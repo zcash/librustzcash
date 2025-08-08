@@ -18,6 +18,8 @@ workspace.
 - `zcash_client_backend::data_api::AccountBirthday::from_parts`
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy`
 - `zcash_client_backend::data_api::wallet::TargetHeight`
+- `zcash_client_backend::data_api::Balance::uneconomic_value`
+- `zcash_client_backend::data_api::AccountBalance::uneconomic_value`
 - A `zcashd-compat` feature flag has been added in service of being able to
   import data from the zcashd `wallet.dat` format. It enables functionality
   needed in order to represent the nonstandard derivations for keys and
@@ -71,6 +73,10 @@ workspace.
     height element of its result tuple.
   - Arguments to `WalletRead::get_wallet_summary` have changed; it now takes a
     `ConfirmationsPolicy` instead of a `u32` `min_confirmations` argument.
+  - The semantics of `zcash_client_backend::data_api::Balance::total` and
+    `zcash_client_backend::data_api::AccountBalance::total` have changed;
+    these totals no longer include the value of uneconomic ("dust") notes
+    and transparent UTXOs.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.

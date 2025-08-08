@@ -165,6 +165,7 @@ pub struct Balance {
     spendable_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    uneconomic_value: Zatoshis,
 }
 
 impl Balance {
@@ -173,6 +174,7 @@ impl Balance {
         spendable_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        uneconomic_value: Zatoshis::ZERO,
     };
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
@@ -224,6 +226,18 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value in the account of notes that have value less than the marginal
+    /// fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        self.uneconomic_value
+    }
+
+    /// Adds the specified value to the uneconomic value total, checking for overflow.
+    pub fn add_uneconomic_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.uneconomic_value = (self.uneconomic_value + value).unwrap();
+        Ok(())
+    }
+
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
         (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
@@ -235,13 +249,8 @@ impl Balance {
 /// of the wallet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
-    /// The value of unspent Sapling outputs belonging to the account.
     sapling_balance: Balance,
-
-    /// The value of unspent Orchard outputs belonging to the account.
     orchard_balance: Balance,
-
-    /// The value of all unspent transparent outputs belonging to the account.
     unshielded_balance: Balance,
 }
 
@@ -303,6 +312,14 @@ impl AccountBalance {
     }
 
     /// Returns the [`Balance`] of unshielded funds in the account.
+    ///
+    /// Note that because transparent UTXOs may be shielded with zero confirmations and this crate
+    /// does not provide capabilities to directly spend transparent UTXOs in non-shielding
+    /// transactions, the [`change_pending_confirmation`] and [`value_pending_spendability`] fields
+    /// of the returned [`Balance`] will always be zero.
+    ///
+    /// [`change_pending_confirmation`]: Balance::change_pending_confirmation
+    /// [`value_pending_spendability`]: Balance::value_pending_spendability
     pub fn unshielded_balance(&self) -> &Balance {
         &self.unshielded_balance
     }
@@ -319,7 +336,7 @@ impl AccountBalance {
         Ok(result)
     }
 
-    /// Returns the total value of funds belonging to the account.
+    /// Returns the total value of economically relevant notes and UTXOs belonging to the account.
     pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
@@ -347,6 +364,15 @@ impl AccountBalance {
     pub fn value_pending_spendability(&self) -> Zatoshis {
         (self.sapling_balance.value_pending_spendability
             + self.orchard_balance.value_pending_spendability)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the value in the account of notes and transparent UTXOs that have value less than
+    /// the marginal fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        (self.sapling_balance.uneconomic_value
+            + self.orchard_balance.uneconomic_value
+            + self.unshielded_balance.uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }

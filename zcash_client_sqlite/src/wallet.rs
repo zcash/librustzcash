@@ -1878,8 +1878,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     };
 
     let recover_until_height = recover_until_height(tx)?;
-
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
+    let target_height = chain_tip_height + 1;
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
@@ -1942,48 +1942,58 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
-        chain_tip_height: BlockHeight,
+        target_height: BlockHeight,
         confirmations_policy: ConfirmationsPolicy,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
         protocol: ShieldedProtocol,
         with_pool_balance: F,
     ) -> Result<(), SqliteClientError>
     where
-        F: Fn(&mut AccountBalance, Zatoshis, Zatoshis, Zatoshis) -> Result<(), SqliteClientError>,
+        F: Fn(
+            &mut AccountBalance,
+            Zatoshis,
+            Zatoshis,
+            Zatoshis,
+            Zatoshis,
+        ) -> Result<(), SqliteClientError>,
     {
         let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
-        // If the shard containing the summary height contains any unscanned ranges that start below or
-        // including that height, none of our shielded balance is currently spendable.
+        // If the shard containing the anchor height contains any unscanned ranges that start
+        // below or including that height, none of our shielded balance is currently spendable.
         #[tracing::instrument(skip_all)]
         fn is_any_spendable(
             conn: &rusqlite::Connection,
-            trusted_summary_height: BlockHeight,
+            anchor_height: BlockHeight,
             table_prefix: &'static str,
         ) -> Result<bool, SqliteClientError> {
             conn.query_row(
                 &format!(
                     "SELECT NOT EXISTS(
                          SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges
-                         WHERE :summary_height
+                         WHERE :anchor_height
                             BETWEEN subtree_start_height
-                            AND IFNULL(subtree_end_height, :summary_height)
-                         AND block_range_start <= :summary_height
+                            AND IFNULL(subtree_end_height, :anchor_height)
+                         AND block_range_start <= :anchor_height
                      )"
                 ),
-                named_params![":summary_height": u32::from(trusted_summary_height)],
+                named_params![":anchor_height": u32::from(anchor_height)],
                 |row| row.get::<_, bool>(0),
             )
             .map_err(|e| e.into())
         }
-        let target_height = chain_tip_height + 1;
-        let trusted_summary_height =
+
+        let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-        let any_spendable = is_any_spendable(tx, trusted_summary_height, table_prefix)?;
+        let untrusted_height =
+            target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
+
+        let any_spendable = is_any_spendable(tx, trusted_height, table_prefix)?;
+
+        // The trusted height will be used as the anchor height.
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT
-                a.uuid, n.value, n.is_change, scan_state.max_priority,
-                t.block, n.recipient_key_scope
+            "SELECT a.uuid, n.value, n.is_change, n.recipient_key_scope,
+                    scan_state.max_priority, t.block
              FROM {table_prefix}_received_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN transactions t ON t.id_tx = n.tx
@@ -1993,7 +2003,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
              WHERE (
                 t.block IS NOT NULL -- the receiving tx is mined
                 OR t.expiry_height IS NULL -- the receiving tx will not expire
-                OR t.expiry_height >= :summary_height -- the receiving tx is unexpired
+                OR t.expiry_height >= :target_height -- the receiving tx is unexpired
              )
              -- and the received note is unspent
              AND n.id NOT IN (
@@ -2002,30 +2012,33 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                JOIN transactions t ON t.id_tx = transaction_id
                WHERE t.block IS NOT NULL -- the spending transaction is mined
                OR t.expiry_height IS NULL -- the spending tx will not expire
-               -- TODO(schell): a bug in select_spendable_notes was fixed by changing this to
-               -- `>= :summary_height`. Should that also happen here?
-               OR t.expiry_height > :summary_height -- the spending tx is unexpired
+               OR t.expiry_height >= :target_height -- the spending tx is unexpired
              )"
         ))?;
 
-        let mut rows = stmt_select_notes
-            .query(named_params![":summary_height": u32::from(target_height).saturating_sub(u32::from(confirmations_policy.trusted()))])?;
+        let mut rows =
+            stmt_select_notes.query(named_params![":target_height": u32::from(target_height)])?;
         while let Some(row) = rows.next()? {
-            let account = AccountUuid(row.get::<_, Uuid>(0)?);
+            let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
 
-            let value_raw = row.get::<_, i64>(1)?;
+            let value_raw = row.get::<_, i64>("value")?;
             let value = Zatoshis::from_nonnegative_i64(value_raw).map_err(|_| {
                 SqliteClientError::CorruptedData(format!(
                     "Negative received note value: {value_raw}"
                 ))
             })?;
 
-            let is_change = row.get::<_, bool>(2)?;
+            let is_change = row.get::<_, bool>("is_change")?;
+
+            let recipient_key_scope = row
+                .get::<_, Option<i64>>("recipient_key_scope")?
+                .map(KeyScope::decode)
+                .transpose()?;
 
             // If `max_priority` is null, this means that the note is not positioned; the note
             // will not be spendable, so we assign the scan priority to `ChainTip` as a priority
             // that is greater than `Scanned`
-            let max_priority_raw = row.get::<_, Option<i64>>(3)?;
+            let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
             let max_priority = max_priority_raw.map_or_else(
                 || Ok(ScanPriority::ChainTip),
                 |raw| {
@@ -2037,36 +2050,38 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 },
             )?;
 
-            // TODO(schell): ask under what circumstances would `received_height` be None?
-            // It seems that from the query above, `block` will always be present
-            let received_height = row.get::<_, Option<u32>>(4)?.map(BlockHeight::from);
-            let recipient_key_scope = row.get::<_, i64>(5)?;
-            // for now, we only treat wallet-internal outputs as trusted
-            let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
-            let required_confirmations = u32::from(confirmations_policy.untrusted());
-            // If the note is from a trusted source (this wallet), then we don't have to determine the
-            // number of confirmations, as we've already queried above based on the trusted summary height.
-            // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
-            //
-            // This is outlined in zip315.
-            let untrusted_but_confirmed_spendable = received_height.iter().any(|mined_height| {
-                let number_of_confirmations = target_height - *mined_height;
-                number_of_confirmations >= required_confirmations
-            });
-            let confirmed_spendable = note_is_trusted || untrusted_but_confirmed_spendable;
-            let is_spendable =
-                any_spendable && confirmed_spendable && max_priority <= ScanPriority::Scanned;
+            let received_height = row.get::<_, Option<u32>>("block")?.map(BlockHeight::from);
 
-            let is_pending_change = is_change && !confirmed_spendable;
+            // A note is spendable if we have enough chain tip information to construct witnesses,
+            // the shard that its witness resides in is sufficiently scanned that we can construct
+            // the witness for the note, and the note has enough confirmations to be spent.
+            let is_spendable = any_spendable
+                && max_priority <= ScanPriority::Scanned
+                && match recipient_key_scope {
+                    Some(KeyScope::INTERNAL) => {
+                        received_height.iter().any(|h| h <= &trusted_height)
+                    }
+                    _ => received_height.iter().any(|h| h <= &untrusted_height),
+                };
 
-            let (spendable_value, change_pending_confirmation, value_pending_spendability) = {
+            let is_pending_change =
+                is_change && received_height.iter().all(|h| h > &trusted_height);
+
+            let (
+                spendable_value,
+                change_pending_confirmation,
+                value_pending_spendability,
+                uneconomic_value,
+            ) = {
                 let zero = Zatoshis::ZERO;
-                if is_spendable {
-                    (value, zero, zero)
+                if value <= Zatoshis::const_from_u64(5000) {
+                    (zero, zero, zero, value)
+                } else if is_spendable {
+                    (value, zero, zero, zero)
                 } else if is_pending_change {
-                    (zero, value, zero)
+                    (zero, value, zero, zero)
                 } else {
-                    (zero, zero, value)
+                    (zero, zero, value, zero)
                 }
             };
 
@@ -2076,6 +2091,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     spendable_value,
                     change_pending_confirmation,
                     value_pending_spendability,
+                    uneconomic_value,
                 )?;
             }
         }
@@ -2087,15 +2103,20 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let orchard_trace = tracing::info_span!("orchard_balances").entered();
         with_pool_balances(
             tx,
-            chain_tip_height,
+            target_height,
             confirmations_policy,
             &mut account_balances,
             ShieldedProtocol::Orchard,
-            |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
+            |balances,
+             spendable_value,
+             change_pending_confirmation,
+             value_pending_spendability,
+             uneconomic_value| {
                 balances.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
                     bal.add_spendable_value(spendable_value)?;
                     bal.add_pending_change_value(change_pending_confirmation)?;
                     bal.add_pending_spendable_value(value_pending_spendability)?;
+                    bal.add_uneconomic_value(uneconomic_value)?;
                     Ok(())
                 })
             },
@@ -2106,15 +2127,20 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
     with_pool_balances(
         tx,
-        chain_tip_height,
+        target_height,
         confirmations_policy,
         &mut account_balances,
         ShieldedProtocol::Sapling,
-        |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
+        |balances,
+         spendable_value,
+         change_pending_confirmation,
+         value_pending_spendability,
+         uneconomic_value| {
             balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
                 bal.add_spendable_value(spendable_value)?;
                 bal.add_pending_change_value(change_pending_confirmation)?;
                 bal.add_pending_spendable_value(value_pending_spendability)?;
+                bal.add_uneconomic_value(uneconomic_value)?;
                 Ok(())
             })
         },

@@ -2861,8 +2861,8 @@ where
     assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create fake CompactBlocks sending value to the address
-    let value = Zatoshis::const_from_u64(5);
-    let value2 = Zatoshis::const_from_u64(7);
+    let value = Zatoshis::const_from_u64(50000);
+    let value2 = Zatoshis::const_from_u64(70000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
@@ -3124,7 +3124,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = Zatoshis::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the cache
@@ -3137,7 +3137,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create a second fake CompactBlock sending more value to the address
-    let value2 = Zatoshis::const_from_u64(7);
+    let value2 = Zatoshis::const_from_u64(70000);
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
     // Scan the cache again
@@ -3174,7 +3174,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = Zatoshis::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(50000);
     let (received_height, _, nf) =
         st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
@@ -3187,7 +3187,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
-    let value2 = Zatoshis::const_from_u64(2);
+    let value2 = Zatoshis::const_from_u64(20000);
     let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the cache again
@@ -3220,14 +3220,14 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF
     assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = Zatoshis::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(50000);
     let (received_height, _, nf) =
         st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
-    let value2 = Zatoshis::const_from_u64(2);
+    let value2 = Zatoshis::const_from_u64(20000);
     let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the spending block first.
