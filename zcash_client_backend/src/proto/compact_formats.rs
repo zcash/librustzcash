@@ -79,7 +79,7 @@ pub struct CompactTx {
 /// protocol specification.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactSaplingSpend {
-    /// Nullifier (see the Zcash protocol specification)
+    /// nullifier (see the Zcash protocol specification)
     #[prost(bytes = "vec", tag = "1")]
     pub nf: ::prost::alloc::vec::Vec<u8>,
 }
@@ -89,13 +89,13 @@ pub struct CompactSaplingSpend {
 /// `encCiphertext` field of a Sapling Output Description. Total size is 116 bytes.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactSaplingOutput {
-    /// Note commitment u-coordinate.
+    /// note commitment u-coordinate
     #[prost(bytes = "vec", tag = "1")]
     pub cmu: ::prost::alloc::vec::Vec<u8>,
-    /// Ephemeral public key.
+    /// ephemeral public key
     #[prost(bytes = "vec", tag = "2")]
     pub ephemeral_key: ::prost::alloc::vec::Vec<u8>,
-    /// First 52 bytes of ciphertext.
+    /// first 52 bytes of ciphertext
     #[prost(bytes = "vec", tag = "3")]
     pub ciphertext: ::prost::alloc::vec::Vec<u8>,
 }
