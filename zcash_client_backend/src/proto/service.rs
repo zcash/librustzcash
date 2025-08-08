@@ -40,10 +40,27 @@ pub struct TxFilter {
 /// for the `height` field. See <https://github.com/zcash/librustzcash/issues/1484>
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTransaction {
-    /// exact data returned by Zcash 'getrawtransaction'
+    /// The serialized representation of the Zcash transaction.
     #[prost(bytes = "vec", tag = "1")]
     pub data: ::prost::alloc::vec::Vec<u8>,
-    /// height that the transaction was mined (or -1)
+    /// The height at which the transaction is mined, or a sentinel value.
+    ///
+    /// Due to an error in the original protobuf definition, it is necessary to
+    /// reinterpret the result of the `getrawtransaction` RPC call. Zcashd will
+    /// return the int64 value `-1` for the height of transactions that appear
+    /// in the block index, but which are not mined in the main chain. Here, the
+    /// height field of `RawTransaction` was erroneously created as a `uint64`,
+    /// and as such we must map the response from the zcashd RPC API to be
+    /// representable within this space. Additionally, the `height` field will
+    /// be absent for transactions in the mempool, resulting in the default
+    /// value of `0` being set. Therefore, the meanings of the `height` field of
+    /// the `RawTransaction` type are as follows:
+    ///
+    /// * height 0: the transaction is in the mempool
+    /// * height 0xffffffffffffffff: the transaction has been mined on a fork that
+    ///    is not currently the main chain
+    /// * any other height: the transaction has been mined in the main chain at the
+    ///    given height
     #[prost(uint64, tag = "2")]
     pub height: u64,
 }
@@ -151,6 +168,8 @@ pub struct Balance {
     #[prost(int64, tag = "1")]
     pub value_zat: i64,
 }
+/// The a shortened transaction ID is the prefix in big-endian (hex) format
+/// (then converted to binary).
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Exclude {
     #[prost(bytes = "vec", repeated, tag = "1")]
@@ -546,9 +565,9 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Return RawTransactions that match the given transparent address filter.
-        ///
-        /// Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
+        /// Return the transactions corresponding to the given t-address within the given block range
+        /// NB - this method is misnamed, it returns transactions, not transaction IDs.
+        /// NOTE: this method is deprecated, please use GetTaddressTransactions instead.
         pub async fn get_taddress_txids(
             &mut self,
             request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,
@@ -574,6 +593,36 @@ pub mod compact_tx_streamer_client {
                     GrpcMethod::new(
                         "cash.z.wallet.sdk.rpc.CompactTxStreamer",
                         "GetTaddressTxids",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Return the transactions corresponding to the given t-address within the given block range
+        pub async fn get_taddress_transactions(
+            &mut self,
+            request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::RawTransaction>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTaddressTransactions",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTaddressTransactions",
                     ),
                 );
             self.inner.server_streaming(req, path, codec).await
@@ -639,6 +688,9 @@ pub mod compact_tx_streamer_client {
         /// more bandwidth-efficient; if two or more transactions in the mempool
         /// match a shortened txid, they are all sent (none is excluded). Transactions
         /// in the exclude list that don't exist in the mempool are ignored.
+        ///
+        /// The a shortened transaction ID is the prefix in big-endian (hex) format
+        /// (then converted to binary). See smoke-test.bash for examples.
         pub async fn get_mempool_tx(
             &mut self,
             request: impl tonic::IntoRequest<super::Exclude>,
@@ -757,8 +809,8 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Returns a stream of information about roots of subtrees of the Sapling and Orchard
-        /// note commitment trees.
+        /// Returns a stream of information about roots of subtrees of the note commitment tree
+        /// for the specified shielded protocol (Sapling or Orchard).
         pub async fn get_subtree_roots(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSubtreeRootsArg>,
