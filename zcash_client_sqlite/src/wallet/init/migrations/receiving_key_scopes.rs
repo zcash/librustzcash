@@ -277,11 +277,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 mod tests {
     use std::convert::Infallible;
 
+    use crate::ParallelSliceMut;
+    #[cfg(feature = "multicore")]
+    use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
     use incrementalmerkletree::Position;
-    use maybe_rayon::{
-        iter::{IndexedParallelIterator, ParallelIterator},
-        slice::ParallelSliceMut,
-    };
     use rand_core::OsRng;
     use rusqlite::{named_params, params, Connection, OptionalExtension};
     use tempfile::NamedTempFile;
