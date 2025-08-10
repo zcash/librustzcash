@@ -32,21 +32,25 @@ pub enum Error {
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
     MissingSigningKey,
-    /// Provided null data is longer than the maximum supported length
+    /// Provided null data is longer than the maximum supported length.
     NullDataTooLong {
         actual: usize,
         limit: usize,
     },
     /// The number of inputs does not match number of sighashes.
     InputCountMismatch, // Use this for prepare_transparent_signatures
-    /// A provided external signature did not cryptographically match any available unsigned transparent input.
-    NoMatchingInputForSignature {
+    /// A provided external signature was not valid for any transparent input.
+    InvalidExternalSignature {
         sig_index: usize,
     },
-    /// A single provided external signature was cryptographically valid for more than one distinct transparent input.
-    AmbiguousSignature,
-    /// Not all transparent inputs that require signing received a valid signature.
-    NotAllInputsSigned,
+    /// An external signature is valid for more than one transparent input.
+    /// This should not happen: it indicates either a duplicate signed input
+    /// and key (and therefore a double-spend), or an attack on ECDSA such as
+    /// key substitution.
+    DuplicateSignature,
+    /// A bundle could not be built because required signatures on transparent
+    /// inputs were missing.
+    MissingSignatures,
     /// An error occurred within the secp256k1 cryptographic library.
     Secp256k1Error(String), // Stores String to satisfy PartialEq/Eq
 }
@@ -57,11 +61,11 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::NullDataTooLong { actual, limit } => write!(f, "Provided null data is longer than the maximum supported length (actual: {}, limit: {}", actual, limit),
+            Error::NullDataTooLong { actual, limit } => write!(f, "Provided null data is longer than the maximum supported length (actual: {}, limit: {})", actual, limit),
             Error::InputCountMismatch => write!(f, "The number of inputs does not match the number of sighashes"),
-            Error::NoMatchingInputForSignature { sig_index } => write!(f, "A provided external signature at index {} did not cryptographically match any available unsigned transparent input", sig_index),
-            Error::AmbiguousSignature => write!(f, "A single provided external signature was cryptographically valid for more than one distinct transparent input"),
-            Error::NotAllInputsSigned => write!(f, "Not all transparent inputs that require signing received a valid signature"),
+            Error::InvalidExternalSignature { sig_index } => write!(f, "A provided external signature at index {} was not valid for any transparent input", sig_index),
+            Error::DuplicateSignature => write!(f, "An external signature is valid for more than one transparent input."),
+            Error::MissingSignatures => write!(f, "A bundle could not be built because required signatures on transparent inputs were missing."),
             Error::Secp256k1Error(msg) => write!(f, "Secp256k1 cryptographic library error: {}", msg),
         }
     }
@@ -510,7 +514,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
     ) -> Result<Self, Error> {
         if self.authorization_inputs.is_empty() && !signatures.is_empty() {
             // No inputs to sign.
-            return Err(Error::NoMatchingInputForSignature { sig_index: 0 });
+            return Err(Error::InvalidExternalSignature { sig_index: 0 });
         }
 
         // Iterate over signatures
@@ -550,7 +554,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
             {
                 if matched_input_idx.is_some() {
                     // This signature was already valid for a different input.
-                    return Err(Error::AmbiguousSignature);
+                    return Err(Error::DuplicateSignature);
                 }
                 matched_input_idx = Some(input_idx);
             }
@@ -559,7 +563,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
         if let Some(final_input_idx) = matched_input_idx {
             // Check if another signature has already been applied to this input.
             if self.final_script_sigs[final_input_idx].is_some() {
-                return Err(Error::AmbiguousSignature);
+                return Err(Error::DuplicateSignature);
             }
 
             // Apply the signature.
@@ -571,7 +575,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
             Ok(self)
         } else {
             // This signature did not match any available unsigned inputs.
-            Err(Error::NoMatchingInputForSignature { sig_index: sig_idx })
+            Err(Error::InvalidExternalSignature { sig_index: sig_idx })
         }
     }
 
@@ -585,7 +589,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
                 Some(script) => fully_signed_scripts.push(script.clone()),
                 None => {
                     if !self.authorization_inputs.is_empty() {
-                        return Err(Error::NotAllInputsSigned);
+                        return Err(Error::MissingSignatures);
                     }
                 }
             }
@@ -732,7 +736,7 @@ mod tests {
         let result = sig_context.append_external_signatures(&[bad_signature]);
         assert!(matches!(
             result,
-            Err(Error::NoMatchingInputForSignature { sig_index: 0 })
+            Err(Error::InvalidExternalSignature { sig_index: 0 })
         ));
     }
 
@@ -766,9 +770,9 @@ mod tests {
         let msg = Message::from_digest_slice(&sighash).unwrap();
         let ambiguous_sig = Secp256k1::signing_only().sign_ecdsa(&msg, &sk);
 
-        // Assert that appending this one signature fails with AmbiguousSignature
+        // Assert that appending this one signature fails with DuplicateSignature
         let result = sig_context.append_external_signatures(&[ambiguous_sig]);
-        assert!(matches!(result, Err(Error::AmbiguousSignature)));
+        assert!(matches!(result, Err(Error::DuplicateSignature)));
     }
 
     #[test]
@@ -806,12 +810,12 @@ mod tests {
         );
         let partially_signed_context = result_after_append.unwrap();
 
-        // Assert that finalizing the bundle fails
+        // Assert that finalizing the bundle fails.
         // The context is missing a signature for the second input.
         let final_bundle_result = partially_signed_context.finalize_signatures();
         assert!(
-            matches!(final_bundle_result, Err(Error::NotAllInputsSigned)),
-            "Should fail with NotAllInputsSigned, but got: {:?}",
+            matches!(final_bundle_result, Err(Error::MissingSignatures)),
+            "Should fail with MissingSignatures, but got: {:?}",
             final_bundle_result
         );
     }

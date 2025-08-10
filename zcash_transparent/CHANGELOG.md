@@ -26,12 +26,12 @@ workspace.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
   return `Ok(None)` when this is the case. 
-- Added `NullDataTooLong` variant to public `Error` enum
 - `zcash_transparent::builder::Error` has added variants:
+  - `NullDataTooLong`
   - `InputCountMismatch`
-  - `NoMatchingInputForSignature { sig_index: usize }`
-  - `AmbiguousSignature`
-  - `NotAllInputsSigned`
+  - `InvalidExternalSignature { sig_index: usize }`
+  - `DuplicateSignature`
+  - `MissingSignatures`
   - `Secp256k1Error(String)`
 
 ### Removed
