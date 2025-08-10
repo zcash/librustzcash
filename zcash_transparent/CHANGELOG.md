@@ -32,7 +32,6 @@ workspace.
   - `InvalidExternalSignature { sig_index: usize }`
   - `DuplicateSignature`
   - `MissingSignatures`
-  - `Secp256k1Error(String)`
 
 ### Removed
 - Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;

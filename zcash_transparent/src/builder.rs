@@ -1,7 +1,6 @@
 //! Types and functions for building transparent transaction components.
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -22,7 +21,6 @@ use {
         bundle::OutPoint,
         sighash::{SighashType, SIGHASH_ALL},
     },
-    alloc::string::ToString,
     sha2::Digest,
 };
 
@@ -51,8 +49,6 @@ pub enum Error {
     /// A bundle could not be built because required signatures on transparent
     /// inputs were missing.
     MissingSignatures,
-    /// An error occurred within the secp256k1 cryptographic library.
-    Secp256k1Error(String), // Stores String to satisfy PartialEq/Eq
 }
 
 impl fmt::Display for Error {
@@ -66,7 +62,6 @@ impl fmt::Display for Error {
             Error::InvalidExternalSignature { sig_index } => write!(f, "A provided external signature at index {} was not valid for any transparent input", sig_index),
             Error::DuplicateSignature => write!(f, "An external signature is valid for more than one transparent input."),
             Error::MissingSignatures => write!(f, "A bundle could not be built because required signatures on transparent inputs were missing."),
-            Error::Secp256k1Error(msg) => write!(f, "Secp256k1 cryptographic library error: {}", msg),
         }
     }
 }
@@ -423,8 +418,7 @@ impl Bundle<Unauthorized> {
                     value: info.coin.value,
                 });
 
-                let msg =
-                    secp256k1::Message::from_digest_slice(sighash.as_ref()).expect("32 bytes");
+                let msg = secp256k1::Message::from_digest(sighash);
                 let sig = signing_set.secp.sign_ecdsa(&msg, sk);
 
                 // Signature has to have "SIGHASH_ALL" appended to it
@@ -544,8 +538,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
                 continue;
             }
 
-            let sighash_msg = secp256k1::Message::from_digest_slice(&self.sighashes[input_idx])
-                .map_err(|e| Error::Secp256k1Error(e.to_string()))?;
+            let sighash_msg = secp256k1::Message::from_digest(self.sighashes[input_idx]);
 
             if self
                 .secp_ctx
