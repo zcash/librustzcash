@@ -4719,11 +4719,27 @@ mod tests {
         );
     }
 
-     #[test]
+    #[test]
     fn send_max_funds_to_orchard_proposed_transfer() {
         zcash_client_backend::data_api::testing::cross_pool::send_max_funds_to_orchard_proposed_transfer(
             TestDbFactory::default(),
             BlockCache::new()
         );
+    }
+
+    #[test]
+    fn send_multi_step_max_amount_proposed_transfer() {
+        zcash_client_backend::data_api::testing::cross_pool::send_multi_step_max_amount_proposed_transfer::<
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
     }
 }
