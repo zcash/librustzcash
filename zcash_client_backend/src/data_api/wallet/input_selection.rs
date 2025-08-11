@@ -694,6 +694,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     }
 }
 
+#[warn(clippy::type_complexity)]
 pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     params: &ParamsT,
     wallet_db: &InputSourceT,

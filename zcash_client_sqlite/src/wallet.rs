@@ -4703,6 +4703,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "orchard")]
     #[test]
     fn test_cross_pool_single_step_send() {
         zcash_client_backend::data_api::testing::cross_pool::send_single_step_proposed_transfer(
@@ -4711,6 +4712,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "orchard")]
     #[test]
     fn send_max_funds_to_sapling_proposed_transfer() {
         zcash_client_backend::data_api::testing::cross_pool::send_max_funds_to_sapling_proposed_transfer(
@@ -4719,6 +4721,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "orchard")]
     #[test]
     fn send_max_funds_to_orchard_proposed_transfer() {
         zcash_client_backend::data_api::testing::cross_pool::send_max_funds_to_orchard_proposed_transfer(
@@ -4727,6 +4730,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "orchard")]
     #[test]
     fn send_multi_step_max_amount_proposed_transfer() {
         zcash_client_backend::data_api::testing::cross_pool::send_multi_step_max_amount_proposed_transfer::<
