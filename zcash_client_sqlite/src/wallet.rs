@@ -4729,8 +4729,8 @@ mod tests {
             BlockCache::new()
         );
     }
-
-    #[cfg(feature = "orchard")]
+    
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn send_multi_step_max_amount_proposed_transfer() {
         zcash_client_backend::data_api::testing::cross_pool::send_multi_step_max_amount_proposed_transfer::<

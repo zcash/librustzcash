@@ -2,14 +2,11 @@ use std::{convert::Infallible, num::NonZeroU32};
 
 use assert_matches::assert_matches;
 
-use ::transparent::address::TransparentAddress;
+
 use zcash_keys::address::Address;
-use zcash_primitives::{
-    block::BlockHash,
-    transaction::fees::zip317::{MARGINAL_FEE, MINIMUM_FEE},
-};
+use zcash_primitives::block::BlockHash;
 use zcash_protocol::{memo::Memo, value::Zatoshis, ShieldedProtocol};
-use zip32::Scope;
+
 use zip321::Payment;
 
 use crate::{
@@ -19,7 +16,7 @@ use crate::{
             AddressType, TestBuilder,
         },
         wallet::{decrypt_and_store_transaction, input_selection::GreedyInputSelector},
-        Account as _, DecryptedTransaction, WalletRead, WalletTest, WalletWrite,
+        Account as _, WalletRead, WalletTest,
     },
     decrypt_transaction,
     fees::{
@@ -29,27 +26,34 @@ use crate::{
     wallet::{NoteId, OvkPolicy},
 };
 
-use super::{DataStoreFactory, TestCache, TestState};
+use super::{DataStoreFactory, TestCache};
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    super::TestState,
     crate::{
-        data_api::TransactionDataRequest,
+        data_api::{
+            TransactionDataRequest,
+            DecryptedTransaction, WalletWrite,
+        },
         fees::ChangeValue,
         wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     },
     ::transparent::{
+        address::TransparentAddress,
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     rand_core::OsRng,
     std::collections::HashSet,
     zcash_primitives::transaction::{
+        fees::zip317::{MARGINAL_FEE, MINIMUM_FEE},
         builder::{BuildConfig, Builder},
         fees::zip317,
     },
     zcash_proofs::prover::LocalTxProver,
     zcash_protocol::value::ZatBalance,
+    zip32::Scope,
 };
 
 /// Loads wallet with 60k Sapling zats and 60k Orchard zats and
