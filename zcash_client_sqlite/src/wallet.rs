@@ -4710,4 +4710,20 @@ mod tests {
             BlockCache::new(),
         );
     }
+
+    #[test]
+    fn send_max_funds_to_sapling_proposed_transfer() {
+        zcash_client_backend::data_api::testing::cross_pool::send_max_funds_to_sapling_proposed_transfer(
+            TestDbFactory::default(),
+            BlockCache::new()
+        );
+    }
+
+     #[test]
+    fn send_max_funds_to_orchard_proposed_transfer() {
+        zcash_client_backend::data_api::testing::cross_pool::send_max_funds_to_orchard_proposed_transfer(
+            TestDbFactory::default(),
+            BlockCache::new()
+        );
+    }
 }
