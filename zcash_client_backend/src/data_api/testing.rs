@@ -91,6 +91,8 @@ pub mod pool;
 pub mod sapling;
 
 #[cfg(feature = "orchard")]
+pub mod cross_pool;
+#[cfg(feature = "orchard")]
 pub mod orchard;
 #[cfg(feature = "transparent-inputs")]
 pub mod transparent;

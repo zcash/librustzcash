@@ -4702,4 +4702,12 @@ mod tests {
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
     }
+
+    #[test]
+    fn test_cross_pool_single_step_send() {
+        zcash_client_backend::data_api::testing::cross_pool::send_single_step_proposed_transfer(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
 }
