@@ -66,7 +66,7 @@ impl Key {
                 .with_check(None)
                 .into_vec()?,
         );
-        let prefix = network.b58_script_address_prefix();
+        let prefix = network.b58_secret_key_prefix();
         let decoded_len = decoded.expose_secret().len();
         let compressed =
             decoded_len == (33 + prefix.len()) && decoded.expose_secret().last() == Some(&1);
