@@ -14,9 +14,12 @@ license.workspace = true
 categories.workspace = true
 
 [dependencies]
+# - Error handling
+snafu = "0.8.6"
+
 # - Parsing and Encoding
-nom.workspace = true
 base64.workspace = true
+nom.workspace = true
 percent-encoding.workspace = true
 
 # - Test dependencies
