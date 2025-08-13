@@ -12,6 +12,7 @@ pub struct TestVector {
     pub network: NetworkType,
 }
 
+// From src/test/data/base58_keys_valid.json in zcashd.
 pub const VALID: &[TestVector] = &[
     TestVector {
         base58_encoding: "t1T8yaLVhNqxA5KJcmiqqFN88e8DNp2PBfF",
@@ -364,7 +365,7 @@ pub const VALID: &[TestVector] = &[
     },
 ];
 
-// From
+// From src/test/data/base58_keys_invalid.json in zcashd.
 pub const INVALID: &[&str] = &[
     "",
     "x",
