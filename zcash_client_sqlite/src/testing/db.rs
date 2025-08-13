@@ -47,7 +47,6 @@ use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
     testing::transparent::GapLimits,
-    zcash_protocol::value::Zatoshis,
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).

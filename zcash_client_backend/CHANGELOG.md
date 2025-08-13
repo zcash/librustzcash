@@ -73,6 +73,8 @@ workspace.
     height element of its result tuple.
   - Arguments to `WalletRead::get_wallet_summary` have changed; it now takes a
     `ConfirmationsPolicy` instead of a `u32` `min_confirmations` argument.
+  - Arguments to `WalletRead::get_transparent_balances` have changed. The balance
+    is now retrieved in terms of a target height and confirmations policy.
   - The semantics of `zcash_client_backend::data_api::Balance::total` and
     `zcash_client_backend::data_api::AccountBalance::total` have changed;
     these totals no longer include the value of uneconomic ("dust") notes

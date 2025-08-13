@@ -7,8 +7,8 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
+use ::transparent::bundle::TxOut;
 use nonempty::NonEmpty;
-use transparent::bundle::TxOut;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::{
@@ -35,9 +35,9 @@ use {
         fees::EphemeralBalance,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
-    transparent::{address::TransparentAddress, bundle::OutPoint},
     zip321::Payment,
 };
 

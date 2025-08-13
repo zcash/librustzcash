@@ -1794,7 +1794,11 @@ pub(crate) mod tests {
                 &input_selector,
                 &change_strategy,
                 request,
-                ConfirmationsPolicy::new_symmetrical_unchecked(10),
+                ConfirmationsPolicy::new_symmetrical_unchecked(
+                    10,
+                    #[cfg(feature = "transparent-inputs")]
+                    false,
+                ),
             )
             .unwrap();
 
@@ -1883,7 +1887,11 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request.clone(),
-            ConfirmationsPolicy::new_symmetrical_unchecked(10),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false,
+            ),
         );
 
         assert_matches!(proposal, Err(_));
@@ -1897,7 +1905,11 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false,
+            ),
         );
 
         assert_matches!(proposal, Ok(_));

@@ -1181,14 +1181,22 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(
         st.get_pending_shielded_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            ),
         ),
         value
     );
     assert_eq!(
         st.get_spendable_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            ),
         ),
         Zatoshis::ZERO
     );
@@ -1215,14 +1223,22 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(
         st.get_spendable_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(2)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         value
     );
     assert_eq!(
         st.get_pending_shielded_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(2)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         value
     );
@@ -1243,7 +1259,11 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical_unchecked(2),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            ),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1273,7 +1293,10 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10),
+            ConfirmationsPolicy::new_symmetrical_unchecked(10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+                ),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1298,21 +1321,33 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(
         st.get_spendable_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         (value * 2u64).unwrap()
     );
     assert_eq!(
         st.get_pending_shielded_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         (value * 9u64).unwrap()
     );
 
     // Should now be able to generate a proposal
     let amount_sent = Zatoshis::from_u64(70000).unwrap();
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(10);
+    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(
+        10,
+        #[cfg(feature = "transparent-inputs")]
+        false,
+    );
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1377,7 +1412,11 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(1);
+    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(
+        1,
+        #[cfg(feature = "transparent-inputs")]
+        false,
+    );
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1671,14 +1710,22 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     assert_eq!(
         st.get_pending_shielded_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         value
     );
     assert_eq!(
         st.get_spendable_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10)
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                10,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            )
         ),
         Zatoshis::ZERO
     );
@@ -2232,7 +2279,12 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         TargetHeight::from(account.birthday().height() + 5),
-        ConfirmationsPolicy::new_unchecked(1, 5),
+        ConfirmationsPolicy::new_unchecked(
+            1,
+            5,
+            #[cfg(feature = "transparent-inputs")]
+            false,
+        ),
         &[],
     )
     .unwrap();
@@ -2257,7 +2309,11 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            ConfirmationsPolicy::new_symmetrical_unchecked(5),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                5,
+                #[cfg(feature = "transparent-inputs")]
+                false
+            ),
         ),
         Ok(_)
     );

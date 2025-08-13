@@ -1465,9 +1465,9 @@ pub trait WalletRead {
     /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns a [`WalletSummary`] that represents the sync status, and the wallet balances
-    /// given the specified minimum number of confirmations for all accounts known to the
-    /// wallet; or `Ok(None)` if the wallet has no summary data available.
+    /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
+    /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
+    /// or `Ok(None)` if the wallet has no summary data available.
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
@@ -1591,16 +1591,17 @@ pub trait WalletRead {
     }
 
     /// Returns a mapping from each transparent receiver associated with the specified account
-    /// to its not-yet-shielded UTXO balance as of the end of the block at the provided
-    /// `max_height`, when that balance is non-zero.
+    /// to the balance of funds given the specified target height and confirmations policy.
+    ///
     ///
     /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         Ok(HashMap::new())
     }
 

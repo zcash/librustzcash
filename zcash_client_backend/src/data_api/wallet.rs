@@ -340,6 +340,8 @@ where
 pub struct ConfirmationsPolicy {
     trusted: NonZeroU32,
     untrusted: NonZeroU32,
+    #[cfg(feature = "transparent-inputs")]
+    allow_zero_conf_shielding: bool,
 }
 
 impl Default for ConfirmationsPolicy {
@@ -349,6 +351,8 @@ impl Default for ConfirmationsPolicy {
             trusted: NonZeroU32::MIN.saturating_add(2),
             // 10
             untrusted: NonZeroU32::MIN.saturating_add(9),
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding: true,
         }
     }
 }
@@ -357,6 +361,8 @@ impl ConfirmationsPolicy {
     pub const MIN: Self = ConfirmationsPolicy {
         trusted: NonZeroU32::MIN,
         untrusted: NonZeroU32::MIN,
+        #[cfg(feature = "transparent-inputs")]
+        allow_zero_conf_shielding: true,
     };
 
     /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
@@ -365,20 +371,34 @@ impl ConfirmationsPolicy {
     /// The number of confirmations required for trusted notes must be less than or equal to the
     /// number of confirmations required for untrusted notes; this returns `Err(())` if this
     /// invariant is violated.
-    pub fn new(trusted: NonZeroU32, untrusted: NonZeroU32) -> Result<Self, ()> {
+    pub fn new(
+        trusted: NonZeroU32,
+        untrusted: NonZeroU32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Result<Self, ()> {
         if trusted > untrusted {
             Err(())
         } else {
-            Ok(Self { trusted, untrusted })
+            Ok(Self {
+                trusted,
+                untrusted,
+                #[cfg(feature = "transparent-inputs")]
+                allow_zero_conf_shielding,
+            })
         }
     }
 
     /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
     /// set to `min_confirmations`.
-    pub fn new_symmetrical(min_confirmations: NonZeroU32) -> Self {
+    pub fn new_symmetrical(
+        min_confirmations: NonZeroU32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
         Self {
             trusted: min_confirmations,
             untrusted: min_confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
         }
     }
 
@@ -389,7 +409,11 @@ impl ConfirmationsPolicy {
     /// # Panics
     /// Panics if `trusted > untrusted` or either argument value is zero.
     #[cfg(feature = "test-dependencies")]
-    pub fn new_unchecked(trusted: u32, untrusted: u32) -> Self {
+    pub fn new_unchecked(
+        trusted: u32,
+        untrusted: u32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
         if trusted > untrusted {
             panic!("trusted must be <= untrusted")
         }
@@ -397,6 +421,8 @@ impl ConfirmationsPolicy {
         Self {
             trusted: NonZeroU32::new(trusted).expect("trusted must be nonzero"),
             untrusted: NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
         }
     }
 
@@ -406,12 +432,17 @@ impl ConfirmationsPolicy {
     /// # Panics
     /// Panics if `min_confirmations == 0`
     #[cfg(feature = "test-dependencies")]
-    pub fn new_symmetrical_unchecked(min_confirmations: u32) -> Self {
+    pub fn new_symmetrical_unchecked(
+        min_confirmations: u32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
         let confirmations =
             NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero");
         Self {
             trusted: confirmations,
             untrusted: confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
         }
     }
 
@@ -431,6 +462,13 @@ impl ConfirmationsPolicy {
     /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
     pub fn untrusted(&self) -> NonZeroU32 {
         self.untrusted
+    }
+
+    /// Returns whether or not transparent inputs may be spent with zero confirmations in shielding
+    /// transactions.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn allow_zero_conf_shielding(&self) -> bool {
+        self.allow_zero_conf_shielding
     }
 }
 

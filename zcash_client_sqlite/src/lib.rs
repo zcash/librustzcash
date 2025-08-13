@@ -51,6 +51,8 @@ use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::Balance;
 
 use zcash_client_backend::{
     data_api::{
@@ -106,7 +108,6 @@ use {
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -914,13 +915,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_transparent_balances(
         &self,
         account: Self::AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
             account,
-            max_height,
+            target_height,
+            confirmations_policy,
         )
     }
 
