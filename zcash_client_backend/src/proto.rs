@@ -34,9 +34,9 @@ use crate::{
 use transparent::bundle::OutPoint;
 
 #[cfg(feature = "orchard")]
-use orchard::domain::OrchardDomainCommon;
-#[cfg(feature = "orchard")]
 use orchard::orchard_flavor::OrchardVanilla;
+#[cfg(feature = "orchard")]
+use orchard::primitives::OrchardPrimitives;
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
 #[cfg(feature = "orchard")]
@@ -196,13 +196,13 @@ impl compact_formats::CompactSaplingSpend {
 
 #[cfg(feature = "orchard")]
 impl TryFrom<&compact_formats::CompactOrchardAction>
-    for orchard::domain::CompactAction<OrchardVanilla>
+    for orchard::primitives::CompactAction<OrchardVanilla>
 {
     type Error = ();
 
     fn try_from(value: &compact_formats::CompactOrchardAction) -> Result<Self, Self::Error> {
         Ok(
-            orchard::domain::CompactAction::<OrchardVanilla>::from_parts(
+            orchard::primitives::CompactAction::<OrchardVanilla>::from_parts(
                 value.nf()?,
                 value.cmx()?,
                 value.ephemeral_key()?,
@@ -260,7 +260,7 @@ impl<A: sapling::bundle::Authorization> From<&sapling::bundle::SpendDescription<
 }
 
 #[cfg(feature = "orchard")]
-impl<SpendAuth, D: OrchardDomainCommon> From<&orchard::Action<SpendAuth, D>>
+impl<SpendAuth, D: OrchardPrimitives> From<&orchard::Action<SpendAuth, D>>
     for compact_formats::CompactOrchardAction
 {
     fn from(action: &orchard::Action<SpendAuth, D>) -> compact_formats::CompactOrchardAction {

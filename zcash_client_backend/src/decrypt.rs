@@ -16,7 +16,7 @@ use zip32::Scope;
 use crate::data_api::DecryptedTransaction;
 
 #[cfg(feature = "orchard")]
-use orchard::domain::OrchardDomain;
+use orchard::primitives::OrchardDomain;
 
 /// An enumeration of the possible relationships a TXO can have to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

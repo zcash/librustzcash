@@ -1,8 +1,8 @@
 use std::hash::Hash;
 
 use ::orchard::{
-    domain::OrchardDomain,
     keys::{FullViewingKey, SpendingKey},
+    primitives::OrchardDomain,
     tree::MerkleHashOrchard,
 };
 use incrementalmerkletree::{Hashable, Level};

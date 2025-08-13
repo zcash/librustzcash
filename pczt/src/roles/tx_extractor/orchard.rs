@@ -1,10 +1,10 @@
-use orchard::domain::OrchardDomainCommon;
 use orchard::orchard_flavor::OrchardFlavor;
+use orchard::primitives::OrchardPrimitives;
 use orchard::{bundle::Authorized, circuit::VerifyingKey, pczt::Unbound, Bundle};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
 
-pub(super) fn extract_bundle<D: OrchardDomainCommon>(
+pub(super) fn extract_bundle<D: OrchardPrimitives>(
     bundle: crate::orchard::Bundle,
 ) -> Result<Option<Bundle<Unbound, ZatBalance, D>>, OrchardError> {
     bundle
