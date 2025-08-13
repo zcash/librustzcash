@@ -13,10 +13,10 @@ use core2::io::{self, Read, Write};
 use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
-    domain::OrchardDomainCommon,
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     orchard_flavor::OrchardVanilla,
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
+    primitives::OrchardPrimitives,
     value::ValueCommitment,
     Action, Anchor, Bundle,
 };
@@ -208,27 +208,27 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
     })
 }
 
-pub fn read_note_ciphertext<R: Read, D: OrchardDomainCommon>(
+pub fn read_note_ciphertext<R: Read, P: OrchardPrimitives>(
     mut reader: R,
-) -> io::Result<TransmittedNoteCiphertext<D>> {
+) -> io::Result<TransmittedNoteCiphertext<P>> {
     let mut epk = [0; 32];
-    let mut enc = vec![0u8; D::ENC_CIPHERTEXT_SIZE];
+    let mut enc = vec![0u8; P::ENC_CIPHERTEXT_SIZE];
     let mut out = [0; 80];
 
     reader.read_exact(&mut epk)?;
     reader.read_exact(&mut enc)?;
     reader.read_exact(&mut out)?;
 
-    Ok(TransmittedNoteCiphertext::<D> {
+    Ok(TransmittedNoteCiphertext::<P> {
         epk_bytes: epk,
-        enc_ciphertext: <D>::NoteCiphertextBytes::from_slice(&enc).unwrap(),
+        enc_ciphertext: <P>::NoteCiphertextBytes::from_slice(&enc).unwrap(),
         out_ciphertext: out,
     })
 }
 
-pub fn read_action_without_auth<R: Read, D: OrchardDomainCommon>(
+pub fn read_action_without_auth<R: Read, P: OrchardPrimitives>(
     mut reader: R,
-) -> io::Result<Action<(), D>> {
+) -> io::Result<Action<(), P>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
@@ -391,18 +391,18 @@ pub fn write_cmx<W: Write>(mut writer: W, cmx: &ExtractedNoteCommitment) -> io::
     writer.write_all(&cmx.to_bytes())
 }
 
-pub fn write_note_ciphertext<W: Write, D: OrchardDomainCommon>(
+pub fn write_note_ciphertext<W: Write, P: OrchardPrimitives>(
     mut writer: W,
-    nc: &TransmittedNoteCiphertext<D>,
+    nc: &TransmittedNoteCiphertext<P>,
 ) -> io::Result<()> {
     writer.write_all(&nc.epk_bytes)?;
     writer.write_all(nc.enc_ciphertext.as_ref())?;
     writer.write_all(&nc.out_ciphertext)
 }
 
-pub fn write_action_without_auth<W: Write, D: OrchardDomainCommon>(
+pub fn write_action_without_auth<W: Write, P: OrchardPrimitives>(
     mut writer: W,
-    act: &Action<<Authorized as Authorization>::SpendAuth, D>,
+    act: &Action<<Authorized as Authorization>::SpendAuth, P>,
 ) -> io::Result<()> {
     write_value_commitment(&mut writer, act.cv_net())?;
     write_nullifier(&mut writer, act.nullifier())?;
