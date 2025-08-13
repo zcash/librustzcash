@@ -426,7 +426,7 @@ impl<NoteRef> Step<NoteRef> {
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -452,7 +452,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)

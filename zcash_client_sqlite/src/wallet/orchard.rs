@@ -150,6 +150,9 @@ fn to_spendable_note<P: consensus::Parameters>(
 
     let ufvk_str: Option<String> = row.get("ufvk")?;
     let scope_code: Option<i64> = row.get("recipient_key_scope")?;
+    let mined_height = row
+        .get::<_, Option<u32>>("mined_height")?
+        .map(BlockHeight::from);
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an
@@ -191,6 +194,7 @@ fn to_spendable_note<P: consensus::Parameters>(
                 note,
                 spending_key_scope,
                 note_commitment_tree_position,
+                mined_height,
             ))
         })
         .transpose()

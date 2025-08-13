@@ -44,9 +44,9 @@ workspace.
     feature flag.
   - Arguments to `InputSource::select_spendable_notes` have changed; it now takes
     a `TargetHeight` and a `ConfirmationsPolicy` instead of an anchor height.
-    The signatures of `wallet::propose_transfer`, `wallet::propose_standard_transfer`,
-    `wallet::propose_standard_transfer_to_address`, have also been modified
-    to take these changes into account, as have the signatures of the
+    The signatures of `wallet::propose_transfer` and
+    `wallet::propose_standard_transfer_to_address` have also been modified to
+    take these changes into account, as have the signatures of the
     `test-dependencies`-flagged methods
     `testing::TestState::{spend, propose_transfer, propose_standard_transfer}`.
   - Arguments to `InputSource::get_spendable_transparent_outputs` have changed:

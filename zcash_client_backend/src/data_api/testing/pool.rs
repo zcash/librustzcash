@@ -1179,25 +1179,11 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Value is considered pending at 10 confirmations.
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            ),
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::default()),
         value
     );
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            ),
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::default()),
         Zatoshis::ZERO
     );
 
@@ -1293,10 +1279,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical_unchecked(10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-                ),
+            ConfirmationsPolicy::default(),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1319,40 +1302,21 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account_id), (value * 11u64).unwrap());
     // Spendable balance at 10 confirmations is value * 2.
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            )
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::default()),
         (value * 2u64).unwrap()
     );
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            )
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::default()),
         (value * 9u64).unwrap()
     );
 
     // Should now be able to generate a proposal
     let amount_sent = Zatoshis::from_u64(70000).unwrap();
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(
-        10,
-        #[cfg(feature = "transparent-inputs")]
-        false,
-    );
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            min_confirmations,
+            ConfirmationsPolicy::default(),
             &to,
             amount_sent,
             None,
@@ -1412,16 +1376,11 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical_unchecked(
-        1,
-        #[cfg(feature = "transparent-inputs")]
-        false,
-    );
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            min_confirmations,
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(15000),
             None,
@@ -1502,12 +1461,11 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Second spend should now succeed
     let amount_sent2 = Zatoshis::const_from_u64(2000);
-    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            min_confirmations,
+            ConfirmationsPolicy::MIN,
             &to,
             amount_sent2,
             None,
@@ -1578,11 +1536,10 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
             SingleOutputChangeStrategy<DSF::DataStore>,
         >,
     > {
-        let min_confirmations = ConfirmationsPolicy::MIN;
         let proposal = st.propose_standard_transfer(
             account_id,
             fee_rule,
-            min_confirmations,
+            ConfirmationsPolicy::MIN,
             &addr2,
             Zatoshis::const_from_u64(15000),
             None,
@@ -1659,12 +1616,11 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            min_confirmations,
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(50000),
             None,
@@ -1708,25 +1664,11 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Value is considered pending at 10 confirmations.
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            )
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::default()),
         value
     );
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                10,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            )
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::default()),
         Zatoshis::ZERO
     );
 
@@ -1742,12 +1684,11 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            min_confirmations,
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(50000),
             None,

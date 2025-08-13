@@ -3,6 +3,7 @@
 use incrementalmerkletree::Position;
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
+use zip32::Scope;
 
 use zcash_client_backend::{
     data_api::{
@@ -20,7 +21,7 @@ use zcash_protocol::{
 
 use crate::{
     error::SqliteClientError,
-    wallet::{encoding::KeyScope, pool_code, wallet_birthday},
+    wallet::{pool_code, wallet_birthday},
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -117,7 +118,7 @@ where
         &format!(
             "SELECT rn.id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                accounts.ufvk, recipient_key_scope
+                accounts.ufvk, recipient_key_scope, transactions.mined_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions ON transactions.id_tx = rn.tx
@@ -308,28 +309,28 @@ where
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
-        |r| -> Result<_, SqliteClientError> {
-            let maybe_note = to_spendable_note(params, r)?;
-            let recipient_key_scope: i64 = r.get("recipient_key_scope")?;
-            // for now, we only treat wallet-internal outputs as trusted
-            let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
-            let mined_height: u32 = r.get("mined_height")?;
-            Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
-        },
+        |r| -> Result<_, SqliteClientError> { to_spendable_note(params, r) },
     )?;
 
     notes
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
             result_note
-                .map(|(note, is_trusted, mined_height)| {
-                    let number_of_confirmations = target_height - mined_height;
+                .map(|note| {
+                    let number_of_confirmations = target_height
+                        - note
+                            .mined_height()
+                            .expect("mined height checked to be non-null");
+
                     let required_confirmations = u32::from(confirmations_policy.untrusted());
-                    // If the note is from a trusted source (this wallet), then we don't have to determine the
-                    // number of confirmations, as we've already queried above based on the trusted anchor height.
-                    // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
-                    let is_spendable =
-                        is_trusted || u32::from(number_of_confirmations) >= required_confirmations;
+
+                    // If the note is from a trusted source (this wallet), then we don't have to
+                    // determine the number of confirmations, as we've already queried above based
+                    // on the trusted anchor height. So we only check if it's trusted, or if it
+                    // meets the untrusted number of confirmations.
+                    let is_spendable = note.spending_key_scope() == Scope::Internal
+                        || number_of_confirmations >= required_confirmations;
+
                     is_spendable.then_some(note)
                 })
                 .transpose()
