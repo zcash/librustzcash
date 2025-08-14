@@ -237,43 +237,40 @@ where
         &format!(
             "WITH eligible AS (
                  SELECT
-                     {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+                     rn.id AS id, txid, {output_index_col},
                      diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope,
-                     transactions.block AS mined_height
-                 FROM {table_prefix}_received_notes
-                 INNER JOIN accounts
-                    ON accounts.id = {table_prefix}_received_notes.account_id
-                 INNER JOIN transactions
-                    ON transactions.id_tx = {table_prefix}_received_notes.tx
+                     t.block AS mined_height
+                 FROM {table_prefix}_received_notes rn
+                 INNER JOIN accounts ON accounts.id = rn.account_id
+                 INNER JOIN transactions t ON t.id_tx = rn.tx
                  WHERE accounts.uuid = :account_uuid
-                 AND {table_prefix}_received_notes.account_id = accounts.id
                  -- FIXME #1316, allow selection of dust inputs
-                 AND {table_prefix}_received_notes.value > 5000
+                 AND rn.value > 5000
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
                  AND commitment_tree_position IS NOT NULL
-                 AND transactions.block <= :anchor_height
-                 AND {table_prefix}_received_notes.id NOT IN rarray(:exclude)
-                 AND {table_prefix}_received_notes.id NOT IN (
+                 AND t.block <= :anchor_height
+                 AND rn.id NOT IN rarray(:exclude)
+                 AND rn.id NOT IN (
                    SELECT {table_prefix}_received_note_id
-                   FROM {table_prefix}_received_note_spends
-                   JOIN transactions stx ON stx.id_tx = transaction_id
+                   FROM {table_prefix}_received_note_spends rns
+                   JOIN transactions stx ON stx.id_tx = rns.transaction_id
                    WHERE stx.block IS NOT NULL -- the spending tx is mined
                    OR stx.expiry_height IS NULL -- the spending tx will not expire
                    OR stx.expiry_height >= :target_height -- the spending tx is unexpired
                  )
                  AND NOT EXISTS (
-                    SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
-                    -- select all the unscanned ranges involving the shard containing this note
-                    WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
-                    AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-                    -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-                    AND unscanned.block_range_start <= :anchor_height
-                    -- exclude unscanned ranges that end below the wallet birthday
-                    AND unscanned.block_range_end > :wallet_birthday
+                   SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
+                   -- select all the unscanned ranges involving the shard containing this note
+                   WHERE rn.commitment_tree_position >= unscanned.start_position
+                   AND rn.commitment_tree_position < unscanned.end_position_exclusive
+                   -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
+                   AND unscanned.block_range_start <= :anchor_height
+                   -- exclude unscanned ranges that end below the wallet birthday
+                   AND unscanned.block_range_end > :wallet_birthday
                  )
              )
              SELECT id, txid, {output_index_col},
@@ -389,14 +386,13 @@ pub(crate) fn select_unspent_note_meta(
     let mut stmt = conn.prepare_cached(&format!("
         SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
                commitment_tree_position, value
-        FROM {table_prefix}_received_notes
-        INNER JOIN transactions
-           ON transactions.id_tx = {table_prefix}_received_notes.tx
+        FROM {table_prefix}_received_notes rn
+        INNER JOIN transactions ON transactions.id_tx = rn.tx
         WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
         AND recipient_key_scope IS NOT NULL
         AND nf IS NOT NULL
         AND commitment_tree_position IS NOT NULL
-        AND {table_prefix}_received_notes.id NOT IN (
+        AND rn.id NOT IN (
           SELECT {table_prefix}_received_note_id
           FROM {table_prefix}_received_note_spends
           JOIN transactions stx ON stx.id_tx = transaction_id
@@ -407,8 +403,8 @@ pub(crate) fn select_unspent_note_meta(
         AND NOT EXISTS (
            SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
            -- select all the unscanned ranges involving the shard containing this note
-           WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
-           AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+           WHERE rn.commitment_tree_position >= unscanned.start_position
+           AND rn.commitment_tree_position < unscanned.end_position_exclusive
            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
            AND unscanned.block_range_start <= :anchor_height
            -- exclude unscanned ranges that end below the wallet birthday

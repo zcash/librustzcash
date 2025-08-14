@@ -1992,27 +1992,28 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
         // The trusted height will be used as the anchor height.
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT a.uuid, n.value, n.is_change, n.recipient_key_scope,
-                    scan_state.max_priority, t.block
-             FROM {table_prefix}_received_notes n
-             JOIN accounts a ON a.id = n.account_id
-             JOIN transactions t ON t.id_tx = n.tx
+            "SELECT a.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
+                    scan_state.max_priority,
+                    t.block AS mined_height
+             FROM {table_prefix}_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
+             JOIN transactions t ON t.id_tx = rn.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-                ON n.commitment_tree_position >= scan_state.start_position
-                AND n.commitment_tree_position < scan_state.end_position_exclusive
+                ON rn.commitment_tree_position >= scan_state.start_position
+                AND rn.commitment_tree_position < scan_state.end_position_exclusive
              WHERE (
                 t.block IS NOT NULL -- the receiving tx is mined
                 OR t.expiry_height IS NULL -- the receiving tx will not expire
                 OR t.expiry_height >= :target_height -- the receiving tx is unexpired
              )
              -- and the received note is unspent
-             AND n.id NOT IN (
+             AND rn.id NOT IN (
                SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends
-               JOIN transactions t ON t.id_tx = transaction_id
-               WHERE t.block IS NOT NULL -- the spending transaction is mined
-               OR t.expiry_height IS NULL -- the spending tx will not expire
-               OR t.expiry_height >= :target_height -- the spending tx is unexpired
+               FROM {table_prefix}_received_note_spends rns
+               JOIN transactions stx ON stx.id_tx = rns.transaction_id
+               WHERE stx.block IS NOT NULL -- the spending transaction is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )"
         ))?;
 
@@ -2050,7 +2051,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 },
             )?;
 
-            let received_height = row.get::<_, Option<u32>>("block")?.map(BlockHeight::from);
+            let received_height = row
+                .get::<_, Option<u32>>("mined_height")?
+                .map(BlockHeight::from);
 
             // A note is spendable if we have enough chain tip information to construct witnesses,
             // the shard that its witness resides in is sufficiently scanned that we can construct
