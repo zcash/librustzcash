@@ -167,12 +167,6 @@ pub struct Spend {
     /// - This is required by the Prover.
     pub(crate) rseed_split_note: Option<[u8; 32]>,
 
-    /// A flag to indicate whether the value of the SpendInfo will be counted in the `ValueSum` of the action.
-    ///
-    /// - This is chosen by the Constructor.
-    /// - This is required by the Prover.
-    pub(crate) split_flag: Option<bool>,
-
     /// The full viewing key that received the note being spent.
     ///
     /// - This is set by the Updater.
@@ -193,6 +187,12 @@ pub struct Spend {
     ///   validate `rk`.
     /// - After `zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
+
+    /// A flag to indicate whether the value of the SpendInfo will be counted in the `ValueSum` of the action.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) split_flag: Option<bool>,
 
     /// The ZIP 32 derivation path at which the spending key can be found for the note
     /// being spent.
@@ -414,10 +414,10 @@ impl Bundle {
                 && merge_optional(&mut lhs.spend.rho, rho)
                 && merge_optional(&mut lhs.spend.rseed, rseed)
                 && merge_optional(&mut lhs.spend.rseed_split_note, rseed_split_note)
-                && merge_optional(&mut lhs.spend.split_flag, split_flag)
                 && merge_optional(&mut lhs.spend.fvk, fvk)
                 && merge_optional(&mut lhs.spend.witness, witness)
                 && merge_optional(&mut lhs.spend.alpha, alpha)
+                && merge_optional(&mut lhs.spend.split_flag, split_flag)
                 && merge_optional(&mut lhs.spend.zip32_derivation, spend_zip32_derivation)
                 && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk)
                 && merge_map(&mut lhs.spend.proprietary, spend_proprietary)
@@ -538,7 +538,6 @@ impl Bundle {
                         rseed_split_note: spend
                             .rseed_split_note()
                             .map(|rseed_split_note| *rseed_split_note.as_bytes()),
-                        split_flag: *spend.split_flag(),
                         fvk: spend.fvk().as_ref().map(|fvk| fvk.to_bytes()),
                         witness: spend.witness().as_ref().map(|witness| {
                             (
@@ -554,6 +553,7 @@ impl Bundle {
                             )
                         }),
                         alpha: spend.alpha().map(|alpha| alpha.to_repr()),
+                        split_flag: *spend.split_flag(),
                         zip32_derivation: spend.zip32_derivation().as_ref().map(|z| {
                             Zip32Derivation {
                                 seed_fingerprint: *z.seed_fingerprint(),

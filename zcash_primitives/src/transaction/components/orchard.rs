@@ -149,15 +149,15 @@ pub fn read_orchard_zsa_bundle<R: Read>(
     )))
 }
 
-#[cfg(zcash_unstable = "nu7")]
-fn read_burn_item<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
-    Ok((read_asset(reader)?, read_note_value(reader)?))
-}
-
 /// Reads burn for OrchardZSA
 #[cfg(zcash_unstable = "nu7")]
 pub fn read_burn<R: Read>(mut reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
     Vector::read(&mut reader, read_burn_item)
+}
+
+#[cfg(zcash_unstable = "nu7")]
+fn read_burn_item<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
+    Ok((read_asset(reader)?, read_note_value(reader)?))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -265,6 +265,35 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
     Ok(Signature::from(bytes))
 }
 
+/// Writes an [`orchard::Bundle`] in the v5 transaction format.
+pub fn write_orchard_vanilla_bundle<W: Write>(
+    bundle: &Bundle<Authorized, ZatBalance, OrchardVanilla>,
+    mut writer: W,
+) -> io::Result<()> {
+    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
+        write_action_without_auth(w, a)
+    })?;
+
+    writer.write_all(&[bundle.flags().to_byte()])?;
+    writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
+    writer.write_all(&bundle.anchor().to_bytes())?;
+    Vector::write(
+        &mut writer,
+        bundle.authorization().proof().as_ref(),
+        |w, b| w.write_all(&[*b]),
+    )?;
+    Array::write(
+        &mut writer,
+        bundle.actions().iter().map(|a| a.authorization()),
+        |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
+    )?;
+    writer.write_all(&<[u8; 64]>::from(
+        bundle.authorization().binding_signature(),
+    ))?;
+
+    Ok(())
+}
+
 #[cfg(zcash_unstable = "nu7")]
 fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
     let mut bytes = [0; 8];
@@ -297,35 +326,6 @@ pub fn write_orchard_bundle<W: Write>(
     } else {
         CompactSize::write(&mut writer, 0)?;
     }
-
-    Ok(())
-}
-
-/// Writes an [`orchard::Bundle`] in the v5 transaction format.
-pub fn write_orchard_vanilla_bundle<W: Write>(
-    bundle: &Bundle<Authorized, ZatBalance, OrchardVanilla>,
-    mut writer: W,
-) -> io::Result<()> {
-    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-        write_action_without_auth(w, a)
-    })?;
-
-    writer.write_all(&[bundle.flags().to_byte()])?;
-    writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-    writer.write_all(&bundle.anchor().to_bytes())?;
-    Vector::write(
-        &mut writer,
-        bundle.authorization().proof().as_ref(),
-        |w, b| w.write_all(&[*b]),
-    )?;
-    Array::write(
-        &mut writer,
-        bundle.actions().iter().map(|a| a.authorization()),
-        |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-    )?;
-    writer.write_all(&<[u8; 64]>::from(
-        bundle.authorization().binding_signature(),
-    ))?;
 
     Ok(())
 }

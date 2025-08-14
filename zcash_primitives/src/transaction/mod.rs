@@ -1174,14 +1174,14 @@ pub enum DigestError {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use crate::consensus::BranchId;
+    use ::transparent::bundle::testing::{self as transparent_testing};
+    use ::zcash_protocol::consensus::BranchId;
     use proptest::prelude::*;
 
     use super::{
         components::{
             orchard::testing::{self as orchard_testing},
             sapling::testing::{self as sapling_testing},
-            transparent::testing::{self as transparent_testing},
         },
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
