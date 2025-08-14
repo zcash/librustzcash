@@ -453,7 +453,7 @@ impl SplitPolicy {
 /// intermediate step, such as when sending from a shielded pool to a [ZIP 320] "TEX" address.
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EphemeralBalance {
     Input(Zatoshis),
     Output(Zatoshis),
@@ -487,7 +487,7 @@ impl EphemeralBalance {
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
     type FeeRule: FeeRule + Clone;
-    type Error;
+    type Error: From<<Self::FeeRule as FeeRule>::Error>;
 
     /// The type of metadata source that this change strategy requires in order to be able to
     /// retrieve required wallet metadata. If more capabilities are required of the backend than
@@ -547,7 +547,7 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
-        ephemeral_balance: Option<&EphemeralBalance>,
+        ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }

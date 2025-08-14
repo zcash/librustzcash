@@ -143,6 +143,9 @@ pub enum SqliteClientError {
     /// of the transactions in which it is known to have been used.
     AddressReuse(String, NonEmpty<TxId>),
 
+    /// The wallet found one or more notes that given a certain context would be
+    /// ineligible and shouldn't be considered in the involved db operation.
+    IneligibleNotes,
     /// The wallet encountered an error when attempting to schedule wallet operations.
     #[cfg(feature = "transparent-inputs")]
     Scheduling(SchedulingError),
@@ -240,6 +243,9 @@ impl fmt::Display for SqliteClientError {
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::NotificationMismatch { expected, actual } => {
                 write!(f, "The client performed an address check over a block range that did not match the requested range; expected as_of_height: {expected}, actual as_of_height: {actual}")
+            }
+            SqliteClientError::IneligibleNotes => {
+                write!(f, "Query found notes that are considered ineligible in its context")
             }
         }
     }
