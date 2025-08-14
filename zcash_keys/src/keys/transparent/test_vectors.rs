@@ -12,6 +12,7 @@ pub struct TestVector {
     pub network: NetworkType,
 }
 
+// These are sourced from https://github.com/zcash/zcash/blob/b65b008a7b334a2f7c2eaae1b028e011f2e21dd1/src/test/data/base58_keys_valid.json
 pub const VALID: &[TestVector] = &[
     TestVector {
         base58_encoding: "t1T8yaLVhNqxA5KJcmiqqFN88e8DNp2PBfF",
@@ -364,7 +365,7 @@ pub const VALID: &[TestVector] = &[
     },
 ];
 
-// From
+// Sourced from https://github.com/zcash/zcash/blob/b65b008a7b334a2f7c2eaae1b028e011f2e21dd1/src/test/data/base58_keys_invalid.json
 pub const INVALID: &[&str] = &[
     "",
     "x",
