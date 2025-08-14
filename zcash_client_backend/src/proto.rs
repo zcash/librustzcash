@@ -206,7 +206,7 @@ impl TryFrom<&compact_formats::CompactOrchardAction>
                 value.nf()?,
                 value.cmx()?,
                 value.ephemeral_key()?,
-                NoteBytesData::from_slice(&value.ciphertext)?,
+                NoteBytesData::from_slice(&value.ciphertext).ok_or(())?,
             ),
         )
     }
