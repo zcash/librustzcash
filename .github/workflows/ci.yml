@@ -1,5 +1,7 @@
 name: CI
 
+permissions: {}
+
 on:
   pull_request:
   push:
@@ -10,6 +12,9 @@ jobs:
   required-test:
     name: Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      statuses: write
     strategy:
       matrix:
         target:
