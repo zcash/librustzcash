@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::WalletMigrationError;
@@ -12,17 +12,17 @@ use super::v_transactions_shielding_balance;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
 
+const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [v_transactions_shielding_balance::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -160,28 +160,35 @@ impl RusqliteMigration for Migration {
 
 #[cfg(test)]
 mod tests {
+    use rand_chacha::ChaChaRng;
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+        testing::db::{test_clock, test_rng},
+        util::testing::FixedClock,
+        wallet::init::{migrations::v_transactions_net, WalletMigrator},
         WalletDb,
     };
 
     #[test]
     fn v_transactions_note_uniqueness_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[v_transactions_net::MIGRATION_ID],
-            false,
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
         )
         .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[v_transactions_net::MIGRATION_ID])
+            .unwrap();
 
         // Create an account in the wallet
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -205,7 +212,12 @@ mod tests {
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
             VALUES (0, 3, 0, '', 2, '', 'nf_b', false);").unwrap();
 
-        let check_balance_delta = |db_data: &mut WalletDb<rusqlite::Connection, Network>,
+        let check_balance_delta = |db_data: &mut WalletDb<
+            rusqlite::Connection,
+            Network,
+            FixedClock,
+            ChaChaRng,
+        >,
                                    expected_notes: i64| {
             let mut q = db_data
                 .conn
@@ -233,10 +245,7 @@ mod tests {
                         assert_eq!(received_note_count, expected_notes);
                     }
                     other => {
-                        panic!(
-                            "Account {:?} is not expected to exist in the wallet.",
-                            other
-                        );
+                        panic!("Account {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -247,7 +256,10 @@ mod tests {
         check_balance_delta(&mut db_data, 1);
 
         // Apply the current migration.
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // Now it should be correct.
         check_balance_delta(&mut db_data, 2);

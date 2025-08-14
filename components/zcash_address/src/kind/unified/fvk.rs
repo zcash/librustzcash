@@ -1,4 +1,6 @@
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -82,10 +84,12 @@ impl SealedItem for Fvk {
 /// # Examples
 ///
 /// ```
-/// # use std::error::Error;
 /// use zcash_address::unified::{self, Container, Encoding};
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let ufvk_from_user = || "uview1cgrqnry478ckvpr0f580t6fsahp0a5mj2e9xl7hv2d2jd4ldzy449mwwk2l9yeuts85wjls6hjtghdsy5vhhvmjdw3jxl3cxhrg3vs296a3czazrycrr5cywjhwc5c3ztfyjdhmz0exvzzeyejamyp0cr9z8f9wj0953fzht0m4lenk94t70ruwgjxag2tvp63wn9ftzhtkh20gyre3w5s24f6wlgqxnjh40gd2lxe75sf3z8h5y2x0atpxcyf9t3em4h0evvsftluruqne6w4sm066sw0qe5y8qg423grple5fftxrqyy7xmqmatv7nzd7tcjadu8f7mqz4l83jsyxy4t8pkayytyk7nrp467ds85knekdkvnd7hqkfer8mnqd7pv";
 /// let example_ufvk: &str = ufvk_from_user();
 ///
@@ -125,17 +129,21 @@ impl SealedContainer for Ufvk {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uview";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded testnet Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uviewtest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded regtest Unified FVK.
-    const REGTEST: &'static str = "uviewregtest";
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_FVK;
 
     fn from_inner(fvks: Vec<Self::Item>) -> Self {
         Self(fvks)
@@ -144,18 +152,19 @@ impl SealedContainer for Ufvk {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+
     use assert_matches::assert_matches;
 
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform128()(a in uniform96(), b in uniform32(0u8..)) -> [u8; 128] {
@@ -220,7 +229,7 @@ mod tests {
     proptest! {
         #[test]
         fn ufvk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             ufvk in arb_unified_fvk(),
         ) {
             let encoded = ufvk.encode(&network);
@@ -234,7 +243,7 @@ mod tests {
         // The test cases below use `Ufvk(vec![Fvk::Orchard([1; 96])])` as base.
 
         // Invalid padding ([0xff; 16] instead of [b'u', 0x00, 0x00, 0x00...])
-        let invalid_padding = vec![
+        let invalid_padding = [
             0x6b, 0x32, 0x44, 0xf1, 0xb, 0x67, 0xe9, 0x8f, 0x6, 0x57, 0xe3, 0x5, 0x17, 0xa0, 0x7,
             0x5c, 0xb0, 0xc9, 0x23, 0xcc, 0xb7, 0x54, 0xac, 0x55, 0x6a, 0x65, 0x99, 0x95, 0x32,
             0x97, 0xd5, 0x34, 0xa7, 0xc8, 0x6f, 0xc, 0xd7, 0x3b, 0xe0, 0x88, 0x19, 0xf3, 0x3e,
@@ -252,7 +261,7 @@ mod tests {
         );
 
         // Short padding (padded to 15 bytes instead of 16)
-        let truncated_padding = vec![
+        let truncated_padding = [
             0xdf, 0xea, 0x84, 0x55, 0xc3, 0x4a, 0x7c, 0x6e, 0x9f, 0x83, 0x3, 0x21, 0x14, 0xb0,
             0xcf, 0xb0, 0x60, 0x84, 0x75, 0x3a, 0xdc, 0xb9, 0x93, 0x16, 0xc0, 0x8f, 0x28, 0x5f,
             0x61, 0x5e, 0xf0, 0x8e, 0x44, 0xae, 0xa6, 0x74, 0xc5, 0x64, 0xad, 0xfa, 0xdc, 0x7d,
@@ -300,7 +309,7 @@ mod tests {
         );
 
         // - Truncated after the typecode of the Sapling fvk.
-        let truncated_after_sapling_typecode = vec![
+        let truncated_after_sapling_typecode = [
             0xac, 0x26, 0x5b, 0x19, 0x8f, 0x88, 0xb0, 0x7, 0xb3, 0x0, 0x91, 0x19, 0x52, 0xe1, 0x73,
             0x48, 0xff, 0x66, 0x7a, 0xef, 0xcf, 0x57, 0x9c, 0x65, 0xe4, 0x6a, 0x7a, 0x1d, 0x19,
             0x75, 0x6b, 0x43, 0xdd, 0xcf, 0xb9, 0x9a, 0xf3, 0x7a, 0xf8, 0xb, 0x23, 0x96, 0x64,
@@ -330,7 +339,7 @@ mod tests {
     #[test]
     fn only_transparent() {
         // Raw encoding of `Ufvk(vec![Fvk::P2pkh([0; 65])])`.
-        let encoded = vec![
+        let encoded = [
             0xc4, 0x70, 0xc8, 0x7a, 0xcc, 0xe6, 0x6b, 0x1a, 0x62, 0xc7, 0xcd, 0x5f, 0x76, 0xd8,
             0xcc, 0x9c, 0x50, 0xbd, 0xce, 0x85, 0x80, 0xd7, 0x78, 0x25, 0x3e, 0x47, 0x9, 0x57,
             0x7d, 0x6a, 0xdb, 0x10, 0xb4, 0x11, 0x80, 0x13, 0x4c, 0x83, 0x76, 0xb4, 0x6b, 0xbd,

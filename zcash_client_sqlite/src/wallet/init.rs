@@ -1,27 +1,39 @@
 //! Functions for initializing the various databases.
 
+use std::borrow::BorrowMut;
 use std::fmt;
 use std::rc::Rc;
 
-use schemer::{Migrator, MigratorError};
-use schemer_rusqlite::RusqliteAdapter;
+use rand_core::RngCore;
+use regex::Regex;
+use schemerz::{Migrator, MigratorError};
+use schemerz_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_client_backend::{
-    data_api::{SeedRelevance, WalletRead},
-    keys::AddressGenerationError,
-};
-use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
+use zcash_client_backend::data_api::{SeedRelevance, WalletRead};
+use zcash_keys::keys::AddressGenerationError;
+use zcash_protocol::{consensus, value::BalanceError};
+
+use self::migrations::verify_network_compatibility;
 
 use super::commitment_tree;
-use crate::{error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, util::Clock, WalletDb};
 
-mod migrations;
+pub mod migrations;
+
+const SQLITE_MAJOR_VERSION: u32 = 3;
+const MIN_SQLITE_MINOR_VERSION: u32 = 35;
+
+const MIGRATIONS_TABLE: &str = "schemer_migrations";
 
 #[derive(Debug)]
 pub enum WalletMigrationError {
+    /// A feature required by the wallet database is not supported by the version of
+    /// SQLite that the migration is running against.
+    DatabaseNotSupported(String),
+
     /// The seed is required for the migration.
     SeedRequired,
 
@@ -49,10 +61,13 @@ pub enum WalletMigrationError {
     BalanceError(BalanceError),
 
     /// Wrapper for commitment tree invariant violations
-    CommitmentTree(ShardTreeError<commitment_tree::Error>),
+    CommitmentTree(Box<ShardTreeError<commitment_tree::Error>>),
 
     /// Reverting the specified migration is not supported.
     CannotRevert(Uuid),
+
+    /// Some other unexpected violation of database business rules occurred
+    Other(Box<SqliteClientError>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -69,7 +84,7 @@ impl From<BalanceError> for WalletMigrationError {
 
 impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
     fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
-        WalletMigrationError::CommitmentTree(e)
+        WalletMigrationError::CommitmentTree(Box::new(e))
     }
 }
 
@@ -79,9 +94,32 @@ impl From<AddressGenerationError> for WalletMigrationError {
     }
 }
 
+impl From<SqliteClientError> for WalletMigrationError {
+    fn from(value: SqliteClientError) -> Self {
+        match value {
+            SqliteClientError::CorruptedData(err) => WalletMigrationError::CorruptedData(err),
+            SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
+            SqliteClientError::CommitmentTree(err) => {
+                WalletMigrationError::CommitmentTree(Box::new(err))
+            }
+            SqliteClientError::BalanceError(err) => WalletMigrationError::BalanceError(err),
+            SqliteClientError::AddressGeneration(err) => {
+                WalletMigrationError::AddressGeneration(err)
+            }
+            other => WalletMigrationError::Other(Box::new(other)),
+        }
+    }
+}
+
 impl fmt::Display for WalletMigrationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            WalletMigrationError::DatabaseNotSupported(version) => {
+                write!(
+                    f,
+                    "The installed SQLite version {version} does not support operations required by the wallet."
+                )
+            }
             WalletMigrationError::SeedRequired => {
                 write!(
                     f,
@@ -95,16 +133,19 @@ impl fmt::Display for WalletMigrationError {
                 )
             }
             WalletMigrationError::CorruptedData(reason) => {
-                write!(f, "Wallet database is corrupted: {}", reason)
+                write!(f, "Wallet database is corrupted: {reason}")
             }
-            WalletMigrationError::DbError(e) => write!(f, "{}", e),
-            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
-            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
+            WalletMigrationError::DbError(e) => write!(f, "{e}"),
+            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {e:?}"),
+            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {e:?}"),
             WalletMigrationError::AddressGeneration(e) => {
-                write!(f, "Address generation error: {:?}", e)
+                write!(f, "Address generation error: {e:?}")
             }
             WalletMigrationError::CannotRevert(uuid) => {
-                write!(f, "Reverting migration {} is not supported", uuid)
+                write!(f, "Reverting migration {uuid} is not supported")
+            }
+            WalletMigrationError::Other(err) => {
+                write!(f, "Unexpected violation of database business rules: {err}")
             }
         }
     }
@@ -117,6 +158,7 @@ impl std::error::Error for WalletMigrationError {
             WalletMigrationError::BalanceError(e) => Some(e),
             WalletMigrationError::CommitmentTree(e) => Some(e),
             WalletMigrationError::AddressGeneration(e) => Some(e),
+            WalletMigrationError::Other(e) => Some(e),
             _ => None,
         }
     }
@@ -136,7 +178,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         }
         SqliteClientError::DecodingError(e) => WalletMigrationError::CorruptedData(e.to_string()),
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::HdwalletError(e) => WalletMigrationError::CorruptedData(e.to_string()),
+        SqliteClientError::TransparentDerivation(e) => {
+            WalletMigrationError::CorruptedData(e.to_string())
+        }
         #[cfg(feature = "transparent-inputs")]
         SqliteClientError::TransparentAddress(e) => {
             WalletMigrationError::CorruptedData(e.to_string())
@@ -146,18 +190,18 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::InvalidMemo(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::AddressGeneration(e) => WalletMigrationError::AddressGeneration(e),
         SqliteClientError::BadAccountData(e) => WalletMigrationError::CorruptedData(e),
-        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(e),
+        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(Box::new(e)),
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
-            format!("Wallet DB contains unsupported pool type {}", pool),
+            format!("Wallet DB contains unsupported pool type {pool}"),
         ),
         SqliteClientError::BalanceError(e) => WalletMigrationError::BalanceError(e),
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
         SqliteClientError::BlockConflict(_)
         | SqliteClientError::NonSequentialBlocks
-        | SqliteClientError::RequestedRewindInvalid(_, _)
+        | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
-        | SqliteClientError::AccountIdDiscontinuity
-        | SqliteClientError::AccountIdOutOfRange
+        | SqliteClientError::Zip32AccountIndexOutOfRange
+        | SqliteClientError::AccountCollision(_)
         | SqliteClientError::CacheMiss(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")
         }
@@ -174,6 +218,26 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::ChainHeightUnknown => {
             unreachable!("we don't call methods that require a known chain height")
         }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::ReachedGapLimit(..) => {
+            unreachable!("we don't do ephemeral address tracking")
+        }
+        SqliteClientError::DiversifierIndexReuse(i, _) => {
+            WalletMigrationError::CorruptedData(format!(
+                "invalid attempt to overwrite address at diversifier index {}",
+                u128::from(i)
+            ))
+        }
+        SqliteClientError::AddressReuse(_, _) => {
+            unreachable!("we don't create transactions in migrations")
+        }
+        SqliteClientError::NoteFilterInvalid(_) => {
+            unreachable!("we don't do note selection in migrations")
+        }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::Scheduling(e) => {
+            WalletMigrationError::Other(Box::new(SqliteClientError::Scheduling(e)))
+        }
     }
 }
 
@@ -188,7 +252,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// In order to correctly apply migrations to accounts derived from a seed, sometimes the
 /// optional `seed` argument is required. This function should first be invoked with
 /// `seed` set to `None`; if a pending migration requires the seed, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
 /// The caller can then re-call this function with the necessary seed.
 ///
 /// > Note that currently only one seed can be provided; as such, wallets containing
@@ -199,12 +263,12 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// _relevance_: if any account in the wallet for which [`Account::source`] is
 /// [`AccountSource::Derived`] can be derived from the given seed, the seed is relevant to
 /// the wallet. If the given seed is not relevant, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
-/// or `Err(schemer::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
-/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
-/// accounts are not migrated.
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
 ///
 /// It is safe to use a wallet database previously created without the ability to create
 /// transparent spends with a build that enables transparent spends (via use of the
@@ -221,9 +285,11 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # use std::error::Error;
 /// # use secrecy::SecretVec;
 /// # use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::Network;
+/// use rand_core::OsRng;
+/// use zcash_protocol::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
+///     util::SystemClock,
 ///     wallet::init::{WalletMigrationError, init_wallet_db},
 /// };
 ///
@@ -231,7 +297,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # let data_file = NamedTempFile::new().unwrap();
 /// # let get_data_db_path = || data_file.path();
 /// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
-/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork)?;
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
 /// match init_wallet_db(&mut db, None) {
 ///     Err(e)
 ///         if matches!(
@@ -253,36 +319,288 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 // the library that does not support transparent use. It might be a good idea to add an explicit
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
-pub fn init_wallet_db<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+pub fn init_wallet_db<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+    CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
+    wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
-) -> Result<(), MigratorError<WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, &[], true)
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+    if let Some(seed) = seed {
+        WalletMigrator::new().with_seed(seed)
+    } else {
+        WalletMigrator::new()
+    }
+    .init_or_migrate(wdb)
 }
 
-fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+/// A migrator that sets up the internal structure of the wallet database.
+///
+/// This procedure will automatically perform migration operations to update the wallet
+/// database to the database structure required by the current version of this library,
+/// and should be invoked at least once any time a client program upgrades to a new
+/// version of this library. The operation of this procedure is idempotent, so it is safe
+/// (though not required) to invoke this operation every time the wallet is opened.
+///
+/// In order to correctly apply migrations to accounts derived from a seed, sometimes the
+/// seed is required. The migrator should first be used without calling [`Self::with_seed`];
+/// if a pending migration requires the seed, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// The caller can then call [`Self::with_seed`] and then re-call [`Self::init_or_migrate`]
+/// with the necessary seed.
+///
+/// > Note that currently only one seed can be provided; as such, wallets containing
+/// > accounts derived from several different seeds are unsupported, and will result in an
+/// > error. Support for multi-seed wallets is being tracked in [zcash/librustzcash#1284].
+///
+/// When a seed is provided, it is checked against the database for _relevance_: if any
+/// account in the wallet for which [`Account::source`] is [`AccountSource::Derived`] can
+/// be derived from the given seed, the seed is relevant to the wallet. If the given seed
+/// is not relevant, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+///
+/// We do not check whether the seed is relevant to any imported account, because that
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
+///
+/// It is safe to use a wallet database previously created without the ability to create
+/// transparent spends with a build that enables transparent spends (via use of the
+/// `transparent-inputs` feature flag.) The reverse is unsafe, as wallet balance
+/// calculations would ignore the transparent UTXOs already controlled by the wallet.
+///
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [`Account::source`]: zcash_client_backend::data_api::Account::source
+/// [`AccountSource::Derived`]: zcash_client_backend::data_api::AccountSource::Derived
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use secrecy::SecretVec;
+/// # use tempfile::NamedTempFile;
+/// use rand_core::OsRng;
+/// use zcash_protocol::consensus::Network;
+/// use zcash_client_sqlite::{
+///     WalletDb,
+///     util::SystemClock,
+///     wallet::init::{WalletMigrationError, WalletMigrator},
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let data_file = NamedTempFile::new().unwrap();
+/// # let get_data_db_path = || data_file.path();
+/// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
+/// match WalletMigrator::new().init_or_migrate(&mut db) {
+///     Err(e)
+///         if matches!(
+///             e.source().and_then(|e| e.downcast_ref()),
+///             Some(&WalletMigrationError::SeedRequired)
+///         ) =>
+///     {
+///         let seed = load_seed()?;
+///         WalletMigrator::new()
+///             .with_seed(seed)
+///             .init_or_migrate(&mut db)
+///     }
+///     res => res,
+/// }?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct WalletMigrator {
     seed: Option<SecretVec<u8>>,
+    verify_seed_relevance: bool,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
+}
+
+impl Default for WalletMigrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WalletMigrator {
+    /// Constructs a new wallet migrator.
+    pub fn new() -> Self {
+        Self {
+            seed: None,
+            verify_seed_relevance: true,
+            external_migrations: None,
+        }
+    }
+
+    /// Sets the seed for the migrator to use.
+    pub fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    /// API for internal test usage only.
+    #[cfg(test)]
+    pub(crate) fn ignore_seed_relevance(mut self) -> Self {
+        self.verify_seed_relevance = false;
+        self
+    }
+
+    /// Sets the external migration graph to apply alongside the internal migrations.
+    ///
+    /// From a data management perspective, it can be useful to store additional data
+    /// alongside the `zcash_client_sqlite` wallet database. This method enables you to
+    /// provide an external [`schemerz`] migration graph that the migrator will apply to
+    /// the wallet database.
+    ///
+    /// # WARNING
+    ///
+    /// **DO NOT** depend on or modify internal details of the `zcash_client_sqlite`
+    /// schema!
+    ///
+    /// The internal migrations are written to take into account internal relationships
+    /// between the `zcash_client_sqlite` tables, but they will never take into account
+    /// external tables. In particular, this means that you **MUST NOT**:
+    /// - Modify the structure or contents of any internal table.
+    /// - Assume that internal IDs will exist indefinitely (instead have a backup plan for
+    ///   recovering your data relationships if a new internal migration affects your
+    ///   foreign keys).
+    ///
+    /// The `zcash_client_sqlite` schema does not have any common prefix it uses for
+    /// tables, indexes, or views. However, we promise to not use the prefix `ext_` for
+    /// any internal names. Schema created by external migrations **MUST** use name
+    /// prefixing with a prefix that is unlikely to collide with either the internal names
+    /// or other potential external schemas (e.g. `ext_myappname_*`).
+    ///
+    /// # Integration
+    ///
+    /// In order to enable anchoring your external migrations correctly with respect to
+    /// this library's internal migrations, we provide constants in the [`migrations`]
+    /// module (for each release that adds a migration) which you can include within your
+    /// [`schemerz::Migration::dependencies`] set.
+    ///
+    /// Each migration runs inside a database transaction, which has the following
+    /// implications:
+    /// - `PRAGMA foreign_keys` has no effect inside a transaction, so the migrator
+    ///   handles foreign key enforcement itself:
+    ///   - `PRAGMA foreign_keys = OFF` is set before running any migrations.
+    ///   - `PRAGMA foreign_keys = ON` is set after all migrations are successful.
+    /// - `PRAGMA legacy_alter_table` should only be used in cases where its effect is
+    ///   explicitly intended, so the migrator does not use it globally. If you want to
+    ///   rename tables without breaking foreign key relationships, you need to do so
+    ///   yourself inside individual migrations:
+    ///   ```sql
+    ///   PRAGMA legacy_alter_table = ON;
+    ///   DROP TABLE table_name;
+    ///   ALTER TABLE table_name_new RENAME TO table_name;
+    ///   PRAGMA legacy_alter_table = OFF;
+    ///   ```
+    pub fn with_external_migrations(
+        mut self,
+        migrations: Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>,
+    ) -> Self {
+        self.external_migrations = Some(migrations);
+        self
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub fn init_or_migrate<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        self.init_or_migrate_to(wdb, &[])
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub(crate) fn init_or_migrate_to<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+        target_migrations: &[Uuid],
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        init_wallet_db_internal(
+            wdb,
+            self.seed,
+            self.external_migrations,
+            target_migrations,
+            self.verify_seed_relevance,
+        )
+    }
+}
+
+fn init_wallet_db_internal<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+    CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
+    wdb: &mut WalletDb<C, P, CL, R>,
+    seed: Option<SecretVec<u8>>,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
-) -> Result<(), MigratorError<WalletMigrationError>> {
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
-    // Turn off foreign keys, and ensure that table replacement/modification
-    // does not break views
-    wdb.conn
-        .execute_batch(
-            "PRAGMA foreign_keys = OFF;
-             PRAGMA legacy_alter_table = TRUE;",
-        )
-        .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
-    let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
-    adapter.init().expect("Migrations table setup succeeds.");
+    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)?;
 
+    // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
+    // key references in table definitions.
+    //
+    // It is necessary to perform this operation globally using the outer connection because this
+    // pragma has no effect when set or unset within a transaction.
+    wdb.conn
+        .borrow()
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
+
+    // Temporarily take ownership of the connection in a wrapper to perform the initial migration
+    // table setup. This extra adapter creation could be omitted if `RusqliteAdapter` provided an
+    // accessor for the connection that it wraps, or if it provided a mechanism to query to
+    // determine whether a given migration has been applied. (see
+    // https://github.com/zcash/schemerz/issues/6)
+    {
+        let adapter = RusqliteAdapter::<'_, WalletMigrationError>::new(
+            wdb.conn.borrow_mut(),
+            Some(MIGRATIONS_TABLE.to_string()),
+        );
+        adapter.init().expect("Migrations table setup succeeds.");
+    }
+
+    // Now that we are certain that the migrations table exists, verify that if the database
+    // already contains account data, any stored UFVKs correspond to the same network that the
+    // migrations are being run for.
+    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(MigratorError::Adapter)?;
+
+    // Now create the adapter that we're actually going to use to perform the migrations, and
+    // proceed.
+    let adapter = RusqliteAdapter::new(wdb.conn.borrow_mut(), Some(MIGRATIONS_TABLE.to_string()));
     let mut migrator = Migrator::new(adapter);
     migrator
-        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()))
+        .register_multiple(
+            migrations::all_migrations(
+                &wdb.params,
+                wdb.clock.clone(),
+                wdb.rng.clone(),
+                seed.clone(),
+            )
+            .into_iter(),
+        )
         .expect("Wallet migration registration should have been successful.");
+    if let Some(migrations) = external_migrations {
+        migrator.register_multiple(migrations.into_iter())?;
+    }
     if target_migrations.is_empty() {
         migrator.up(None)?;
     } else {
@@ -291,6 +609,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
         }
     }
     wdb.conn
+        .borrow()
         .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
@@ -320,33 +639,93 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     Ok(())
 }
 
+/// Verify that the sqlite version in use supports the features required by this library.
+/// Note that the version of sqlite available to the database backend may be different
+/// from what is used to query the views that are part of the public API.
+fn verify_sqlite_version_compatibility(
+    conn: &rusqlite::Connection,
+) -> Result<(), WalletMigrationError> {
+    let sqlite_version =
+        conn.query_row("SELECT sqlite_version()", [], |row| row.get::<_, String>(0))?;
+
+    let version_re = Regex::new(r"^(?<major>[0-9]+)\.(?<minor>[0-9]+).*$").unwrap();
+    let captures =
+        version_re
+            .captures(&sqlite_version)
+            .ok_or(WalletMigrationError::DatabaseNotSupported(
+                "Unknown".to_owned(),
+            ))?;
+    let parse_version_part = |part: &str| {
+        captures[part].parse::<u32>().map_err(|_| {
+            WalletMigrationError::CorruptedData(format!(
+                "Cannot decode SQLite {} version component {}",
+                part, &captures[part]
+            ))
+        })
+    };
+    let major = parse_version_part("major")?;
+    let minor = parse_version_part("minor")?;
+
+    if major != SQLITE_MAJOR_VERSION || minor < MIN_SQLITE_MINOR_VERSION {
+        Err(WalletMigrationError::DatabaseNotSupported(sqlite_version))
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
-#[allow(deprecated)]
+pub(crate) mod testing {
+    use rand::RngCore;
+    use schemerz::MigratorError;
+    use secrecy::SecretVec;
+    use uuid::Uuid;
+    use zcash_protocol::consensus;
+
+    use crate::{util::Clock, WalletDb};
+
+    use super::WalletMigrationError;
+
+    pub(crate) fn init_wallet_db<
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
+        seed: Option<SecretVec<u8>>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        super::init_wallet_db_internal(wdb, seed, None, &[], true)
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use rusqlite::{self, named_params, ToSql};
+    use rand::RngCore;
+    use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
 
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::{
-        address::Address,
-        data_api::scanning::ScanPriority,
-        encoding::{encode_extended_full_viewing_key, encode_payment_address},
-        keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    };
-
     use ::sapling::zip32::ExtendedFullViewingKey;
-    use zcash_primitives::{
-        consensus::{
-            self, BlockHeight, BranchId, Network, NetworkConstants, NetworkUpgrade, Parameters,
+    use zcash_client_backend::data_api::testing::TestBuilder;
+    use zcash_keys::{
+        address::Address,
+        encoding::{encode_extended_full_viewing_key, encode_payment_address},
+        keys::{
+            sapling, ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey,
         },
-        transaction::{TransactionData, TxVersion},
-        zip32::AccountId,
     };
+    use zcash_primitives::transaction::{TransactionData, TxVersion};
+    use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
+    use zip32::AccountId;
 
-    use crate::{testing::TestBuilder, wallet::scanning::priority_code, WalletDb, UA_TRANSPARENT};
-
-    use super::init_wallet_db;
+    use super::testing::init_wallet_db;
+    use crate::{
+        testing::db::{test_clock, test_rng, TestDbFactory},
+        util::Clock,
+        wallet::db,
+        WalletDb, UA_TRANSPARENT,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -354,300 +733,87 @@ mod tests {
         crate::wallet::{self, pool_code, PoolType},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
-        zcash_primitives::zip32::DiversifierIndex,
+        zip32::DiversifierIndex,
     };
+
+    pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
+        let result = conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")?
+            .query_and_then([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(result)
+    }
 
     #[test]
     fn verify_schema() {
-        let st = TestBuilder::new().build();
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
 
         use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
-            r#"CREATE TABLE "accounts" (
-                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_kind INTEGER NOT NULL DEFAULT 0,
-                hd_seed_fingerprint BLOB,
-                hd_account_index INTEGER,
-                ufvk TEXT,
-                uivk TEXT NOT NULL,
-                orchard_fvk_item_cache BLOB,
-                sapling_fvk_item_cache BLOB,
-                p2pkh_fvk_item_cache BLOB,
-                birthday_height INTEGER NOT NULL,
-                birthday_sapling_tree_size INTEGER,
-                birthday_orchard_tree_size INTEGER,
-                recover_until_height INTEGER,
-                CHECK (
-                  (
-                    account_kind = 0
-                    AND hd_seed_fingerprint IS NOT NULL
-                    AND hd_account_index IS NOT NULL
-                    AND ufvk IS NOT NULL
-                  )
-                  OR
-                  (
-                    account_kind = 1
-                    AND hd_seed_fingerprint IS NULL
-                    AND hd_account_index IS NULL
-                  )
-                )
-            )"#,
-            r#"CREATE TABLE "addresses" (
-                account_id INTEGER NOT NULL,
-                diversifier_index_be BLOB NOT NULL,
-                address TEXT NOT NULL,
-                cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
-            )"#,
-            "CREATE TABLE blocks (
-                height INTEGER PRIMARY KEY,
-                hash BLOB NOT NULL,
-                time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL ,
-                sapling_commitment_tree_size INTEGER,
-                orchard_commitment_tree_size INTEGER,
-                sapling_output_count INTEGER,
-                orchard_action_count INTEGER)",
-            "CREATE TABLE nullifier_map (
-                spend_pool INTEGER NOT NULL,
-                nf BLOB NOT NULL,
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                CONSTRAINT tx_locator
-                    FOREIGN KEY (block_height, tx_index)
-                    REFERENCES tx_locator_map(block_height, tx_index)
-                    ON DELETE CASCADE
-                    ON UPDATE RESTRICT,
-                CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
-            )",
-            "CREATE TABLE orchard_received_note_spends (
-                orchard_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (orchard_received_note_id)
-                    REFERENCES orchard_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (orchard_received_note_id, transaction_id)
-            )",
-            "CREATE TABLE orchard_received_notes (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                action_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rho BLOB NOT NULL,
-                rseed BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, action_index)
-            )",
-            "CREATE TABLE orchard_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE orchard_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE orchard_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE orchard_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE sapling_received_note_spends (
-                sapling_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (sapling_received_note_id)
-                    REFERENCES sapling_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (sapling_received_note_id, transaction_id)
-            )",
-            r#"CREATE TABLE "sapling_received_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rcm BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_index)
-            )"#,
-            "CREATE TABLE sapling_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE sapling_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE sapling_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE sapling_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE scan_queue (
-                block_range_start INTEGER NOT NULL,
-                block_range_end INTEGER NOT NULL,
-                priority INTEGER NOT NULL,
-                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
-                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
-                CONSTRAINT range_bounds_order CHECK (
-                    block_range_start < block_range_end
-                )
-            )",
-            "CREATE TABLE schemer_migrations (
-                id blob PRIMARY KEY
-            )",
-            r#"CREATE TABLE "sent_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                from_account_id INTEGER NOT NULL,
-                to_address TEXT,
-                to_account_id INTEGER,
-                value INTEGER NOT NULL,
-                memo BLOB,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
-                CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-                )
-            )"#,
-            // Internal table created by SQLite when we started using `AUTOINCREMENT`.
-            "CREATE TABLE sqlite_sequence(name,seq)",
-            "CREATE TABLE transactions (
-                id_tx INTEGER PRIMARY KEY,
-                txid BLOB NOT NULL UNIQUE,
-                created TEXT,
-                block INTEGER,
-                tx_index INTEGER,
-                expiry_height INTEGER,
-                raw BLOB,
-                fee INTEGER,
-                FOREIGN KEY (block) REFERENCES blocks(height)
-            )",
-            "CREATE TABLE transparent_received_output_spends (
-                transparent_received_output_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (transparent_received_output_id)
-                    REFERENCES utxos(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (transparent_received_output_id, transaction_id)
-            )",
-            "CREATE TABLE tx_locator_map (
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                txid BLOB NOT NULL UNIQUE,
-                PRIMARY KEY (block_height, tx_index)
-            )",
-            r#"CREATE TABLE "utxos" (
-                id INTEGER PRIMARY KEY,
-                received_by_account_id INTEGER NOT NULL,
-                address TEXT NOT NULL,
-                prevout_txid BLOB NOT NULL,
-                prevout_idx INTEGER NOT NULL,
-                script BLOB NOT NULL,
-                value_zat INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            )"#,
+            db::TABLE_ACCOUNTS,
+            db::TABLE_ADDRESSES,
+            db::TABLE_BLOCKS,
+            db::TABLE_NULLIFIER_MAP,
+            db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
+            db::TABLE_ORCHARD_RECEIVED_NOTES,
+            db::TABLE_ORCHARD_TREE_CAP,
+            db::TABLE_ORCHARD_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_ORCHARD_TREE_CHECKPOINTS,
+            db::TABLE_ORCHARD_TREE_SHARDS,
+            db::TABLE_SAPLING_RECEIVED_NOTE_SPENDS,
+            db::TABLE_SAPLING_RECEIVED_NOTES,
+            db::TABLE_SAPLING_TREE_CAP,
+            db::TABLE_SAPLING_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_SAPLING_TREE_CHECKPOINTS,
+            db::TABLE_SAPLING_TREE_SHARDS,
+            db::TABLE_SCAN_QUEUE,
+            db::TABLE_SCHEMERZ_MIGRATIONS,
+            db::TABLE_SENT_NOTES,
+            db::TABLE_SQLITE_SEQUENCE,
+            db::TABLE_TRANSACTIONS,
+            db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
+            db::TABLE_TRANSPARENT_RECEIVED_OUTPUTS,
+            db::TABLE_TRANSPARENT_SPEND_MAP,
+            db::TABLE_TRANSPARENT_SPEND_SEARCH_QUEUE,
+            db::TABLE_TX_LOCATOR_MAP,
+            db::TABLE_TX_RETRIEVAL_QUEUE,
         ];
 
-        let mut tables_query = st
-            .wallet()
-            .conn
-            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
-            .unwrap();
-        let mut rows = tables_query.query([]).unwrap();
-        let mut expected_idx = 0;
-        while let Some(row) = rows.next().unwrap() {
-            let sql: String = row.get(0).unwrap();
+        let rows = describe_tables(&st.wallet().db().conn).unwrap();
+        assert_eq!(rows.len(), expected_tables.len());
+        for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
-                re.replace_all(&sql, " "),
-                re.replace_all(expected_tables[expected_idx], " ")
+                re.replace_all(actual, " "),
+                re.replace_all(expected, " ").trim(),
             );
-            expected_idx += 1;
         }
 
         let expected_indices = vec![
-            r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#,
-            r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#,
-            r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#,
-            r#"CREATE INDEX "addresses_accounts" ON "addresses" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#,
-            r#"CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
-                account_id ASC
-            )"#,
-            r#"CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
-                tx ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
-                "tx" ASC
-            )"#,
-            r#"CREATE INDEX sent_notes_from_account ON "sent_notes" (from_account_id)"#,
-            r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#,
-            r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#,
-            r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#,
+            db::INDEX_ACCOUNTS_UFVK,
+            db::INDEX_ACCOUNTS_UIVK,
+            db::INDEX_ACCOUNTS_UUID,
+            db::INDEX_HD_ACCOUNT,
+            db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_T_INDICES,
+            db::INDEX_NF_MAP_LOCATOR_IDX,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
+            db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_SAPLING_RECEIVED_NOTES_TX,
+            db::INDEX_SENT_NOTES_FROM_ACCOUNT,
+            db::INDEX_SENT_NOTES_TO_ACCOUNT,
+            db::INDEX_SENT_NOTES_TX,
+            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT_ID,
         ];
         let mut indices_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND sql != '' ORDER BY tbl_name, name")
             .unwrap();
@@ -657,354 +823,29 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_indices[expected_idx], " ")
+                re.replace_all(expected_indices[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
 
         let expected_views = vec![
-            // v_orchard_shard_scan_ranges
-            format!(
-                "CREATE VIEW v_orchard_shard_scan_ranges AS
-                SELECT
-                    shard.shard_index,
-                    shard.shard_index << 16 AS start_position,
-                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
-                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-                    shard.subtree_end_height,
-                    shard.contains_marked,
-                    scan_queue.block_range_start,
-                    scan_queue.block_range_end,
-                    scan_queue.priority
-                FROM orchard_tree_shards shard
-                LEFT OUTER JOIN orchard_tree_shards prev_shard
-                    ON shard.shard_index = prev_shard.shard_index + 1
-                -- Join with scan ranges that overlap with the subtree's involved blocks.
-                INNER JOIN scan_queue ON (
-                    subtree_start_height < scan_queue.block_range_end AND
-                    (
-                        scan_queue.block_range_start <= shard.subtree_end_height OR
-                        shard.subtree_end_height IS NULL
-                    )
-                )",
-                u32::from(st.network().activation_height(NetworkUpgrade::Nu5).unwrap()),
-            ),
-            //v_orchard_shard_unscanned_ranges
-            format!(
-                "CREATE VIEW v_orchard_shard_unscanned_ranges AS
-                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-                SELECT
-                    shard_index,
-                    start_position,
-                    end_position_exclusive,
-                    subtree_start_height,
-                    subtree_end_height,
-                    contains_marked,
-                    block_range_start,
-                    block_range_end,
-                    priority
-                FROM v_orchard_shard_scan_ranges
-                INNER JOIN wallet_birthday
-                WHERE priority > {}
-                AND block_range_end > wallet_birthday.height",
-                priority_code(&ScanPriority::Scanned),
-            ),
-            // v_orchard_shards_scan_state
-            "CREATE VIEW v_orchard_shards_scan_state AS
-            SELECT
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked,
-                MAX(priority) AS max_priority
-            FROM v_orchard_shard_scan_ranges
-            GROUP BY
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked".to_owned(),
-            // v_received_note_spends
-            "CREATE VIEW v_received_note_spends AS
-            SELECT
-                2 AS pool,
-                sapling_received_note_id AS received_note_id,
-                transaction_id
-            FROM sapling_received_note_spends
-            UNION
-            SELECT
-                3 AS pool,
-                orchard_received_note_id AS received_note_id,
-                transaction_id
-            FROM orchard_received_note_spends".to_owned(),
-            // v_received_notes
-            "CREATE VIEW v_received_notes AS
-                SELECT
-                    sapling_received_notes.id AS id_within_pool_table,
-                    sapling_received_notes.tx,
-                    2 AS pool,
-                    sapling_received_notes.output_index AS output_index,
-                    account_id,
-                    sapling_received_notes.value,
-                    is_change,
-                    sapling_received_notes.memo,
-                    sent_notes.id AS sent_note_id
-                FROM sapling_received_notes
-                LEFT JOIN sent_notes
-                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                   (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-            UNION
-                SELECT
-                    orchard_received_notes.id AS id_within_pool_table,
-                    orchard_received_notes.tx,
-                    3 AS pool,
-                    orchard_received_notes.action_index AS output_index,
-                    account_id,
-                    orchard_received_notes.value,
-                    is_change,
-                    orchard_received_notes.memo,
-                    sent_notes.id AS sent_note_id
-                FROM orchard_received_notes
-                LEFT JOIN sent_notes
-                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                   (orchard_received_notes.tx, 3, orchard_received_notes.action_index)".to_owned(),
-            // v_sapling_shard_scan_ranges
-            format!(
-                "CREATE VIEW v_sapling_shard_scan_ranges AS
-                SELECT
-                    shard.shard_index,
-                    shard.shard_index << 16 AS start_position,
-                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
-                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-                    shard.subtree_end_height,
-                    shard.contains_marked,
-                    scan_queue.block_range_start,
-                    scan_queue.block_range_end,
-                    scan_queue.priority
-                FROM sapling_tree_shards shard
-                LEFT OUTER JOIN sapling_tree_shards prev_shard
-                    ON shard.shard_index = prev_shard.shard_index + 1
-                -- Join with scan ranges that overlap with the subtree's involved blocks.
-                INNER JOIN scan_queue ON (
-                    subtree_start_height < scan_queue.block_range_end AND
-                    (
-                        scan_queue.block_range_start <= shard.subtree_end_height OR
-                        shard.subtree_end_height IS NULL
-                    )
-                )",
-                u32::from(st.network().activation_height(NetworkUpgrade::Sapling).unwrap()),
-            ),
-            // v_sapling_shard_unscanned_ranges
-            format!(
-                "CREATE VIEW v_sapling_shard_unscanned_ranges AS
-                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-                SELECT
-                    shard_index,
-                    start_position,
-                    end_position_exclusive,
-                    subtree_start_height,
-                    subtree_end_height,
-                    contains_marked,
-                    block_range_start,
-                    block_range_end,
-                    priority
-                FROM v_sapling_shard_scan_ranges
-                INNER JOIN wallet_birthday
-                WHERE priority > {}
-                AND block_range_end > wallet_birthday.height",
-                priority_code(&ScanPriority::Scanned)
-            ),
-            // v_sapling_shards_scan_state
-            "CREATE VIEW v_sapling_shards_scan_state AS
-            SELECT
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked,
-                MAX(priority) AS max_priority
-            FROM v_sapling_shard_scan_ranges
-            GROUP BY
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked".to_owned(),
-            // v_transactions
-            "CREATE VIEW v_transactions AS
-                WITH
-                notes AS (
-                    -- Shielded notes received in this transaction
-                    SELECT v_received_notes.account_id     AS account_id,
-                           transactions.block              AS block,
-                           transactions.txid               AS txid,
-                           v_received_notes.pool           AS pool,
-                           id_within_pool_table,
-                           v_received_notes.value          AS value,
-                           CASE
-                                WHEN v_received_notes.is_change THEN 1
-                                ELSE 0
-                           END AS is_change,
-                           CASE
-                                WHEN v_received_notes.is_change THEN 0
-                                ELSE 1
-                           END AS received_count,
-                           CASE
-                             WHEN (v_received_notes.memo IS NULL OR v_received_notes.memo = X'F6')
-                               THEN 0
-                             ELSE 1
-                           END AS memo_present
-                    FROM v_received_notes
-                    JOIN transactions
-                         ON transactions.id_tx = v_received_notes.tx
-                    UNION
-                    -- Transparent TXOs received in this transaction
-                    SELECT utxos.received_by_account_id AS account_id,
-                           utxos.height                 AS block,
-                           utxos.prevout_txid           AS txid,
-                           0                            AS pool,
-                           utxos.id                     AS id_within_pool_table,
-                           utxos.value_zat              AS value,
-                           0                            AS is_change,
-                           1                            AS received_count,
-                           0                            AS memo_present
-                    FROM utxos
-                    UNION
-                    -- Shielded notes spent in this transaction
-                    SELECT v_received_notes.account_id  AS account_id,
-                           transactions.block           AS block,
-                           transactions.txid            AS txid,
-                           v_received_notes.pool        AS pool,
-                           id_within_pool_table,
-                           -v_received_notes.value      AS value,
-                           0                            AS is_change,
-                           0                            AS received_count,
-                           0                            AS memo_present
-                    FROM v_received_notes
-                    JOIN v_received_note_spends rns
-                         ON rns.pool = v_received_notes.pool
-                         AND rns.received_note_id = v_received_notes.id_within_pool_table
-                    JOIN transactions
-                         ON transactions.id_tx = rns.transaction_id
-                    UNION
-                    -- Transparent TXOs spent in this transaction
-                    SELECT utxos.received_by_account_id AS account_id,
-                           transactions.block           AS block,
-                           transactions.txid            AS txid,
-                           0                            AS pool,
-                           utxos.id                     AS id_within_pool_table,
-                           -utxos.value_zat             AS value,
-                           0                            AS is_change,
-                           0                            AS received_count,
-                           0                            AS memo_present
-                    FROM utxos
-                    JOIN transparent_received_output_spends tros
-                         ON tros.transparent_received_output_id = utxos.id
-                    JOIN transactions
-                         ON transactions.id_tx = tros.transaction_id
-                ),
-                -- Obtain a count of the notes that the wallet created in each transaction,
-                -- not counting change notes.
-                sent_note_counts AS (
-                    SELECT sent_notes.from_account_id AS account_id,
-                           transactions.txid       AS txid,
-                           COUNT(DISTINCT sent_notes.id) as sent_notes,
-                           SUM(
-                             CASE
-                               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR v_received_notes.tx IS NOT NULL)
-                                 THEN 0
-                               ELSE 1
-                             END
-                           ) AS memo_count
-                    FROM sent_notes
-                    JOIN transactions
-                         ON transactions.id_tx = sent_notes.tx
-                    LEFT JOIN v_received_notes
-                         ON sent_notes.id = v_received_notes.sent_note_id
-                    WHERE COALESCE(v_received_notes.is_change, 0) = 0
-                    GROUP BY account_id, txid
-                ),
-                blocks_max_height AS (
-                    SELECT MAX(blocks.height) as max_height FROM blocks
-                )
-                SELECT notes.account_id                  AS account_id,
-                       notes.block                       AS mined_height,
-                       notes.txid                        AS txid,
-                       transactions.tx_index             AS tx_index,
-                       transactions.expiry_height        AS expiry_height,
-                       transactions.raw                  AS raw,
-                       SUM(notes.value)                  AS account_balance_delta,
-                       transactions.fee                  AS fee_paid,
-                       SUM(notes.is_change) > 0          AS has_change,
-                       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-                       SUM(notes.received_count)         AS received_note_count,
-                       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-                       blocks.time                       AS block_time,
-                       (
-                            blocks.height IS NULL
-                            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-                       ) AS expired_unmined
-                FROM notes
-                LEFT JOIN transactions
-                     ON notes.txid = transactions.txid
-                JOIN blocks_max_height
-                LEFT JOIN blocks ON blocks.height = notes.block
-                LEFT JOIN sent_note_counts
-                     ON sent_note_counts.account_id = notes.account_id
-                     AND sent_note_counts.txid = notes.txid
-                GROUP BY notes.account_id, notes.txid".to_owned(),
-            // v_tx_outputs
-            "CREATE VIEW v_tx_outputs AS
-                SELECT transactions.txid              AS txid,
-                       v_received_notes.pool          AS output_pool,
-                       v_received_notes.output_index  AS output_index,
-                       sent_notes.from_account_id     AS from_account_id,
-                       v_received_notes.account_id    AS to_account_id,
-                       NULL                           AS to_address,
-                       v_received_notes.value         AS value,
-                       v_received_notes.is_change     AS is_change,
-                       v_received_notes.memo          AS memo
-                FROM v_received_notes
-                JOIN transactions
-                    ON transactions.id_tx = v_received_notes.tx
-                LEFT JOIN sent_notes
-                    ON sent_notes.id = v_received_notes.sent_note_id
-                UNION
-                SELECT utxos.prevout_txid           AS txid,
-                       0                            AS output_pool,
-                       utxos.prevout_idx            AS output_index,
-                       NULL                         AS from_account_id,
-                       utxos.received_by_account_id AS to_account_id,
-                       utxos.address                AS to_address,
-                       utxos.value_zat              AS value,
-                       0                            AS is_change,
-                       NULL                         AS memo
-                FROM utxos
-                UNION
-                SELECT transactions.txid            AS txid,
-                       sent_notes.output_pool       AS output_pool,
-                       sent_notes.output_index      AS output_index,
-                       sent_notes.from_account_id   AS from_account_id,
-                       v_received_notes.account_id  AS to_account_id,
-                       sent_notes.to_address        AS to_address,
-                       sent_notes.value             AS value,
-                       0                            AS is_change,
-                       sent_notes.memo              AS memo
-                FROM sent_notes
-                JOIN transactions
-                    ON transactions.id_tx = sent_notes.tx
-                LEFT JOIN v_received_notes
-                    ON sent_notes.id = v_received_notes.sent_note_id
-                WHERE COALESCE(v_received_notes.is_change, 0) = 0".to_owned(),
+            db::VIEW_ADDRESS_FIRST_USE.to_owned(),
+            db::VIEW_ADDRESS_USES.to_owned(),
+            db::view_orchard_shard_scan_ranges(st.network()),
+            db::view_orchard_shard_unscanned_ranges(),
+            db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
+            db::VIEW_RECEIVED_OUTPUT_SPENDS.to_owned(),
+            db::VIEW_RECEIVED_OUTPUTS.to_owned(),
+            db::view_sapling_shard_scan_ranges(st.network()),
+            db::view_sapling_shard_unscanned_ranges(),
+            db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),
+            db::VIEW_TRANSACTIONS.to_owned(),
+            db::VIEW_TX_OUTPUTS.to_owned(),
         ];
 
         let mut views_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();
@@ -1014,16 +855,35 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(&expected_views[expected_idx], " ")
+                re.replace_all(&expected_views[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
     }
 
     #[test]
+    fn external_schema_prefix_unused() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let mut names_query = st
+            .wallet()
+            .db()
+            .conn
+            .prepare("SELECT tbl_name FROM sqlite_schema")
+            .unwrap();
+        let mut rows = names_query.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let name: String = row.get(0).unwrap();
+            assert!(!name.starts_with("ext_"));
+        }
+    }
+
+    #[test]
     fn init_migrate_from_0_3_0() {
-        fn init_0_3_0<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_0_3_0<P: consensus::Parameters, CL: Clock + Clone, R: RngCore + Clone>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -1127,11 +987,18 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -1143,8 +1010,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_autoshielding_poc() {
-        fn init_autoshielding<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_autoshielding<P: consensus::Parameters, CL, R>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -1267,7 +1134,7 @@ mod tests {
             )?;
 
             let tx = TransactionData::from_parts(
-                TxVersion::Sapling,
+                TxVersion::V4,
                 BranchId::Canopy,
                 0,
                 BlockHeight::from(0),
@@ -1275,9 +1142,7 @@ mod tests {
                 None,
                 None,
                 None,
-                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-                None,
-                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+                #[cfg(zcash_unstable = "nu7")]
                 None,
             )
             .freeze()
@@ -1302,11 +1167,18 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();
@@ -1318,8 +1190,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_main_pre_migrations() {
-        fn init_main<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_main<P: consensus::Parameters, CL, R>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             ufvk: &UnifiedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -1422,7 +1294,7 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
                 ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
@@ -1462,14 +1334,20 @@ mod tests {
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    [pool_code(PoolType::Transparent).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [pool_code(PoolType::TRANSPARENT).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -1495,7 +1373,8 @@ mod tests {
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
         assert_matches!(init_wallet_db(&mut db_data, None), Ok(_));
 
         // Prior to adding any accounts, every seed phrase is relevant to the wallet.
@@ -1512,13 +1391,18 @@ mod tests {
 
         let birthday = AccountBirthday::from_sapling_activation(&network, BlockHash([0; 32]));
         let (account_id, _usk) = db_data
-            .create_account(&Secret::new(seed.to_vec()), &birthday)
+            .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
+
+        // We have to have the chain tip height in order to allocate new addresses, to record the
+        // exposed-at height.
+        db_data.update_chain_tip(birthday.height()).unwrap();
+
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(
-                account.kind,
-                AccountSource::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
+                &account.kind,
+                AccountSource::Derived{derivation, ..} if derivation.account_index() == zip32::AccountId::ZERO,
             )
         );
 
@@ -1529,7 +1413,7 @@ mod tests {
         );
         assert_matches!(
             init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
-            Err(schemer::MigratorError::Adapter(
+            Err(schemerz::MigratorError::Adapter(
                 WalletMigrationError::SeedNotRelevant
             ))
         );
@@ -1538,18 +1422,27 @@ mod tests {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) =
-                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
-                        .unwrap()
-                        .expect("create_account generated the first address");
+                // hardcoded with knowledge of test vectors
+                let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Require);
+
+                let (ua, di) = wallet::get_last_generated_address_matching(
+                    &db_data.conn,
+                    &db_data.params,
+                    account_id,
+                    if tv.diversifier_index == 0 {
+                        UnifiedAddressRequest::AllAvailableKeys
+                    } else {
+                        ua_request
+                    },
+                )
+                .unwrap()
+                .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
-                // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(false, true, true);
                 db_data
                     .get_next_available_address(account_id, ua_request)
                     .unwrap()

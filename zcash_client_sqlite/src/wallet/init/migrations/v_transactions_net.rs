@@ -2,26 +2,28 @@
 //! as received value.
 use std::collections::HashSet;
 
-use rusqlite::{self, named_params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::named_params;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{PoolType, ShieldedProtocol};
+
+use zcash_protocol::PoolType;
 
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x2aa4d24f_51aa_4a4c_8d9b_e5b8a762865f);
 
+const DEPENDENCIES: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [add_transaction_views::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -44,7 +46,7 @@ impl RusqliteMigration for Migration {
              SELECT tx, :output_pool, output_index, from_account, from_account, value
              FROM sent_notes",
              named_params![
-                ":output_pool": &pool_code(PoolType::Shielded(ShieldedProtocol::Sapling))
+                ":output_pool": &pool_code(PoolType::SAPLING)
              ]
         )?;
 
@@ -205,25 +207,30 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::add_transaction_views, WalletMigrator},
         WalletDb,
     };
 
     #[test]
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[add_transaction_views::MIGRATION_ID],
-            false,
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
         )
         .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[add_transaction_views::MIGRATION_ID])
+            .unwrap();
 
         // Create two accounts in the wallet.
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -380,7 +387,7 @@ mod tests {
                         assert_eq!(memo_count, 0);
                     }
                     other => {
-                        panic!("Transaction {} is not a sent tx.", other);
+                        panic!("Transaction {other} is not a sent tx.");
                     }
                 }
             }
@@ -388,7 +395,10 @@ mod tests {
         }
 
         // Run this migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // Corrected behavior after v_transactions has been updated
         {
@@ -443,7 +453,7 @@ mod tests {
                         assert_eq!(received_note_count, 1);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -495,7 +505,7 @@ mod tests {
                         assert!(is_change);
                     }
                     other => {
-                        panic!("Unexpected output index for tx {}: {}.", tx, other);
+                        panic!("Unexpected output index for tx {tx}: {other}.");
                     }
                 }
             }
@@ -540,10 +550,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }
@@ -574,10 +581,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }

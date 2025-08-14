@@ -2,30 +2,28 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
+};
 use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
-use zcash_primitives::{
+use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
+use zcash_protocol::{
     consensus::BlockHeight,
-    legacy::TransparentAddress,
-    transaction::{
-        components::{
-            amount::NonNegativeAmount,
-            transparent::{OutPoint, TxOut},
-        },
-        fees::transparent as transparent_fees,
-        TxId,
-    },
-    zip32::Scope,
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
-use zcash_protocol::value::BalanceError;
+use zip32::Scope;
 
-use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::fees::sapling as sapling_fees;
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,52 +60,30 @@ impl NoteId {
     }
 }
 
-/// A type that represents the recipient of a transaction output: a recipient address (and, for
-/// unified addresses, the pool to which the payment is sent) in the case of an outgoing output, or an
-/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
-/// output.
+/// A type that represents the recipient of a transaction output:
+///
+/// * a recipient address;
+/// * for external unified addresses, the pool to which the payment is sent;
+/// * for wallet-internal outputs, the internal account ID and metadata about the note.
+/// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
+///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone)]
-pub enum Recipient<AccountId, N> {
-    External(ZcashAddress, PoolType),
+pub enum Recipient<AccountId> {
+    External {
+        recipient_address: ZcashAddress,
+        output_pool: PoolType,
+    },
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralTransparent {
+        receiving_account: AccountId,
+        ephemeral_address: TransparentAddress,
+        outpoint: OutPoint,
+    },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
-        note: N,
+        note: Box<Note>,
     },
-}
-
-impl<AccountId, N> Recipient<AccountId, N> {
-    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
-        match self {
-            Recipient::External(addr, pool) => Recipient::External(addr, pool),
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: f(note),
-            },
-        }
-    }
-}
-
-impl<AccountId, N> Recipient<AccountId, Option<N>> {
-    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
-        match self {
-            Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => note.map(|n0| Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: n0,
-            }),
-        }
-    }
 }
 
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
@@ -191,7 +167,7 @@ impl<AccountId> WalletTx<AccountId> {
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
     txout: TxOut,
-    height: BlockHeight,
+    mined_height: Option<BlockHeight>,
     recipient_address: TransparentAddress,
 }
 
@@ -199,14 +175,14 @@ impl WalletTransparentOutput {
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,
-        height: BlockHeight,
+        mined_height: Option<BlockHeight>,
     ) -> Option<WalletTransparentOutput> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
-                height,
+                mined_height,
                 recipient_address,
             })
     }
@@ -219,15 +195,15 @@ impl WalletTransparentOutput {
         &self.txout
     }
 
-    pub fn height(&self) -> BlockHeight {
-        self.height
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
     }
 
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
     }
 
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         self.txout.value
     }
 }
@@ -375,13 +351,13 @@ pub enum Note {
 }
 
 impl Note {
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         match self {
             Note::Sapling(n) => n.value().inner().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
+            Note::Orchard(n) => Zatoshis::from_u64(n.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
@@ -464,14 +440,14 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
 }
 
 impl<NoteRef> ReceivedNote<NoteRef, sapling::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
 
 #[cfg(feature = "orchard")]
 impl<NoteRef> ReceivedNote<NoteRef, orchard::note::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
@@ -481,7 +457,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -494,7 +470,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()
@@ -509,7 +485,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -523,7 +499,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()
@@ -579,6 +555,7 @@ impl OvkPolicy {
 }
 
 /// Metadata related to the ZIP 32 derivation of a transparent address.
+/// This is implicitly scoped to an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
 pub struct TransparentAddressMetadata {
@@ -588,6 +565,8 @@ pub struct TransparentAddressMetadata {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
+    /// Returns a `TransparentAddressMetadata` in the given scope for the
+    /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
         Self {
             scope,

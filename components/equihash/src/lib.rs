@@ -7,6 +7,9 @@
 //! verify solutions for any valid `(n, k)` parameters, as long as the row indices are no
 //! larger than 32 bits (that is, `ceiling(((n / (k + 1)) + 1) / 8) <= 4`).
 //!
+#![cfg_attr(feature = "std", doc = "## Feature flags")]
+#![cfg_attr(feature = "std", doc = document_features::document_features!())]
+//!
 //! References
 //! ==========
 //! - [Section 7.6.1: Equihash.] Zcash Protocol Specification, version 2020.1.10 or later.
@@ -19,6 +22,15 @@
 
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+#![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
 
 mod minimal;
 mod params;
@@ -28,3 +40,8 @@ mod verify;
 mod test_vectors;
 
 pub use verify::{is_valid_solution, Error};
+
+#[cfg(feature = "solver")]
+mod blake2b;
+#[cfg(feature = "solver")]
+pub mod tromp;

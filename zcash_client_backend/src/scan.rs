@@ -45,15 +45,15 @@ where
 pub(crate) trait Decryptor<D: BatchDomain, Output> {
     type Memo;
 
-    // Once we reach MSRV 1.75.0, this can return `impl Iterator`.
     fn batch_decrypt<IvkTag: Clone>(
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
 }
 
 /// A decryptor of outputs as encoded in transactions.
+#[allow(dead_code)]
 pub(crate) struct FullDecryptor;
 
 impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output> for FullDecryptor {
@@ -63,7 +63,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output> for FullDec
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -74,7 +74,6 @@ impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output> for FullDec
                     memo,
                 })
             })
-            .collect()
     }
 }
 
@@ -88,7 +87,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output> for Compact
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_compact_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -99,7 +98,6 @@ impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output> for Compact
                     memo: (),
                 })
             })
-            .collect()
     }
 }
 
@@ -141,7 +139,7 @@ impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
         // linked list. `crossbeam_channel` allocates memory for the linked list in blocks
         // of 31 items.
         const ITEMS_PER_BLOCK: usize = 31;
-        let num_blocks = (num_items + ITEMS_PER_BLOCK - 1) / ITEMS_PER_BLOCK;
+        let num_blocks = num_items.div_ceil(ITEMS_PER_BLOCK);
 
         // The structure of a block is:
         // - A pointer to the next block.
@@ -194,6 +192,7 @@ impl<Item: Task> Tasks<Item> for () {
 ///
 /// This struct implements `DynamicUsage` without any item bounds, but that works because
 /// it only implements `Tasks` for items that implement `DynamicUsage`.
+#[allow(dead_code)]
 pub(crate) struct WithUsage {
     // The current heap usage for all running tasks.
     running_usage: Arc<AtomicUsize>,
@@ -367,9 +366,7 @@ where
         assert_eq!(outputs.len(), repliers.len());
 
         let decryption_results = Dec::batch_decrypt(&tags, &ivks, &outputs);
-        for (decryption_result, OutputReplier(replier)) in
-            decryption_results.into_iter().zip(repliers.into_iter())
-        {
+        for (decryption_result, OutputReplier(replier)) in decryption_results.zip(repliers) {
             // If `decryption_result` is `None` then we will just drop `replier`,
             // indicating to the parent `BatchRunner` that this output was not for us.
             if let Some(value) = decryption_result {

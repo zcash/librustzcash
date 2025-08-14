@@ -9,9 +9,11 @@ use {
             self,
             address::{test_vectors::TEST_VECTORS, Receiver},
         },
-        Network, ToAddress, ZcashAddress,
+        ToAddress, ZcashAddress,
     },
-    std::iter,
+    alloc::string::ToString,
+    core::iter,
+    zcash_protocol::consensus::NetworkType,
 };
 
 #[test]
@@ -38,7 +40,8 @@ fn unified() {
             }))
             .collect();
 
-        let expected_addr = ZcashAddress::from_unified(Network::Main, unified::Address(receivers));
+        let expected_addr =
+            ZcashAddress::from_unified(NetworkType::Main, unified::Address(receivers));
 
         // Test parsing
         let addr: ZcashAddress = tv.unified_addr.parse().unwrap();

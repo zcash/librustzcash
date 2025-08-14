@@ -1,34 +1,39 @@
 use std::{collections::HashSet, rc::Rc};
 
 use incrementalmerkletree::Position;
+use orchard::note::AssetBase;
 use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
+use rusqlite::{named_params, types::Value, Connection, Row};
 
 use zcash_client_backend::{
-    data_api::NullifierQuery,
+    data_api::{Account as _, NullifierQuery, TargetValue},
     wallet::{ReceivedNote, WalletOrchardOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, TransferType,
 };
-use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
+use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
-use super::{memo_repr, parse_scope, scope_code};
+use super::{
+    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedOrchardOutput {
+    type AccountId;
+
     fn index(&self) -> usize;
-    fn account_id(&self) -> AccountId;
+    fn account_id(&self) -> Self::AccountId;
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
@@ -37,11 +42,13 @@ pub(crate) trait ReceivedOrchardOutput {
     fn recipient_key_scope(&self) -> Option<Scope>;
 }
 
-impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
+impl<AccountId: Copy> ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
+    type AccountId = AccountId;
+
     fn index(&self) -> usize {
         self.index()
     }
-    fn account_id(&self) -> AccountId {
+    fn account_id(&self) -> Self::AccountId {
         *WalletOrchardOutput::account_id(self)
     }
     fn note(&self) -> &Note {
@@ -64,11 +71,13 @@ impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
     }
 }
 
-impl ReceivedOrchardOutput for DecryptedOutput<Note, AccountId> {
+impl<AccountId: Copy> ReceivedOrchardOutput for DecryptedOutput<Note, AccountId> {
+    type AccountId = AccountId;
+
     fn index(&self) -> usize {
         self.index()
     }
-    fn account_id(&self) -> AccountId {
+    fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
     fn note(&self) -> &orchard::note::Note {
@@ -153,9 +162,11 @@ fn to_spendable_note<P: consensus::Parameters>(
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?;
 
-            let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
-                SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
-            })?;
+            let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
+                .map_err(|_| {
+                    SqliteClientError::CorruptedData(format!("Invalid key scope code {scope_code}"))
+                })?;
+
             let recipient = ufvk
                 .orchard()
                 .map(|fvk| fvk.to_ivk(spending_key_scope).address(diversifier))
@@ -166,6 +177,7 @@ fn to_spendable_note<P: consensus::Parameters>(
             let note = Option::from(Note::from_parts(
                 recipient,
                 orchard::value::NoteValue::from_raw(note_value),
+                AssetBase::native(),
                 rho,
                 rseed,
             ))
@@ -202,8 +214,8 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
-    account: AccountId,
-    target_value: Zatoshis,
+    account: AccountUuid,
+    target_value: TargetValue,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
@@ -219,40 +231,103 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     )
 }
 
+pub(crate) fn ensure_address<
+    T: ReceivedOrchardOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    output: &T,
+    exposure_height: Option<BlockHeight>,
+) -> Result<Option<AddressRef>, SqliteClientError> {
+    if output.recipient_key_scope() != Some(Scope::Internal) {
+        let account = get_account(conn, params, output.account_id())?
+            .ok_or(SqliteClientError::AccountUnknown)?;
+
+        let uivk = account.uivk();
+        let ivk = uivk
+            .orchard()
+            .as_ref()
+            .expect("uivk decrypted this output.");
+        let to = output.note().recipient();
+        let diversifier_index = ivk
+            .diversifier_index(&to)
+            .expect("address corresponds to account");
+
+        let ua = account
+            .uivk()
+            .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
+        upsert_address(
+            conn,
+            params,
+            account.internal_id(),
+            diversifier_index,
+            &ua,
+            exposure_height,
+            false,
+        )
+        .map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) fn select_unspent_note_meta(
+    conn: &Connection,
+    chain_tip_height: BlockHeight,
+    wallet_birthday: BlockHeight,
+) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
+    super::common::select_unspent_note_meta(
+        conn,
+        ShieldedProtocol::Orchard,
+        chain_tip_height,
+        wallet_birthday,
+    )
+}
+
 /// Records the specified shielded output as having been received.
 ///
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
-    conn: &Transaction,
+///
+/// Returns the internal account identifier of the account that received the output.
+pub(crate) fn put_received_note<
+    T: ReceivedOrchardOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
     output: &T,
-    tx_ref: i64,
-    spent_in: Option<i64>,
-) -> Result<(), SqliteClientError> {
+    tx_ref: TxRef,
+    target_or_mined_height: Option<BlockHeight>,
+    spent_in: Option<TxRef>,
+) -> Result<AccountRef, SqliteClientError> {
+    let account_id = get_account_ref(conn, output.account_id())?;
+    let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
-        "INSERT INTO orchard_received_notes
-        (
-            tx, action_index, account_id,
+        "INSERT INTO orchard_received_notes (
+            tx, action_index, account_id, address_id,
             diversifier, value, rho, rseed, memo, nf,
             is_change, commitment_tree_position,
             recipient_key_scope
         )
         VALUES (
-            :tx, :action_index, :account_id,
+            :tx, :action_index, :account_id, :address_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
             :is_change, :commitment_tree_position,
             :recipient_key_scope
         )
         ON CONFLICT (tx, action_index) DO UPDATE
         SET account_id = :account_id,
+            address_id = :address_id,
             diversifier = :diversifier,
             value = :value,
             rho = :rho,
             rseed = :rseed,
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
-            is_change = IFNULL(:is_change, is_change),
+            is_change = MAX(:is_change, is_change),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
             recipient_key_scope = :recipient_key_scope
         RETURNING orchard_received_notes.id",
@@ -263,9 +338,10 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
     let diversifier = to.diversifier();
 
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":action_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account_id": output.account_id().0,
+        ":account_id": account_id.0,
+        ":address_id": address_id.map(|a| a.0),
         ":diversifier": diversifier.as_array(),
         ":value": output.note().value().inner(),
         ":rho": output.note().rho().to_bytes(),
@@ -274,7 +350,7 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
-        ":recipient_key_scope": output.recipient_key_scope().map(scope_code),
+        ":recipient_key_scope": output.recipient_key_scope().map(|s| KeyScope::from(s).encode()),
     ];
 
     let received_note_id = stmt_upsert_received_note
@@ -288,11 +364,11 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
              ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
             named_params![
                 ":orchard_received_note_id": received_note_id,
-                ":transaction_id": spent_in
+                ":transaction_id": spent_in.0
             ],
         )?;
     }
-    Ok(())
+    Ok(account_id)
 }
 
 /// Retrieves the set of nullifiers for "potentially spendable" Orchard notes that the
@@ -304,12 +380,13 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
 pub(crate) fn get_orchard_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
-) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
         NullifierQuery::Unspent => conn.prepare(
-            "SELECT rn.account_id, rn.nf
+            "SELECT a.uuid, rn.nf
              FROM orchard_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              JOIN transactions tx ON tx.id_tx = rn.tx
              WHERE rn.nf IS NOT NULL
              AND tx.block IS NOT NULL
@@ -322,14 +399,15 @@ pub(crate) fn get_orchard_nullifiers(
              )",
         )?,
         NullifierQuery::All => conn.prepare(
-            "SELECT rn.account_id, rn.nf
+            "SELECT a.uuid, rn.nf
              FROM orchard_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              WHERE nf IS NOT NULL",
         )?,
     };
 
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountId(row.get(0)?);
+        let account = AccountUuid(row.get(0)?);
         let nf_bytes: [u8; 32] = row.get(1)?;
         Ok::<_, rusqlite::Error>((account, Nullifier::from_bytes(&nf_bytes).unwrap()))
     })?;
@@ -341,18 +419,19 @@ pub(crate) fn get_orchard_nullifiers(
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     nfs: impl Iterator<Item = &'a Nullifier>,
-) -> Result<HashSet<AccountId>, rusqlite::Error> {
+) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
     let mut account_q = conn.prepare_cached(
-        "SELECT rn.account_id
-        FROM orchard_received_notes rn
-        WHERE rn.nf IN rarray(:nf_ptr)",
+        "SELECT a.uuid
+         FROM orchard_received_notes rn
+         JOIN accounts a ON a.id = rn.account_id
+         WHERE rn.nf IN rarray(:nf_ptr)",
     )?;
 
     let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_bytes().to_vec())).collect();
     let nf_ptr = Rc::new(nf_values);
     let res = account_q
         .query_and_then(named_params![":nf_ptr": &nf_ptr], |row| {
-            row.get::<_, u32>(0).map(AccountId)
+            row.get(0).map(AccountUuid)
         })?
         .collect::<Result<HashSet<_>, _>>()?;
 
@@ -366,7 +445,7 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// spending transaction has been mined.
 pub(crate) fn mark_orchard_note_spent(
     conn: &Connection,
-    tx_ref: i64,
+    tx_ref: TxRef,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
     let mut stmt_mark_orchard_note_spent = conn.prepare_cached(
@@ -377,7 +456,7 @@ pub(crate) fn mark_orchard_note_spent(
 
     match stmt_mark_orchard_note_spent.execute(named_params![
        ":nf": nf.to_bytes(),
-       ":transaction_id": tx_ref
+       ":transaction_id": tx_ref.0
     ])? {
         0 => Ok(false),
         1 => Ok(true),
@@ -387,186 +466,21 @@ pub(crate) fn mark_orchard_note_spent(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::{Hashable, Level};
-    use orchard::{
-        keys::{FullViewingKey, SpendingKey},
-        domain::OrchardDomain,
-        tree::MerkleHashOrchard,
-    };
-    use shardtree::error::ShardTreeError;
-    use zcash_client_backend::{
-        data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
-        },
-        wallet::{Note, ReceivedNote},
-    };
-    use zcash_keys::{
-        address::{Address, UnifiedAddress},
-        keys::UnifiedSpendingKey,
-    };
-    use zcash_note_encryption::try_output_recovery_with_ovk;
-    use zcash_primitives::transaction::Transaction;
-    use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, ShieldedProtocol};
 
-    use super::select_spendable_orchard_notes;
-    use crate::{
-        error::SqliteClientError,
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
-        },
-        wallet::{commitment_tree, sapling::tests::SaplingPoolTester},
-        ORCHARD_TABLES_PREFIX,
+    use zcash_client_backend::data_api::testing::{
+        orchard::OrchardPoolTester, sapling::SaplingPoolTester,
     };
 
-    pub(crate) struct OrchardPoolTester;
-    impl ShieldedPoolTester for OrchardPoolTester {
-        const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
-        const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
-        // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
-
-        type Sk = SpendingKey;
-        type Fvk = FullViewingKey;
-        type MerkleTreeHash = MerkleHashOrchard;
-        type Note = orchard::note::Note;
-
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_orchard().unwrap()
-        }
-
-        fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
-            usk.orchard()
-        }
-
-        fn sk(seed: &[u8]) -> Self::Sk {
-            let mut account = zip32::AccountId::ZERO;
-            loop {
-                if let Ok(sk) = SpendingKey::from_zip32_seed(seed, 1, account) {
-                    break sk;
-                }
-                account = account.next().unwrap();
-            }
-        }
-
-        fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk {
-            sk.into()
-        }
-
-        fn sk_default_address(sk: &Self::Sk) -> Address {
-            Self::fvk_default_address(&Self::sk_to_fvk(sk))
-        }
-
-        fn fvk_default_address(fvk: &Self::Fvk) -> Address {
-            UnifiedAddress::from_receivers(
-                Some(fvk.address_at(0u32, zip32::Scope::External)),
-                None,
-                None,
-            )
-            .unwrap()
-            .into()
-        }
-
-        fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool {
-            a == b
-        }
-
-        fn empty_tree_leaf() -> Self::MerkleTreeHash {
-            MerkleHashOrchard::empty_leaf()
-        }
-
-        fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
-            MerkleHashOrchard::empty_root(level)
-        }
-
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
-            start_index: u64,
-            roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
-            st.wallet_mut()
-                .put_orchard_subtree_roots(start_index, roots)
-        }
-
-        fn next_subtree_index(s: &WalletSummary<crate::AccountId>) -> u64 {
-            s.next_orchard_subtree_index()
-        }
-
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: crate::AccountId,
-            target_value: zcash_protocol::value::Zatoshis,
-            anchor_height: BlockHeight,
-            exclude: &[crate::ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, orchard::note::Note>>, SqliteClientError>
-        {
-            select_spendable_orchard_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
-        }
-
-        fn decrypted_pool_outputs_count(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
-        ) -> usize {
-            d_tx.orchard_outputs().len()
-        }
-
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
-            mut f: impl FnMut(&MemoBytes),
-        ) {
-            for output in d_tx.orchard_outputs() {
-                f(output.memo());
-            }
-        }
-
-        fn try_output_recovery<Cache>(
-            _: &TestState<Cache>,
-            _: BlockHeight,
-            tx: &Transaction,
-            fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
-            for action in tx.orchard_bundle().unwrap().actions() {
-                // Find the output that decrypts with the external OVK
-                let result = try_output_recovery_with_ovk(
-                    &OrchardDomain::for_action(action),
-                    &fvk.to_ovk(zip32::Scope::External),
-                    action,
-                    action.cv_net(),
-                    &action.encrypted_note().out_ciphertext,
-                );
-
-                if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
-                        (
-                            Note::Orchard(note),
-                            UnifiedAddress::from_receivers(Some(addr), None, None)
-                                .unwrap()
-                                .into(),
-                            MemoBytes::from_bytes(&memo).expect("correct length"),
-                        )
-                    }));
-                }
-            }
-
-            Ok(None)
-        }
-
-        fn received_note_count(
-            summary: &zcash_client_backend::data_api::chain::ScanSummary,
-        ) -> usize {
-            summary.received_orchard_note_count()
-        }
-    }
+    use crate::testing::{self};
 
     #[test]
     fn send_single_step_proposed_transfer() {
         testing::pool::send_single_step_proposed_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn send_with_multiple_change_outputs() {
+        testing::pool::send_with_multiple_change_outputs::<OrchardPoolTester>()
     }
 
     #[test]
@@ -576,13 +490,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
+    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+        testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<OrchardPoolTester>()
     }
 
     #[test]
-    #[allow(deprecated)]
     fn proposal_fails_with_no_blocks() {
         testing::pool::proposal_fails_with_no_blocks::<OrchardPoolTester>()
     }
@@ -648,6 +566,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn metadata_queries_exclude_unwanted_notes() {
+        testing::pool::metadata_queries_exclude_unwanted_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }
@@ -658,6 +581,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fully_funded_send_to_t() {
         testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>()
     }
@@ -670,5 +594,17 @@ pub(crate) mod tests {
     #[test]
     fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_orchard_only() {
+        testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_orchard_to_sapling() {
+        testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
     }
 }

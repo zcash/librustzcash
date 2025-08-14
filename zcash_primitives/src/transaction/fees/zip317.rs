@@ -2,24 +2,21 @@
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
+use alloc::vec::Vec;
 use core::cmp::max;
 
-use crate::{
+use ::transparent::bundle::OutPoint;
+use zcash_protocol::{
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
-    transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            transparent::OutPoint,
-        },
-        fees::transparent,
-    },
+    value::{BalanceError, Zatoshis},
 };
+
+use crate::transaction::fees::transparent;
 
 /// The standard [ZIP 317] marginal fee.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-pub const MARGINAL_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(5_000);
+pub const MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(5_000);
 
 /// The minimum number of logical actions that must be paid according to [ZIP 317].
 ///
@@ -40,19 +37,23 @@ pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_000);
+pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
 /// This fee rule supports Orchard, Sapling, and (P2PKH only) transparent inputs.
-/// Returns an error if a coin containing a non-p2pkh script is provided as an input.
-/// This fee rule may slightly overestimate fees in case where the user is attempting to spend more than ~150 transparent inputs.
+/// Returns an error if a coin containing a non-P2PKH script is provided as an input.
+///
+/// This fee rule may slightly overestimate fees in case where the user is attempting
+/// to spend a large number of transparent inputs. This is intentional and is relied
+/// on for the correctness of transaction construction algorithms in the
+/// `zcash_client_backend` crate.
 ///
 /// [`FeeRule`]: crate::transaction::fees::FeeRule
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 #[derive(Clone, Debug)]
 pub struct FeeRule {
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
@@ -73,10 +74,19 @@ impl FeeRule {
 
     /// Construct a new FeeRule instance with the specified parameter values.
     ///
+    /// Using this fee rule with
+    /// ```compile_fail
+    /// marginal_fee < 5000 || grace_actions < 2
+    ///     || p2pkh_standard_input_size > P2PKH_STANDARD_INPUT_SIZE
+    ///     || p2pkh_standard_output_size > P2PKH_STANDARD_OUTPUT_SIZE
+    /// ```
+    /// violates ZIP 317, and might cause transactions built with it to fail.
+    ///
     /// Returns `None` if either `p2pkh_standard_input_size` or `p2pkh_standard_output_size` are
     /// zero.
+    #[cfg(feature = "non-standard-fees")]
     pub fn non_standard(
-        marginal_fee: NonNegativeAmount,
+        marginal_fee: Zatoshis,
         grace_actions: usize,
         p2pkh_standard_input_size: usize,
         p2pkh_standard_output_size: usize,
@@ -94,7 +104,7 @@ impl FeeRule {
     }
 
     /// Returns the ZIP 317 marginal fee.
-    pub fn marginal_fee(&self) -> NonNegativeAmount {
+    pub fn marginal_fee(&self) -> Zatoshis {
         self.marginal_fee
     }
     /// Returns the ZIP 317 number of grace actions
@@ -127,13 +137,12 @@ impl From<BalanceError> for FeeError {
     }
 }
 
-impl std::fmt::Display for FeeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for FeeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match &self {
             FeeError::Balance(e) => write!(
                 f,
-                "A balance calculation violated amount validity bounds: {}.",
-                e
+                "A balance calculation violated amount validity bounds: {e}."
             ),
             FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
         }
@@ -147,29 +156,32 @@ impl super::FeeRule for FeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
+        transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error> {
-        let non_p2pkh_inputs: Vec<_> = transparent_inputs
-            .iter()
-            .filter_map(|t_in| match t_in.coin().script_pubkey.address() {
-                Some(TransparentAddress::PublicKeyHash(_)) => None,
-                _ => Some(t_in.outpoint()),
-            })
-            .cloned()
-            .collect();
-
-        if !non_p2pkh_inputs.is_empty() {
-            return Err(FeeError::NonP2pkhInputs(non_p2pkh_inputs));
+    ) -> Result<Zatoshis, Self::Error> {
+        let mut t_in_total_size: usize = 0;
+        let mut non_p2pkh_outpoints = vec![];
+        for sz in transparent_input_sizes.into_iter() {
+            match sz {
+                transparent::InputSize::Known(s) => {
+                    t_in_total_size += s;
+                }
+                transparent::InputSize::Unknown(outpoint) => {
+                    non_p2pkh_outpoints.push(outpoint.clone());
+                }
+            }
         }
 
-        let t_in_total_size = transparent_inputs.len() * 150;
-        let t_out_total_size = transparent_outputs.len() * 34;
+        if !non_p2pkh_outpoints.is_empty() {
+            return Err(FeeError::NonP2pkhInputs(non_p2pkh_outpoints));
+        }
 
-        let ceildiv = |num: usize, den: usize| (num + den - 1) / den;
+        let t_out_total_size = transparent_output_sizes.into_iter().sum();
+
+        let ceildiv = |num: usize, den: usize| num.div_ceil(den);
 
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),

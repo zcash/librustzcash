@@ -53,11 +53,15 @@ use core::fmt;
 use core::ops::RangeInclusive;
 use core::result::Result;
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
-#[cfg(feature = "std")]
-use std::vec::Vec;
+
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 #[cfg(test)]
 mod test_vectors;
@@ -264,8 +268,8 @@ pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
 ///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8",
 /// );
 /// ```
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
     f4jumble_mut(&mut result).map(|()| result)
@@ -291,8 +295,8 @@ pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
 /// let message_b = f4jumble::f4jumble_inv(&encoded_b).unwrap();
 /// assert_eq!(message_b, b"The package from Sarah arrives tomorrow morning.");
 /// ```
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub fn f4jumble_inv(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
     f4jumble_inv_mut(&mut result).map(|()| result)

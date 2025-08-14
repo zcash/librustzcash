@@ -4,10 +4,9 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use incrementalmerkletree::Retention;
-use rusqlite::{self, named_params, params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use incrementalmerkletree::{Marking, Retention};
+use rusqlite::{named_params, params};
+use schemerz_rusqlite::RusqliteMigration;
 use shardtree::{error::ShardTreeError, store::caching::CachingShardStore, ShardTree};
 use tracing::{debug, trace};
 use uuid::Uuid;
@@ -16,10 +15,8 @@ use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange},
     SAPLING_SHARD_HEIGHT,
 };
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    merkle_tree::{read_commitment_tree, read_incremental_witness},
-};
+use zcash_primitives::merkle_tree::{read_commitment_tree, read_incremental_witness};
+use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     wallet::{
@@ -33,19 +30,19 @@ use crate::{
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7da6489d_e835_4657_8be5_f512bcce6cbf);
 
+const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [received_notes_nullable_nf::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -173,7 +170,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                 nonempty_frontier.clone(),
                                 Retention::Checkpoint {
                                     id: block_height,
-                                    is_marked: false,
+                                    marking: Marking::Reference,
                                 },
                             )
                             .map_err(|e| match e {
@@ -278,5 +275,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

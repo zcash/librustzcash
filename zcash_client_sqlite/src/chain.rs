@@ -3,7 +3,7 @@
 use prost::Message;
 use rusqlite::params;
 
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 
@@ -169,9 +169,7 @@ pub(crate) fn blockmetadb_insert(
                     // Panicking here is probably the right thing to do, because it
                     // means the database is corrupt.
                     panic!(
-                        "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                        e,
-                        error
+                        "Rollback failed with error {e} while attempting to recover from error {error}; database is likely corrupt."
                     )
             }
         }
@@ -320,12 +318,13 @@ where
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
-    use crate::{testing, wallet::sapling::tests::SaplingPoolTester};
+    use zcash_client_backend::data_api::testing::sapling::SaplingPoolTester;
+
+    use crate::testing;
 
     #[cfg(feature = "orchard")]
-    use crate::wallet::orchard::tests::OrchardPoolTester;
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
     #[test]
     fn valid_chain_states_sapling() {
@@ -338,7 +337,6 @@ mod tests {
         testing::pool::valid_chain_states::<OrchardPoolTester>()
     }
 
-    // FIXME: This requires test framework fixes to pass.
     #[test]
     #[cfg(feature = "orchard")]
     fn invalid_chain_cache_disconnected_sapling() {
@@ -360,6 +358,17 @@ mod tests {
     #[cfg(feature = "orchard")]
     fn data_db_truncation_orchard() {
         testing::pool::data_db_truncation::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn reorg_to_checkpoint_sapling() {
+        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn reorg_to_checkpoint_orchard() {
+        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>()
     }
 
     #[test]

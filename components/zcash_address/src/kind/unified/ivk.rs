@@ -1,4 +1,6 @@
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -87,10 +89,12 @@ impl SealedItem for Ivk {
 /// # Examples
 ///
 /// ```
-/// # use std::error::Error;
 /// use zcash_address::unified::{self, Container, Encoding};
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let uivk_from_user = || "uivk1djetqg3fws7y7qu5tekynvcdhz69gsyq07ewvppmzxdqhpfzdgmx8urnkqzv7ylz78ez43ux266pqjhecd59fzhn7wpe6zarnzh804hjtkyad25ryqla5pnc8p5wdl3phj9fczhz64zprun3ux7y9jc08567xryumuz59rjmg4uuflpjqwnq0j0tzce0x74t4tv3gfjq7nczkawxy6y7hse733ae3vw7qfjd0ss0pytvezxp42p6rrpzeh6t2zrz7zpjk0xhngcm6gwdppxs58jkx56gsfflugehf5vjlmu7vj3393gj6u37wenavtqyhdvcdeaj86s6jczl4zq";
 /// let example_uivk: &str = uivk_from_user();
 ///
@@ -130,17 +134,17 @@ impl SealedContainer for Uivk {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uivk";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_IVK;
 
     /// The HRP for a Bech32m-encoded testnet Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uivktest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_IVK;
 
     /// The HRP for a Bech32m-encoded regtest Unified IVK.
-    const REGTEST: &'static str = "uivkregtest";
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_IVK;
 
     fn from_inner(ivks: Vec<Self::Item>) -> Self {
         Self(ivks)
@@ -149,6 +153,9 @@ impl SealedContainer for Uivk {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+
     use assert_matches::assert_matches;
 
     use proptest::{
@@ -158,13 +165,11 @@ mod tests {
     };
 
     use super::{Ivk, ParseError, Typecode, Uivk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform64()(a in uniform32(0u8..), b in uniform32(0u8..)) -> [u8; 64] {
@@ -213,7 +218,7 @@ mod tests {
     proptest! {
         #[test]
         fn uivk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             uivk in arb_unified_ivk(),
         ) {
             let encoded = uivk.encode(&network);
@@ -227,7 +232,7 @@ mod tests {
         // The test cases below use `Uivk(vec![Ivk::Orchard([1; 64])])` as base.
 
         // Invalid padding ([0xff; 16] instead of [b'u', 0x00, 0x00, 0x00...])
-        let invalid_padding = vec![
+        let invalid_padding = [
             0xba, 0xbc, 0xc0, 0x71, 0xcd, 0x3b, 0xfd, 0x9a, 0x32, 0x19, 0x7e, 0xeb, 0x8a, 0xa7,
             0x6e, 0xd4, 0xac, 0xcb, 0x59, 0xc2, 0x54, 0x26, 0xc6, 0xab, 0x71, 0xc7, 0xc3, 0x72,
             0xc, 0xa9, 0xad, 0xa4, 0xad, 0x8c, 0x9e, 0x35, 0x7b, 0x4c, 0x5d, 0xc7, 0x66, 0x12,
@@ -243,7 +248,7 @@ mod tests {
         );
 
         // Short padding (padded to 15 bytes instead of 16)
-        let truncated_padding = vec![
+        let truncated_padding = [
             0x96, 0x73, 0x6a, 0x56, 0xbc, 0x44, 0x38, 0xe2, 0x47, 0x41, 0x1c, 0x70, 0xe4, 0x6,
             0x87, 0xbe, 0xb6, 0x90, 0xbd, 0xab, 0x1b, 0xd8, 0x27, 0x10, 0x0, 0x21, 0x30, 0x2, 0x77,
             0x87, 0x0, 0x25, 0x96, 0x94, 0x8f, 0x1e, 0x39, 0xd2, 0xd8, 0x65, 0xb4, 0x3c, 0x72,
@@ -266,7 +271,7 @@ mod tests {
         // with the ivk data truncated, but valid padding.
 
         // - Missing the last data byte of the Sapling ivk.
-        let truncated_sapling_data = vec![
+        let truncated_sapling_data = [
             0xce, 0xbc, 0xfe, 0xc5, 0xef, 0x2d, 0xe, 0x66, 0xc2, 0x8c, 0x34, 0xdc, 0x2e, 0x24,
             0xd2, 0xc7, 0x4b, 0xac, 0x36, 0xe0, 0x43, 0x72, 0xa7, 0x33, 0xa4, 0xe, 0xe0, 0x52,
             0x15, 0x64, 0x66, 0x92, 0x36, 0xa7, 0x60, 0x8e, 0x48, 0xe8, 0xb0, 0x30, 0x4d, 0xcb,
@@ -285,7 +290,7 @@ mod tests {
         );
 
         // - Truncated after the typecode of the Sapling ivk.
-        let truncated_after_sapling_typecode = vec![
+        let truncated_after_sapling_typecode = [
             0xf7, 0x3, 0xd8, 0xbe, 0x6a, 0x27, 0xfa, 0xa1, 0xd3, 0x11, 0xea, 0x25, 0x94, 0xe2, 0xb,
             0xde, 0xed, 0x6a, 0xaa, 0x8, 0x46, 0x7d, 0xe4, 0xb1, 0xe, 0xf1, 0xde, 0x61, 0xd7, 0x95,
             0xf7, 0x82, 0x62, 0x32, 0x7a, 0x73, 0x8c, 0x55, 0x93, 0xa1, 0x63, 0x75, 0xe2, 0xca,
@@ -302,7 +307,7 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
         let uivk = Uivk(vec![Ivk::Sapling([1; 64]), Ivk::Sapling([2; 64])]);
-        let encoded = uivk.encode(&Network::Main);
+        let encoded = uivk.encode(&NetworkType::Main);
         assert_eq!(
             Uivk::decode(&encoded),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))
@@ -312,7 +317,7 @@ mod tests {
     #[test]
     fn only_transparent() {
         // Raw Encoding of `Uivk(vec![Ivk::P2pkh([0; 65])])`.
-        let encoded = vec![
+        let encoded = [
             0x12, 0x51, 0x37, 0xc7, 0xac, 0x8c, 0xd, 0x13, 0x3a, 0x5f, 0xc6, 0x84, 0x53, 0x90,
             0xf8, 0xe7, 0x23, 0x34, 0xfb, 0xda, 0x49, 0x3c, 0x87, 0x1c, 0x8f, 0x1a, 0xe1, 0x63,
             0xba, 0xdf, 0x77, 0x64, 0x43, 0xcf, 0xdc, 0x37, 0x1f, 0xd2, 0x89, 0x60, 0xe3, 0x77,

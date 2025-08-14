@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::WalletMigrationError;
@@ -12,17 +12,17 @@ use super::sapling_memo_consistency;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xaa0a4168_b41b_44c5_a47d_c4c66603cfab);
 
+const DEPENDENCIES: &[Uuid] = &[sapling_memo_consistency::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [sapling_memo_consistency::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -187,5 +187,15 @@ impl RusqliteMigration for Migration {
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

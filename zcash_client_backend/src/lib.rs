@@ -61,18 +61,14 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-pub use zcash_keys::address;
 pub mod data_api;
 mod decrypt;
-pub use zcash_keys::encoding;
 pub mod fees;
-pub use zcash_keys::keys;
 pub mod proposal;
 pub mod proto;
 pub mod scan;
 pub mod scanning;
 pub mod wallet;
-pub use zip321;
 
 #[cfg(feature = "sync")]
 pub mod sync;
@@ -80,8 +76,31 @@ pub mod sync;
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
 
+#[cfg(feature = "tor")]
+pub mod tor;
+
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
-pub use zcash_protocol::{PoolType, ShieldedProtocol};
+
+#[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
+pub mod address {
+    pub use zcash_keys::address::*;
+}
+#[deprecated(note = "This module is deprecated; use `::zcash_keys::encoding` instead.")]
+pub mod encoding {
+    pub use zcash_keys::encoding::*;
+}
+#[deprecated(note = "This module is deprecated; use `::zcash_keys::keys` instead.")]
+pub mod keys {
+    pub use zcash_keys::keys::*;
+}
+#[deprecated(note = "use ::zcash_protocol::PoolType instead")]
+pub type PoolType = zcash_protocol::PoolType;
+#[deprecated(note = "use ::zcash_protocol::ShieldedProtocol instead")]
+pub type ShieldedProtocol = zcash_protocol::ShieldedProtocol;
+#[deprecated(note = "This module is deprecated; use the `zip321` crate instead.")]
+pub mod zip321 {
+    pub use zip321::*;
+}
 
 #[cfg(test)]
 #[macro_use]

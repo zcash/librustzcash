@@ -1,11 +1,10 @@
 //! Core traits and structs for Transparent Zcash Extensions.
 
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
 
-use crate::transaction::components::{
-    tze::{self, TzeOut},
-    Amount,
-};
+use crate::transaction::components::tze::{self, TzeOut};
+use zcash_protocol::value::Zatoshis;
 
 /// A typesafe wrapper for witness payloads
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +13,7 @@ pub struct AuthData(pub Vec<u8>);
 /// Binary parsing capability for TZE preconditions & witnesses.
 ///
 /// Serialization formats interpreted by implementations of this trait become consensus-critical
-/// upon activation of of the extension that uses them.
+/// upon activation of the extension that uses them.
 pub trait FromPayload: Sized {
     type Error;
 
@@ -25,7 +24,7 @@ pub trait FromPayload: Sized {
 /// Binary serialization capability for TZE preconditions & witnesses.
 ///
 /// Serialization formats used by implementations of this trait become consensus-critical upon
-/// activation of of the extension that uses them.
+/// activation of the extension that uses them.
 pub trait ToPayload {
     /// Returns a serialized payload and its corresponding mode.
     fn to_payload(&self) -> (u32, Vec<u8>);
@@ -203,11 +202,11 @@ pub trait ExtensionTxBuilder<'a> {
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>);
 
     /// Adds a TZE precondition to the transaction which must be satisfied by a future transaction's
-    /// witness in order to spend the specified `amount`.
+    /// witness in order to spend the specified value.
     fn add_tze_output<Precondition: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: Amount,
+        value: Zatoshis,
         guarded_by: &Precondition,
     ) -> Result<(), Self::BuildError>;
 }

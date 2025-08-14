@@ -2,9 +2,10 @@
 //!
 //! [Equihash]: https://zips.z.cash/protocol/protocol.pdf#equihash
 
+use alloc::vec::Vec;
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
-use byteorder::{LittleEndian, WriteBytesExt};
-use std::fmt;
+use core::fmt;
+use core2::io::Write;
 
 use crate::{
     minimal::{expand_array, indices_from_minimal},
@@ -91,6 +92,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 #[derive(Debug, PartialEq)]
@@ -114,10 +116,10 @@ impl fmt::Display for Kind {
     }
 }
 
-fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
+pub(crate) fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
     let mut personalization: Vec<u8> = Vec::from("ZcashPoW");
-    personalization.write_u32::<LittleEndian>(n).unwrap();
-    personalization.write_u32::<LittleEndian>(k).unwrap();
+    personalization.write_all(&n.to_le_bytes()).unwrap();
+    personalization.write_all(&k.to_le_bytes()).unwrap();
 
     Blake2bParams::new()
         .hash_length(digest_len as usize)
@@ -127,7 +129,7 @@ fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
 
 fn generate_hash(base_state: &Blake2bState, i: u32) -> Blake2bHash {
     let mut lei = [0u8; 4];
-    (&mut lei[..]).write_u32::<LittleEndian>(i).unwrap();
+    (&mut lei[..]).write_all(&i.to_le_bytes()).unwrap();
 
     let mut state = base_state.clone();
     state.update(&lei);

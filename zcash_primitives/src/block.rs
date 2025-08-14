@@ -1,11 +1,15 @@
 //! Structs and methods for handling Zcash block headers.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::fmt;
+use core::ops::Deref;
+use core2::io::{self, Read, Write};
+
+use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
 use sha2::{Digest, Sha256};
-use std::fmt;
-use std::io::{self, Read, Write};
-use std::ops::Deref;
+
 use zcash_encoding::Vector;
 
 pub use equihash;
@@ -112,7 +116,7 @@ impl BlockHeader {
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let version = reader.read_i32::<LittleEndian>()?;
+        let version = reader.read_i32_le()?;
 
         let mut prev_block = BlockHash([0; 32]);
         reader.read_exact(&mut prev_block.0)?;
@@ -123,8 +127,8 @@ impl BlockHeader {
         let mut final_sapling_root = [0; 32];
         reader.read_exact(&mut final_sapling_root)?;
 
-        let time = reader.read_u32::<LittleEndian>()?;
-        let bits = reader.read_u32::<LittleEndian>()?;
+        let time = reader.read_u32_le()?;
+        let bits = reader.read_u32_le()?;
 
         let mut nonce = [0; 32];
         reader.read_exact(&mut nonce)?;
@@ -144,12 +148,12 @@ impl BlockHeader {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i32::<LittleEndian>(self.version)?;
+        writer.write_i32_le(self.version)?;
         writer.write_all(&self.prev_block.0)?;
         writer.write_all(&self.merkle_root)?;
         writer.write_all(&self.final_sapling_root)?;
-        writer.write_u32::<LittleEndian>(self.time)?;
-        writer.write_u32::<LittleEndian>(self.bits)?;
+        writer.write_u32_le(self.time)?;
+        writer.write_u32_le(self.bits)?;
         writer.write_all(&self.nonce)?;
         Vector::write(&mut writer, &self.solution, |w, b| w.write_u8(*b))?;
 
@@ -160,6 +164,7 @@ impl BlockHeader {
 #[cfg(test)]
 mod tests {
     use super::BlockHeader;
+    use alloc::vec::Vec;
 
     const HEADER_MAINNET_415000: [u8; 1487] = [
         0x04, 0x00, 0x00, 0x00, 0x52, 0x74, 0xb4, 0x3b, 0x9e, 0x4a, 0xd8, 0xf4, 0x3e, 0x93, 0xf7,

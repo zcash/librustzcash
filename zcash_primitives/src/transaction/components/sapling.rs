@@ -1,27 +1,28 @@
+use alloc::vec::Vec;
+use core2::io::{self, Read, Write};
 use ff::PrimeField;
+
+use ::sapling::{
+    bundle::{
+        Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
+        SpendDescription, SpendDescriptionV5,
+    },
+    note::ExtractedNoteCommitment,
+    note_encryption::Zip212Enforcement,
+    value::ValueCommitment,
+    Nullifier,
+};
 use redjubjub::SpendAuth;
-use sapling::note_encryption::{Zip212Enforcement, ENC_CIPHERTEXT_SIZE};
-use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD};
-
-use std::io::{self, Read, Write};
-
+use sapling::note_encryption::ENC_CIPHERTEXT_SIZE;
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
-
-use crate::{
-    sapling::{
-        bundle::{
-            Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
-            OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
-        },
-        note::ExtractedNoteCommitment,
-        value::ValueCommitment,
-        Nullifier,
-    },
-    transaction::Transaction,
+use zcash_protocol::{
+    consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
+    value::ZatBalance,
 };
 
-use super::{Amount, GROTH_PROOF_SIZE};
+use super::GROTH_PROOF_SIZE;
+use crate::transaction::Transaction;
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
@@ -110,13 +111,13 @@ fn read_cmu<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
-pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Base> {
+pub fn read_base<R: Read>(mut reader: R, _field: &str) -> io::Result<jubjub::Base> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
     Option::from(jubjub::Base::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} not in field", field),
+            "base value not a valid field element",
         )
     })
 }
@@ -146,7 +147,7 @@ fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<Spen
     let mut bytes = [0; 32];
     reader.read_exact(&mut bytes)?;
     redjubjub::VerificationKey::try_from(bytes)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "verification key is invalid"))
 }
 
 /// Consensus rules (§4.4):
@@ -317,7 +318,7 @@ pub fn temporary_zcashd_read_v4_components<R: Read>(
     reader: R,
     tx_has_sapling: bool,
 ) -> io::Result<(
-    Amount,
+    ZatBalance,
     Vec<SpendDescription<Authorized>>,
     Vec<OutputDescription<GrothProofBytes>>,
 )> {
@@ -330,7 +331,7 @@ pub(crate) fn read_v4_components<R: Read>(
     mut reader: R,
     tx_has_sapling: bool,
 ) -> io::Result<(
-    Amount,
+    ZatBalance,
     Vec<SpendDescription<Authorized>>,
     Vec<OutputDescription<GrothProofBytes>>,
 )> {
@@ -344,7 +345,7 @@ pub(crate) fn read_v4_components<R: Read>(
             Vector::read(&mut reader, |r| read_output_v4(r))?;
         Ok((vb, ss, so))
     } else {
-        Ok((Amount::zero(), vec![], vec![]))
+        Ok((ZatBalance::zero(), vec![], vec![]))
     }
 }
 
@@ -352,7 +353,7 @@ pub(crate) fn read_v4_components<R: Read>(
 #[cfg(feature = "temporary-zcashd")]
 pub fn temporary_zcashd_write_v4_components<W: Write>(
     writer: W,
-    bundle: Option<&Bundle<Authorized, Amount>>,
+    bundle: Option<&Bundle<Authorized, ZatBalance>>,
     tx_has_sapling: bool,
 ) -> io::Result<()> {
     write_v4_components(writer, bundle, tx_has_sapling)
@@ -361,13 +362,13 @@ pub fn temporary_zcashd_write_v4_components<W: Write>(
 /// Writes the Sapling components of a v4 transaction.
 pub(crate) fn write_v4_components<W: Write>(
     mut writer: W,
-    bundle: Option<&Bundle<Authorized, Amount>>,
+    bundle: Option<&Bundle<Authorized, ZatBalance>>,
     tx_has_sapling: bool,
 ) -> io::Result<()> {
     if tx_has_sapling {
         writer.write_all(
             &bundle
-                .map_or(Amount::zero(), |b| *b.value_balance())
+                .map_or(ZatBalance::zero(), |b| *b.value_balance())
                 .to_i64_le_bytes(),
         )?;
         Vector::write(
@@ -394,7 +395,7 @@ pub(crate) fn write_v4_components<W: Write>(
 #[allow(clippy::redundant_closure)]
 pub(crate) fn read_v5_bundle<R: Read>(
     mut reader: R,
-) -> io::Result<Option<Bundle<Authorized, Amount>>> {
+) -> io::Result<Option<Bundle<Authorized, ZatBalance>>> {
     let sd_v5s = Vector::read(&mut reader, read_spend_v5)?;
     let od_v5s = Vector::read(&mut reader, read_output_v5)?;
     let n_spends = sd_v5s.len();
@@ -402,7 +403,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
     let value_balance = if n_spends > 0 || n_outputs > 0 {
         Transaction::read_amount(&mut reader)?
     } else {
-        Amount::zero()
+        ZatBalance::zero()
     };
 
     let anchor = if n_spends > 0 {
@@ -425,11 +426,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 
     let shielded_spends = sd_v5s
         .into_iter()
-        .zip(
-            v_spend_proofs
-                .into_iter()
-                .zip(v_spend_auth_sigs.into_iter()),
-        )
+        .zip(v_spend_proofs.into_iter().zip(v_spend_auth_sigs))
         .map(|(sd_5, (zkproof, spend_auth_sig))| {
             // the following `unwrap` is safe because we know n_spends > 0.
             sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
@@ -438,7 +435,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 
     let shielded_outputs = od_v5s
         .into_iter()
-        .zip(v_output_proofs.into_iter())
+        .zip(v_output_proofs)
         .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
         .collect();
 
@@ -455,7 +452,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 /// Writes a [`Bundle`] in the v5 transaction format.
 pub(crate) fn write_v5_bundle<W: Write>(
     mut writer: W,
-    sapling_bundle: Option<&Bundle<Authorized, Amount>>,
+    sapling_bundle: Option<&Bundle<Authorized, ZatBalance>>,
 ) -> io::Result<()> {
     if let Some(bundle) = sapling_bundle {
         Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
@@ -505,27 +502,23 @@ pub(crate) fn write_v5_bundle<W: Write>(
 pub mod testing {
     use proptest::prelude::*;
 
-    use crate::{
-        sapling::bundle::{testing as t_sap, Authorized, Bundle},
-        transaction::{
-            components::{amount::testing::arb_amount, Amount},
-            TxVersion,
-        },
-    };
+    use crate::transaction::TxVersion;
+    use ::sapling::bundle::{testing as t_sap, Authorized, Bundle};
+    use zcash_protocol::value::{testing::arb_zat_balance, ZatBalance};
 
     prop_compose! {
         fn arb_bundle()(
-            value_balance in arb_amount()
+            value_balance in arb_zat_balance()
         )(
             bundle in t_sap::arb_bundle(value_balance)
-        ) -> Option<Bundle<Authorized, Amount>> {
+        ) -> Option<Bundle<Authorized, ZatBalance>> {
             bundle
         }
     }
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
-    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, ZatBalance>>> {
         if v.has_sapling() {
             Strategy::boxed(arb_bundle())
         } else {

@@ -21,6 +21,11 @@ impl<V: Version> Entry<V> {
         }
     }
 
+    /// Returns the data associated with this node.
+    pub fn data(&self) -> &V::NodeData {
+        &self.data
+    }
+
     /// Creates a new leaf.
     pub fn new_leaf(data: V::NodeData) -> Self {
         Entry {
@@ -31,8 +36,7 @@ impl<V: Version> Entry<V> {
 
     /// Returns if is this node complete (has total of 2^N leaves)
     pub fn complete(&self) -> bool {
-        let leaves = self.leaf_count();
-        leaves & (leaves - 1) == 0
+        self.leaf_count().is_power_of_two()
     }
 
     /// Number of leaves under this node.
@@ -111,7 +115,7 @@ impl<V: Version> Entry<V> {
 impl<V: Version> std::fmt::Display for Entry<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            EntryKind::Node(l, r) => write!(f, "node({}, {}, ..)", l, r),
+            EntryKind::Node(l, r) => write!(f, "node({l}, {r}, ..)"),
             EntryKind::Leaf => write!(f, "leaf(..)"),
         }
     }

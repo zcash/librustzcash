@@ -5,10 +5,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::named_params;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{decrypt_transaction, keys::UnifiedFullViewingKey};
-use zcash_primitives::{consensus, transaction::TxId, zip32::AccountId};
+
+use zcash_client_backend::decrypt_transaction;
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_protocol::{consensus, TxId};
+use zip32::AccountId;
 
 use crate::{
     error::SqliteClientError,
@@ -19,19 +22,19 @@ use super::received_notes_nullable_nf;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7029b904_6557_4aa1_9da5_6904b65d2ba5);
 
+const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [received_notes_nullable_nf::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -66,8 +69,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let ufvk_str: String = row.get(3)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
-                    "Could not decode unified full viewing key for account {}: {:?}",
-                    account, e
+                    "Could not decode unified full viewing key for account {account}: {e:?}"
                 ))
             })?;
 
@@ -94,18 +96,17 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     }
                     SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
                     other => WalletMigrationError::CorruptedData(format!(
-                        "An error was encountered decoding transaction data: {:?}",
-                        other
+                        "An error was encountered decoding transaction data: {other:?}"
                     )),
                 })?
                 .ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Transaction not found for id {:?}",
-                        txid
+                        "Transaction not found for id {txid:?}"
                     ))
                 })?;
 
-            let decrypted_outputs = decrypt_transaction(&self.params, block_height, &tx, &ufvks);
+            let decrypted_outputs =
+                decrypt_transaction(&self.params, Some(block_height), None, &tx, &ufvks);
 
             // Orchard outputs were not supported as of the wallet states that could require this
             // migration.
@@ -219,5 +220,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn down(&self, _: &rusqlite::Transaction) -> Result<(), Self::Error> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

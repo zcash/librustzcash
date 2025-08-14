@@ -6,16 +6,13 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_primitives::{
-    consensus::BlockHeight,
-    transaction::{components::amount::NonNegativeAmount, TxId},
-};
+use zcash_primitives::transaction::TxId;
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
+use zip321::TransactionRequest;
 
 use crate::{
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
-    zip321::TransactionRequest,
-    PoolType, ShieldedProtocol,
 };
 
 /// Errors that can occur in construction of a [`Step`].
@@ -29,8 +26,8 @@ pub enum ProposalError {
     /// sum of transaction outputs, change, and fees is required to be exactly equal to the value
     /// of provided inputs.
     BalanceError {
-        input_total: NonNegativeAmount,
-        output_total: NonNegativeAmount,
+        input_total: Zatoshis,
+        output_total: Zatoshis,
     },
     /// The `is_shielding` flag may only be set to `true` under the following conditions:
     /// * The total of transparent inputs is nonzero
@@ -38,6 +35,8 @@ pub enum ProposalError {
     /// * There provided transaction request is empty; i.e. the only output values specified
     ///   are change and fee amounts.
     ShieldingInvalid,
+    /// No anchor information could be obtained for the specified block height.
+    AnchorNotFound(BlockHeight),
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
@@ -47,6 +46,18 @@ pub enum ProposalError {
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
+    /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
+    SpendsChange(StepOutput),
+    /// A proposal step created an ephemeral output that was not spent in any later step.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralOutputLeftUnspent(StepOutput),
+    /// The proposal included a payment to a TEX address and a spend from a shielded input in the same step.
+    #[cfg(feature = "transparent-inputs")]
+    PaysTexFromShielded,
+    /// The change strategy provided to input selection failed to correctly generate an ephemeral
+    /// change output when needed for sending to a TEX address.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralOutputsInvalid,
 }
 
 impl Display for ProposalError {
@@ -73,22 +84,42 @@ impl Display for ProposalError {
                 f,
                 "The proposal violates the rules for a shielding transaction."
             ),
+            ProposalError::AnchorNotFound(h) => {
+                write!(f, "Unable to compute anchor for block height {h:?}")
+            }
             ProposalError::ReferenceError(r) => {
-                write!(f, "No prior step output found for reference {:?}", r)
+                write!(f, "No prior step output found for reference {r:?}")
             }
             ProposalError::StepDoubleSpend(r) => write!(
                 f,
-                "The proposal uses the output of step {:?} in more than one place.",
-                r
+                "The proposal uses the output of step {r:?} in more than one place."
             ),
             ProposalError::ChainDoubleSpend(pool, txid, index) => write!(
                 f,
-                "The proposal attempts to spend the same output twice: {}, {}, {}",
-                pool, txid, index
+                "The proposal attempts to spend the same output twice: {pool}, {txid}, {index}"
             ),
             ProposalError::PaymentPoolsMismatch => write!(
                 f,
                 "The chosen payment pools did not match the payments of the transaction request."
+            ),
+            ProposalError::SpendsChange(r) => write!(
+                f,
+                "The proposal attempts to spends the change output created at step {r:?}.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::EphemeralOutputLeftUnspent(r) => write!(
+                f,
+                "The proposal created an ephemeral output at step {r:?} that was not spent in any later step.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::PaysTexFromShielded => write!(
+                f,
+                "The proposal included a payment to a TEX address and a spend from a shielded input in the same step.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::EphemeralOutputsInvalid => write!(
+                f,
+                "The proposal generator failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
             ),
         }
     }
@@ -186,7 +217,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
             for t_out in step.transparent_inputs() {
                 let key = (
-                    PoolType::Transparent,
+                    PoolType::TRANSPARENT,
                     TxId::from_bytes(*t_out.outpoint().hash()),
                     t_out.outpoint().n(),
                 );
@@ -198,9 +229,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
                 let key = (
                     match &s_out.note() {
-                        Note::Sapling(_) => PoolType::Shielded(ShieldedProtocol::Sapling),
+                        Note::Sapling(_) => PoolType::SAPLING,
                         #[cfg(feature = "orchard")]
-                        Note::Orchard(_) => PoolType::Shielded(ShieldedProtocol::Orchard),
+                        Note::Orchard(_) => PoolType::ORCHARD,
                     },
                     *s_out.txid(),
                     s_out.output_index().into(),
@@ -225,7 +256,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments to be
-    ///    made.
+    ///   made.
     /// * `payment_pools`: A map from payment index to pool type.
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
@@ -233,7 +264,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `fee_rule`: The fee rule observed by the proposed transaction.
     /// * `min_target_height`: The minimum block height at which the transaction may be created.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
-    ///    transaction.
+    ///   transaction.
     #[allow(clippy::too_many_arguments)]
     pub fn single_step(
         transaction_request: TransactionRequest,
@@ -292,14 +323,14 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 }
 
 /// A reference to either a payment or change output within a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StepOutputIndex {
     Payment(usize),
     Change(usize),
 }
 
 /// A reference to the output of a step in a proposal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StepOutput {
     step_index: usize,
     output_index: StepOutputIndex,
@@ -386,15 +417,15 @@ impl<NoteRef> Step<NoteRef> {
         let transparent_input_total = transparent_inputs
             .iter()
             .map(|out| out.txout().value)
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
-                (acc? + a).ok_or(ProposalError::Overflow)
+            .try_fold(Zatoshis::ZERO, |acc, a| {
+                (acc + a).ok_or(ProposalError::Overflow)
             })?;
 
         let shielded_input_total = shielded_inputs
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -420,7 +451,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)
@@ -432,9 +463,9 @@ impl<NoteRef> Step<NoteRef> {
         let output_total = (request_total + balance.total()).ok_or(ProposalError::Overflow)?;
 
         if is_shielding
-            && (transparent_input_total == NonNegativeAmount::ZERO
-                || shielded_input_total > NonNegativeAmount::ZERO
-                || request_total > NonNegativeAmount::ZERO)
+            && (transparent_input_total == Zatoshis::ZERO
+                || shielded_input_total > Zatoshis::ZERO
+                || request_total > Zatoshis::ZERO)
         {
             return Err(ProposalError::ShieldingInvalid);
         }
@@ -490,57 +521,37 @@ impl<NoteRef> Step<NoteRef> {
         self.is_shielding
     }
 
-    /// Returns whether or not this proposal requires interaction with the specified pool
+    /// Returns whether or not this proposal requires interaction with the specified pool.
     pub fn involves(&self, pool_type: PoolType) -> bool {
-        match pool_type {
-            PoolType::Transparent => {
-                self.is_shielding
-                    || !self.transparent_inputs.is_empty()
-                    || self
-                        .payment_pools()
-                        .values()
-                        .any(|pool| matches!(pool, PoolType::Transparent))
-            }
+        let input_in_this_pool = || match pool_type {
+            PoolType::Transparent => self.is_shielding || !self.transparent_inputs.is_empty(),
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                let sapling_in = self.shielded_inputs.iter().any(|s_in| {
+                self.shielded_inputs.iter().any(|s_in| {
                     s_in.notes()
                         .iter()
                         .any(|note| matches!(note.note(), Note::Sapling(_)))
-                });
-                let sapling_out = self
-                    .payment_pools()
-                    .values()
-                    .any(|pool| matches!(pool, PoolType::Shielded(ShieldedProtocol::Sapling)));
-                let sapling_change = self
-                    .balance
-                    .proposed_change()
-                    .iter()
-                    .any(|c| c.output_pool() == ShieldedProtocol::Sapling);
-
-                sapling_in || sapling_out || sapling_change
+                })
             }
+            #[cfg(feature = "orchard")]
             PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                #[cfg(not(feature = "orchard"))]
-                let orchard_in = false;
-                #[cfg(feature = "orchard")]
-                let orchard_in = self.shielded_inputs.iter().any(|s_in| {
+                self.shielded_inputs.iter().any(|s_in| {
                     s_in.notes()
                         .iter()
                         .any(|note| matches!(note.note(), Note::Orchard(_)))
-                });
-                let orchard_out = self
-                    .payment_pools()
-                    .values()
-                    .any(|pool| matches!(pool, PoolType::Shielded(ShieldedProtocol::Orchard)));
-                let orchard_change = self
-                    .balance
-                    .proposed_change()
-                    .iter()
-                    .any(|c| c.output_pool() == ShieldedProtocol::Orchard);
-
-                orchard_in || orchard_out || orchard_change
+                })
             }
-        }
+            #[cfg(not(feature = "orchard"))]
+            PoolType::Shielded(ShieldedProtocol::Orchard) => false,
+        };
+        let output_in_this_pool = || self.payment_pools().values().any(|pool| *pool == pool_type);
+        let change_in_this_pool = || {
+            self.balance
+                .proposed_change()
+                .iter()
+                .any(|c| c.output_pool() == pool_type)
+        };
+
+        input_in_this_pool() || output_in_this_pool() || change_in_this_pool()
     }
 }
 

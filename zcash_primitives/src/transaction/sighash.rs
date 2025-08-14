@@ -1,49 +1,46 @@
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    components::{amount::NonNegativeAmount, transparent},
-    sighash_v4::v4_signature_hash,
-    sighash_v5::v5_v6_signature_hash,
-    Authorization, TransactionData, TxDigests, TxVersion,
+    sighash_v4::v4_signature_hash, sighash_v5::v5_v6_signature_hash, Authorization,
+    TransactionData, TxDigests, TxVersion,
 };
-use crate::{
-    legacy::Script,
-    sapling::{self, bundle::GrothProofBytes},
-};
+use ::sapling::bundle::GrothProofBytes;
 
 #[cfg(zcash_unstable = "zfuture")]
-use {super::components::Amount, crate::extensions::transparent::Precondition};
+use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
-pub const SIGHASH_ALL: u8 = 0x01;
-pub const SIGHASH_NONE: u8 = 0x02;
-pub const SIGHASH_SINGLE: u8 = 0x03;
-pub const SIGHASH_MASK: u8 = 0x1f;
-pub const SIGHASH_ANYONECANPAY: u8 = 0x80;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ALL` instead.")]
+pub const SIGHASH_ALL: u8 = ::transparent::sighash::SIGHASH_ALL;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_NONE` instead.")]
+pub const SIGHASH_NONE: u8 = ::transparent::sighash::SIGHASH_NONE;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_SINGLE` instead.")]
+pub const SIGHASH_SINGLE: u8 = ::transparent::sighash::SIGHASH_SINGLE;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_MASK` instead.")]
+pub const SIGHASH_MASK: u8 = ::transparent::sighash::SIGHASH_MASK;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead.")]
+pub const SIGHASH_ANYONECANPAY: u8 = ::transparent::sighash::SIGHASH_ANYONECANPAY;
+
+#[deprecated(note = "use `::zcash_transparent::sighash::SighashType` instead.")]
+pub type SighashType = ::transparent::sighash::SighashType;
 
 pub enum SignableInput<'a> {
     Shielded,
-    Transparent {
-        hash_type: u8,
-        index: usize,
-        script_code: &'a Script,
-        script_pubkey: &'a Script,
-        value: NonNegativeAmount,
-    },
+    Transparent(transparent::sighash::SignableInput<'a>),
     #[cfg(zcash_unstable = "zfuture")]
     Tze {
         index: usize,
         precondition: &'a Precondition,
-        value: Amount,
+        value: Zatoshis,
     },
 }
 
-impl<'a> SignableInput<'a> {
+impl SignableInput<'_> {
     pub fn hash_type(&self) -> u8 {
         match self {
-            SignableInput::Shielded => SIGHASH_ALL,
-            SignableInput::Transparent { hash_type, .. } => *hash_type,
+            SignableInput::Shielded => ::transparent::sighash::SIGHASH_ALL,
+            SignableInput::Transparent(input) => input.hash_type().encode(),
             #[cfg(zcash_unstable = "zfuture")]
-            SignableInput::Tze { .. } => SIGHASH_ALL,
+            SignableInput::Tze { .. } => ::transparent::sighash::SIGHASH_ALL,
         }
     }
 }
@@ -56,43 +53,28 @@ impl AsRef<[u8; 32]> for SignatureHash {
     }
 }
 
-/// Additional context that is needed to compute signature hashes
-/// for transactions that include transparent inputs or outputs.
-pub trait TransparentAuthorizingContext: transparent::Authorization {
-    /// Returns the list of all transparent input amounts, provided
-    /// so that wallets can commit to the transparent input breakdown
-    /// without requiring the full data of the previous transactions
-    /// providing these inputs.
-    fn input_amounts(&self) -> Vec<NonNegativeAmount>;
-    /// Returns the list of all transparent input scriptPubKeys, provided
-    /// so that wallets can commit to the transparent input breakdown
-    /// without requiring the full data of the previous transactions
-    /// providing these inputs.
-    fn input_scriptpubkeys(&self) -> Vec<Script>;
-}
-
 /// Computes the signature hash for an input to a transaction, given
 /// the full data of the transaction, the input being signed, and the
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
 pub fn signature_hash<
-    TA: TransparentAuthorizingContext,
+    TA: ::transparent::sighash::TransparentAuthorizingContext,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: &SignableInput<'_>,
+    signable_input: &SignableInput,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
             v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::Zip225 => v5_v6_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::V5 => v5_v6_signature_hash(tx, signable_input, txid_parts),
 
-        #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-        TxVersion::Zsa => v5_v6_signature_hash(tx, signable_input, txid_parts),
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V6 => v5_v6_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_v6_signature_hash(tx, signable_input, txid_parts),

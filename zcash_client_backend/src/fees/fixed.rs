@@ -1,33 +1,39 @@
 //! Change strategies designed for use with a fixed fee.
 
-use zcash_primitives::{
+use core::marker::PhantomData;
+
+use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::BalanceError,
-        fees::{fixed::FeeRule as FixedFeeRule, transparent},
-    },
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
 
-use crate::ShieldedProtocol;
+use crate::data_api::InputSource;
 
 use super::{
-    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, TransactionBalance,
+    common::{single_pool_output_balance, SinglePoolBalanceConfig},
+    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
+    SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
-/// A change strategy that proposes change as a single output to the most current supported
-/// shielded pool and delegates fee calculation to the provided fee rule.
-pub struct SingleOutputChangeStrategy {
+/// A change strategy that proposes change as a single output. The output pool is chosen
+/// as the most current pool that avoids unnecessary pool-crossing (with a specified
+/// fallback when the transaction has no shielded inputs). Fee calculation is delegated
+/// to the provided fee rule.
+pub struct SingleOutputChangeStrategy<I> {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    dust_output_policy: DustOutputPolicy,
+    meta_source: PhantomData<I>,
 }
 
-impl SingleOutputChangeStrategy {
+impl<I> SingleOutputChangeStrategy<I> {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
     /// and change memo.
     ///
@@ -37,21 +43,35 @@ impl SingleOutputChangeStrategy {
         fee_rule: FixedFeeRule,
         change_memo: Option<MemoBytes>,
         fallback_change_pool: ShieldedProtocol,
+        dust_output_policy: DustOutputPolicy,
     ) -> Self {
         Self {
             fee_rule,
             change_memo,
             fallback_change_pool,
+            dust_output_policy,
+            meta_source: PhantomData,
         }
     }
 }
 
-impl ChangeStrategy for SingleOutputChangeStrategy {
+impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     type FeeRule = FixedFeeRule;
     type Error = BalanceError;
+    type MetaSource = I;
+    type AccountMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
+    }
+
+    fn fetch_wallet_meta(
+        &self,
+        _meta_source: &Self::MetaSource,
+        _account: <Self::MetaSource as InputSource>::AccountId,
+        _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
+        Ok(())
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -62,54 +82,69 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        dust_output_policy: &DustOutputPolicy,
+        ephemeral_balance: Option<&EphemeralBalance>,
+        _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        single_change_output_balance(
+        let split_policy = SplitPolicy::single_output();
+        let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
+            &self.dust_output_policy,
+            self.fee_rule.fixed_fee(),
+            &split_policy,
+            self.fallback_change_pool,
+            Zatoshis::ZERO,
+            0,
+        );
+
+        single_pool_output_balance(
+            cfg,
+            None,
             target_height,
             transparent_inputs,
             transparent_outputs,
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            dust_output_policy,
-            self.fee_rule().fixed_fee(),
-            self.change_memo.clone(),
-            self.fallback_change_pool,
+            self.change_memo.as_ref(),
+            ephemeral_balance,
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "orchard")]
-    use std::convert::Infallible;
-
-    use zcash_primitives::{
+    use ::transparent::bundle::TxOut;
+    use zcash_primitives::transaction::fees::{
+        fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE,
+    };
+    use zcash_protocol::{
         consensus::{Network, NetworkUpgrade, Parameters},
-        transaction::{
-            components::{amount::NonNegativeAmount, transparent::TxOut},
-            fees::fixed::FeeRule as FixedFeeRule,
-        },
+        value::Zatoshis,
+        ShieldedProtocol,
     };
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::wallet::input_selection::SaplingPayment,
+        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment},
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
         },
-        ShieldedProtocol,
     };
+
+    #[cfg(feature = "orchard")]
+    use crate::fees::orchard as orchard_fees;
 
     #[test]
     fn change_without_dust() {
-        #[allow(deprecated)]
-        let fee_rule = FixedFeeRule::standard();
-        let change_strategy =
-            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
+        let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+            fee_rule,
+            None,
+            ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -117,41 +152,39 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(60000),
+                    value: Zatoshis::const_from_u64(60000),
                 }][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT_VANILLA,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
-            &DustOutputPolicy::default(),
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
         );
 
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(10000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(10000), None)] &&
+                balance.fee_required() == MINIMUM_FEE
         );
     }
 
     #[test]
     fn dust_change() {
-        #[allow(deprecated)]
-        let fee_rule = FixedFeeRule::standard();
-        let change_strategy =
-            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
+        let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+            fee_rule,
+            None,
+            ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -159,38 +192,33 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(40000),
+                        value: Zatoshis::const_from_u64(40000),
                     },
                     // enough to pay a fee, plus dust
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(10100),
+                        value: Zatoshis::const_from_u64(10100),
                     },
                 ][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT_VANILLA,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
-            &DustOutputPolicy::default(),
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
         );
 
         assert_matches!(
             result,
             Err(ChangeError::InsufficientFunds { available, required })
-            if available == NonNegativeAmount::const_from_u64(50100) && required == NonNegativeAmount::const_from_u64(60000)
+            if available == Zatoshis::const_from_u64(50100) && required == Zatoshis::const_from_u64(60000)
         );
     }
 }

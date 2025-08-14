@@ -1,8 +1,10 @@
 //! Structs representing the components within Zcash transactions.
 
-use std::io::{self, Read, Write};
+use alloc::vec::Vec;
+use core2::io::{self, Read, Write};
 
-use super::{amount::Amount, GROTH_PROOF_SIZE};
+use super::GROTH_PROOF_SIZE;
+use zcash_protocol::value::ZatBalance;
 
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
 const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
@@ -22,10 +24,10 @@ impl Bundle {
     /// its value is added to the transparent value pool; when it
     /// is negative, its value is subtracted from the transparent
     /// value pool.
-    pub fn value_balance(&self) -> Option<Amount> {
+    pub fn value_balance(&self) -> Option<ZatBalance> {
         self.joinsplits
             .iter()
-            .try_fold(Amount::zero(), |total, js| total + js.net_value())
+            .try_fold(ZatBalance::zero(), |total, js| total + js.net_value())
     }
 }
 
@@ -36,8 +38,8 @@ pub(crate) enum SproutProof {
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
-impl std::fmt::Debug for SproutProof {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl core::fmt::Debug for SproutProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         match self {
             SproutProof::Groth(_) => write!(f, "SproutProof::Groth"),
             SproutProof::PHGR(_) => write!(f, "SproutProof::PHGR"),
@@ -47,8 +49,8 @@ impl std::fmt::Debug for SproutProof {
 
 #[derive(Clone)]
 pub struct JsDescription {
-    pub(crate) vpub_old: Amount,
-    pub(crate) vpub_new: Amount,
+    pub(crate) vpub_old: ZatBalance,
+    pub(crate) vpub_new: ZatBalance,
     pub(crate) anchor: [u8; 32],
     pub(crate) nullifiers: [[u8; 32]; ZC_NUM_JS_INPUTS],
     pub(crate) commitments: [[u8; 32]; ZC_NUM_JS_OUTPUTS],
@@ -59,8 +61,8 @@ pub struct JsDescription {
     pub(crate) ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
 }
 
-impl std::fmt::Debug for JsDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl core::fmt::Debug for JsDescription {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         write!(
             f,
             "JSDescription(
@@ -89,7 +91,7 @@ impl JsDescription {
         let vpub_old = {
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_u64_le_bytes(tmp)
+            ZatBalance::from_u64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_old out of range"))?;
 
@@ -97,7 +99,7 @@ impl JsDescription {
         let vpub_new = {
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_u64_le_bytes(tmp)
+            ZatBalance::from_u64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_new out of range"))?;
 
@@ -189,7 +191,7 @@ impl JsDescription {
     /// its value is added to the transparent value pool; when it
     /// is negative, its value is subtracted from the transparent
     /// value pool.
-    pub fn net_value(&self) -> Amount {
+    pub fn net_value(&self) -> ZatBalance {
         (self.vpub_new - self.vpub_old).expect("difference is in range [-MAX_MONEY..=MAX_MONEY]")
     }
 }

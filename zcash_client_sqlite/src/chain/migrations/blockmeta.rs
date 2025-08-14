@@ -1,4 +1,4 @@
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 
 pub fn all_migrations() -> Vec<Box<dyn RusqliteMigration<Error = rusqlite::Error>>> {
     vec![Box::new(init::Migration {})]
@@ -6,8 +6,8 @@ pub fn all_migrations() -> Vec<Box<dyn RusqliteMigration<Error = rusqlite::Error
 
 pub mod init {
     use rusqlite::{self};
-    use schemer::{self, migration};
-    use schemer_rusqlite::RusqliteMigration;
+    use schemerz::{self, migration};
+    use schemerz_rusqlite::RusqliteMigration;
     use uuid::Uuid;
 
     pub struct Migration;
@@ -24,7 +24,7 @@ pub mod init {
 
     migration!(
         Migration,
-        &format!("{}", MIGRATION_ID),
+        MIGRATION_ID,
         [],
         "Initialize the cachemeta database."
     );

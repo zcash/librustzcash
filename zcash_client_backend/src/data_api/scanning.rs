@@ -3,7 +3,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 #[cfg(feature = "unstable-spanning-tree")]
 pub mod spanning_tree;
@@ -50,9 +50,7 @@ impl ScanRange {
     pub fn from_parts(block_range: Range<BlockHeight>, priority: ScanPriority) -> Self {
         assert!(
             block_range.end >= block_range.start,
-            "{:?} is invalid for ScanRange({:?})",
-            block_range,
-            priority,
+            "{block_range:?} is invalid for ScanRange({priority:?})",
         );
         ScanRange {
             block_range,
