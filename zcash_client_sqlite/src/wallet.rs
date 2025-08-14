@@ -2502,37 +2502,46 @@ pub(crate) fn chain_tip_height(
     })
 }
 
+pub(crate) fn get_anchor_height(
+    conn: &rusqlite::Connection,
+    target_height: TargetHeight,
+    min_confirmations: NonZeroU32,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    let sapling_anchor_height = get_max_checkpointed_height(
+        conn,
+        ShieldedProtocol::Sapling,
+        target_height,
+        min_confirmations,
+    )?;
+
+    #[cfg(feature = "orchard")]
+    let orchard_anchor_height = get_max_checkpointed_height(
+        conn,
+        ShieldedProtocol::Orchard,
+        target_height,
+        min_confirmations,
+    )?;
+
+    #[cfg(not(feature = "orchard"))]
+    let orchard_anchor_height: Option<BlockHeight> = None;
+
+    Ok(sapling_anchor_height
+        .zip(orchard_anchor_height)
+        .map(|(s, o)| std::cmp::min(s, o))
+        .or(sapling_anchor_height)
+        .or(orchard_anchor_height))
+}
+
 pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(TargetHeight, BlockHeight)>, SqliteClientError> {
     match chain_tip_height(conn)? {
         Some(chain_tip_height) => {
-            let sapling_anchor_height = get_max_checkpointed_height(
-                conn,
-                ShieldedProtocol::Sapling,
-                chain_tip_height,
-                min_confirmations,
-            )?;
+            let target_height = TargetHeight::from(chain_tip_height + 1);
+            let anchor_height = get_anchor_height(conn, target_height, min_confirmations)?;
 
-            #[cfg(feature = "orchard")]
-            let orchard_anchor_height = get_max_checkpointed_height(
-                conn,
-                ShieldedProtocol::Orchard,
-                chain_tip_height,
-                min_confirmations,
-            )?;
-
-            #[cfg(not(feature = "orchard"))]
-            let orchard_anchor_height: Option<BlockHeight> = None;
-
-            let anchor_height = sapling_anchor_height
-                .zip(orchard_anchor_height)
-                .map(|(s, o)| std::cmp::min(s, o))
-                .or(sapling_anchor_height)
-                .or(orchard_anchor_height);
-
-            Ok(anchor_height.map(|h| ((chain_tip_height + 1).into(), h)))
+            Ok(anchor_height.map(|h| (target_height, h)))
         }
         None => Ok(None),
     }

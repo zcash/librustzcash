@@ -21,7 +21,7 @@ use zcash_protocol::{
 
 use crate::{
     error::SqliteClientError,
-    wallet::{pool_code, wallet_birthday},
+    wallet::{get_anchor_height, pool_code, wallet_birthday},
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -168,18 +168,22 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    match target_value {
-        TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
-            conn,
-            params,
-            account,
-            zats,
-            target_height,
-            confirmations_policy,
-            exclude,
-            protocol,
-            to_spendable_note,
-        ),
+    match get_anchor_height(conn, target_height, confirmations_policy.trusted())? {
+        Some(anchor_height) => match target_value {
+            TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
+                conn,
+                params,
+                account,
+                zats,
+                target_height,
+                anchor_height,
+                confirmations_policy,
+                exclude,
+                protocol,
+                to_spendable_note,
+            ),
+        },
+        None => Ok(vec![]),
     }
 }
 
@@ -190,6 +194,7 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     account: AccountUuid,
     target_value: Zatoshis,
     target_height: TargetHeight,
+    anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -207,15 +212,13 @@ where
         }
     };
 
-    let trusted_anchor_height = target_height - u32::from(confirmations_policy.trusted());
-
     let TableConstants {
         table_prefix,
         output_index_col,
         note_reconstruction_cols,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
-    if unscanned_tip_exists(conn, trusted_anchor_height, table_prefix)? {
+    if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
         return Ok(vec![]);
     }
 
@@ -300,7 +303,7 @@ where
     let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account_uuid": account.0,
-            ":anchor_height": &u32::from(trusted_anchor_height),
+            ":anchor_height": &u32::from(anchor_height),
             ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
