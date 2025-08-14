@@ -131,6 +131,28 @@ jobs:
       - name: Verify working directory is clean
         run: git diff --exit-code
 
+  test-all-features:
+    name: Test with --all-features
+    runs-on: ubuntu-latest-8cores
+    continue-on-error: true
+    steps: 
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run slow tests
+        run: cargo test --workspace --all-features 
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
   test-slow:
     name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
