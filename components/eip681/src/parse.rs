@@ -23,6 +23,14 @@ pub enum ParseError<'a> {
         digits: Digits,
         input: &'a str,
     },
+
+    #[snafu(display("Missing ENS name"))]
+    MissingEns,
+
+    #[snafu(display("{source}"))]
+    EnsNormalization {
+        source: ens_normalize_rs::ProcessError,
+    },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -77,7 +85,7 @@ impl core::fmt::Display for Digits {
 impl Digits {
     pub const MAX_PLACES: usize = u64::MAX.ilog10() as usize;
 
-    pub fn into_u64(&self) -> u64 {
+    pub fn as_u64(&self) -> u64 {
         let mut total = 0;
         for (mag, digit) in self.0.iter().rev().enumerate() {
             total += *digit as u64 * 10u64.pow(mag as u32);
@@ -98,10 +106,6 @@ impl Digits {
             v -= digit * top;
         }
         digits
-    }
-
-    pub fn render(&self) -> String {
-        self.to_string()
     }
 
     /// Parse at least `min` digits.
@@ -134,25 +138,28 @@ impl Digits {
 /// number = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
 /// ```
 ///
-/// Note that a number can be expressed in scientific notation, with a
+/// A number can be expressed in scientific notation, with a
 /// multiplier of a power of 10. Only integer numbers are allowed, so the
 /// exponent MUST be greater or equal to the number of decimals after the point.
 ///
-/// Note(schell):
-/// I suspect that this ABNF notation is incorrect, as it allows for a few cases
-/// that wouldn't make sense.
+/// ## Note
+/// This ABNF notation is doesn't seem correct, as it allows for quite a few
+/// cases that don't make sense - for example:
+///
 /// 1. `*DIGIT` is missing and `[ "." 1*DIGIT ]` is present while `[ ( "e" / "E" ) [ 1*DIGIT] ]`
 ///    is not
 /// 2. `[ ( "e" / "E" ) [ 1*DIGIT] ]` is missing the `[ 1*DIGIT ]` (eg, just "e")
 /// 3. The decimal is present while the exponent is missing
-/// 4. others
+/// 4. only `"-" / "+"` is present
+/// 5. ...others
 ///
-/// TODO(schell):
-///   - look at an EIP-681 _implementation_ to see what they've done
-///     - <https://github.com/crypto-com/defi-wallet-core-rs/blob/52e6c5be2ce44085d7c0d94aabc901b13b8629b6/common/src/qr_code.rs#L171>
-///   - tell someone about the bugs
+/// For this reason, in this library, parsing is separate from validation.
 ///
-/// This suggests that validation is separate from parsing.
+/// Other implementations use regular expressions instead of parsing, and only
+/// support very specific values.  
+///
+// TODO(schell):
+//   - tell someone about the bugs in the ABNF syntax
 #[derive(Debug, PartialEq)]
 pub struct Number {
     /// true for "+", false for "-"
@@ -168,51 +175,37 @@ pub struct Number {
 
 impl core::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.render())
-    }
-}
-
-impl Number {
-    pub fn render(&self) -> String {
+        let this = &self;
         let Number {
             signum,
             integer,
             decimal,
             exponent,
-        } = self;
-        let sig = if let Some(signum) = signum {
-            if *signum {
-                "+"
-            } else {
-                "-"
-            }
-        } else {
-            ""
+        } = this;
+        if let Some(signum) = signum {
+            f.write_str(if *signum { "+" } else { "-" })?;
+        }
+        integer.fmt(f)?;
+        if let Some(dec) = decimal {
+            f.write_fmt(format_args!(".{dec}"))?;
         };
-        let dec = if let Some(dec) = decimal {
-            format!(".{dec}")
-        } else {
-            String::new()
-        };
-        let exp = if let Some((little_e, maybe_exp)) = exponent {
-            let e = if *little_e { "e" } else { "E" };
+        if let Some((little_e, maybe_exp)) = exponent {
+            f.write_str(if *little_e { "e" } else { "E" })?;
             if let Some(exp) = maybe_exp {
-                format!("{e}{exp}")
-            } else {
-                e.to_owned()
+                exp.fmt(f)?;
             }
-        } else {
-            String::new()
-        };
-        format!("{sig}{integer}{dec}{exp}")
+        }
+        Ok(())
     }
+}
 
+impl Number {
     pub fn validate(&self) -> Result<(), ValidationError> {
         if let Some(dec) = self.decimal.as_ref() {
             let exp_value = self
                 .exponent
                 .as_ref()
-                .and_then(|(_e, maybe_exp)| maybe_exp.as_ref().map(Digits::into_u64))
+                .and_then(|(_e, maybe_exp)| maybe_exp.as_ref().map(Digits::as_u64))
                 .unwrap_or_default();
             snafu::ensure!(
                 exp_value >= dec.0.len() as u64,
@@ -275,6 +268,55 @@ impl Number {
     }
 }
 
+/// Ethereum Name Service name.
+///
+/// See [EIP-137](https://eips.ethereum.org/EIPS/eip-137).
+///
+/// Examples:
+/// * dao.eth
+/// * linea.eth
+///
+/// Uses:
+/// * https://crates.io/crates/ens-normalize-rs
+///
+/// ENS names must conform to the following syntax:
+///
+/// ## Name Syntax
+///
+/// ```not_abnf
+/// <domain> ::= <label> | <domain> "." <label>
+/// <label> ::= any valid string label per [UTS46](https://unicode.org/reports/tr46/)
+/// ```
+///
+/// In short, names consist of a series of dot-separated labels.
+#[derive(Debug, PartialEq)]
+pub struct EnsName(String);
+
+impl core::fmt::Display for EnsName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl EnsName {
+    const DELIMITERS: &[char] = &['@', '/', '?'];
+
+    /// Parse an `EnsName`.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        fn continue_parsing(c: char) -> bool {
+            !c.is_whitespace() && !EnsName::DELIMITERS.contains(&c)
+        }
+
+        let (i, name) = nom::bytes::complete::take_till(|c| !continue_parsing(c))(i)?;
+        snafu::ensure!(!name.is_empty(), MissingEnsSnafu);
+
+        // Now we have our name, normalize
+        let normalized_name = ens_normalize_rs::normalize(name).context(EnsNormalizationSnafu)?;
+
+        Ok((i, EnsName(normalized_name)))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -283,7 +325,7 @@ mod test {
 
     #[test]
     fn digits_sanity() {
-        assert_eq!(123, Digits(vec![1, 2, 3]).into_u64());
+        assert_eq!(123, Digits(vec![1, 2, 3]).as_u64());
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).0);
     }
 
@@ -309,7 +351,7 @@ mod test {
     proptest! {
         #[test]
         fn arb_digits_gte_sanity(digits in arb_digits_gte(20)) {
-            assert!(digits.into_u64() >= 20);
+            assert!(digits.as_u64() >= 20);
         }
     }
 
@@ -317,23 +359,18 @@ mod test {
     fn parse_digits_sanity() {
         let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
         assert!(i.is_empty());
-        assert_eq!(256, seen_digits.into_u64())
+        assert_eq!(256, seen_digits.as_u64())
     }
 
     proptest! {
         #[test]
         fn parse_digits(digits in arb_digits(1)) {
-            let s = digits.render();
+            let s = digits.to_string();
             let (i, seen_digits) = Digits::parse_min(&s, 0).unwrap();
             assert!(i.is_empty());
             assert_eq!(digits, seen_digits);
         }
     }
-
-    // #[test]
-    // fn number_render_sanity() {
-    //     Number { signum: Some(true), integer: Digits(vec!["12345"]),  }
-    // }
 
     fn arb_valid_number() -> impl Strategy<Value = Number> {
         (
@@ -400,6 +437,48 @@ mod test {
             let (i, seen_ns) = Number::parse(&s).unwrap();
             assert!(i.is_empty());
             assert_eq!(ns, seen_ns);
+        }
+    }
+
+    #[test]
+    fn parse_ens_name_sanity() {
+        let valid_ens_names = [
+            "luckyrabbits.meter",
+            "web3.web2.web1",
+            "kitty.cat",
+            "renderling.xyz",
+            "efnx.com",
+            "takt.com",
+        ];
+        for input in valid_ens_names {
+            println!("parsing '{input}'");
+            let (i, name) = EnsName::parse(input).unwrap();
+            println!("  got '{name}'");
+            assert_eq!("", i);
+            assert_eq!(EnsName(input.to_string()), name);
+        }
+    }
+
+    fn arb_any_ens_name() -> impl Strategy<Value = EnsName> {
+        proptest::string::string_regex("[^\\s\\t@/?]{0,255}")
+            .unwrap()
+            .prop_map(EnsName)
+    }
+
+    proptest! {
+        #[test]
+        fn arb_ens_name(expected in arb_any_ens_name()) {
+            let input = expected.to_string();
+            match EnsName::parse(&input) {
+                Err(nom::Err::Error(ParseError::EnsNormalization{..})) => {}
+                Err(nom::Err::Error(ParseError::MissingEns)) => {}
+                Err(e) => panic!("{e}"),
+                Ok((i, seen)) => {
+                    assert_eq!("", i);
+                    assert_eq!(expected, seen);
+                }
+
+            }
         }
     }
 }

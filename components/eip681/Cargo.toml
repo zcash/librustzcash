@@ -19,6 +19,7 @@ snafu = "0.8.6"
 
 # - Parsing and Encoding
 base64.workspace = true
+ens-normalize-rs = "0.1.1"
 nom.workspace = true
 percent-encoding.workspace = true
 
