@@ -9,6 +9,12 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.1] - 2025-08-06
+
+### Fixed
+- Use of an incorrect prefix for transparent secret key Base58 encoding
+  (available under the `transparent-key-encoding` feature) has been fixed.
+
 ## [0.10.0] - 2025-08-06
 
 ### Added
