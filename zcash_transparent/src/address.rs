@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 /// Most of the opcodes are unused by this crate, but we define them so that the alternate
 /// `Debug` impl for [`Script`] renders correctly for unexpected scripts.
 #[derive(Debug)]
-enum OpCode {
+pub(crate) enum OpCode {
     // push value
     Op0 = 0x00, // False
     PushData1 = 0x4c,
