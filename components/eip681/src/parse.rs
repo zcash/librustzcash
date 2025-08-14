@@ -1,11 +1,60 @@
 //! Types and functions used for parsing.
 
+use nom::Parser;
 use snafu::prelude::*;
 
 #[derive(Debug, Snafu)]
-pub enum ParseError {
-    #[snafu(display("Expected a digit, saw '{c}'"))]
-    NotADigit { c: char },
+pub enum ParseError<'a> {
+    #[snafu(display("{}", nom::error::Error::to_string(&nom::error::Error {
+        input: *input, code: *code
+    })))]
+    Nom {
+        input: &'a str,
+        code: nom::error::ErrorKind,
+        other: Option<String>,
+    },
+
+    #[snafu(display(
+        "Expected at least {min} digits, saw only '{digits}' before {}",
+        input.split_at(10).0
+    ))]
+    DigitsMinimum {
+        min: usize,
+        digits: Digits,
+        input: &'a str,
+    },
+}
+
+impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
+    fn from_error_kind(input: &'a str, code: nom::error::ErrorKind) -> Self {
+        NomSnafu {
+            input,
+            code,
+            other: None,
+        }
+        .build()
+    }
+
+    fn append(input: &'a str, code: nom::error::ErrorKind, other: Self) -> Self {
+        NomSnafu {
+            input,
+            code,
+            other: Some(other.to_string()),
+        }
+        .build()
+    }
+}
+
+impl<'a> From<ParseError<'a>> for nom::Err<ParseError<'a>> {
+    fn from(value: ParseError<'a>) -> Self {
+        nom::Err::Error(value)
+    }
+}
+
+#[derive(Debug, Snafu, PartialEq)]
+pub enum ValidationError {
+    #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]
+    SmallExponent { expected: usize, seen: u64 },
 }
 
 /// Zero or more consecutive digits.
@@ -55,8 +104,9 @@ impl Digits {
         self.to_string()
     }
 
-    pub fn parse(i: &str) -> nom::IResult<&str, Self> {
-        let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(10))(i)?;
+    /// Parse at least `min` digits.
+    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_ascii_digit())(i)?;
         let data = chars
             .chars()
             .map(|c| {
@@ -65,7 +115,16 @@ impl Digits {
                 }) as u8
             })
             .collect::<Vec<_>>();
-        Ok((i, Digits(data)))
+        let digits = Digits(data);
+        snafu::ensure!(
+            digits.0.len() >= min,
+            DigitsMinimumSnafu {
+                min,
+                digits,
+                input: i
+            }
+        );
+        Ok((i, digits))
     }
 }
 
@@ -94,24 +153,30 @@ impl Digits {
 ///   - tell someone about the bugs
 ///
 /// This suggests that validation is separate from parsing.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Number {
     /// true for "+", false for "-"
     signum: Option<bool>,
     integer: Digits,
-    /// true for "e", false for "E"
-    little_e: bool,
     decimal: Option<Digits>,
-    exponent: Option<Digits>,
+    exponent: Option<(
+        // true for "e", false for "E"
+        bool,
+        Option<Digits>,
+    )>,
+}
+
+impl core::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.render())
+    }
 }
 
 impl Number {
-    #[cfg(test)]
     pub fn render(&self) -> String {
         let Number {
             signum,
             integer,
-            little_e,
             decimal,
             exponent,
         } = self;
@@ -129,31 +194,84 @@ impl Number {
         } else {
             String::new()
         };
-        let exp = if let Some(exp) = exponent {
+        let exp = if let Some((little_e, maybe_exp)) = exponent {
             let e = if *little_e { "e" } else { "E" };
-            format!("{e}{exp}")
+            if let Some(exp) = maybe_exp {
+                format!("{e}{exp}")
+            } else {
+                e.to_owned()
+            }
         } else {
             String::new()
         };
         format!("{sig}{integer}{dec}{exp}")
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if let Some(dec) = self.decimal.as_ref() {
             let exp_value = self
                 .exponent
                 .as_ref()
-                .map(Digits::into_u64)
+                .and_then(|(_e, maybe_exp)| maybe_exp.as_ref().map(Digits::into_u64))
                 .unwrap_or_default();
-            exp_value >= dec.0.len() as u64
-        } else {
-            true
+            snafu::ensure!(
+                exp_value >= dec.0.len() as u64,
+                SmallExponentSnafu {
+                    expected: dec.0.len(),
+                    seen: exp_value,
+                }
+            );
         }
+        Ok(())
     }
 
-    /// Parse a number.
-    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError> {
-        todo!()
+    /// Parse a `Number`.
+    ///
+    /// /// ```abnf
+    /// number = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
+    /// ```
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        // Parse [ "-" / "+" ]
+        let parse_signum_pos = nom::character::complete::char('+').map(|_| true);
+        let parse_signum_neg = nom::character::complete::char('-').map(|_| false);
+        let parse_signum = parse_signum_pos.or(parse_signum_neg);
+        let (i, signum) = nom::combinator::opt(parse_signum)(i)?;
+
+        // Parse *DIGIT
+        let (i, integer) = Digits::parse_min(i, 0)?;
+
+        // Parse [ "." 1*DIGIT ]
+        fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
+            let (i, _dot) = nom::character::complete::char('.')(i)?;
+            let (i, digits) = Digits::parse_min(i, 1)?;
+            Ok((i, digits))
+        }
+        let (i, decimal) = nom::combinator::opt(parse_decimal)(i)?;
+
+        // Parse [ ( "e" / "E" ) [ 1*DIGIT ] ]
+        fn parse_exponent(i: &str) -> nom::IResult<&str, (bool, Option<Digits>), ParseError<'_>> {
+            // Parse ( "e" / "E" )
+            let parse_little_e = nom::character::complete::char('e').map(|_| true);
+            let parse_big_e = nom::character::complete::char('E').map(|_| false);
+            let mut parse_e = parse_little_e.or(parse_big_e);
+            let (i, little_e) = parse_e.parse(i)?;
+
+            // Parse [ 1*DIGIT ]
+            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1))(i)?;
+
+            Ok((i, (little_e, maybe_exp)))
+        }
+        let (i, exponent) = nom::combinator::opt(parse_exponent)(i)?;
+
+        Ok((
+            i,
+            Self {
+                signum,
+                integer,
+                decimal,
+                exponent,
+            },
+        ))
     }
 }
 
@@ -197,7 +315,7 @@ mod test {
 
     #[test]
     fn parse_digits_sanity() {
-        let (i, seen_digits) = Digits::parse("256").unwrap();
+        let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
         assert!(i.is_empty());
         assert_eq!(256, seen_digits.into_u64())
     }
@@ -206,7 +324,7 @@ mod test {
         #[test]
         fn parse_digits(digits in arb_digits(1)) {
             let s = digits.render();
-            let (i, seen_digits) = Digits::parse(&s).unwrap();
+            let (i, seen_digits) = Digits::parse_min(&s, 0).unwrap();
             assert!(i.is_empty());
             assert_eq!(digits, seen_digits);
         }
@@ -234,9 +352,8 @@ mod test {
                 .prop_map(move |exponent| Number {
                     signum,
                     integer: integer.clone(),
-                    little_e,
                     decimal: decimal.clone(),
-                    exponent,
+                    exponent: exponent.map(|exp| (little_e, Some(exp))),
                 })
             })
     }
@@ -246,68 +363,43 @@ mod test {
         (
             prop::option::of(any::<bool>()),
             arb_digits(0),
-            any::<bool>(),
+            prop::option::of(any::<bool>()),
             prop::option::of(arb_digits(1)),
             prop::option::of(arb_digits(1)),
         )
             .prop_map(|(signum, integer, little_e, decimal, exponent)| Number {
                 signum,
                 integer,
-                little_e,
                 decimal,
-                exponent,
+                exponent: little_e.map(|e| (e, exponent)),
             })
     }
 
     proptest! {
         #[test]
         fn arb_valid_number_sanity(number in arb_valid_number()) {
-            assert!(number.is_valid());
+            assert_eq!(Ok(()), number.validate());
         }
     }
 
-    // prop_compose! {
-    //     fn arb_number(max_len: usize)
-    //     (
-    //         n_decimals in prop::option::of(1..=max_len)
-    //     )
-    //     (
-    //         decimal in n_decimals.prop_map(|n| arb_digits(1..=n))
-    //     )
-    //     (
-    //         signum in any::<bool>(),
-    //         integer in arb_digits(0..=max_len),
-    //         decimal_and_exponent in decimal.prop_map(|ds| {
-    //             let exponent = arb_digits()
-    //             (
-    //                 ds,
-    //                 arb_digits()
-    //             )
-    //         })
-    //     ) -> ArbNumber {
-    //         ArbNumber {
-    //             signum,
-    //             integer,
-    //             decimal_and_exponent: None
-    //         }
-    //     }
-    // }
+    proptest! {
+        #[test]
+        fn parse_valid_number(ns in arb_valid_number()) {
+            let s = ns.to_string();
+            let (i, seen_ns) = Number::parse(&s).unwrap();
+            assert!(i.is_empty());
+            assert_eq!(ns, seen_ns);
+            assert_eq!(Ok(()), seen_ns.validate());
+        }
+    }
 
-    // // prop_compose! {
-    // //     fn arb_number_str()
-    // //     (decimals in prop::option::of(any::<u64>()))
-    // //     (
-    // //         integer in prop::option::of(any::<i64>()),
-    // //         digit2 in decimals.prop_map(|exp| )
-    // //     ) -> String {
-
-    // //     }
-    // // }
-
-    // proptest! {
-    //     #[test]
-    //     fn prop_number(ns in arb_number(10)) {
-    //         assert!(ns.integer.len() <= 10);
-    //     }
-    // }
+    proptest! {
+        #[test]
+        fn parse_any_number(ns in arb_any_number()) {
+            let s = ns.to_string();
+            let (i, seen_ns) = Number::parse(&s).unwrap();
+            assert!(i.is_empty());
+            assert_eq!(ns, seen_ns);
+        }
+    }
 }

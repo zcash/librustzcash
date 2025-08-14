@@ -1,6 +1,6 @@
 //! Parser for [EIP-681](https://eips.ethereum.org/EIPS/eip-681) transaction requests.
 //!
-//! ## Syntax
+//! ## ABNF Syntax
 //!
 //! ```abnf
 //! request          = schema_prefix target_address [ "@" chain_id ] [ "/" function_name ] [ "?" parameters ]
