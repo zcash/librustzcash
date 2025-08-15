@@ -16,7 +16,7 @@ use zcash_protocol::{
     PoolType, ShieldedProtocol,
 };
 
-use crate::data_api::InputSource;
+use crate::data_api::{wallet::TargetHeight, InputSource};
 
 pub mod common;
 #[cfg(feature = "non-standard-fees")]
@@ -542,7 +542,7 @@ pub trait ChangeStrategy {
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,

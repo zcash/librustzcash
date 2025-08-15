@@ -876,7 +876,7 @@ impl proposal::Proposal {
 
                 Proposal::multi_step(
                     fee_rule,
-                    self.min_target_height.into(),
+                    BlockHeight::from_u32(self.min_target_height).into(),
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
                 .map_err(ProposalDecodingError::ProposalInvalid)

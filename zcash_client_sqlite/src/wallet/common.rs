@@ -3,9 +3,14 @@
 use incrementalmerkletree::Position;
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
+use zip32::Scope;
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT},
+    data_api::{
+        scanning::ScanPriority,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+        NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+    },
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
@@ -15,9 +20,10 @@ use zcash_protocol::{
     PoolType, ShieldedProtocol,
 };
 
-use super::wallet_birthday;
 use crate::{
-    error::SqliteClientError, wallet::pool_code, AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
+    wallet::{get_anchor_height, pool_code, scanning::priority_code},
+    AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]
@@ -113,7 +119,7 @@ where
         &format!(
             "SELECT rn.id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                accounts.ufvk, recipient_key_scope
+                accounts.ufvk, recipient_key_scope, transactions.mined_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions ON transactions.id_tx = rn.tx
@@ -154,7 +160,8 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -162,17 +169,22 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    match target_value {
-        TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
-            conn,
-            params,
-            account,
-            zats,
-            anchor_height,
-            exclude,
-            protocol,
-            to_spendable_note,
-        ),
+    match get_anchor_height(conn, target_height, confirmations_policy.trusted())? {
+        Some(anchor_height) => match target_value {
+            TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
+                conn,
+                params,
+                account,
+                zats,
+                target_height,
+                anchor_height,
+                confirmations_policy,
+                exclude,
+                protocol,
+                to_spendable_note,
+            ),
+        },
+        None => Ok(vec![]),
     }
 }
 
@@ -182,7 +194,9 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
+    target_height: TargetHeight,
     anchor_height: BlockHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -190,15 +204,6 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    let birthday_height = match wallet_birthday(conn)? {
-        Some(birthday) => birthday,
-        None => {
-            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
-            // such a case, the wallet has no notes to spend.
-            return Ok(vec![]);
-        }
-    };
-
     let TableConstants {
         table_prefix,
         output_index_col,
@@ -223,58 +228,51 @@ where
     // 3) Select all notes for which the running sum was less than the required value, as
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
-    let mut stmt_select_notes = conn.prepare_cached(
-        &format!(
-            "WITH eligible AS (
-                 SELECT
-                     {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                     SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
-                     accounts.ufvk as ufvk, recipient_key_scope
-                 FROM {table_prefix}_received_notes
-                 INNER JOIN accounts
-                    ON accounts.id = {table_prefix}_received_notes.account_id
-                 INNER JOIN transactions
-                    ON transactions.id_tx = {table_prefix}_received_notes.tx
-                 WHERE accounts.uuid = :account_uuid
-                 AND {table_prefix}_received_notes.account_id = accounts.id
-                 AND value > 5000 -- FIXME #1316, allow selection of dust inputs
-                 AND accounts.ufvk IS NOT NULL
-                 AND recipient_key_scope IS NOT NULL
-                 AND nf IS NOT NULL
-                 AND commitment_tree_position IS NOT NULL
-                 AND transactions.block <= :anchor_height
-                 AND {table_prefix}_received_notes.id NOT IN rarray(:exclude)
-                 AND {table_prefix}_received_notes.id NOT IN (
-                   SELECT {table_prefix}_received_note_id
-                   FROM {table_prefix}_received_note_spends
-                   JOIN transactions stx ON stx.id_tx = transaction_id
-                   WHERE stx.block IS NOT NULL -- the spending tx is mined
-                   OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
-                 )
-                 AND NOT EXISTS (
-                    SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
-                    -- select all the unscanned ranges involving the shard containing this note
-                    WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
-                    AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-                    -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-                    AND unscanned.block_range_start <= :anchor_height
-                    -- exclude unscanned ranges that end below the wallet birthday
-                    AND unscanned.block_range_end > :wallet_birthday
-                 )
+    let mut stmt_select_notes = conn.prepare_cached(&format!(
+        "WITH eligible AS (
+             SELECT
+                 rn.id AS id, txid, {output_index_col},
+                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                 SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
+                 accounts.ufvk as ufvk, recipient_key_scope,
+                 t.block AS mined_height
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN accounts ON accounts.id = rn.account_id
+             INNER JOIN transactions t ON t.id_tx = rn.tx
+             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+                ON rn.commitment_tree_position >= scan_state.start_position
+                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             WHERE accounts.uuid = :account_uuid
+             -- FIXME #1316, allow selection of dust inputs
+             AND rn.value > 5000
+             AND accounts.ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
+             -- the shard containing the note is fully scanned; this condition will exclude
+             -- notes for which `scan_state.max_priority IS NULL` (which will also arise if
+             -- `rn.commitment_tree_position IS NULL`; hence we don't need that explicit filter)
+             AND scan_state.max_priority <= :scanned_priority
+             AND t.block <= :anchor_height
+             AND rn.id NOT IN rarray(:exclude)
+             AND rn.id NOT IN (
+               SELECT {table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends rns
+               JOIN transactions stx ON stx.id_tx = rns.transaction_id
+               WHERE stx.block IS NOT NULL -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )
-             SELECT id, txid, {output_index_col},
-                    diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
-             FROM eligible WHERE so_far < :target_value
-             UNION
-             SELECT id, txid, {output_index_col},
-                    diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
-             FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
-        )
-    )?;
+         )
+         SELECT id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope, mined_height
+         FROM eligible WHERE so_far < :target_value
+         UNION
+         SELECT id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope, mined_height
+         FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
+    ))?;
 
     let excluded: Vec<Value> = exclude
         .iter()
@@ -292,16 +290,38 @@ where
         named_params![
             ":account_uuid": account.0,
             ":anchor_height": &u32::from(anchor_height),
+            ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
-            ":wallet_birthday": u32::from(birthday_height)
+            ":scanned_priority": priority_code(&ScanPriority::Scanned)
         ],
-        |r| to_spendable_note(params, r),
+        |r| -> Result<_, SqliteClientError> { to_spendable_note(params, r) },
     )?;
 
     notes
-        .filter_map(|r| r.transpose())
-        .collect::<Result<_, _>>()
+        .filter_map(|result_maybe_note| {
+            let result_note = result_maybe_note.transpose()?;
+            result_note
+                .map(|note| {
+                    let number_of_confirmations = target_height
+                        - note
+                            .mined_height()
+                            .expect("mined height checked to be non-null");
+
+                    let required_confirmations = u32::from(confirmations_policy.untrusted());
+
+                    // If the note is from a trusted source (this wallet), then we don't have to
+                    // determine the number of confirmations, as we've already queried above based
+                    // on the trusted anchor height. So we only check if it's trusted, or if it
+                    // meets the untrusted number of confirmations.
+                    let is_spendable = note.spending_key_scope() == Scope::Internal
+                        || number_of_confirmations >= required_confirmations;
+
+                    is_spendable.then_some(note)
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
 }
 
 #[allow(dead_code)]
@@ -355,14 +375,13 @@ pub(crate) fn select_unspent_note_meta(
     let mut stmt = conn.prepare_cached(&format!("
         SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
                commitment_tree_position, value
-        FROM {table_prefix}_received_notes
-        INNER JOIN transactions
-           ON transactions.id_tx = {table_prefix}_received_notes.tx
+        FROM {table_prefix}_received_notes rn
+        INNER JOIN transactions ON transactions.id_tx = rn.tx
         WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
         AND recipient_key_scope IS NOT NULL
         AND nf IS NOT NULL
         AND commitment_tree_position IS NOT NULL
-        AND {table_prefix}_received_notes.id NOT IN (
+        AND rn.id NOT IN (
           SELECT {table_prefix}_received_note_id
           FROM {table_prefix}_received_note_spends
           JOIN transactions stx ON stx.id_tx = transaction_id
@@ -373,8 +392,8 @@ pub(crate) fn select_unspent_note_meta(
         AND NOT EXISTS (
            SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
            -- select all the unscanned ranges involving the shard containing this note
-           WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
-           AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+           WHERE rn.commitment_tree_position >= unscanned.start_position
+           AND rn.commitment_tree_position < unscanned.end_position_exclusive
            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
            AND unscanned.block_range_start <= :anchor_height
            -- exclude unscanned ranges that end below the wallet birthday

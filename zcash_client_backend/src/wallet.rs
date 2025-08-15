@@ -383,6 +383,7 @@ pub struct ReceivedNote<NoteRef, NoteT> {
     note: NoteT,
     spending_key_scope: Scope,
     note_commitment_tree_position: Position,
+    mined_height: Option<BlockHeight>,
 }
 
 impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
@@ -393,6 +394,7 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
         note: NoteT,
         spending_key_scope: Scope,
         note_commitment_tree_position: Position,
+        mined_height: Option<BlockHeight>,
     ) -> Self {
         ReceivedNote {
             note_id,
@@ -401,6 +403,7 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note,
             spending_key_scope,
             note_commitment_tree_position,
+            mined_height,
         }
     }
 
@@ -422,6 +425,9 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
 
     /// Map over the `note` field of this data structure.
     ///
@@ -435,6 +441,7 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note: f(self.note),
             spending_key_scope: self.spending_key_scope,
             note_commitment_tree_position: self.note_commitment_tree_position,
+            mined_height: self.mined_height,
         }
     }
 }

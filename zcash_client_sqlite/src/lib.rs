@@ -51,12 +51,15 @@ use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::Balance;
 
 use zcash_client_backend::{
     data_api::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
         SeedRelevance, SentTransaction, SpendableNotes, TargetValue, TransactionDataRequest,
@@ -105,7 +108,6 @@ use {
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -574,7 +576,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::new(
@@ -584,7 +587,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     &self.params,
                     account,
                     target_value,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     exclude,
                 )?
             } else {
@@ -597,7 +601,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     &self.params,
                     account,
                     target_value,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     exclude,
                 )?
             } else {
@@ -618,15 +623,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_spendable_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
             address,
             target_height,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
@@ -800,14 +805,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
         wallet::get_wallet_summary(
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
-            min_confirmations,
+            confirmations_policy,
             &SubtreeProgressEstimator,
         )
     }
@@ -843,7 +848,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
     }
 
@@ -910,13 +915,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_transparent_balances(
         &self,
         account: Self::AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
             account,
-            max_height,
+            target_height,
+            confirmations_policy,
         )
     }
 

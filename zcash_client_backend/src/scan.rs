@@ -255,6 +255,7 @@ impl<Item: Task + DynamicUsage> Tasks<Item> for WithUsage {
 
 /// A task that will clean up its own heap usage from the overall running usage once it is
 /// complete.
+#[allow(dead_code)]
 pub(crate) struct WithUsageTask<Item> {
     /// The item being run.
     item: Item,

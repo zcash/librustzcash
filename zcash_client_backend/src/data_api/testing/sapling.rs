@@ -18,6 +18,7 @@ use zip32::Scope;
 use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
     },
@@ -92,7 +93,8 @@ impl ShieldedPoolTester for SaplingPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
@@ -100,7 +102,8 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 account,
                 target_value,
                 &[ShieldedProtocol::Sapling],
-                anchor_height,
+                target_height,
+                confirmations_policy,
                 exclude,
             )
             .map(|n| n.take_sapling())
