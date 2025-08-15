@@ -1,5 +1,6 @@
-use assert_matches::assert_matches;
 use std::collections::BTreeMap;
+
+use assert_matches::assert_matches;
 
 use ::transparent::{
     address::TransparentAddress,

@@ -108,7 +108,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::read_commitment_tree,
-    transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, Transaction, TransactionData},
+    transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317, Transaction, TransactionData},
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -1879,7 +1879,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     let recover_until_height = recover_until_height(tx)?;
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
-    let target_height = chain_tip_height + 1;
+    let target_height = TargetHeight::from(chain_tip_height + 1);
+    let anchor_height = get_anchor_height(tx, target_height, confirmations_policy.trusted())?;
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
@@ -1942,7 +1943,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
+        anchor_height: Option<BlockHeight>,
         confirmations_policy: ConfirmationsPolicy,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
         protocol: ShieldedProtocol,
@@ -1988,9 +1990,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let untrusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
 
-        let any_spendable = is_any_spendable(tx, trusted_height, table_prefix)?;
+        let any_spendable =
+            anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
 
-        // The trusted height will be used as the anchor height.
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT a.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
@@ -2077,7 +2079,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 uneconomic_value,
             ) = {
                 let zero = Zatoshis::ZERO;
-                if value <= Zatoshis::const_from_u64(5000) {
+                if value <= zip317::MARGINAL_FEE {
                     (zero, zero, zero, value)
                 } else if is_spendable {
                     (value, zero, zero, zero)
@@ -2107,6 +2109,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         with_pool_balances(
             tx,
             target_height,
+            anchor_height,
             confirmations_policy,
             &mut account_balances,
             ShieldedProtocol::Orchard,
@@ -2131,6 +2134,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     with_pool_balances(
         tx,
         target_height,
+        anchor_height,
         confirmations_policy,
         &mut account_balances,
         ShieldedProtocol::Sapling,
@@ -2153,7 +2157,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")]
     transparent::add_transparent_account_balances(
         tx,
-        chain_tip_height + 1,
+        target_height,
         confirmations_policy,
         &mut account_balances,
     )?;

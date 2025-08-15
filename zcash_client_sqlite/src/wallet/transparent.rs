@@ -38,6 +38,7 @@ use zcash_keys::{
     },
 };
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::fees::zip317;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{ZatBalance, Zatoshis},
@@ -780,12 +781,12 @@ pub(crate) fn get_wallet_transparent_output(
 
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
-/// * the transaction that produced the output had or will have at least `min_confirmations`
-///   confirmations; and
+/// * the transaction that produced the output had or will have at least the number of
+///   confirmations required by the specified confirmations policy, and;
 /// * the output is unspent as of the current chain tip.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded
-/// if the spending transaction will not be expired at `target_height`.
+/// iff the spending transaction will not be expired at `target_height`.
 ///
 /// This could, in very rare circumstances, return unspent outputs that are actually not
 /// spendable, if they are the outputs of deshielding transactions where the spend anchors have
@@ -917,7 +918,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
 
         let entry = result.entry(taddr).or_insert(Balance::ZERO);
-        if value < Zatoshis::const_from_u64(5000) {
+        if value < zip317::MARGINAL_FEE {
             entry.add_uneconomic_value(value)?;
         } else {
             entry.add_spendable_value(value)?;
@@ -970,7 +971,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
 
             let entry = result.entry(taddr).or_insert(Balance::ZERO);
-            if value < Zatoshis::const_from_u64(5000) {
+            if value < zip317::MARGINAL_FEE {
                 entry.add_uneconomic_value(value)?;
             } else {
                 entry.add_spendable_value(value)?;
@@ -984,7 +985,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 #[tracing::instrument(skip(conn, account_balances))]
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {

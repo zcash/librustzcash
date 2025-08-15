@@ -418,6 +418,14 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         })
         .collect::<Vec<_>>();
 
+    assert!(
+        steps
+            .iter()
+            .filter(|step| step.number_of_confirmations < min_confirmations)
+            .all(|step| step.spendable_balance == Zatoshis::ZERO),
+        "spendable balance is equal to starting balance until we have sufficient confirmations"
+    );
+
     let to = T::random_address(st.rng_mut());
     // Now that the funds are spendable, propose a transaction
     let proposed = st.propose_standard_transfer::<Infallible>(

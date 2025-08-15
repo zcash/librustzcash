@@ -288,6 +288,12 @@ pub type ExtractErrT<DbT, N> = Error<
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TargetHeight(BlockHeight);
 
+impl TargetHeight {
+    pub fn saturating_sub(self, value: u32) -> BlockHeight {
+        self.0.saturating_sub(value)
+    }
+}
+
 impl From<BlockHeight> for TargetHeight {
     fn from(value: BlockHeight) -> Self {
         TargetHeight(value)
@@ -334,8 +340,13 @@ where
     }
 }
 
-/// The minimum number of confirmations required for trusted and untrusted
-/// transactions.
+/// A description of the policy that is used to determine what notes are available for spending,
+/// based upon the number of confirmations (the number of blocks in the chain since and including
+/// the block in which a note was produced.)
+///
+/// See [`ZIP 315`] for details including the definitions of "trusted" and "untrusted" notes.
+///
+/// [`ZIP 315`]: https://zips.z.cash/zip-0315
 #[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
     trusted: NonZeroU32,
@@ -344,6 +355,16 @@ pub struct ConfirmationsPolicy {
     allow_zero_conf_shielding: bool,
 }
 
+/// The default confirmations policy according to [`ZIP 315`].
+///
+/// * Require 3 confirmations for "trusted" transaction outputs (outputs produced by the wallet)
+/// * Require 10 confirmations for "untrusted" outputs (those sent to the wallet by external/third
+///   parties)
+/// * Allow zero-conf shielding of transparent UTXOs irrespective of their origin, but treat the
+///   resulting shielding transaction's outputs as though the original transparent UTXOs had
+///   instead been received as untrusted shielded outputs.
+///
+/// [`ZIP 315`]: https://zips.z.cash/zip-0315
 impl Default for ConfirmationsPolicy {
     fn default() -> Self {
         ConfirmationsPolicy {
@@ -358,6 +379,11 @@ impl Default for ConfirmationsPolicy {
 }
 
 impl ConfirmationsPolicy {
+    /// A policy to use the minimum number of confirmations possible: 1 confirmation for shielded
+    /// notes irrespective of origin, and 0 confirmations for transparent UTXOs.
+    ///
+    /// Test-only.
+    #[cfg(feature = "test-dependencies")]
     pub const MIN: Self = ConfirmationsPolicy {
         trusted: NonZeroU32::MIN,
         untrusted: NonZeroU32::MIN,
@@ -371,6 +397,9 @@ impl ConfirmationsPolicy {
     /// The number of confirmations required for trusted notes must be less than or equal to the
     /// number of confirmations required for untrusted notes; this returns `Err(())` if this
     /// invariant is violated.
+    ///
+    /// WARNING: This should only be used with great care to avoid problems of transaction
+    /// distinguishability; prefer [`ConfirmationsPolicy::default()`] instead.
     pub fn new(
         trusted: NonZeroU32,
         untrusted: NonZeroU32,
@@ -390,6 +419,9 @@ impl ConfirmationsPolicy {
 
     /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
     /// set to `min_confirmations`.
+    ///
+    /// WARNING: This should only be used with great care to avoid problems of transaction
+    /// distinguishability; prefer [`ConfirmationsPolicy::default()`] instead.
     pub fn new_symmetrical(
         min_confirmations: NonZeroU32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
@@ -414,16 +446,13 @@ impl ConfirmationsPolicy {
         untrusted: u32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
     ) -> Self {
-        if trusted > untrusted {
-            panic!("trusted must be <= untrusted")
-        }
-
-        Self {
-            trusted: NonZeroU32::new(trusted).expect("trusted must be nonzero"),
-            untrusted: NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
+        Self::new(
+            NonZeroU32::new(trusted).expect("trusted must be nonzero"),
+            NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
             #[cfg(feature = "transparent-inputs")]
             allow_zero_conf_shielding,
-        }
+        )
+        .expect("trusted must be <= untrusted")
     }
 
     /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
@@ -436,14 +465,11 @@ impl ConfirmationsPolicy {
         min_confirmations: u32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
     ) -> Self {
-        let confirmations =
-            NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero");
-        Self {
-            trusted: confirmations,
-            untrusted: confirmations,
+        Self::new_symmetrical(
+            NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero"),
             #[cfg(feature = "transparent-inputs")]
             allow_zero_conf_shielding,
-        }
+        )
     }
 
     /// Returns the number of confirmations required before trusted notes may be spent.

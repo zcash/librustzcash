@@ -234,7 +234,7 @@ impl Balance {
 
     /// Adds the specified value to the uneconomic value total, checking for overflow.
     pub fn add_uneconomic_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
-        self.uneconomic_value = (self.uneconomic_value + value).unwrap();
+        self.uneconomic_value = (self.uneconomic_value + value).ok_or(BalanceError::Overflow)?;
         Ok(())
     }
 

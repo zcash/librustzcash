@@ -20,6 +20,7 @@ workspace.
 - `zcash_client_backend::data_api::wallet::TargetHeight`
 - `zcash_client_backend::data_api::Balance::uneconomic_value`
 - `zcash_client_backend::data_api::AccountBalance::uneconomic_value`
+- `zcash_client_backend::wallet::ReceivedNote::mined_height`
 - A `zcashd-compat` feature flag has been added in service of being able to
   import data from the zcashd `wallet.dat` format. It enables functionality
   needed in order to represent the nonstandard derivations for keys and
@@ -42,43 +43,33 @@ workspace.
     as its argument instead of its parts. This minimizes the API complexity
     that would otherwise arise due to the presence of the `zcashd-compat`
     feature flag.
-  - Arguments to `InputSource::select_spendable_notes` have changed; it now takes
-    a `TargetHeight` and a `ConfirmationsPolicy` instead of an anchor height.
+  - The following methods now take `TargetHeight` and `ConfirmationsPolicy`
+    arguments instead of an anchor height:
+    - `InputSource::select_spendable_notes`
+    - `wallet::input_selection::InputSelector::propose_transaction`
     The signatures of `wallet::propose_transfer` and
     `wallet::propose_standard_transfer_to_address` have also been modified to
     take these changes into account, as have the signatures of the
     `test-dependencies`-flagged methods
     `testing::TestState::{spend, propose_transfer, propose_standard_transfer}`.
-  - Arguments to `InputSource::get_spendable_transparent_outputs` have changed:
-      - the `target_height` argument now has type `TargetHeight` instead of
-        `BlockHeight`.
-      - it now takes a `ConfirmationsPolicy` instead of a `u32` `min_confirmations`
-        argument.
+  - The following methods now use `TargetHeight` instead of `BlockHeight` in
+    their arguments and return values:
+    - `InputSource::get_spendable_transparent_outputs`
+    - `WalletRead::get_target_and_anchor_heights`
+    - `wallet::input_selection::ShieldingSelector::propose_shielding`
     Related `test-dependencies`-flagged methods on `testing::TestState` have
     also been changed accordingly.
-  - Arguments to `wallet::input_selection::InputSelector::propose_transaction`
-    have changed; it now takes a `TargetHeight` and `ConfirmationsPolicy` instead
-    of an anchor height.
-  - Arguments to `wallet::input_selection::ShieldingSelector::propose_shielding`
-    have changed:
-    - it now takes a `TargetHeight` instead of `BlockHeight` for its
-      `target_height` argument.
-      - it now takes a `ConfirmationsPolicy` instead of a `u32` `min_confirmations`
-        argument.
-  - Arguments to `wallet::propose_shielding` and `wallet::shield_transparent_funds`
-    have changed; they now take `ConfirmationsPolicy` instead of `u32`
-    `min_confirmations` arguments.
-  - The result type of `WalletRead::get_target_and_anchor_heights` has changed.
-    It now returns a `TargetHeight` instead of a `BlockHeight` for the target
-    height element of its result tuple.
-  - Arguments to `WalletRead::get_wallet_summary` have changed; it now takes a
-    `ConfirmationsPolicy` instead of a `u32` `min_confirmations` argument.
-  - Arguments to `WalletRead::get_transparent_balances` have changed. The balance
-    is now retrieved in terms of a target height and confirmations policy.
-  - The semantics of `zcash_client_backend::data_api::Balance::total` and
-    `zcash_client_backend::data_api::AccountBalance::total` have changed;
-    these totals no longer include the value of uneconomic ("dust") notes
-    and transparent UTXOs.
+  - The following methods now take a `ConfirmationsPolicy` instead of a `u32`
+    `min_confirmations` argument:
+    - `InputSource::get_spendable_transparent_outputs`
+    - `WalletRead::get_wallet_summary`
+    - `wallet::propose_shielding`
+    - `wallet::shield_transparent_funds`
+    - `wallet::input_selection::ShieldingSelector::propose_shielding`
+  - `WalletRead::get_transparent_balances` now retrieves the balance in terms of
+    a target height and confirmations policy.
+  - The semantics of `Balance::total` and `AccountBalance::total` have changed;
+    these totals no longer include value that is uneconomic to spend ("dust").
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.
@@ -89,6 +80,12 @@ workspace.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed; it now takes
     a `TargetHeight` instead of a `BlockHeight`.
+- `zcash_client_backend::proposal`:
+  - Arguments to `Proposal::{single_step, multi_step}` have changed; it now takes
+    a `TargetHeight` instead of a `BlockHeight`.
+  - `Proposal::min_target_height` now returns `TargetHeight` instead of `BlockHeight`
+- `zcash_client_backend::wallet::ReceivedNote::from_parts` takes an additional
+  `mined_height` argument.
 
 ## [0.18.1, 0.19.1] - 2025-07-19
 
