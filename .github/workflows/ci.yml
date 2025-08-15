@@ -40,7 +40,7 @@ jobs:
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -69,7 +69,7 @@ jobs:
     name: Test with --all-features
     runs-on: ubuntu-latest-8cores
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: actions/cache@v4
@@ -127,7 +127,7 @@ jobs:
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -186,7 +186,7 @@ jobs:
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -242,7 +242,7 @@ jobs:
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -275,7 +275,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -315,7 +315,7 @@ jobs:
         target:
           - wasm32-wasi
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           path: crates
@@ -354,7 +354,7 @@ jobs:
         target:
           - thumbv7em-none-eabihf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           path: crates
@@ -396,7 +396,7 @@ jobs:
     name: Bitrot check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       # Build benchmarks to prevent bitrot
@@ -407,7 +407,7 @@ jobs:
     name: Clippy (MSRV)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -428,7 +428,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -460,7 +460,7 @@ jobs:
       options: --security-opt seccomp=unconfined
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -491,7 +491,7 @@ jobs:
     name: Intra-doc links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -509,7 +509,7 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Check formatting
@@ -519,7 +519,7 @@ jobs:
     name: protobuf consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - id: prepare
@@ -543,7 +543,7 @@ jobs:
     name: UUID validity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Extract UUIDs
