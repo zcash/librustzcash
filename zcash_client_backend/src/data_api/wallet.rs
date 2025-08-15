@@ -1,5 +1,6 @@
 //! # Functions for creating Zcash transactions that spend funds belonging to the wallet
 //!
+//!
 //! This module contains several different ways of creating Zcash transactions. This module is
 //! designed around the idea that a Zcash wallet holds its funds in notes in either the Orchard
 //! or Sapling shielded pool. In order to better preserve users' privacy, it does not provide any
@@ -289,6 +290,8 @@ pub type ExtractErrT<DbT, N> = Error<
 pub struct TargetHeight(BlockHeight);
 
 impl TargetHeight {
+    /// Subtracts the provided value from this height, returning [`zcash_protocol::consensus::H0`]
+    /// if this would result in underflow of the wrapped `u32`.
     pub fn saturating_sub(self, value: u32) -> BlockHeight {
         self.0.saturating_sub(value)
     }

@@ -782,7 +782,7 @@ pub(crate) fn get_wallet_transparent_output(
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
-///   confirmations required by the specified confirmations policy, and;
+///   confirmations required by the specified confirmations policy; and
 /// * the output is unspent as of the current chain tip.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded

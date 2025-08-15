@@ -29,7 +29,7 @@ impl BlockHeight {
         BlockHeight(v)
     }
 
-    /// Subtracts the provided value from this height, returning `H0` if this would result in
+    /// Subtracts the provided value from this height, returning [`H0`] if this would result in
     /// underflow of the wrapped `u32`.
     pub fn saturating_sub(self, v: u32) -> BlockHeight {
         BlockHeight(self.0.saturating_sub(v))
