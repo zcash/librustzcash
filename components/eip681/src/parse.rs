@@ -55,7 +55,17 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
 
 impl<'a> From<ParseError<'a>> for nom::Err<ParseError<'a>> {
     fn from(value: ParseError<'a>) -> Self {
-        nom::Err::Error(value)
+        if value.is_recoverable() {
+            nom::Err::Error(value)
+        } else {
+            nom::Err::Failure(value)
+        }
+    }
+}
+
+impl ParseError<'_> {
+    pub fn is_recoverable(&self) -> bool {
+        true
     }
 }
 
@@ -71,12 +81,19 @@ pub enum ValidationError {
 /// *DIGIT
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-pub struct Digits(Vec<u8>);
+pub struct Digits {
+    is_hex: bool,
+    places: Vec<u8>,
+}
 
 impl core::fmt::Display for Digits {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for n in self.0.iter() {
-            f.write_fmt(format_args!("{n}"))?;
+        for n in self.places.iter() {
+            if self.is_hex {
+                f.write_fmt(format_args!("{n:x}"))?;
+            } else {
+                f.write_fmt(format_args!("{n}"))?;
+            }
         }
         Ok(())
     }
@@ -87,41 +104,56 @@ impl Digits {
 
     pub fn as_u64(&self) -> u64 {
         let mut total = 0;
-        for (mag, digit) in self.0.iter().rev().enumerate() {
-            total += *digit as u64 * 10u64.pow(mag as u32);
+        let radix = if self.is_hex { 16u64 } else { 10u64 };
+        for (mag, digit) in self.places.iter().rev().enumerate() {
+            total += *digit as u64 * radix.pow(mag as u32);
         }
         total
     }
 
     pub fn from_u64(mut v: u64) -> Self {
         if v == 0 {
-            return Digits(vec![0]);
+            return Digits {
+                is_hex: false,
+                places: vec![0],
+            };
         }
 
-        let mut digits = Digits(vec![]);
+        let mut digits = Digits {
+            is_hex: false,
+            places: vec![],
+        };
         for log in (0..=v.ilog10()).rev() {
             let top = 10u64.pow(log);
             let digit = v / top;
-            digits.0.push(digit as u8);
+            digits.places.push(digit as u8);
             v -= digit * top;
         }
         digits
     }
 
     /// Parse at least `min` digits.
-    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_ascii_digit())(i)?;
+    pub fn parse_min(
+        i: &str,
+        min: usize,
+        is_hex: bool,
+    ) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let radix = if is_hex { 16 } else { 10 };
+        let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(radix))(i)?;
         let data = chars
             .chars()
             .map(|c| {
-                c.to_digit(10).unwrap_or_else(|| {
+                c.to_digit(radix).unwrap_or_else(|| {
                     unreachable!("we already checked that this char was a digit")
                 }) as u8
             })
             .collect::<Vec<_>>();
-        let digits = Digits(data);
+        let digits = Digits {
+            places: data,
+            is_hex,
+        };
         snafu::ensure!(
-            digits.0.len() >= min,
+            digits.places.len() >= min,
             DigitsMinimumSnafu {
                 min,
                 digits,
@@ -208,9 +240,9 @@ impl Number {
                 .and_then(|(_e, maybe_exp)| maybe_exp.as_ref().map(Digits::as_u64))
                 .unwrap_or_default();
             snafu::ensure!(
-                exp_value >= dec.0.len() as u64,
+                exp_value >= dec.places.len() as u64,
                 SmallExponentSnafu {
-                    expected: dec.0.len(),
+                    expected: dec.places.len(),
                     seen: exp_value,
                 }
             );
@@ -231,12 +263,12 @@ impl Number {
         let (i, signum) = nom::combinator::opt(parse_signum)(i)?;
 
         // Parse *DIGIT
-        let (i, integer) = Digits::parse_min(i, 0)?;
+        let (i, integer) = Digits::parse_min(i, 0, false)?;
 
         // Parse [ "." 1*DIGIT ]
         fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
             let (i, _dot) = nom::character::complete::char('.')(i)?;
-            let (i, digits) = Digits::parse_min(i, 1)?;
+            let (i, digits) = Digits::parse_min(i, 1, false)?;
             Ok((i, digits))
         }
         let (i, decimal) = nom::combinator::opt(parse_decimal)(i)?;
@@ -250,7 +282,7 @@ impl Number {
             let (i, little_e) = parse_e.parse(i)?;
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1))(i)?;
+            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1, false))(i)?;
 
             Ok((i, (little_e, maybe_exp)))
         }
@@ -325,22 +357,42 @@ mod test {
 
     #[test]
     fn digits_sanity() {
-        assert_eq!(123, Digits(vec![1, 2, 3]).as_u64());
-        assert_eq!(vec![1, 2, 3], Digits::from_u64(123).0);
+        assert_eq!(
+            123,
+            Digits {
+                is_hex: false,
+                places: vec![1, 2, 3]
+            }
+            .as_u64()
+        );
+        assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
+    }
+
+    fn arb_digits_with(min_digits: usize, is_hex: bool) -> impl Strategy<Value = Digits> {
+        let size_range = min_digits..=Digits::MAX_PLACES;
+
+        let radix = if is_hex { 16u8 } else { 10u8 };
+        prop::collection::vec(0..radix, size_range.clone())
+            .prop_map(move |places| Digits { is_hex, places })
     }
 
     fn arb_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
-        let size_range = min_digits..=Digits::MAX_PLACES;
-        let strategy = prop::collection::vec(0..=9u8, size_range);
-        strategy.prop_map(Digits)
+        arb_digits_with(min_digits, false)
+    }
+
+    fn arb_hex_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
+        arb_digits_with(min_digits, true)
+    }
+
+    fn arb_any_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
+        any::<bool>().prop_flat_map(move |is_hex| arb_digits_with(min_digits, is_hex))
     }
 
     proptest! {
         #[test]
-        fn arb_digits_sanity(digits in arb_digits(2)) {
-            // all digits should be >= 10
-            assert!(digits.0.len() >= 2, "digits: {digits:#?}");
-            assert!(digits.0.len() <= Digits::MAX_PLACES, "digits: {digits:#?}");
+        fn arb_digits_sanity(digits in arb_digits_with(2, false)) {
+            assert!(digits.places.len() >= 2, "digits: {digits:#?}");
+            assert!(digits.places.len() <= Digits::MAX_PLACES, "digits: {digits:#?}");
         }
     }
 
@@ -357,17 +409,17 @@ mod test {
 
     #[test]
     fn parse_digits_sanity() {
-        let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
+        let (i, seen_digits) = Digits::parse_min("256", 0, false).unwrap();
         assert!(i.is_empty());
         assert_eq!(256, seen_digits.as_u64())
     }
 
     proptest! {
         #[test]
-        fn parse_digits(digits in arb_digits(1)) {
+        fn parse_digits(digits in arb_any_digits(1)) {
             let s = digits.to_string();
-            let (i, seen_digits) = Digits::parse_min(&s, 0).unwrap();
-            assert!(i.is_empty());
+            let (i, seen_digits) = Digits::parse_min(&s, 1, digits.is_hex).unwrap();
+            assert_eq!("", i);
             assert_eq!(digits, seen_digits);
         }
     }
@@ -382,7 +434,9 @@ mod test {
             .prop_flat_map(|(signum, integer, little_e, decimal)| {
                 if let Some(dec) = decimal.as_ref() {
                     // If there is a decimal, ensure that the exponent "covers" it
-                    arb_digits_gte(dec.0.len() as u64).prop_map(Some).boxed()
+                    arb_digits_gte(dec.places.len() as u64)
+                        .prop_map(Some)
+                        .boxed()
                 } else {
                     prop::option::of(arb_digits(1)).boxed()
                 }
@@ -451,9 +505,7 @@ mod test {
             "takt.com",
         ];
         for input in valid_ens_names {
-            println!("parsing '{input}'");
             let (i, name) = EnsName::parse(input).unwrap();
-            println!("  got '{name}'");
             assert_eq!("", i);
             assert_eq!(EnsName(input.to_string()), name);
         }
