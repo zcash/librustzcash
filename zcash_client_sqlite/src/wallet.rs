@@ -1996,8 +1996,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     scan_state.max_priority,
                     t.block AS mined_height
              FROM {table_prefix}_received_notes rn
-             JOIN accounts a ON a.id = rn.account_id
-             JOIN transactions t ON t.id_tx = rn.tx
+             INNER JOIN accounts a ON a.id = rn.account_id
+             INNER JOIN transactions t ON t.id_tx = rn.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive

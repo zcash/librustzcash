@@ -7,6 +7,7 @@ use zip32::Scope;
 
 use zcash_client_backend::{
     data_api::{
+        scanning::ScanPriority,
         wallet::{ConfirmationsPolicy, TargetHeight},
         NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
     },
@@ -21,7 +22,7 @@ use zcash_protocol::{
 
 use crate::{
     error::SqliteClientError,
-    wallet::{get_anchor_height, pool_code, wallet_birthday},
+    wallet::{get_anchor_height, pool_code, scanning::priority_code},
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -203,15 +204,6 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    let birthday_height = match wallet_birthday(conn)? {
-        Some(birthday) => birthday,
-        None => {
-            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
-            // such a case, the wallet has no notes to spend.
-            return Ok(vec![]);
-        }
-    };
-
     let TableConstants {
         table_prefix,
         output_index_col,
@@ -236,9 +228,8 @@ where
     // 3) Select all notes for which the running sum was less than the required value, as
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
-    let mut stmt_select_notes = conn.prepare_cached(
-        &format!(
-            "WITH eligible AS (
+    let mut stmt_select_notes = conn.prepare_cached(&format!(
+        "WITH eligible AS (
                  SELECT
                      rn.id AS id, txid, {output_index_col},
                      diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
@@ -248,13 +239,19 @@ where
                  FROM {table_prefix}_received_notes rn
                  INNER JOIN accounts ON accounts.id = rn.account_id
                  INNER JOIN transactions t ON t.id_tx = rn.tx
+                 LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+                    ON rn.commitment_tree_position >= scan_state.start_position
+                    AND rn.commitment_tree_position < scan_state.end_position_exclusive
                  WHERE accounts.uuid = :account_uuid
                  -- FIXME #1316, allow selection of dust inputs
                  AND rn.value > 5000
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
-                 AND commitment_tree_position IS NOT NULL
+                 -- the shard containing the note is fully scanned; this condition will exclude
+                 -- notes for which `scan_state.max_priority IS NULL` (which will also arise if
+                 -- `rn.commitment_tree_position IS NULL`; hence we don't need that explicit filter)
+                 AND scan_state.max_priority <= :scanned_priority
                  AND t.block <= :anchor_height
                  AND rn.id NOT IN rarray(:exclude)
                  AND rn.id NOT IN (
@@ -264,16 +261,6 @@ where
                    WHERE stx.block IS NOT NULL -- the spending tx is mined
                    OR stx.expiry_height IS NULL -- the spending tx will not expire
                    OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-                 )
-                 AND NOT EXISTS (
-                   SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
-                   -- select all the unscanned ranges involving the shard containing this note
-                   WHERE rn.commitment_tree_position >= unscanned.start_position
-                   AND rn.commitment_tree_position < unscanned.end_position_exclusive
-                   -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-                   AND unscanned.block_range_start <= :anchor_height
-                   -- exclude unscanned ranges that end below the wallet birthday
-                   AND unscanned.block_range_end > :wallet_birthday
                  )
              )
              SELECT id, txid, {output_index_col},
@@ -285,8 +272,7 @@ where
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                     ufvk, recipient_key_scope, mined_height
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
-        )
-    )?;
+    ))?;
 
     let excluded: Vec<Value> = exclude
         .iter()
@@ -307,7 +293,7 @@ where
             ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
-            ":wallet_birthday": u32::from(birthday_height)
+            ":scanned_priority": priority_code(&ScanPriority::Scanned)
         ],
         |r| -> Result<_, SqliteClientError> { to_spendable_note(params, r) },
     )?;
