@@ -230,48 +230,48 @@ where
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
-                 SELECT
-                     rn.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                     SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
-                     accounts.ufvk as ufvk, recipient_key_scope,
-                     t.block AS mined_height
-                 FROM {table_prefix}_received_notes rn
-                 INNER JOIN accounts ON accounts.id = rn.account_id
-                 INNER JOIN transactions t ON t.id_tx = rn.tx
-                 LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
-                    ON rn.commitment_tree_position >= scan_state.start_position
-                    AND rn.commitment_tree_position < scan_state.end_position_exclusive
-                 WHERE accounts.uuid = :account_uuid
-                 -- FIXME #1316, allow selection of dust inputs
-                 AND rn.value > 5000
-                 AND accounts.ufvk IS NOT NULL
-                 AND recipient_key_scope IS NOT NULL
-                 AND nf IS NOT NULL
-                 -- the shard containing the note is fully scanned; this condition will exclude
-                 -- notes for which `scan_state.max_priority IS NULL` (which will also arise if
-                 -- `rn.commitment_tree_position IS NULL`; hence we don't need that explicit filter)
-                 AND scan_state.max_priority <= :scanned_priority
-                 AND t.block <= :anchor_height
-                 AND rn.id NOT IN rarray(:exclude)
-                 AND rn.id NOT IN (
-                   SELECT {table_prefix}_received_note_id
-                   FROM {table_prefix}_received_note_spends rns
-                   JOIN transactions stx ON stx.id_tx = rns.transaction_id
-                   WHERE stx.block IS NOT NULL -- the spending tx is mined
-                   OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-                 )
+             SELECT
+                 rn.id AS id, txid, {output_index_col},
+                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                 SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
+                 accounts.ufvk as ufvk, recipient_key_scope,
+                 t.block AS mined_height
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN accounts ON accounts.id = rn.account_id
+             INNER JOIN transactions t ON t.id_tx = rn.tx
+             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+                ON rn.commitment_tree_position >= scan_state.start_position
+                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             WHERE accounts.uuid = :account_uuid
+             -- FIXME #1316, allow selection of dust inputs
+             AND rn.value > 5000
+             AND accounts.ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
+             -- the shard containing the note is fully scanned; this condition will exclude
+             -- notes for which `scan_state.max_priority IS NULL` (which will also arise if
+             -- `rn.commitment_tree_position IS NULL`; hence we don't need that explicit filter)
+             AND scan_state.max_priority <= :scanned_priority
+             AND t.block <= :anchor_height
+             AND rn.id NOT IN rarray(:exclude)
+             AND rn.id NOT IN (
+               SELECT {table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends rns
+               JOIN transactions stx ON stx.id_tx = rns.transaction_id
+               WHERE stx.block IS NOT NULL -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )
-             SELECT id, txid, {output_index_col},
-                    diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height
-             FROM eligible WHERE so_far < :target_value
-             UNION
-             SELECT id, txid, {output_index_col},
-                    diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height
-             FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
+         )
+         SELECT id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope, mined_height
+         FROM eligible WHERE so_far < :target_value
+         UNION
+         SELECT id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope, mined_height
+         FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     ))?;
 
     let excluded: Vec<Value> = exclude
