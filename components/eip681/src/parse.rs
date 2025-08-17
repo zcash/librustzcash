@@ -15,12 +15,13 @@ pub enum ParseError<'a> {
     },
 
     #[snafu(display(
-        "Expected at least {min} digits, saw only '{digits}' before {}",
+        "Expected at least {min} digits, saw {} before {}",
+        digits.len(),
         input.split_at(10).0
     ))]
     DigitsMinimum {
         min: usize,
-        digits: Digits,
+        digits: Vec<u8>,
         input: &'a str,
     },
 
@@ -82,18 +83,13 @@ pub enum ValidationError {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Digits {
-    is_hex: bool,
     places: Vec<u8>,
 }
 
 impl core::fmt::Display for Digits {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for n in self.places.iter() {
-            if self.is_hex {
-                f.write_fmt(format_args!("{n:x}"))?;
-            } else {
-                f.write_fmt(format_args!("{n}"))?;
-            }
+            f.write_fmt(format_args!("{n}"))?;
         }
         Ok(())
     }
@@ -104,25 +100,18 @@ impl Digits {
 
     pub fn as_u64(&self) -> u64 {
         let mut total = 0;
-        let radix = if self.is_hex { 16u64 } else { 10u64 };
         for (mag, digit) in self.places.iter().rev().enumerate() {
-            total += *digit as u64 * radix.pow(mag as u32);
+            total += *digit as u64 * 10u64.pow(mag as u32);
         }
         total
     }
 
     pub fn from_u64(mut v: u64) -> Self {
         if v == 0 {
-            return Digits {
-                is_hex: false,
-                places: vec![0],
-            };
+            return Digits { places: vec![0] };
         }
 
-        let mut digits = Digits {
-            is_hex: false,
-            places: vec![],
-        };
+        let mut digits = Digits { places: vec![] };
         for log in (0..=v.ilog10()).rev() {
             let top = 10u64.pow(log);
             let digit = v / top;
@@ -133,34 +122,59 @@ impl Digits {
     }
 
     /// Parse at least `min` digits.
-    pub fn parse_min(
-        i: &str,
-        min: usize,
-        is_hex: bool,
-    ) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let radix = if is_hex { 16 } else { 10 };
-        let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(radix))(i)?;
-        let data = chars
-            .chars()
-            .map(|c| {
-                c.to_digit(radix).unwrap_or_else(|| {
-                    unreachable!("we already checked that this char was a digit")
-                }) as u8
-            })
-            .collect::<Vec<_>>();
-        let digits = Digits {
-            places: data,
-            is_hex,
-        };
-        snafu::ensure!(
-            digits.places.len() >= min,
-            DigitsMinimumSnafu {
-                min,
-                digits,
-                input: i
-            }
-        );
-        Ok((i, digits))
+    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, places) = parse_min(i, min, false)?;
+        Ok((i, Digits { places }))
+    }
+}
+
+/// Parse at least `min` digits.
+pub fn parse_min(i: &str, min: usize, is_hex: bool) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
+    let radix = if is_hex { 16 } else { 10 };
+    let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(radix))(i)?;
+    let data = chars
+        .chars()
+        .map(|c| {
+            c.to_digit(radix)
+                .unwrap_or_else(|| unreachable!("we already checked that this char was a digit"))
+                as u8
+        })
+        .collect::<Vec<_>>();
+    snafu::ensure!(
+        data.len() >= min,
+        DigitsMinimumSnafu {
+            min,
+            digits: data,
+            input: i
+        }
+    );
+    Ok((i, data))
+}
+
+/// Zero or more consecutive hexidecimal digits.
+///
+/// ```abnf
+/// *HEXDIG
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct HexDigits {
+    places: Vec<u8>,
+}
+
+impl core::fmt::Display for HexDigits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for n in self.places.iter() {
+            f.write_fmt(format_args!("{n:x}"))?;
+        }
+        Ok(())
+    }
+}
+
+impl HexDigits {
+    /// Parse at least `min` digits.
+    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, places) = parse_min(i, min, true)?;
+        Ok((i, HexDigits { places }))
     }
 }
 
@@ -263,12 +277,12 @@ impl Number {
         let (i, signum) = nom::combinator::opt(parse_signum)(i)?;
 
         // Parse *DIGIT
-        let (i, integer) = Digits::parse_min(i, 0, false)?;
+        let (i, integer) = Digits::parse_min(i, 0)?;
 
         // Parse [ "." 1*DIGIT ]
         fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
             let (i, _dot) = nom::character::complete::char('.')(i)?;
-            let (i, digits) = Digits::parse_min(i, 1, false)?;
+            let (i, digits) = Digits::parse_min(i, 1)?;
             Ok((i, digits))
         }
         let (i, decimal) = nom::combinator::opt(parse_decimal)(i)?;
@@ -282,7 +296,7 @@ impl Number {
             let (i, little_e) = parse_e.parse(i)?;
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1, false))(i)?;
+            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1))(i)?;
 
             Ok((i, (little_e, maybe_exp)))
         }
@@ -321,7 +335,7 @@ impl Number {
 /// ```
 ///
 /// In short, names consist of a series of dot-separated labels.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EnsName(String);
 
 impl core::fmt::Display for EnsName {
@@ -349,6 +363,44 @@ impl EnsName {
     }
 }
 
+/// An Ethereum address.
+///
+/// ```abnf
+/// ethereum_address = ( "0x" 40*HEXDIG ) / ENS_NAME
+/// ```
+///
+/// Where `ENS_NAME` is [`EnsName`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum EthereumAddress {
+    Hex(HexDigits),
+    Name(EnsName),
+}
+
+impl core::fmt::Display for EthereumAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EthereumAddress::Hex(digits) => f.write_fmt(format_args!("0x{digits}")),
+            EthereumAddress::Name(name) => name.fmt(f),
+        }
+    }
+}
+
+impl EthereumAddress {
+    /// Parse an `EthereumAddress`.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        // Parse "0x" and then 40+ hex digits
+        fn parse_40plus_hex(i: &str) -> nom::IResult<&str, EthereumAddress, ParseError<'_>> {
+            let (i, _) = nom::bytes::complete::tag("0x")(i)?;
+            let (i, digits) = HexDigits::parse_min(i, 40)?;
+            Ok((i, EthereumAddress::Hex(digits)))
+        }
+        let parse_ens = EnsName::parse.map(EthereumAddress::Name);
+        let mut parse_address = parse_40plus_hex.or(parse_ens);
+        let (i, address) = parse_address.parse(i)?;
+        Ok((i, address))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -360,7 +412,6 @@ mod test {
         assert_eq!(
             123,
             Digits {
-                is_hex: false,
                 places: vec![1, 2, 3]
             }
             .as_u64()
@@ -368,29 +419,24 @@ mod test {
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
     }
 
-    fn arb_digits_with(min_digits: usize, is_hex: bool) -> impl Strategy<Value = Digits> {
+    fn arb_digits_with(min_digits: usize) -> impl Strategy<Value = Digits> {
         let size_range = min_digits..=Digits::MAX_PLACES;
 
-        let radix = if is_hex { 16u8 } else { 10u8 };
-        prop::collection::vec(0..radix, size_range.clone())
-            .prop_map(move |places| Digits { is_hex, places })
+        prop::collection::vec(0..10u8, size_range).prop_map(|places| Digits { places })
     }
 
     fn arb_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
-        arb_digits_with(min_digits, false)
+        arb_digits_with(min_digits)
     }
 
-    fn arb_hex_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
-        arb_digits_with(min_digits, true)
-    }
-
-    fn arb_any_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
-        any::<bool>().prop_flat_map(move |is_hex| arb_digits_with(min_digits, is_hex))
+    fn arb_hex_digits(min_digits: usize, max_digits: usize) -> impl Strategy<Value = HexDigits> {
+        let size_range = min_digits..=max_digits;
+        prop::collection::vec(0..16u8, size_range).prop_map(|places| HexDigits { places })
     }
 
     proptest! {
         #[test]
-        fn arb_digits_sanity(digits in arb_digits_with(2, false)) {
+        fn arb_digits_sanity(digits in arb_digits_with(2)) {
             assert!(digits.places.len() >= 2, "digits: {digits:#?}");
             assert!(digits.places.len() <= Digits::MAX_PLACES, "digits: {digits:#?}");
         }
@@ -409,16 +455,16 @@ mod test {
 
     #[test]
     fn parse_digits_sanity() {
-        let (i, seen_digits) = Digits::parse_min("256", 0, false).unwrap();
+        let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
         assert!(i.is_empty());
         assert_eq!(256, seen_digits.as_u64())
     }
 
     proptest! {
         #[test]
-        fn parse_digits(digits in arb_any_digits(1)) {
+        fn parse_digits(digits in arb_digits(1)) {
             let s = digits.to_string();
-            let (i, seen_digits) = Digits::parse_min(&s, 1, digits.is_hex).unwrap();
+            let (i, seen_digits) = Digits::parse_min(&s, 1).unwrap();
             assert_eq!("", i);
             assert_eq!(digits, seen_digits);
         }
@@ -511,26 +557,89 @@ mod test {
         }
     }
 
+    /// Produces rather exhaustive `EnsName`s that may not be parseable because:
+    ///
+    /// * includes unicode that doesn't pass normalization
+    /// * is zero length
+    ///
+    /// This produces a lot of cases, as a result `parse_arb_ens_name` takes about
+    /// 7 seconds on a mac M4Max machine.
     fn arb_any_ens_name() -> impl Strategy<Value = EnsName> {
         proptest::string::string_regex("[^\\s\\t@/?]{0,255}")
             .unwrap()
             .prop_map(EnsName)
     }
 
+    /// Produces "happy path" `EnsName`s that are guaranteed to be parseable,
+    /// but are not exhaustive.
+    fn arb_happy_ens_name() -> impl Strategy<Value = EnsName> {
+        /// Creates a "happy path" label according to
+        /// [EIP-137](https://eips.ethereum.org/EIPS/eip-137):
+        ///
+        /// > Labels and domains may be of any length, but for compatibility with
+        /// > legacy DNS, it is recommended that labels be restricted to no more than
+        /// > 64 characters each, and complete ENS names to no more than 255
+        /// > characters. For the same reason, it is recommended that labels do not
+        /// > start or end with hyphens, or start with digits.
+        ///
+        fn arb_happy_label() -> impl Strategy<Value = String> {
+            proptest::string::string_regex("[a-z][a-z0-9]{1,62}[a-z0-9]?").unwrap()
+        }
+
+        fn arb_happy_label_maybe() -> impl Strategy<Value = Option<String>> {
+            (any::<bool>(), arb_happy_label()).prop_map(|(is_some, label)| is_some.then_some(label))
+        }
+
+        fn arb_happy_label_list() -> impl Strategy<Value = [Option<String>; 4]> {
+            [
+                arb_happy_label().prop_map(Some).boxed(),
+                arb_happy_label_maybe().boxed(),
+                arb_happy_label_maybe().boxed(),
+                arb_happy_label_maybe().boxed(),
+            ]
+        }
+
+        arb_happy_label_list()
+            .prop_map(|list| EnsName(list.into_iter().flatten().collect::<Vec<_>>().join(".")))
+    }
+
     proptest! {
         #[test]
-        fn arb_ens_name(expected in arb_any_ens_name()) {
+        fn parse_arb_ens_name(expected in arb_any_ens_name()) {
             let input = expected.to_string();
             match EnsName::parse(&input) {
-                Err(nom::Err::Error(ParseError::EnsNormalization{..})) => {}
-                Err(nom::Err::Error(ParseError::MissingEns)) => {}
-                Err(e) => panic!("{e}"),
                 Ok((i, seen)) => {
                     assert_eq!("", i);
                     assert_eq!(expected, seen);
                 }
+                // The input was empty, fine
+                Err(nom::Err::Error(ParseError::MissingEns)) => {}
+                // The input didn't normalize, fine since we don't know how to
+                // construct a strategy via regex that is exhaustive of normalized input
+                Err(nom::Err::Error(ParseError::EnsNormalization { .. })) => {}
+                // Anything else panic because it's unexpected and should be fixed
+                Err(e) => panic!("{e}"),
 
             }
+        }
+    }
+
+    fn arb_eth_addy() -> impl Strategy<Value = EthereumAddress> {
+        let hexes: BoxedStrategy<EthereumAddress> = arb_hex_digits(40, 40)
+            .prop_map(EthereumAddress::Hex)
+            .boxed();
+        let names: BoxedStrategy<EthereumAddress> =
+            arb_happy_ens_name().prop_map(EthereumAddress::Name).boxed();
+        hexes.prop_union(names)
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_eth_address(expected in arb_eth_addy()) {
+            let input = expected.to_string();
+            let (rest, seen) = EthereumAddress::parse(&input).unwrap();
+            assert_eq!("", rest);
+            assert_eq!(expected, seen);
         }
     }
 }
