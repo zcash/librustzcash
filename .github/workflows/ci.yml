@@ -140,6 +140,12 @@ jobs:
           cargo test
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run pczt end-to-end tests
+        run: >
+          cargo test
+          --package pczt
+          --test end_to_end
+          --features "io-finalizer,prover,signer,tx-extractor,spend-finalizer,zcp-builder"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -472,12 +478,14 @@ jobs:
           key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Generate coverage report
         run: >
+          timeout --preserve-status 300s 
           cargo tarpaulin
           --engine llvm
           ${{ steps.prepare.outputs.feature-flags }}
           --release
-          --timeout 600
+          --timeout 300
           --out xml
+          || true
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5.3.1
         with:

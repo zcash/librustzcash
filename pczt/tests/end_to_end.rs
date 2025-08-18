@@ -5,9 +5,9 @@ use ::transparent::{
     bundle as transparent,
     keys::{AccountPrivKey, IncomingViewingKey},
 };
-use orchard::domain::OrchardDomain;
 use orchard::note::AssetBase;
 use orchard::orchard_flavor::OrchardVanilla;
+use orchard::primitives::OrchardDomain;
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
     roles::{
@@ -30,10 +30,30 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
+#[cfg(zcash_unstable = "nu7")]
+use nonempty::NonEmpty;
+#[cfg(zcash_unstable = "nu7")]
+use orchard::{
+    issuance::compute_asset_desc_hash,
+    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
+    note::{RandomSeed, Rho},
+    orchard_flavor::OrchardZSA,
+    value::NoteValue,
+    Note,
+};
+#[cfg(zcash_unstable = "nu7")]
+use zcash_protocol::consensus::Network::RegtestNetwork;
+
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
+static ORCHARD_ZSA_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
     ORCHARD_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build::<OrchardVanilla>)
+}
+
+#[cfg(zcash_unstable = "nu7")]
+fn orchard_zsa_proving_key() -> &'static orchard::circuit::ProvingKey {
+    ORCHARD_ZSA_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build::<OrchardZSA>)
 }
 
 fn check_round_trip(pczt: &Pczt) {
@@ -428,6 +448,163 @@ fn orchard_to_orchard() {
     let index = orchard_meta.spend_action_index(0).unwrap();
     let mut signer = Signer::new(pczt).unwrap();
     signer.sign_orchard(index, &orchard_ask).unwrap();
+    let pczt = signer.finish();
+    check_round_trip(&pczt);
+
+    // We should now be able to extract the fully authorized transaction.
+    let tx = TransactionExtractor::new(pczt).extract().unwrap();
+
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
+#[cfg(zcash_unstable = "nu7")]
+#[test]
+fn zsa_to_zsa() {
+    let mut rng = OsRng;
+
+    // Create an Orchard account to receive funds.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already received a note. We need a native note for to pay fees.
+    let native_note = {
+        let mut orchard_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT_ZSA,
+            orchard::Anchor::empty_tree(),
+        );
+        orchard_builder
+            .add_output(
+                None,
+                recipient,
+                NoteValue::from_raw(10_000),
+                AssetBase::native(),
+                Memo::Empty.encode().into_bytes(),
+            )
+            .unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64, OrchardZSA>(&mut rng).unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = OrchardDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        note
+    };
+
+    let isk = IssuanceAuthorizingKey::from_bytes([1; 32]).unwrap();
+    let ik = IssuanceValidatingKey::from(&isk);
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let asset = AssetBase::derive(
+        &ik,
+        &compute_asset_desc_hash(&NonEmpty::from_slice(b"zsa_asset").unwrap()),
+    );
+
+    let rho = Rho::from_bytes(&[1; 32]).unwrap();
+    let zsa_note = Note::from_parts(
+        recipient,
+        value,
+        asset,
+        rho,
+        RandomSeed::from_bytes([2; 32], &rho).unwrap(),
+    )
+    .unwrap();
+
+    // Use the tree with 2 leafs.
+    let (anchor, native_merkle_path, zsa_merkle_path) = {
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+
+        // First leaf is the native note.
+        let native_cmx: orchard::note::ExtractedNoteCommitment = native_note.commitment().into();
+        let native_leaf = MerkleHashOrchard::from_cmx(&native_cmx);
+        tree.append(native_leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+
+        // Second leaf is the ZSA note.
+        let zsa_cmx: orchard::note::ExtractedNoteCommitment = zsa_note.commitment().into();
+        let zsa_leaf = MerkleHashOrchard::from_cmx(&zsa_cmx);
+        tree.append(zsa_leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+
+        tree.checkpoint(9_999_999).unwrap();
+
+        let position = 0.into();
+        let merkle_path_native = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path_native.root(native_leaf);
+
+        let position = 1.into();
+        let merkle_path_zsa = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+
+        (
+            anchor.into(),
+            merkle_path_native.into(),
+            merkle_path_zsa.into(),
+        )
+    };
+
+    // Build the Orchard bundle we'll be using.
+    let mut builder = Builder::new(
+        RegtestNetwork,
+        10_000_000.into(),
+        BuildConfig::TxV6 {
+            sapling_anchor: None,
+            orchard_anchor: Some(anchor),
+        },
+    );
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk.clone(), native_note, native_merkle_path)
+        .unwrap();
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk.clone(), zsa_note, zsa_merkle_path)
+        .unwrap();
+    builder
+        .add_orchard_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            1_000_000,
+            asset,
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        orchard_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
+
+    // Finalize the I/O.
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
+
+    // Create proofs.
+    let pczt = Prover::new(pczt)
+        .create_orchard_proof::<OrchardZSA>(orchard_zsa_proving_key())
+        .unwrap()
+        .finish();
+    check_round_trip(&pczt);
+
+    // Apply signatures.
+    let index = orchard_meta.spend_action_index(0).unwrap();
+    let index2 = orchard_meta.spend_action_index(1).unwrap();
+    let mut signer = Signer::new(pczt).unwrap();
+    signer.sign_orchard(index, &orchard_ask).unwrap();
+    signer.sign_orchard(index2, &orchard_ask).unwrap();
     let pczt = signer.finish();
     check_round_trip(&pczt);
 
