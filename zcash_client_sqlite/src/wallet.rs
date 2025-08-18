@@ -1994,15 +1994,23 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT a.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
+            "SELECT accounts.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
-                    t.block AS mined_height
+                    t.block AS mined_height,
+                    MAX(tt.block) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
-             INNER JOIN accounts a ON a.id = rn.account_id
+             INNER JOIN accounts accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             LEFT OUTER JOIN transparent_received_output_spends ros
+                ON ros.transaction_id = t.id_tx
+             LEFT OUTER JOIN transparent_received_outputs tro
+                ON tro.id = ros.transparent_received_output_id
+                AND tro.account_id = accounts.id
+             LEFT OUTER JOIN transactions tt
+                ON tt.id_tx = tro.transaction_id
              WHERE (
                 t.block IS NOT NULL -- the receiving tx is mined
                 OR t.expiry_height IS NULL -- the receiving tx will not expire
@@ -2016,7 +2024,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                WHERE stx.block IS NOT NULL -- the spending transaction is mined
                OR stx.expiry_height IS NULL -- the spending tx will not expire
                OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-             )"
+             )
+             GROUP BY accounts.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
+                      scan_state.max_priority, t.block"
         ))?;
 
         let mut rows =
@@ -2057,6 +2067,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .get::<_, Option<u32>>("mined_height")?
                 .map(BlockHeight::from);
 
+            let max_shielding_input_height = row
+                .get::<_, Option<u32>>("max_shielding_input_height")?
+                .map(BlockHeight::from);
+
             // A note is spendable if we have enough chain tip information to construct witnesses,
             // the shard that its witness resides in is sufficiently scanned that we can construct
             // the witness for the note, and the note has enough confirmations to be spent.
@@ -2064,7 +2078,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 && max_priority <= ScanPriority::Scanned
                 && match recipient_key_scope {
                     Some(KeyScope::INTERNAL) => {
-                        received_height.iter().any(|h| h <= &trusted_height)
+                        // The note was has at least `trusted` confirmations.
+                        received_height.iter().any(|h| h <= &trusted_height) &&
+                        // And, if the note was the output of a shielding transaction, its
+                        // have at least `untrusted` confirmations
+                        max_shielding_input_height.iter().all(|h| h <= &untrusted_height)
                     }
                     _ => received_height.iter().any(|h| h <= &untrusted_height),
                 };

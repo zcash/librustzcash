@@ -117,26 +117,37 @@ where
 
     let result = conn.query_row_and_then(
         &format!(
-            "SELECT rn.id, txid, {output_index_col},
-                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                accounts.ufvk, recipient_key_scope, transactions.mined_height
+            "SELECT rn.id, t.txid, rn.{output_index_col},
+                rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+                accounts.ufvk, rn.recipient_key_scope, t.mined_height,
+                MAX(tt.block) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
-             INNER JOIN transactions ON transactions.id_tx = rn.tx
-             WHERE txid = :txid
-             AND transactions.block IS NOT NULL
-             AND {output_index_col} = :output_index
+             INNER JOIN transactions t ON t.id_tx = rn.tx
+             LEFT OUTER JOIN transparent_received_output_spends ros
+                ON ros.transaction_id = t.id_tx
+             LEFT OUTER JOIN transparent_received_outputs tro
+                ON tro.id = ros.transparent_received_output_id
+                AND tro.account_id = accounts.id
+             LEFT OUTER JOIN transactions tt
+                ON tt.id_tx = tro.transaction_id
+             WHERE t.txid = :txid
+             AND t.block IS NOT NULL
+             AND rn.{output_index_col} = :output_index
              AND accounts.ufvk IS NOT NULL
-             AND recipient_key_scope IS NOT NULL
-             AND nf IS NOT NULL
-             AND commitment_tree_position IS NOT NULL
+             AND rn.recipient_key_scope IS NOT NULL
+             AND rn.nf IS NOT NULL
+             AND rn.commitment_tree_position IS NOT NULL
              AND rn.id NOT IN (
                SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends
-               JOIN transactions stx ON stx.id_tx = transaction_id
+               FROM {table_prefix}_received_note_spends rns
+               JOIN transactions stx ON stx.id_tx = rns.transaction_id
                WHERE stx.block IS NOT NULL -- the spending tx is mined
                OR stx.expiry_height IS NULL -- the spending tx will not expire
-             )"
+             )
+             GROUP BY rn.id, t.txid, rn.{output_index_col},
+                      rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+                      accounts.ufvk, rn.recipient_key_scope, t.mined_height"
         ),
         named_params![
            ":txid": txid.as_ref(),
@@ -231,17 +242,25 @@ where
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
              SELECT
-                 rn.id AS id, txid, {output_index_col},
-                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                 rn.id AS id, t.txid, rn.{output_index_col},
+                 rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
-                 accounts.ufvk as ufvk, recipient_key_scope,
-                 t.block AS mined_height
+                 accounts.ufvk as ufvk, rn.recipient_key_scope,
+                 t.block AS mined_height,
+                 MAX(tt.block) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             LEFT OUTER JOIN transparent_received_output_spends ros
+                ON ros.transaction_id = t.id_tx
+             LEFT OUTER JOIN transparent_received_outputs tro
+                ON tro.id = ros.transparent_received_output_id
+                AND tro.account_id = accounts.id
+             LEFT OUTER JOIN transactions tt
+                ON tt.id_tx = tro.transaction_id
              WHERE accounts.uuid = :account_uuid
              -- FIXME #1316, allow selection of dust inputs
              AND rn.value > 5000
@@ -262,15 +281,21 @@ where
                OR stx.expiry_height IS NULL -- the spending tx will not expire
                OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )
+             GROUP BY
+                rn.id, t.txid, rn.{output_index_col},
+                rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+                ufvk, rn.recipient_key_scope, t.block
          )
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope, mined_height
+                ufvk, recipient_key_scope,
+                mined_height, max_shielding_input_height
          FROM eligible WHERE so_far < :target_value
          UNION
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope, mined_height
+                ufvk, recipient_key_scope,
+                mined_height, max_shielding_input_height
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     ))?;
 
@@ -298,24 +323,29 @@ where
         |r| -> Result<_, SqliteClientError> { to_spendable_note(params, r) },
     )?;
 
+    let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
+    let untrusted_height =
+        target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
+
     notes
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
             result_note
                 .map(|note| {
-                    let number_of_confirmations = target_height
-                        - note
-                            .mined_height()
-                            .expect("mined height checked to be non-null");
+                    let received_height = note
+                        .mined_height()
+                        .expect("mined height checked to be non-null");
 
-                    let required_confirmations = u32::from(confirmations_policy.untrusted());
-
-                    // If the note is from a trusted source (this wallet), then we don't have to
-                    // determine the number of confirmations, as we've already queried above based
-                    // on the trusted anchor height. So we only check if it's trusted, or if it
-                    // meets the untrusted number of confirmations.
-                    let is_spendable = note.spending_key_scope() == Scope::Internal
-                        || number_of_confirmations >= required_confirmations;
+                    let is_spendable = match note.spending_key_scope() {
+                        Scope::Internal => {
+                            // The note was has at least `trusted` confirmations.
+                            received_height <= trusted_height &&
+                            // And, if the note was the output of a shielding transaction, its
+                            // have at least `untrusted` confirmations
+                            note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
+                        }
+                        Scope::External => received_height <= untrusted_height,
+                    };
 
                     is_spendable.then_some(note)
                 })
