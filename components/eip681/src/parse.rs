@@ -1,5 +1,7 @@
 //! Types and functions used for parsing.
 
+use std::borrow::Cow;
+
 use nom::Parser;
 use snafu::prelude::*;
 
@@ -74,6 +76,9 @@ impl ParseError<'_> {
 pub enum ValidationError {
     #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]
     SmallExponent { expected: usize, seen: u64 },
+
+    #[snafu(display("Could not decode url-encoded string: {source}"))]
+    UrlEncoding { source: std::str::Utf8Error },
 }
 
 /// Zero or more consecutive digits.
@@ -401,6 +406,47 @@ impl EthereumAddress {
     }
 }
 
+/// A URL-encoded unicode string of arbitrary length, where delimiters and the
+/// percentage symbol are mandatorily hex-encoded with a `%` prefix.
+#[derive(Debug, PartialEq)]
+pub struct UrlEncodedUnicodeString(String);
+
+impl UrlEncodedUnicodeString {
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        fn should_continue_parsing(c: char) -> bool {
+            c.is_alphanumeric() || c == '%'
+        }
+        let (i, s) = nom::bytes::complete::take_while(should_continue_parsing)(i)?;
+        Ok((i, UrlEncodedUnicodeString(s.to_string())))
+    }
+
+    pub fn encode(input: impl AsRef<str>) -> Self {
+        let s = percent_encoding::utf8_percent_encode(
+            input.as_ref(),
+            percent_encoding::NON_ALPHANUMERIC,
+        );
+        UrlEncodedUnicodeString(s.to_string())
+    }
+
+    pub fn decode(&self) -> Result<Cow<'_, str>, ValidationError> {
+        let decoder = percent_encoding::percent_decode(self.0.as_bytes());
+        let cow = decoder.decode_utf8().context(UrlEncodingSnafu)?;
+        Ok(cow)
+    }
+}
+
+/// A parameter value.
+///
+/// ```abnf
+/// value = number / ethereum_address / STRING
+/// ```
+#[derive(Debug, PartialEq)]
+pub enum Value {
+    Number(Number),
+    Address(EthereumAddress),
+    String(UrlEncodedUnicodeString),
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -639,6 +685,34 @@ mod test {
             let input = expected.to_string();
             let (rest, seen) = EthereumAddress::parse(&input).unwrap();
             assert_eq!("", rest);
+            assert_eq!(expected, seen);
+        }
+    }
+
+    #[test]
+    fn url_encoding_sanity() {
+        let s = "hello@blah/blah?blah blah🫠blah";
+        let encoded = UrlEncodedUnicodeString::encode(s);
+        assert_eq!(
+            "hello%40blah%2Fblah%3Fblah%20blah%F0%9F%AB%A0blah",
+            &encoded.0.to_string()
+        );
+    }
+
+    fn arb_unicode(min: usize, max: usize) -> impl Strategy<Value = String> {
+        proptest::string::string_regex(&format!(".{{{min}, {max}}}")).unwrap()
+    }
+
+    fn arb_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
+        arb_unicode(1, 1024).prop_map(UrlEncodedUnicodeString::encode)
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_url_encoded_unicode_string(expected in arb_url_encoded_string()) {
+            let input = &expected.0;
+            let (output, seen) = UrlEncodedUnicodeString::parse(input).unwrap();
+            assert_eq!("", output);
             assert_eq!(expected, seen);
         }
     }
