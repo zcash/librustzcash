@@ -15,5 +15,18 @@
 //! value            = number / ethereum_address / STRING
 //! number           = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
 //! ```
+//!
+//! TODO(schell):
+//! * [ ] request          
+//! * [ ] schema_prefix    
+//! * [x] target_address   
+//! * [ ] chain_id         
+//! * [ ] function_name    
+//! * [x] ethereum_address
+//! * [ ] parameters       
+//! * [ ] parameter        
+//! * [ ] key              
+//! * [ ] value            
+//! * [x] number           
 
 mod parse;
