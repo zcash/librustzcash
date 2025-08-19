@@ -447,6 +447,20 @@ pub enum Value {
     String(UrlEncodedUnicodeString),
 }
 
+impl Value {
+    /// Parse a `Value`.
+    ///
+    /// ```abnf
+    /// value = number / ethereum_address / STRING
+    /// ```
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let number = Number::parse.map(Value::Number);
+        let ethereum_address = EthereumAddress::parse.map(Value::Address);
+        let string = UrlEncodedUnicodeString::parse.map(Value::String);
+        nom::branch::alt((number, ethereum_address, string)).parse(i)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
