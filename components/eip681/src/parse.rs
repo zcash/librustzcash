@@ -35,7 +35,7 @@ pub enum ParseError<'a> {
         source: ens_normalize_rs::ProcessError,
     },
 
-    #[snafu(display("Invalid bit size. Expected {range} but saw {seen}"))]
+    #[snafu(display("Invalid bit size. Expected {range:?} but saw {seen}"))]
     InvalidBitRange {
         range: std::ops::RangeInclusive<u32>,
         seen: u64,
@@ -479,7 +479,7 @@ pub enum Type {
     /// Unsigned int type (uint<M>).
     Uint(u32),
     /// Signed int type (int<M>).
-    Int(usize),
+    Int(u32),
     /// Address type (address).
     Address,
     /// Bool type (bool).
@@ -505,11 +505,11 @@ impl core::fmt::Display for Type {
             Type::Int(size) => write!(f, "int{}", size),
             Type::Address => write!(f, "address"),
             Type::Bool => write!(f, "bool"),
-            Type::String => write!(f, "string"),
             Type::FixedBytes(size) => write!(f, "bytes{}", size),
             Type::Bytes => write!(f, "bytes"),
             Type::FixedArray(ty, size) => write!(f, "{}[{}]", ty, size),
             Type::Array(ty) => write!(f, "{}[]", ty),
+            Type::String => write!(f, "string"),
             Type::Tuple(tys) => write!(
                 f,
                 "({})",
@@ -527,7 +527,12 @@ impl Type {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         fn parse_uint(i: &str) -> nom::IResult<&str, Type, ParseError<'_>> {
             let (i, _uint) = nom::bytes::complete::tag("uint")(i)?;
-            let (i, digits) = Digits::parse_min(i, 1)?;
+            let (i, digits) = Digits::parse_min(i, 0)?;
+            if digits.places.is_empty() {
+                // `uint` is a synonym for `uint256`
+                return Ok((i, Type::Uint(256)));
+            }
+
             let bits = digits.as_u64();
 
             snafu::ensure!(
@@ -542,9 +547,32 @@ impl Type {
             Ok((i, Type::Uint(bits as u32)))
         }
         fn parse_int(i: &str) -> nom::IResult<&str, Type, ParseError<'_>> {
-            todo!()
+            let (i, _int) = nom::bytes::complete::tag("int")(i)?;
+            let (i, digits) = Digits::parse_min(i, 0)?;
+            if digits.places.is_empty() {
+                // `int` is a synonym for `int256`
+                return Ok((i, Type::Uint(256)));
+            }
+            let bits = digits.as_u64();
+
+            snafu::ensure!(
+                bits > 0 && bits <= 256,
+                InvalidBitRangeSnafu {
+                    range: 1..=256,
+                    seen: bits
+                }
+            );
+            snafu::ensure!(bits % 8 == 0, InvalidBitSizeSnafu { seen: bits });
+
+            Ok((i, Type::Int(bits as u32)))
         }
-        todo!()
+
+        let parse_address = nom::bytes::complete::tag("address").map(|_| Type::Address);
+        let parse_bool = nom::bytes::complete::tag("bool").map(|_| Type::Bool);
+
+        let mut parse_type = nom::branch::alt((parse_uint, parse_int, parse_address, parse_bool));
+        let (i, type_) = parse_type.parse(i)?;
+        Ok((i, type_))
     }
 }
 
