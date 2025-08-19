@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use nom::Parser;
+use nom::{AsChar, Parser};
 use snafu::prelude::*;
 
 #[derive(Debug, Snafu)]
@@ -34,6 +34,19 @@ pub enum ParseError<'a> {
     EnsNormalization {
         source: ens_normalize_rs::ProcessError,
     },
+
+    #[snafu(display(
+        "Invalid bit size. Expected {}..={} but saw {seen}",
+        range.start(),
+        range.end()
+    ))]
+    InvalidBitRange {
+        range: std::ops::RangeInclusive<u32>,
+        seen: u64,
+    },
+
+    #[snafu(display("Bit size must be a multiple of 8, saw {seen}"))]
+    InvalidBitSize { seen: u64 },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -461,8 +474,46 @@ impl Value {
     }
 }
 
+/// An Ethereum ABI type name.
+///
+/// See [Solidity ABI types](https://docs.soliditylang.org/en/develop/abi-spec.html#types)
+/// for more info.
+///
+/// ## Note
+/// Instead of parsing [`Type`] as a nested syntax tree, we instead only parse the _name_.
+// TODO(schell): If we do end up wanting a syntax tree, I have the start of one on the branch
+// `feat/eip-681-tx-req-parser-solidity-types`
+#[derive(Clone, Debug, PartialEq)]
+pub struct EthereumAbiTypeName {
+    name: String,
+}
+
+impl core::fmt::Display for EthereumAbiTypeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl EthereumAbiTypeName {
+    /// Parse a `Type`.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        fn is_type_char(c: char) -> bool {
+            let chars = &[
+                '[', ']', // Arrays
+                '<', '>', // Type constructors
+                '(', ')', ',', // Tuples
+            ];
+            c.is_alphanum() || chars.contains(&c)
+        }
+        let (i, s) = nom::bytes::complete::take_while1(is_type_char)(i)?;
+        Ok((i, EthereumAbiTypeName { name: s.to_owned() }))
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
 
     use proptest::prelude::*;
@@ -726,6 +777,117 @@ mod test {
         fn parse_arb_url_encoded_unicode_string(expected in arb_url_encoded_string()) {
             let input = &expected.0;
             let (output, seen) = UrlEncodedUnicodeString::parse(input).unwrap();
+            assert_eq!("", output);
+            assert_eq!(expected, seen);
+        }
+    }
+
+    fn arb_eth_type_name(recursions_max: usize) -> impl Strategy<Value = EthereumAbiTypeName> {
+        fn arb_eth_base_type_name() -> impl Strategy<Value = EthereumAbiTypeName> {
+            fn one_offs() -> impl Strategy<Value = EthereumAbiTypeName> {
+                proptest::strategy::Union::new(
+                    [
+                        "uint", "int", "address", "bool", "fixed", "ufixed", "function", "bytes",
+                        "string",
+                    ]
+                    .map(|s| proptest::strategy::Just(EthereumAbiTypeName { name: s.to_owned() })),
+                )
+            }
+            fn arb_uint_or_int() -> impl Strategy<Value = EthereumAbiTypeName> {
+                // 0 < M <= 256, M % 8 == 0
+                ((0u32..=256 / 8), any::<bool>()).prop_map(|(n, is_uint)| EthereumAbiTypeName {
+                    name: format!("{}{}", if is_uint { "uint" } else { "int" }, n * 8),
+                })
+            }
+            fn arb_fixed_or_ufixed() -> impl Strategy<Value = EthereumAbiTypeName> {
+                // 8 <= M <= 256, M % 8 == 0
+                let m = 1u32..=256 / 8;
+                // 0 < N <= 80
+                let n = 1..=80;
+                (m, n, any::<bool>()).prop_map(|(m, n, is_fixed)| EthereumAbiTypeName {
+                    name: format!("{}{m}{n}", if is_fixed { "fixed" } else { "ufixed" }),
+                })
+            }
+            fn arb_bytes() -> impl Strategy<Value = EthereumAbiTypeName> {
+                // 0 < M <= 32
+                (1..=32).prop_map(|m| EthereumAbiTypeName {
+                    name: format!("bytes{m}"),
+                })
+            }
+
+            proptest::strategy::Union::new([
+                one_offs().boxed(),
+                arb_uint_or_int().boxed(),
+                arb_fixed_or_ufixed().boxed(),
+                arb_bytes().boxed(),
+            ])
+        }
+
+        // Don't allow infinite recursion, but ensure that we return _something_
+        if recursions_max == 0 {
+            return arb_eth_base_type_name().boxed();
+        }
+
+        fn arb_eth_array_type_name(
+            recursions_max: usize,
+        ) -> impl Strategy<Value = EthereumAbiTypeName> {
+            // M >= 0 but we also have to cover variable-length arrays
+            (
+                (0u32..),
+                arb_eth_type_name(recursions_max.saturating_sub(1)),
+            )
+                .prop_map(|(m, ty)| EthereumAbiTypeName {
+                    name: format!(
+                        "<{ty}>[{}]",
+                        if m > 0 { m.to_string() } else { String::new() }
+                    ),
+                })
+        }
+
+        fn arb_eth_n_tuple(
+            recursions_max: usize,
+            n_tuple: usize,
+        ) -> impl Strategy<Value = EthereumAbiTypeName> {
+            proptest::collection::vec(arb_eth_type_name(recursions_max.saturating_sub(1)), n_tuple)
+                .prop_map(|types| EthereumAbiTypeName {
+                    name: format!(
+                        "({})",
+                        types
+                            .into_iter()
+                            .map(|ty| ty.name)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ),
+                })
+        }
+
+        fn arb_eth_tuple(recursions_max: usize) -> impl Strategy<Value = EthereumAbiTypeName> {
+            (0usize..10)
+                .prop_flat_map(move |n| arb_eth_n_tuple(recursions_max.saturating_sub(1), n))
+        }
+
+        proptest::strategy::Union::new([
+            arb_eth_base_type_name().boxed(),
+            arb_eth_array_type_name(recursions_max - 1).boxed(),
+            arb_eth_tuple(recursions_max - 1).boxed(),
+        ])
+        .boxed()
+    }
+
+    static COUNT: std::sync::LazyLock<std::sync::atomic::AtomicU32> =
+        std::sync::LazyLock::new(|| 0.into());
+
+    fn print_it(name: &str) {
+        if COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 16 {
+            println!("{name}");
+        }
+    }
+    proptest! {
+        #[test]
+        fn parse_arb_eth_type_name(expected in arb_eth_type_name(4)) {
+            let input = &expected.name;
+            print_it(input);
+            let (output, seen) = EthereumAbiTypeName::parse(input).unwrap();
             assert_eq!("", output);
             assert_eq!(expected, seen);
         }
