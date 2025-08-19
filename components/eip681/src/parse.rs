@@ -34,6 +34,15 @@ pub enum ParseError<'a> {
     EnsNormalization {
         source: ens_normalize_rs::ProcessError,
     },
+
+    #[snafu(display("Invalid bit size. Expected {range} but saw {seen}"))]
+    InvalidBitRange {
+        range: std::ops::RangeInclusive<u32>,
+        seen: u64,
+    },
+
+    #[snafu(display("Bit size must be a multiple of 8, saw {seen}"))]
+    InvalidBitSize { seen: u64 },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -458,6 +467,84 @@ impl Value {
         let ethereum_address = EthereumAddress::parse.map(Value::Address);
         let string = UrlEncodedUnicodeString::parse.map(Value::String);
         nom::branch::alt((number, ethereum_address, string)).parse(i)
+    }
+}
+
+/// An Ethereum ABI type.
+///
+/// See [Solidity ABI types](https://docs.soliditylang.org/en/develop/abi-spec.html#types)
+/// for more info.
+#[derive(Debug, PartialEq)]
+pub enum Type {
+    /// Unsigned int type (uint<M>).
+    Uint(u32),
+    /// Signed int type (int<M>).
+    Int(usize),
+    /// Address type (address).
+    Address,
+    /// Bool type (bool).
+    Bool,
+    /// Fixed size bytes type (bytes<M>).
+    FixedBytes(usize),
+    /// Fixed size array type (T\[k\])
+    FixedArray(Box<Type>, usize),
+    /// UTF-8 string type (string).
+    String,
+    /// Dynamic size bytes type (bytes).
+    Bytes,
+    /// Dynamic size array type (T[])
+    Array(Box<Type>),
+    /// Tuple type (tuple(T1, T2, ..., Tn))
+    Tuple(Vec<(String, Type)>),
+}
+
+impl core::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Uint(size) => write!(f, "uint{}", size),
+            Type::Int(size) => write!(f, "int{}", size),
+            Type::Address => write!(f, "address"),
+            Type::Bool => write!(f, "bool"),
+            Type::String => write!(f, "string"),
+            Type::FixedBytes(size) => write!(f, "bytes{}", size),
+            Type::Bytes => write!(f, "bytes"),
+            Type::FixedArray(ty, size) => write!(f, "{}[{}]", ty, size),
+            Type::Array(ty) => write!(f, "{}[]", ty),
+            Type::Tuple(tys) => write!(
+                f,
+                "({})",
+                tys.iter()
+                    .map(|(_, ty)| format!("{}", ty))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        }
+    }
+}
+
+impl Type {
+    /// Parse a `Type`.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        fn parse_uint(i: &str) -> nom::IResult<&str, Type, ParseError<'_>> {
+            let (i, _uint) = nom::bytes::complete::tag("uint")(i)?;
+            let (i, digits) = Digits::parse_min(i, 1)?;
+            let bits = digits.as_u64();
+
+            snafu::ensure!(
+                bits > 0 && bits <= 256,
+                InvalidBitRangeSnafu {
+                    range: 1..=256,
+                    seen: bits
+                }
+            );
+            snafu::ensure!(bits % 8 == 0, InvalidBitSizeSnafu { seen: bits });
+
+            Ok((i, Type::Uint(bits as u32)))
+        }
+        fn parse_int(i: &str) -> nom::IResult<&str, Type, ParseError<'_>> {
+            todo!()
+        }
+        todo!()
     }
 }
 
