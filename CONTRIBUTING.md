@@ -418,6 +418,19 @@ numerous implications, including but not limited to the following:
   type and expose a safe constructor for the variant along with accessors for
   the members of the wrapped type.
 
+#### Public API
+
+The public API of the `librustzcash` crates is carefully curated. We rely on
+several conventions to maintain the legibility of what is public in the API
+when reviewing code:
+- Any type or function annotated `pub` MUST be part of the public API; we do
+  not permit publicly visible types in private modules (with the exception of
+  those necessary for representing the "sealed trait" pattern, which we use
+  when we want to prohibit third-party implementations of traits we define).
+- Public functions and types that expose more powerful capabilities
+  not required for ordinary use of the crate that are specifically for use in
+  testing contexts should be guarded by the `test-dependencies` feature flag.
+
 #### Side Effects & Capability-Oriented Programming
 
 Whenever it's possible to do without impairing performance in hot code paths,
@@ -450,6 +463,27 @@ This means:
 This project consistently uses `Result` with custom error `enum`s to indicate
 the presence of errors. The `std::error::Error` trait should be implemented for
 such error types when the error type is part of the public API of the crate.
+
+#### Serialization
+
+Serialization formats, and serialized data, must be treated with the utmost
+care, as serialized data imposes an essentially permanent compatibility burden.
+As such, we enforce some strict rules related to serialization:
+- All serialized data must be versioned at the top level. Any piece of
+  serialized data that may be independently stored must be versioned
+  in such a way that parsing first inspects the version prior to further
+  interpretation of the data.
+- We do NOT use derived serialization (e.g., `serde`) except in very specific
+  use cases; in those cases (such as the `pczt` crate) we explicitly mark each
+  type for which we used derived serialization as serialization-critical, and
+  these types may not be modified once they have been exposed in a public
+  release of the associated crate. The data serialized by derivation-based
+  methods MUST be wrapped in a container that provides versioning, as described
+  above.
+- The above rules MAY be relaxed for serialization formats that are purely 
+  ephemeral, such as for wire formats where both the sender and the receiver
+  are always updated simultaneously and the serialized form is never written
+  to longer-term storage.
 
 ## Attribution
 This guide is based on the template supplied by the
