@@ -341,7 +341,7 @@ where
                             // The note was has at least `trusted` confirmations.
                             received_height <= trusted_height &&
                             // And, if the note was the output of a shielding transaction, its
-                            // have at least `untrusted` confirmations
+                            // transparent inputs have at least `untrusted` confirmations.
                             note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
                         }
                         Scope::External => received_height <= untrusted_height,

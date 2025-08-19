@@ -1999,7 +1999,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     t.block AS mined_height,
                     MAX(tt.block) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
-             INNER JOIN accounts accounts ON accounts.id = rn.account_id
+             INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
@@ -2081,7 +2081,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                         // The note was has at least `trusted` confirmations.
                         received_height.iter().any(|h| h <= &trusted_height) &&
                         // And, if the note was the output of a shielding transaction, its
-                        // have at least `untrusted` confirmations
+                        // transparent inputs have at least `untrusted` confirmations.
                         max_shielding_input_height.iter().all(|h| h <= &untrusted_height)
                     }
                     _ => received_height.iter().any(|h| h <= &untrusted_height),
