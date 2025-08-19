@@ -975,6 +975,13 @@ impl Transaction {
     }
 
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        if self.orchard_bundle.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Orchard components cannot be present when serializing to the V4 transaction format."
+            ));
+        }
+
         self.version.write(&mut writer)?;
 
         self.write_transparent(&mut writer)?;
@@ -1003,13 +1010,6 @@ impl Transaction {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
                 writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
             }
-        }
-
-        if self.orchard_bundle.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Orchard components cannot be present when serializing to the V4 transaction format."
-            ));
         }
 
         Ok(())
