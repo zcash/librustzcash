@@ -8,7 +8,10 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::{Account, NullifierQuery, TargetValue},
+    data_api::{
+        wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, NullifierQuery, TargetValue,
+    },
     wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
@@ -148,6 +151,13 @@ fn to_spendable_note<P: consensus::Parameters>(
 
     let ufvk_str: Option<String> = row.get("ufvk")?;
     let scope_code: Option<i64> = row.get("recipient_key_scope")?;
+    let mined_height = row
+        .get::<_, Option<u32>>("mined_height")?
+        .map(BlockHeight::from);
+
+    let max_shielding_input_height = row
+        .get::<_, Option<u32>>("max_shielding_input_height")?
+        .map(BlockHeight::from);
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an
@@ -188,6 +198,8 @@ fn to_spendable_note<P: consensus::Parameters>(
                 ),
                 spending_key_scope,
                 note_commitment_tree_position,
+                mined_height,
+                max_shielding_input_height,
             ))
         })
         .transpose()
@@ -223,7 +235,8 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
@@ -231,7 +244,8 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         params,
         account,
         target_value,
-        anchor_height,
+        target_height,
+        confirmations_policy,
         exclude,
         ShieldedProtocol::Sapling,
         to_spendable_note,
@@ -631,5 +645,10 @@ pub(crate) mod tests {
     #[test]
     fn wallet_recovery_compute_fees() {
         testing::pool::wallet_recovery_computes_fees::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn zip315_can_spend_inputs_by_confirmations_policy() {
+        testing::pool::can_spend_inputs_by_confirmations_policy::<SaplingPoolTester>();
     }
 }

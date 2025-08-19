@@ -11,6 +11,7 @@ use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, Shielded
 use zip321::TransactionRequest;
 
 use crate::{
+    data_api::wallet::TargetHeight,
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
 };
@@ -166,7 +167,7 @@ impl<NoteRef> ShieldedInputs<NoteRef> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Proposal<FeeRuleT, NoteRef> {
     fee_rule: FeeRuleT,
-    min_target_height: BlockHeight,
+    min_target_height: TargetHeight,
     steps: NonEmpty<Step<NoteRef>>,
 }
 
@@ -183,7 +184,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `steps`: A vector of steps that make up the proposal.
     pub fn multi_step(
         fee_rule: FeeRuleT,
-        min_target_height: BlockHeight,
+        min_target_height: TargetHeight,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
         let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
@@ -273,7 +274,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
-        min_target_height: BlockHeight,
+        min_target_height: TargetHeight,
         is_shielding: bool,
     ) -> Result<Self, ProposalError> {
         Ok(Self {
@@ -301,7 +302,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// The chain must contain at least this many blocks in order for the proposal to
     /// be executed.
-    pub fn min_target_height(&self) -> BlockHeight {
+    pub fn min_target_height(&self) -> TargetHeight {
         self.min_target_height
     }
 
@@ -425,7 +426,7 @@ impl<NoteRef> Step<NoteRef> {
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -451,7 +452,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)

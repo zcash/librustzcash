@@ -23,18 +23,22 @@ use transparent::{
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, OutputStatusFilter, TransactionDataRequest,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
         TransactionStatusFilter,
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
-use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
-    keys::{AddressGenerationError, UnifiedAddressRequest},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
+        UnifiedIncomingViewingKey,
+    },
 };
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::fees::zip317;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{ZatBalance, Zatoshis},
@@ -777,14 +781,14 @@ pub(crate) fn get_wallet_transparent_output(
 
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
-/// * the transaction that produced the output had or will have at least `min_confirmations`
-///   confirmations; and
+/// * the transaction that produced the output had or will have at least the number of
+///   confirmations required by the specified confirmations policy; and
 /// * the output is unspent as of the current chain tip.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded
 /// iff the spending transaction will not be expired at `target_height`.
 ///
-/// This could, in very rare circumstances, return as unspent outputs that are actually not
+/// This could, in very rare circumstances, return unspent outputs that are actually not
 /// spendable, if they are the outputs of deshielding transactions where the spend anchors have
 /// been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
 /// it should be vanishingly rare as the vast majority of rewinds are of a single block.
@@ -792,28 +796,26 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     address: &TransparentAddress,
-    target_height: BlockHeight,
-    min_confirmations: u32,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
-    let confirmed_height = target_height - min_confirmations;
-
     let mut stmt_utxos = conn.prepare(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
          WHERE u.address = :address
-         -- the transaction that created the output is mined or unexpired as of `confirmed_height`
          AND (
-            t.mined_height <= :confirmed_height -- tx is mined
-            -- TODO: uncomment the following lines in order to enable zero-conf spends
-            -- OR (
-            --     :min_confirmations = 0
-            --     AND (
-            --         t.expiry_height = 0 -- tx will not expire
-            --         OR t.expiry_height >= :target_height
-            --     )
-            -- )
+            -- tx is mined and has at least min_confirmations
+            (
+                t.mined_height < :target_height -- tx is mined
+                AND :target_height - t.mined_height >= :min_confirmations
+            )
+            -- or the utxo can be spent with zero confirmations and is definitely unexpired
+            OR (
+                :min_confirmations = 0
+                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
+            )
          )
          -- and the output is unspent
          AND u.id NOT IN (
@@ -822,19 +824,24 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
             WHERE tx.mined_height IS NOT NULL -- the spending transaction is mined
             OR tx.expiry_height = 0 -- the spending tx will not expire
-            OR tx.expiry_height >= :target_height -- the spending tx has not yet expired
-            -- we are intentionally conservative and exclude outputs that are potentially spent
-            -- as of the target height, even if they might actually be spendable due to expiry
-            -- of the spending transaction as of the chain tip
+            OR tx.expiry_height >= :target_height -- the spending tx is unexpired
          )",
     )?;
 
     let addr_str = address.encode(params);
+
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
     let mut rows = stmt_utxos.query(named_params![
         ":address": addr_str,
-        ":confirmed_height": u32::from(confirmed_height),
         ":target_height": u32::from(target_height),
-        //":min_confirmations": min_confirmations
+        ":min_confirmations": min_confirmations
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
@@ -856,25 +863,36 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_uuid: AccountUuid,
-    summary_height: BlockHeight,
-) -> Result<HashMap<TransparentAddress, Zatoshis>, SqliteClientError> {
-    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<HashMap<TransparentAddress, Balance>, SqliteClientError> {
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
+    let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(
-        "SELECT u.address, SUM(u.value_zat)
+        "SELECT u.address, u.value_zat
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
          WHERE accounts.uuid = :account_uuid
          -- the transaction that created the output is mined or is definitely unexpired
          AND (
-            t.mined_height <= :summary_height -- tx is mined
-            OR ( -- or the caller has requested to include zero-conf funds that are not expired
-                :summary_height > :chain_tip_height
-                AND (
-                    t.expiry_height = 0 -- tx will not expire
-                    OR t.expiry_height >= :summary_height
-                )
+            -- tx is mined and has at least min_confirmations
+            (
+                t.mined_height < :target_height -- tx is mined
+                AND :target_height - t.mined_height >= :min_confirmations
+            )
+            -- or the utxo can be spent with zero confirmations and is definitely unexpired
+            OR (
+                :min_confirmations = 0
+                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
             )
          )
          -- and the output is unspent
@@ -884,70 +902,133 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
             WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
             OR tx.expiry_height = 0 -- the spending tx will not expire
-            OR tx.expiry_height >= :spend_expiry_height -- the spending tx is unexpired
-         )
-         GROUP BY u.address",
+            OR tx.expiry_height >= :target_height -- the spending tx is unexpired
+         )",
     )?;
 
-    let mut res = HashMap::new();
     let mut rows = stmt_address_balances.query(named_params![
         ":account_uuid": account_uuid.0,
-        ":summary_height": u32::from(summary_height),
-        ":chain_tip_height": u32::from(chain_tip_height),
-        ":spend_expiry_height": u32::from(std::cmp::min(summary_height, chain_tip_height + 1)),
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations
     ])?;
+
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
         let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
 
-        res.insert(taddr, value);
+        let entry = result.entry(taddr).or_insert(Balance::ZERO);
+        if value < zip317::MARGINAL_FEE {
+            entry.add_uneconomic_value(value)?;
+        } else {
+            entry.add_spendable_value(value)?;
+        }
     }
 
-    Ok(res)
+    // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
+    // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
+    // appear in the spendable balance and we don't want to double-count it.
+    if min_confirmations > 0 {
+        let mut stmt_address_balances = conn.prepare(
+            "SELECT u.address, u.value_zat
+             FROM transparent_received_outputs u
+             JOIN accounts ON accounts.id = u.account_id
+             JOIN transactions t ON t.id_tx = u.transaction_id
+             WHERE accounts.uuid = :account_uuid
+             -- the transaction that created the output is mined or is definitely unexpired
+             AND (
+                 -- the transaction that created the output is mined with not enough confirmations
+                (
+                    t.mined_height < :target_height
+                    AND :target_height - t.mined_height < :min_confirmations
+                )
+                -- or the tx is unmined but definitely not expired
+                OR (
+                    t.mined_height IS NULL
+                    AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
+                )
+             )
+             -- and the output is unspent
+             AND u.id NOT IN (
+                SELECT txo_spends.transparent_received_output_id
+                FROM transparent_received_output_spends txo_spends
+                JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
+                WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+                OR tx.expiry_height = 0 -- the spending tx will not expire
+                OR tx.expiry_height >= :target_height -- the spending tx is unexpired
+             )",
+        )?;
+
+        let mut rows = stmt_address_balances.query(named_params![
+            ":account_uuid": account_uuid.0,
+            ":target_height": u32::from(target_height),
+            ":min_confirmations": min_confirmations
+        ])?;
+
+        while let Some(row) = rows.next()? {
+            let taddr_str: String = row.get(0)?;
+            let taddr = TransparentAddress::decode(params, &taddr_str)?;
+            let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
+
+            let entry = result.entry(taddr).or_insert(Balance::ZERO);
+            if value < zip317::MARGINAL_FEE {
+                entry.add_uneconomic_value(value)?;
+            } else {
+                entry.add_spendable_value(value)?;
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 #[tracing::instrument(skip(conn, account_balances))]
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
-    mempool_height: BlockHeight,
-    min_confirmations: u32,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
-    // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
     let mut stmt_account_spendable_balances = conn.prepare(
         "SELECT a.uuid, SUM(u.value_zat)
          FROM transparent_received_outputs u
          JOIN accounts a ON a.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
-         -- the transaction that created the output is mined and with enough confirmations
          WHERE (
-            -- tx is mined and has at least has at least min_confirmations
+            -- tx is mined and has at least min_confirmations
             (
-                t.mined_height < :mempool_height -- tx is mined
-                AND :mempool_height - t.mined_height >= :min_confirmations
+                t.mined_height < :target_height -- tx is mined
+                AND :target_height - t.mined_height >= :min_confirmations
             )
             -- or the utxo can be spent with zero confirmations and is definitely unexpired
             OR (
                 :min_confirmations = 0
-                AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
             )
          )
          -- and the received txo is unspent
          AND u.id NOT IN (
-           SELECT transparent_received_output_id
+           SELECT txo_spends.transparent_received_output_id
            FROM transparent_received_output_spends txo_spends
-           JOIN transactions tx
-             ON tx.id_tx = txo_spends.transaction_id
+           JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
            WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
            OR tx.expiry_height = 0 -- the spending tx will not expire
-           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+           OR tx.expiry_height >= :target_height -- the spending tx is unexpired
          )
          GROUP BY a.uuid",
     )?;
+
     let mut rows = stmt_account_spendable_balances.query(named_params![
-        ":mempool_height": u32::from(mempool_height),
-        ":min_confirmations": min_confirmations,
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations
     ])?;
 
     while let Some(row) = rows.next()? {
@@ -966,6 +1047,7 @@ pub(crate) fn add_transparent_account_balances(
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
     // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
     // appear in the spendable balance and we don't want to double-count it.
+    // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(
             "SELECT a.uuid, SUM(u.value_zat)
@@ -975,30 +1057,29 @@ pub(crate) fn add_transparent_account_balances(
              WHERE (
                  -- the transaction that created the output is mined with not enough confirmations
                 (
-                    t.mined_height < :mempool_height
-                    AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
+                    t.mined_height < :target_height
+                    AND :target_height - t.mined_height < :min_confirmations
                 )
                 -- or the tx is unmined but definitely not expired
                 OR (
                     t.mined_height IS NULL
-                    AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+                    AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
                 )
              )
              -- and the received txo is unspent
              AND u.id NOT IN (
-               SELECT transparent_received_output_id
+               SELECT txo_spends.transparent_received_output_id
                FROM transparent_received_output_spends txo_spends
-               JOIN transactions tx
-                 ON tx.id_tx = txo_spends.transaction_id
+               JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
                WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
                OR tx.expiry_height = 0 -- the spending tx will not expire
-               OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+               OR tx.expiry_height >= :target_height -- the spending tx is unexpired
              )
              GROUP BY a.uuid",
         )?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
-            ":mempool_height": u32::from(mempool_height),
+            ":target_height": u32::from(target_height),
             ":min_confirmations": min_confirmations,
         ])?;
 

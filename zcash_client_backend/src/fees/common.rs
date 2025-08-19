@@ -11,7 +11,7 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
-use crate::data_api::AccountMeta;
+use crate::data_api::{wallet::TargetHeight, AccountMeta};
 
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
@@ -204,7 +204,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
     wallet_meta: Option<&AccountMeta>,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -372,7 +372,7 @@ where
         .fee_rule
         .fee_required(
             cfg.params,
-            target_height,
+            BlockHeight::from(target_height),
             transparent_input_sizes.clone(),
             transparent_output_sizes.clone(),
             sapling_input_count,
@@ -404,7 +404,7 @@ where
                 cfg.fee_rule
                     .fee_required(
                         cfg.params,
-                        target_height,
+                        BlockHeight::from(target_height),
                         transparent_input_sizes.clone(),
                         transparent_output_sizes.clone(),
                         sapling_input_count,
@@ -435,7 +435,7 @@ where
                 cfg.fee_rule
                     .fee_required(
                         cfg.params,
-                        target_height,
+                        BlockHeight::from(target_height),
                         transparent_input_sizes,
                         transparent_output_sizes,
                         sapling_input_count,

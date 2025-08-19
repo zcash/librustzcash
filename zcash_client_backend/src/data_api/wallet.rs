@@ -1,5 +1,6 @@
 //! # Functions for creating Zcash transactions that spend funds belonging to the wallet
 //!
+//!
 //! This module contains several different ways of creating Zcash transactions. This module is
 //! designed around the idea that a Zcash wallet holds its funds in notes in either the Orchard
 //! or Sapling shielded pool. In order to better preserve users' privacy, it does not provide any
@@ -35,7 +36,10 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 
 use nonempty::NonEmpty;
 use rand_core::OsRng;
-use std::num::NonZeroU32;
+use std::{
+    num::NonZeroU32,
+    ops::{Add, Sub},
+};
 
 use shardtree::error::{QueryError, ShardTreeError};
 
@@ -52,13 +56,11 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
-use ::sapling::{
+use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
-};
+use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -82,17 +84,16 @@ use zip321::Payment;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
-    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
+    transparent::bundle::TxOut,
     zcash_keys::encoding::AddressCodec,
 };
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
-    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -101,6 +102,7 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
@@ -113,6 +115,27 @@ const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
 #[cfg(feature = "pczt")]
 const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
+#[cfg(feature = "pczt")]
+fn serialize_target_height<S>(
+    target_height: &TargetHeight,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let u: u32 = BlockHeight::from(*target_height).into();
+    u.serialize(serializer)
+}
+
+#[cfg(feature = "pczt")]
+fn deserialize_target_height<'de, D>(deserializer: D) -> Result<TargetHeight, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let u = u32::deserialize(deserializer)?;
+    Ok(BlockHeight::from_u32(u).into())
+}
+
 /// Information about the proposal from which a PCZT was created.
 ///
 /// Stored under the proprietary field `PROPRIETARY_PROPOSAL_INFO`.
@@ -120,7 +143,11 @@ const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 #[derive(Serialize, Deserialize)]
 struct ProposalInfo<AccountId> {
     from_account: AccountId,
-    target_height: u32,
+    #[serde(
+        serialize_with = "serialize_target_height",
+        deserialize_with = "deserialize_target_height"
+    )]
+    target_height: TargetHeight,
 }
 
 /// Reduced version of [`Recipient`] stored inside a PCZT.
@@ -255,6 +282,225 @@ pub type ExtractErrT<DbT, N> = Error<
     N,
 >;
 
+/// A wrapper type around [`BlockHeight`] that represents the _next_ chain tip.
+///
+/// Addition and subtraction are provided by proxying to [`BlockHeight`].
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TargetHeight(BlockHeight);
+
+impl TargetHeight {
+    /// Subtracts the provided value from this height, returning [`zcash_protocol::consensus::H0`]
+    /// if this would result in underflow of the wrapped `u32`.
+    pub fn saturating_sub(self, value: u32) -> BlockHeight {
+        self.0.saturating_sub(value)
+    }
+}
+
+impl From<BlockHeight> for TargetHeight {
+    fn from(value: BlockHeight) -> Self {
+        TargetHeight(value)
+    }
+}
+
+impl From<TargetHeight> for BlockHeight {
+    fn from(value: TargetHeight) -> Self {
+        value.0
+    }
+}
+
+impl From<TargetHeight> for u32 {
+    fn from(value: TargetHeight) -> Self {
+        u32::from(value.0)
+    }
+}
+
+impl From<u32> for TargetHeight {
+    fn from(value: u32) -> Self {
+        TargetHeight(BlockHeight::from_u32(value))
+    }
+}
+
+impl<I> Add<I> for TargetHeight
+where
+    BlockHeight: Add<I>,
+{
+    type Output = <BlockHeight as Add<I>>::Output;
+
+    fn add(self, rhs: I) -> Self::Output {
+        self.0 + rhs
+    }
+}
+
+impl<I> Sub<I> for TargetHeight
+where
+    BlockHeight: Sub<I>,
+{
+    type Output = <BlockHeight as Sub<I>>::Output;
+
+    fn sub(self, rhs: I) -> Self::Output {
+        self.0 - rhs
+    }
+}
+
+/// A description of the policy that is used to determine what notes are available for spending,
+/// based upon the number of confirmations (the number of blocks in the chain since and including
+/// the block in which a note was produced.)
+///
+/// See [`ZIP 315`] for details including the definitions of "trusted" and "untrusted" notes.
+///
+/// [`ZIP 315`]: https://zips.z.cash/zip-0315
+#[derive(Clone, Copy, Debug)]
+pub struct ConfirmationsPolicy {
+    trusted: NonZeroU32,
+    untrusted: NonZeroU32,
+    #[cfg(feature = "transparent-inputs")]
+    allow_zero_conf_shielding: bool,
+}
+
+/// The default confirmations policy according to [`ZIP 315`].
+///
+/// * Require 3 confirmations for "trusted" transaction outputs (outputs produced by the wallet)
+/// * Require 10 confirmations for "untrusted" outputs (those sent to the wallet by external/third
+///   parties)
+/// * Allow zero-conf shielding of transparent UTXOs irrespective of their origin, but treat the
+///   resulting shielding transaction's outputs as though the original transparent UTXOs had
+///   instead been received as untrusted shielded outputs.
+///
+/// [`ZIP 315`]: https://zips.z.cash/zip-0315
+impl Default for ConfirmationsPolicy {
+    fn default() -> Self {
+        ConfirmationsPolicy {
+            // 3
+            trusted: NonZeroU32::MIN.saturating_add(2),
+            // 10
+            untrusted: NonZeroU32::MIN.saturating_add(9),
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding: true,
+        }
+    }
+}
+
+impl ConfirmationsPolicy {
+    /// A policy to use the minimum number of confirmations possible: 1 confirmation for shielded
+    /// notes irrespective of origin, and 0 confirmations for transparent UTXOs.
+    ///
+    /// Test-only.
+    #[cfg(feature = "test-dependencies")]
+    pub const MIN: Self = ConfirmationsPolicy {
+        trusted: NonZeroU32::MIN,
+        untrusted: NonZeroU32::MIN,
+        #[cfg(feature = "transparent-inputs")]
+        allow_zero_conf_shielding: true,
+    };
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values.
+    ///
+    /// The number of confirmations required for trusted notes must be less than or equal to the
+    /// number of confirmations required for untrusted notes; this returns `Err(())` if this
+    /// invariant is violated.
+    ///
+    /// WARNING: This should only be used with great care to avoid problems of transaction
+    /// distinguishability; prefer [`ConfirmationsPolicy::default()`] instead.
+    pub fn new(
+        trusted: NonZeroU32,
+        untrusted: NonZeroU32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Result<Self, ()> {
+        if trusted > untrusted {
+            Err(())
+        } else {
+            Ok(Self {
+                trusted,
+                untrusted,
+                #[cfg(feature = "transparent-inputs")]
+                allow_zero_conf_shielding,
+            })
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    ///
+    /// WARNING: This should only be used with great care to avoid problems of transaction
+    /// distinguishability; prefer [`ConfirmationsPolicy::default()`] instead.
+    pub fn new_symmetrical(
+        min_confirmations: NonZeroU32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
+        Self {
+            trusted: min_confirmations,
+            untrusted: min_confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values, which must both be nonzero. The number of trusted confirmations required
+    /// must be less than or equal to the number of untrusted confirmations required.
+    ///
+    /// # Panics
+    /// Panics if `trusted > untrusted` or either argument value is zero.
+    #[cfg(feature = "test-dependencies")]
+    pub fn new_unchecked(
+        trusted: u32,
+        untrusted: u32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
+        Self::new(
+            NonZeroU32::new(trusted).expect("trusted must be nonzero"),
+            NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
+        )
+        .expect("trusted must be <= untrusted")
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    ///
+    /// # Panics
+    /// Panics if `min_confirmations == 0`
+    #[cfg(feature = "test-dependencies")]
+    pub fn new_symmetrical_unchecked(
+        min_confirmations: u32,
+        #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
+    ) -> Self {
+        Self::new_symmetrical(
+            NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero"),
+            #[cfg(feature = "transparent-inputs")]
+            allow_zero_conf_shielding,
+        )
+    }
+
+    /// Returns the number of confirmations required before trusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn trusted(&self) -> NonZeroU32 {
+        self.trusted
+    }
+
+    /// Returns the number of confirmations required before untrusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn untrusted(&self) -> NonZeroU32 {
+        self.untrusted
+    }
+
+    /// Returns whether or not transparent inputs may be spent with zero confirmations in shielding
+    /// transactions.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn allow_zero_conf_shielding(&self) -> bool {
+        self.allow_zero_conf_shielding
+    }
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -267,7 +513,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
-    min_confirmations: NonZeroU32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -279,22 +525,27 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let (target_height, anchor_height) = wallet_db
-        .get_target_and_anchor_heights(min_confirmations)
-        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
-        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+    // Using the trusted confirmations results in an anchor_height that will
+    // include the maximum number of notes being selected, and we can filter
+    // later based on the input source (whether it's trusted or not) and the
+    // number of confirmations
+    let maybe_intial_heights = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted)
+        .map_err(InputSelectorError::DataSource)?;
+    let (target_height, anchor_height) =
+        maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
-    input_selector
-        .propose_transaction(
-            params,
-            wallet_db,
-            target_height,
-            anchor_height,
-            spend_from_account,
-            request,
-            change_strategy,
-        )
-        .map_err(Error::from)
+    let proposal = input_selector.propose_transaction(
+        params,
+        wallet_db,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        spend_from_account,
+        request,
+        change_strategy,
+    )?;
+    Ok(proposal)
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -312,7 +563,7 @@ where
 /// * `spend_from_account`: The unified account that controls the funds that will be spent
 ///   in the resulting transaction. This procedure will return an error if the
 ///   account ID does not correspond to an account known to the wallet.
-/// * `min_confirmations`: The minimum number of confirmations that a previously
+/// * `confirmations_policy`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
@@ -329,7 +580,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     params: &ParamsT,
     fee_rule: StandardFeeRule,
     spend_from_account: <DbT as InputSource>::AccountId,
-    min_confirmations: NonZeroU32,
+    confirmations_policy: ConfirmationsPolicy,
     to: &Address,
     amount: Zatoshis,
     memo: Option<MemoBytes>,
@@ -381,7 +632,7 @@ where
         &input_selector,
         &change_strategy,
         request,
-        min_confirmations,
+        confirmations_policy,
     )
 }
 
@@ -398,7 +649,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     shielding_threshold: Zatoshis,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -422,8 +673,8 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            chain_tip_height + 1,
-            min_confirmations,
+            (chain_tip_height + 1).into(),
+            confirmations_policy,
         )
         .map_err(Error::from)
 }
@@ -633,7 +884,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     ufvk: &UnifiedFullViewingKey,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
-    min_target_height: BlockHeight,
+    min_target_height: TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -776,7 +1027,7 @@ where
     // are no possible transparent inputs, so we ignore those here.
     let mut builder = Builder::new(
         params.clone(),
-        min_target_height,
+        BlockHeight::from(min_target_height),
         BuildConfig::Standard {
             sapling_anchor,
             orchard_anchor,
@@ -1203,7 +1454,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
-    min_target_height: BlockHeight,
+    min_target_height: TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1304,7 +1555,7 @@ where
                         try_sapling_note_decryption(
                             &sapling_internal_ivk,
                             &bundle.shielded_outputs()[output_index],
-                            zip212_enforcement(params, min_target_height),
+                            zip212_enforcement(params, min_target_height.into()),
                         )
                         .map(|(note, _, _)| Note::Sapling(note))
                     })
@@ -1475,7 +1726,7 @@ where
                 PROPRIETARY_PROPOSAL_INFO.into(),
                 postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
                     from_account: account_id,
-                    target_height: proposal.min_target_height().into(),
+                    target_height: proposal.min_target_height(),
                 })
                 .expect("postcard encoding of PCZT proposal metadata should not fail"),
             )
@@ -2061,7 +2312,7 @@ where
     let transactions = vec![SentTransaction::new(
         &transaction,
         created,
-        BlockHeight::from_u32(proposal_info.target_height),
+        proposal_info.target_height,
         proposal_info.from_account,
         &outputs,
         fee_amount,
@@ -2123,7 +2374,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<NonEmpty<TxId>, ShieldErrT<DbT, InputsT, ChangeT>>
 where
     ParamsT: consensus::Parameters,
@@ -2139,7 +2390,7 @@ where
         shielding_threshold,
         from_addrs,
         to_account,
-        min_confirmations,
+        confirmations_policy,
     )?;
 
     create_proposed_transactions(

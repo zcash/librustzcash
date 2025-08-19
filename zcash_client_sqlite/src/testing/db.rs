@@ -12,11 +12,13 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
+
 use zcash_client_backend::{
     data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -45,7 +47,6 @@ use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
     testing::transparent::GapLimits,
-    zcash_protocol::value::Zatoshis,
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).

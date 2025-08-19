@@ -88,6 +88,7 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
+    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
@@ -164,6 +165,7 @@ pub struct Balance {
     spendable_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    uneconomic_value: Zatoshis,
 }
 
 impl Balance {
@@ -172,6 +174,7 @@ impl Balance {
         spendable_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        uneconomic_value: Zatoshis::ZERO,
     };
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
@@ -223,6 +226,18 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value in the account of notes that have value less than the marginal
+    /// fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        self.uneconomic_value
+    }
+
+    /// Adds the specified value to the uneconomic value total, checking for overflow.
+    pub fn add_uneconomic_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.uneconomic_value = (self.uneconomic_value + value).ok_or(BalanceError::Overflow)?;
+        Ok(())
+    }
+
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
         (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
@@ -234,13 +249,8 @@ impl Balance {
 /// of the wallet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
-    /// The value of unspent Sapling outputs belonging to the account.
     sapling_balance: Balance,
-
-    /// The value of unspent Orchard outputs belonging to the account.
     orchard_balance: Balance,
-
-    /// The value of all unspent transparent outputs belonging to the account.
     unshielded_balance: Balance,
 }
 
@@ -302,6 +312,14 @@ impl AccountBalance {
     }
 
     /// Returns the [`Balance`] of unshielded funds in the account.
+    ///
+    /// Note that because transparent UTXOs may be shielded with zero confirmations and this crate
+    /// does not provide capabilities to directly spend transparent UTXOs in non-shielding
+    /// transactions, the [`change_pending_confirmation`] and [`value_pending_spendability`] fields
+    /// of the returned [`Balance`] will always be zero.
+    ///
+    /// [`change_pending_confirmation`]: Balance::change_pending_confirmation
+    /// [`value_pending_spendability`]: Balance::value_pending_spendability
     pub fn unshielded_balance(&self) -> &Balance {
         &self.unshielded_balance
     }
@@ -318,7 +336,7 @@ impl AccountBalance {
         Ok(result)
     }
 
-    /// Returns the total value of funds belonging to the account.
+    /// Returns the total value of economically relevant notes and UTXOs belonging to the account.
     pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
@@ -346,6 +364,15 @@ impl AccountBalance {
     pub fn value_pending_spendability(&self) -> Zatoshis {
         (self.sapling_balance.value_pending_spendability
             + self.orchard_balance.value_pending_spendability)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the value in the account of notes and transparent UTXOs that have value less than
+    /// the marginal fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        (self.sapling_balance.uneconomic_value
+            + self.orchard_balance.uneconomic_value
+            + self.unshielded_balance.uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -1294,7 +1321,8 @@ pub trait InputSource {
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
@@ -1338,8 +1366,8 @@ pub trait InputSource {
     fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _target_height: BlockHeight,
-        _min_confirmations: u32,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
@@ -1437,12 +1465,12 @@ pub trait WalletRead {
     /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns a [`WalletSummary`] that represents the sync status, and the wallet balances
-    /// given the specified minimum number of confirmations for all accounts known to the
-    /// wallet; or `Ok(None)` if the wallet has no summary data available.
+    /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
+    /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
+    /// or `Ok(None)` if the wallet has no summary data available.
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
@@ -1506,7 +1534,7 @@ pub trait WalletRead {
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
@@ -1563,16 +1591,17 @@ pub trait WalletRead {
     }
 
     /// Returns a mapping from each transparent receiver associated with the specified account
-    /// to its not-yet-shielded UTXO balance as of the end of the block at the provided
-    /// `max_height`, when that balance is non-zero.
+    /// to the balance of funds given the specified target height and confirmations policy.
+    ///
     ///
     /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2097,7 +2126,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
 pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: Zatoshis,
@@ -2120,7 +2149,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: Zatoshis,
@@ -2165,7 +2194,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     }
 
     /// Returns the block height that this transaction was created to target.
-    pub fn target_height(&self) -> BlockHeight {
+    pub fn target_height(&self) -> TargetHeight {
         self.target_height
     }
 }

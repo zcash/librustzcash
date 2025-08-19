@@ -477,7 +477,7 @@ impl UnifiedSpendingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -1040,7 +1040,7 @@ impl UnifiedFullViewingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -1500,7 +1500,7 @@ impl UnifiedIncomingViewingKey {
     ///
     /// See [`ExternalIvk::default_address`] for more information.
     ///
-    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")

@@ -383,9 +383,13 @@ pub struct ReceivedNote<NoteRef, NoteT> {
     note: NoteT,
     spending_key_scope: Scope,
     note_commitment_tree_position: Position,
+    mined_height: Option<BlockHeight>,
+    max_shielding_input_height: Option<BlockHeight>,
 }
 
 impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
+    /// Constructs a new [`ReceivedNote`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         note_id: NoteRef,
         txid: TxId,
@@ -393,6 +397,8 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
         note: NoteT,
         spending_key_scope: Scope,
         note_commitment_tree_position: Position,
+        mined_height: Option<BlockHeight>,
+        max_shielding_input_height: Option<BlockHeight>,
     ) -> Self {
         ReceivedNote {
             note_id,
@@ -401,26 +407,49 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note,
             spending_key_scope,
             note_commitment_tree_position,
+            mined_height,
+            max_shielding_input_height,
         }
     }
 
+    /// Returns the storage backend's internal identifier for the note.
     pub fn internal_note_id(&self) -> &NoteRef {
         &self.note_id
     }
+    /// Returns the txid of the transaction that constructed the note.
     pub fn txid(&self) -> &TxId {
         &self.txid
     }
+    /// Returns the output index of the note within the transaction, according to the note's
+    /// shielded protocol.
     pub fn output_index(&self) -> u16 {
         self.output_index
     }
+    /// Returns the note data.
     pub fn note(&self) -> &NoteT {
         &self.note
     }
+    /// Returns the [`Scope`] of the spending key required to make spend authorizing signatures for
+    /// the note.
     pub fn spending_key_scope(&self) -> Scope {
         self.spending_key_scope
     }
+    /// Returns the position of the note in the note commitment tree.
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
+    }
+    /// Returns the block height at which the transaction that produced the note was mined.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+    /// Returns the maximum block height among those at which transparent inputs to the transaction
+    /// that produced the note were created, considering only transparent inputs that belong to the
+    /// same wallet account as the note. This height is used in determining the effective number of
+    /// confirmations for externally-received value. See [`ZIP 315`] for additional information.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315
+    pub fn max_shielding_input_height(&self) -> Option<BlockHeight> {
+        self.max_shielding_input_height
     }
 
     /// Map over the `note` field of this data structure.
@@ -435,6 +464,8 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note: f(self.note),
             spending_key_scope: self.spending_key_scope,
             note_commitment_tree_position: self.note_commitment_tree_position,
+            mined_height: self.mined_height,
+            max_shielding_input_height: self.max_shielding_input_height,
         }
     }
 }

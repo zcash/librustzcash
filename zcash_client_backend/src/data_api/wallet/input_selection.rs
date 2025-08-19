@@ -19,11 +19,15 @@ use zcash_protocol::{
 use zip321::TransactionRequest;
 
 use crate::{
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue},
+    data_api::{
+        wallet::TargetHeight, InputSource, SimpleNoteRetention, SpendableNotes, TargetValue,
+    },
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
+
+use super::ConfirmationsPolicy;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -176,8 +180,9 @@ pub trait InputSelector {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -227,8 +232,8 @@ pub trait ShieldingSelector {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -363,8 +368,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -746,7 +752,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     account,
                     TargetValue::AtLeast(amount_required),
                     selectable_pools,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
@@ -780,8 +787,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -793,7 +800,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
+                wallet_db.get_spendable_transparent_outputs(
+                    taddr,
+                    target_height,
+                    confirmations_policy,
+                )
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
