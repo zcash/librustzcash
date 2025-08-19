@@ -26,7 +26,7 @@
 //! * [ ] parameters       
 //! * [ ] parameter        
 //! * [ ] key              
-//! * [ ] value            
+//! * [x] value            
 //! * [x] number           
 
 mod parse;
