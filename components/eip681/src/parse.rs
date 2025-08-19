@@ -512,8 +512,6 @@ impl EthereumAbiTypeName {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicUsize;
-
     use super::*;
 
     use proptest::prelude::*;
@@ -874,19 +872,10 @@ mod test {
         .boxed()
     }
 
-    static COUNT: std::sync::LazyLock<std::sync::atomic::AtomicU32> =
-        std::sync::LazyLock::new(|| 0.into());
-
-    fn print_it(name: &str) {
-        if COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 16 {
-            println!("{name}");
-        }
-    }
     proptest! {
         #[test]
         fn parse_arb_eth_type_name(expected in arb_eth_type_name(4)) {
             let input = &expected.name;
-            print_it(input);
             let (output, seen) = EthereumAbiTypeName::parse(input).unwrap();
             assert_eq!("", output);
             assert_eq!(expected, seen);
