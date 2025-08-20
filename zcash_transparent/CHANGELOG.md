@@ -10,6 +10,34 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent`:
+  - `bundle`:
+    - `Outpoint::null`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error`
+  - `coinbase`:
+    - `MAX_COINBASE_SCRIPT_LEN`
+    - `MIN_COINBASE_SCRIPT_LEN`
+    - `MAX_COINBASE_HEIGHT_LEN`
+    - `MAX_MINER_DATA_LEN`
+    - `MinerData` struct
+    - `impl Default for MinerData`
+    - `impl TryFrom<&[u8]> for MinerData`
+    - `impl AsRef<[u8]> for MinerData`
+    - `Error` enum
+    - `impl fmt::Display for Error`
+    - `impl std::error::Error for Error`
+    - `MinerData` is now `serde::Serialize` under the feature `serde`.
+  - Optional dependency on `serde` under the implicit `serde` feature.
+  - Dependency on `zcash_script 0.3`
+
 ## [0.4.0] - 2025-07-31
 
 ### Added
