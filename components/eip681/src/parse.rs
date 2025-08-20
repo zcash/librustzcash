@@ -28,7 +28,10 @@ pub enum ParseError<'a> {
     },
 
     #[snafu(display("Missing ENS name"))]
-    MissingEns,
+    EnsMissing,
+
+    #[snafu(display("Not a domain"))]
+    EnsDomain,
 
     #[snafu(display("{source}"))]
     EnsNormalization {
@@ -353,6 +356,10 @@ impl Number {
 /// ```
 ///
 /// In short, names consist of a series of dot-separated labels.
+///
+/// ## Note
+/// There's nothing in the spec that says an ENS name _must_ contain a '.', but for the
+/// purposes of this library it is required.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnsName(String);
 
@@ -372,7 +379,8 @@ impl EnsName {
         }
 
         let (i, name) = nom::bytes::complete::take_till(|c| !continue_parsing(c))(i)?;
-        snafu::ensure!(!name.is_empty(), MissingEnsSnafu);
+        snafu::ensure!(!name.is_empty(), EnsMissingSnafu);
+        snafu::ensure!(name.contains('.'), EnsMissingSnafu);
 
         // Now we have our name, normalize
         let normalized_name = ens_normalize_rs::normalize(name).context(EnsNormalizationSnafu)?;
@@ -503,21 +511,12 @@ impl Value {
         // more parameters after it) or with the end of the input.
 
         let mut results = [number.parse(i), ethereum_address.parse(i), string.parse(i)];
-        results.sort_by(|a, b| {
-            let a_len = a.as_ref().map(|(i, _)| i.len()).ok();
-            let b_len = b.as_ref().map(|(i, _)| i.len()).ok();
-            // we want smallest at the back so we can `.pop()` later
-            a_len.cmp(&b_len)
+        results.sort_by_key(|a| {
+            // Sort by the amount of input left over, smallest first
+            a.as_ref().ok().map(|(i, _)| i.len()).unwrap_or(usize::MAX)
         });
-        let mut unreachable_err_case;
-        for result in results.into_iter() {
-            if let Ok(input_and_value) = result {
-                return Ok(input_and_value);
-            } else {
-                unreachable_err_case = result;
-            }
-        }
-        unreachable_err_case
+        // UNWRAP: safe because this was an array of 3
+        results.into_iter().next().unwrap()
     }
 }
 
@@ -814,8 +813,9 @@ mod test {
 
         fn arb_happy_label_list() -> impl Strategy<Value = [Option<String>; 4]> {
             [
+                // We require the ENS name to have at least two labels
                 arb_happy_label().prop_map(Some).boxed(),
-                arb_happy_label_maybe().boxed(),
+                arb_happy_label().prop_map(Some).boxed(),
                 arb_happy_label_maybe().boxed(),
                 arb_happy_label_maybe().boxed(),
             ]
@@ -823,6 +823,13 @@ mod test {
 
         arb_happy_label_list()
             .prop_map(|list| EnsName(list.into_iter().flatten().collect::<Vec<_>>().join(".")))
+    }
+
+    #[test]
+    fn parsing_ens_name_without_dot_fails() {
+        let name = "hellogarbagestuff";
+        let result = EnsName::parse(name);
+        assert!(result.is_err(), "Parsed bad ENS name: {result:#?}");
     }
 
     proptest! {
@@ -835,7 +842,7 @@ mod test {
                     assert_eq!(expected, seen);
                 }
                 // The input was empty, fine
-                Err(nom::Err::Error(ParseError::MissingEns)) => {}
+                Err(nom::Err::Error(ParseError::EnsMissing)) => {}
                 // The input didn't normalize, fine since we don't know how to
                 // construct a strategy via regex that is exhaustive of normalized input
                 Err(nom::Err::Error(ParseError::EnsNormalization { .. })) => {}
