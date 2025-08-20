@@ -424,6 +424,12 @@ impl EthereumAddress {
 #[derive(Debug, PartialEq)]
 pub struct UrlEncodedUnicodeString(String);
 
+impl core::fmt::Display for UrlEncodedUnicodeString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl UrlEncodedUnicodeString {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         fn should_continue_parsing(c: char) -> bool {
@@ -460,6 +466,16 @@ pub enum Value {
     String(UrlEncodedUnicodeString),
 }
 
+impl core::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Number(n) => n.fmt(f),
+            Value::Address(a) => a.fmt(f),
+            Value::String(s) => s.fmt(f),
+        }
+    }
+}
+
 impl Value {
     /// Parse a `Value`.
     ///
@@ -467,10 +483,41 @@ impl Value {
     /// value = number / ethereum_address / STRING
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let number = Number::parse.map(Value::Number);
-        let ethereum_address = EthereumAddress::parse.map(Value::Address);
-        let string = UrlEncodedUnicodeString::parse.map(Value::String);
-        nom::branch::alt((number, ethereum_address, string)).parse(i)
+        let mut number = Number::parse.map(Value::Number);
+        let mut ethereum_address = EthereumAddress::parse.map(Value::Address);
+        let mut string = UrlEncodedUnicodeString::parse.map(Value::String);
+
+        // Here there are some interesting corner cases:
+        //
+        // 1. In `number`'s spec, absolutely everything is optional, so it _never_ fails.
+        // 2. `ethereum_address` may be prefixed with `0` in the hex-address case, so both number
+        //   and address could be parsed. Because of 1, `number` always wins if it comes first, but
+        //   even if the minimum was 1 digit `number` would still win by parsing "0", so
+        //   we can't simply apply them with `number`.or(`address`).
+        // 3. `string` will always match a valid `number`.
+        //
+        // To solve all of these cases we run all three parsers and then return whichever one
+        // consumed the most input.
+        //
+        // In practice this should be fine because values either end with `&` (in the case of
+        // more parameters after it) or with the end of the input.
+
+        let mut results = [number.parse(i), ethereum_address.parse(i), string.parse(i)];
+        results.sort_by(|a, b| {
+            let a_len = a.as_ref().map(|(i, _)| i.len()).ok();
+            let b_len = b.as_ref().map(|(i, _)| i.len()).ok();
+            // we want smallest at the back so we can `.pop()` later
+            a_len.cmp(&b_len)
+        });
+        let mut unreachable_err_case;
+        for result in results.into_iter() {
+            if let Ok(input_and_value) = result {
+                return Ok(input_and_value);
+            } else {
+                unreachable_err_case = result;
+            }
+        }
+        unreachable_err_case
     }
 }
 
@@ -554,9 +601,16 @@ impl Key {
 }
 
 /// A key-value pair.
+#[derive(Debug, PartialEq)]
 pub struct Parameter {
     key: Key,
     value: Value,
+}
+
+impl core::fmt::Display for Parameter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}={}", self.key, self.value))
+    }
 }
 
 impl Parameter {
@@ -792,6 +846,20 @@ mod test {
         }
     }
 
+    #[test]
+    fn hex_address_zero_sanity() {
+        let input = "0x0000000000000000000000000000000000000000";
+        let (output, addy) = EthereumAddress::parse(input).unwrap();
+        assert_eq!("", output, "output was not fully consumed");
+        assert_eq!(
+            EthereumAddress::Hex(HexDigits {
+                places: [0; 40].to_vec()
+            }),
+            addy
+        );
+        assert_eq!(input, &format!("{addy}"));
+    }
+
     fn arb_eth_addy() -> impl Strategy<Value = EthereumAddress> {
         let hexes: BoxedStrategy<EthereumAddress> = arb_hex_digits(40, 40)
             .prop_map(EthereumAddress::Hex)
@@ -962,7 +1030,49 @@ mod test {
         }
     }
 
-    // fn arb_parameter() -> impl Strategy<Value = Parameter> {
+    fn arb_value() -> impl Strategy<Value = Value> {
+        Union::new([
+            arb_valid_number().prop_map(Value::Number).boxed(),
+            arb_eth_addy().prop_map(Value::Address).boxed(),
+            arb_url_encoded_string().prop_map(Value::String).boxed(),
+        ])
+    }
 
-    // }
+    #[test]
+    fn parse_value_url_encoded_space() {
+        let expected = Value::String(UrlEncodedUnicodeString("%20".to_owned()));
+        let input = expected.to_string();
+        assert_eq!("%20", &input);
+        let (output, seen) = Value::parse(&input).unwrap();
+        assert_eq!(
+            "", output,
+            "`input` was not fully consumed. Parsed '{seen:?}' from '{input}'"
+        );
+        assert_eq!(expected, seen);
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_value(expected in arb_value()) {
+            let input = expected.to_string();
+            let (output, seen) = Value::parse(&input).unwrap();
+            assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen:?}' from input '{input}'");
+            assert_eq!("", output);
+            assert_eq!(expected, seen);
+        }
+    }
+
+    fn arb_parameter() -> impl Strategy<Value = Parameter> {
+        (arb_key(), arb_value()).prop_map(|(key, value)| Parameter { key, value })
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_parameter(expected in arb_parameter()) {
+            let input = expected.to_string();
+            let (output, seen) = Parameter::parse(&input).unwrap();
+            assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen}'");
+            assert_eq!(expected, seen);
+        }
+    }
 }
