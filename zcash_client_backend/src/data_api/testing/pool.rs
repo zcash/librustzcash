@@ -1499,7 +1499,7 @@ pub fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer<
     let value = (note_value * number_of_notes + marginal_notes_value).unwrap();
     let non_marginal_notes_value =
         (note_value * number_of_notes).expect("sum of notes should not fail.");
-    let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index, _prior_balance| {
+    let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index| {
         // Add funds to the wallet.
         for _ in 0..number_of_notes {
             add_funds(st, note_value);
@@ -1644,12 +1644,12 @@ pub fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer<
         let ending_balance = st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN);
         assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
 
-        (ephemeral_address.unwrap().0, txids, ending_balance)
+        ephemeral_address.unwrap().0
     };
 
     // Each transfer should use a different ephemeral address.
-    let (ephemeral0, _, bal_0) = run_test(&mut st, 0, Zatoshis::ZERO);
-    let (ephemeral1, _, _) = run_test(&mut st, 1, bal_0);
+    let ephemeral0 = run_test(&mut st, 0);
+    let ephemeral1 = run_test(&mut st, 1);
     assert_ne!(ephemeral0, ephemeral1);
 
     let height = add_funds(&mut st, value);
