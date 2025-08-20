@@ -510,10 +510,69 @@ impl EthereumAbiTypeName {
     }
 }
 
+/// A parameter key.
+///
+/// ```abnf
+/// key = "value" / "gas" / "gasLimit" / "gasPrice" / TYPE
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub enum Key {
+    Value,
+    Gas,
+    GasLimit,
+    GasPrice,
+    Type(EthereumAbiTypeName),
+}
+
+impl core::fmt::Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Key::Value => f.write_str("value"),
+            Key::Gas => f.write_str("gas"),
+            Key::GasLimit => f.write_str("gasLimit"),
+            Key::GasPrice => f.write_str("gasPrice"),
+            Key::Type(ty) => ty.fmt(f),
+        }
+    }
+}
+
+impl Key {
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let parse_value = nom::bytes::complete::tag("value").map(|_| Key::Value);
+        let parse_gas = nom::bytes::complete::tag("gas").map(|_| Key::Gas);
+        let parse_gas_limit = nom::bytes::complete::tag("gasLimit").map(|_| Key::GasLimit);
+        let parse_gas_price = nom::bytes::complete::tag("gasPrice").map(|_| Key::GasPrice);
+
+        nom::branch::alt((
+            parse_value,
+            parse_gas_limit,
+            parse_gas_price,
+            parse_gas,
+            EthereumAbiTypeName::parse.map(Key::Type),
+        ))(i)
+    }
+}
+
+/// A key-value pair.
+pub struct Parameter {
+    key: Key,
+    value: Value,
+}
+
+impl Parameter {
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, key) = Key::parse(i)?;
+        let (i, _eq) = nom::character::complete::char('=')(i)?;
+        let (i, value) = Value::parse(i)?;
+        Ok((i, Parameter { key, value }))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
+    use prop::strategy::Union;
     use proptest::prelude::*;
 
     #[test]
@@ -872,13 +931,38 @@ mod test {
         .boxed()
     }
 
+    const TYPE_RECURSIONS: usize = 4;
     proptest! {
         #[test]
-        fn parse_arb_eth_type_name(expected in arb_eth_type_name(4)) {
+        fn parse_arb_eth_type_name(expected in arb_eth_type_name(TYPE_RECURSIONS)) {
             let input = &expected.name;
             let (output, seen) = EthereumAbiTypeName::parse(input).unwrap();
             assert_eq!("", output);
             assert_eq!(expected, seen);
         }
     }
+
+    fn arb_key() -> impl Strategy<Value = Key> {
+        fn type_keys() -> impl Strategy<Value = Key> {
+            arb_eth_type_name(TYPE_RECURSIONS).prop_map(Key::Type)
+        }
+        fn one_offs() -> impl Strategy<Value = Key> {
+            Union::new([Key::Value, Key::Gas, Key::GasLimit, Key::GasPrice].map(Just))
+        }
+        Union::new([one_offs().boxed(), type_keys().boxed()])
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_key(expected in arb_key()) {
+            let input = expected.to_string();
+            let (output, seen) = Key::parse(&input).unwrap();
+            assert_eq!("", output);
+            assert_eq!(expected, seen);
+        }
+    }
+
+    // fn arb_parameter() -> impl Strategy<Value = Parameter> {
+
+    // }
 }
