@@ -1,5 +1,7 @@
 //! Parser for [EIP-681](https://eips.ethereum.org/EIPS/eip-681) transaction requests.
 //!
+//! The top level of the parsing tree is the type [`EthereumTransactionRequest`].
+//!
 //! ## ABNF Syntax
 //!
 //! ```abnf
@@ -15,18 +17,9 @@
 //! value            = number / ethereum_address / STRING
 //! number           = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
 //! ```
-//!
-//! TODO(schell):
-//! * [ ] request          
-//! * [ ] schema_prefix    
-//! * [x] target_address   
-//! * [ ] chain_id         
-//! * [ ] function_name    
-//! * [x] ethereum_address
-//! * [ ] parameters       
-//! * [ ] parameter        
-//! * [ ] key              
-//! * [x] value            
-//! * [x] number           
 
 mod parse;
+pub use parse::{
+    Digits, EnsName, EthereumAbiTypeName, EthereumAddress, EthereumTransactionRequest, HexDigits,
+    Key, Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
+};
