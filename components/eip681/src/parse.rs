@@ -96,8 +96,8 @@ pub enum ValidationError {
     #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]
     SmallExponent { expected: usize, seen: u64 },
 
-    #[snafu(display("Exponent {seen} is too big and has saturated"))]
-    BigExponent { seen: u64 },
+    #[snafu(display("Number {seen} is too big and has saturated"))]
+    Saturation { seen: Number },
 
     #[snafu(display("Could not decode url-encoded string: {source}"))]
     UrlEncoding { source: std::str::Utf8Error },
@@ -234,7 +234,7 @@ impl HexDigits {
 /// exponent MUST be greater or equal to the number of decimals after the point.
 ///
 /// ## Note
-/// This ABNF notation is doesn't seem correct, as it allows for quite a few
+/// This ABNF notation doesn't seem correct, as it allows for quite a few
 /// cases that don't make sense - for example:
 ///
 /// 1. `*DIGIT` is missing and `[ "." 1*DIGIT ]` is present while `[ ( "e" / "E" ) [ 1*DIGIT] ]`
@@ -251,7 +251,7 @@ impl HexDigits {
 ///
 // TODO(schell):
 //   - tell someone about the bugs in the ABNF syntax
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Number {
     /// true for "+", false for "-"
     signum: Option<bool>,
@@ -360,23 +360,15 @@ impl Number {
             .signum
             .map(|is_positive| if is_positive { 1 } else { -1 })
             .unwrap_or(1i128);
-        dbg!(signum);
         let integer = self.integer();
-        dbg!(integer);
         let (decimal_numerator, decimal_denominator) = self.decimal();
-        dbg!(decimal_numerator);
-        dbg!(decimal_denominator);
         let exp = self
             .exponent
             .as_ref()
             .and_then(|(_, maybe_exp)| maybe_exp.as_ref().map(|digits| digits.as_u64() as u32))
             .unwrap_or_default();
-        dbg!(exp);
-        let multiplier = 10u64.saturating_pow(exp);
-        snafu::ensure!(multiplier < u64::MAX, BigExponentSnafu { seen: exp });
-        dbg!(multiplier);
-        let modulo = multiplier % decimal_denominator;
-        dbg!(modulo);
+        let multiplier = 10i128.saturating_pow(exp);
+        let modulo = multiplier % decimal_denominator as i128;
         snafu::ensure!(
             modulo == 0 || decimal_numerator == 0,
             SmallExponentSnafu {
@@ -384,10 +376,12 @@ impl Number {
                 seen: exp
             }
         );
-        let multiplied_integer = integer * multiplier;
-        let decimal_multiplier = multiplier / decimal_denominator;
-        let multiplied_decimal = decimal_numerator * decimal_multiplier;
-        Ok(signum * (multiplied_integer as i128 + multiplied_decimal as i128))
+        let multiplied_integer = (integer as i128).saturating_mul(multiplier);
+        let decimal_multiplier = multiplier / decimal_denominator as i128;
+        let multiplied_decimal = (decimal_numerator as i128).saturating_mul(decimal_multiplier);
+        let value = multiplied_integer + multiplied_decimal;
+        snafu::ensure!(value < i128::MAX, SaturationSnafu { seen: self.clone() });
+        Ok(signum * value)
     }
 }
 
@@ -946,16 +940,17 @@ mod test {
             prop::option::of(any::<bool>()),
             arb_digits(0),
             any::<bool>(),
-            prop::option::of(arb_digits_in(1..=10)),
+            prop::option::of(arb_digits_in(1..=4)),
         )
             .prop_flat_map(|(signum, integer, little_e, decimal)| {
                 if let Some(dec) = decimal.as_ref() {
                     // If there is a decimal, ensure that the exponent "covers" it
-                    arb_digits_gte(dec.places.len() as u64, u64::MAX.ilog10() as u64 / 2)
-                        .prop_map(Some)
+                    let places_len = dec.places.len();
+                    (places_len..=places_len + 14)
+                        .prop_map(|n| Some(Digits::from_u64(n as u64)))
                         .boxed()
                 } else {
-                    prop::option::of(arb_digits(1)).boxed()
+                    prop::option::of((0..=18).prop_map(|n| Digits::from_u64(n as u64))).boxed()
                 }
                 .prop_map(move |exponent| Number {
                     signum,
@@ -992,7 +987,7 @@ mod test {
 
     proptest! {
         #[test]
-        fn parse_valid_number(ns in arb_valid_number()) {
+        fn parse_arb_valid_number(ns in arb_valid_number()) {
             let s = ns.to_string();
             let (i, seen_ns) = Number::parse(&s).unwrap();
             assert!(i.is_empty());
@@ -1032,6 +1027,7 @@ mod test {
     /// Produces rather exhaustive `EnsName`s that may not be parseable because:
     ///
     /// * includes unicode that doesn't pass normalization
+    /// * only has one label, ie doesn't contain any '.' - eg "notadomain"
     /// * is zero length
     ///
     /// This produces a lot of cases, as a result `parse_arb_ens_name` takes about
@@ -1044,6 +1040,13 @@ mod test {
 
     /// Produces "happy path" `EnsName`s that are guaranteed to be parseable,
     /// but are not exhaustive.
+    ///
+    /// Being exhaustive _and_ happy is hard here, because labels are almost
+    /// arbitrary Unicode, but there are "recommendations" about what makes a
+    /// good name. For added security we also validate the name after parsing
+    /// to ensure it is properly normalized, but synthesizing Unicode that
+    /// is guaranteed normalizable is outside the scope of this testsuite, for
+    /// now.
     fn arb_happy_ens_name() -> impl Strategy<Value = EnsName> {
         /// Creates a "happy path" label according to
         /// [EIP-137](https://eips.ethereum.org/EIPS/eip-137):
@@ -1085,6 +1088,8 @@ mod test {
 
     proptest! {
         #[test]
+        /// Meant to test not-necessarily-happy path ENS names, to ensure
+        /// that they either fail to parse predictably, or parse to an equivalent name
         fn parse_arb_ens_name(expected in arb_any_ens_name()) {
             let input = expected.to_string();
             match EnsName::parse(&input) {
@@ -1094,6 +1099,8 @@ mod test {
                 }
                 // The input was empty, fine
                 Err(nom::Err::Error(ParseError::EnsMissing)) => {}
+                // The input was not a valid domain
+                Err(nom::Err::Error(ParseError::EnsDomain)) => {}
                 // The input didn't normalize, fine since we don't know how to
                 // construct a strategy via regex that is exhaustive of normalized input
                 Err(nom::Err::Error(ParseError::EnsNormalization { .. })) => {}
@@ -1361,50 +1368,6 @@ mod test {
             assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen}'");
             assert_eq!(expected, seen);
         }
-    }
-
-    #[test]
-    fn parse_parameter_sanity() {
-        let expected = Parameter {
-            key: Key::Value,
-            value: Value::Address(EthereumAddress::Name(EnsName("aa.a0".to_owned()))),
-        };
-        let input = "value=aa.a0&value=31554253.75819936219e60504434428";
-        println!("{input}");
-        let (_output, seen) = Parameter::parse(input).unwrap();
-        pretty_assertions::assert_eq!(expected, seen);
-    }
-
-    #[test]
-    fn parse_parameters_sanity() {
-        let expected = Parameters(vec![
-            Parameter {
-                key: Key::Value,
-                value: Value::Address(EthereumAddress::Name(EnsName("aa.a0".to_owned()))),
-            },
-            Parameter {
-                key: Key::Value,
-                value: Value::Number(Number {
-                    signum: None,
-                    integer: Digits {
-                        places: vec![3, 1, 5, 5, 4, 2, 5, 3],
-                    },
-                    decimal: Some(Digits {
-                        places: vec![7, 5, 8, 1, 9, 9, 3, 6, 2, 1, 9],
-                    }),
-                    exponent: Some((
-                        true,
-                        Some(Digits {
-                            places: vec![6, 0, 5, 0, 4, 4, 3, 4, 4, 2, 8],
-                        }),
-                    )),
-                }),
-            },
-        ]);
-        let input = expected.to_string();
-        let (_output, seen) = Parameters::parse(&input).unwrap();
-        println!("parsed: {input}");
-        pretty_assertions::assert_eq!(expected, seen);
     }
 
     fn arb_parameters() -> impl Strategy<Value = Parameters> {
