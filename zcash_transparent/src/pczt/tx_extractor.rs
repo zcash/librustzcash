@@ -55,11 +55,11 @@ impl super::Bundle {
             .map(|input| {
                 let prevout = OutPoint::new(input.prevout_txid.into(), input.prevout_index);
 
-                Ok(TxIn {
+                Ok(TxIn::from_parts(
                     prevout,
-                    script_sig: script_sig(input)?,
-                    sequence: input.sequence.unwrap_or(u32::MAX),
-                })
+                    script_sig(input)?,
+                    input.sequence.unwrap_or(u32::MAX),
+                ))
             })
             .collect::<Result<Vec<_>, E>>()?;
 

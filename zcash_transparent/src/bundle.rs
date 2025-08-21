@@ -85,18 +85,21 @@ impl<A: Authorization> Bundle<A> {
     pub fn is_coinbase(&self) -> bool {
         // From `CTransaction::IsCoinBase()` in zcashd:
         //   return (vin.size() == 1 && vin[0].prevout.IsNull());
-        matches!(&self.vin[..], [input] if input.prevout.is_null())
+        matches!(&self.vin[..], [input] if input.prevout().is_null())
     }
 
+    #[allow(deprecated)]
     pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
         Bundle {
             vin: self
                 .vin
                 .into_iter()
-                .map(|txin| TxIn {
-                    prevout: txin.prevout,
-                    script_sig: f.map_script_sig(txin.script_sig),
-                    sequence: txin.sequence,
+                .map(|txin| {
+                    TxIn::from_parts(
+                        txin.prevout,
+                        f.map_script_sig(txin.script_sig),
+                        txin.sequence,
+                    )
                 })
                 .collect(),
             vout: self.vout,
@@ -116,7 +119,7 @@ impl<A: Authorization> Bundle<A> {
     {
         let mut input_sum = Zatoshis::ZERO;
         for txin in &self.vin {
-            if let Some(v) = get_prevout_value(&txin.prevout)? {
+            if let Some(v) = get_prevout_value(txin.prevout())? {
                 input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
             } else {
                 return Ok(None);
@@ -199,9 +202,39 @@ impl OutPoint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TxIn<A: Authorization> {
+    #[deprecated(since = "0.4.1", note = "use the prevout() accessor instead.")]
     pub prevout: OutPoint,
+    #[deprecated(since = "0.4.1", note = "use the script_sig() accessor instead.")]
     pub script_sig: A::ScriptSig,
+    #[deprecated(since = "0.4.1", note = "use the sequence() accessor instead.")]
     pub sequence: u32,
+}
+
+#[allow(deprecated)]
+impl<A: Authorization> TxIn<A> {
+    /// Constructs a new [`TxIn`] from its constituent parts.
+    pub fn from_parts(prevout: OutPoint, script_sig: A::ScriptSig, sequence: u32) -> Self {
+        Self {
+            prevout,
+            script_sig,
+            sequence,
+        }
+    }
+
+    /// Accessor for the previous transparent output that this input spends.
+    pub fn prevout(&self) -> &OutPoint {
+        &self.prevout
+    }
+
+    /// The signature being used to spend the input.
+    pub fn script_sig(&self) -> &A::ScriptSig {
+        &self.script_sig
+    }
+
+    /// The sequence number of the input (no Zcash protocol use as of NU6).
+    pub fn sequence(&self) -> u32 {
+        self.sequence
+    }
 }
 
 impl TxIn<Authorized> {
@@ -214,17 +247,13 @@ impl TxIn<Authorized> {
             u32::from_le_bytes(sequence)
         };
 
-        Ok(TxIn {
-            prevout,
-            script_sig,
-            sequence,
-        })
+        Ok(TxIn::from_parts(prevout, script_sig, sequence))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout.write(&mut writer)?;
-        self.script_sig.write(&mut writer)?;
-        writer.write_all(&self.sequence.to_le_bytes())
+        self.prevout().write(&mut writer)?;
+        self.script_sig().write(&mut writer)?;
+        writer.write_all(&self.sequence().to_le_bytes())
     }
 }
 
@@ -309,7 +338,7 @@ pub mod testing {
             script_sig in arb_script(),
             sequence in any::<u32>()
         ) -> TxIn<Authorized> {
-            TxIn { prevout, script_sig, sequence }
+            TxIn::from_parts(prevout, script_sig, sequence)
         }
     }
 

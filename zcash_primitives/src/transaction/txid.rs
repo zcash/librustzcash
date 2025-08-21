@@ -80,7 +80,7 @@ pub(crate) fn transparent_prevout_hash<TransparentAuth: transparent::Authorizati
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_PREVOUTS_HASH_PERSONALIZATION);
     for t_in in vin {
-        t_in.prevout.write(&mut h).unwrap();
+        t_in.prevout().write(&mut h).unwrap();
     }
     h.finalize()
 }
@@ -92,7 +92,7 @@ pub(crate) fn transparent_sequence_hash<TransparentAuth: transparent::Authorizat
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     for t_in in vin {
-        h.write_u32_le(t_in.sequence).unwrap();
+        h.write_u32_le(t_in.sequence()).unwrap();
     }
     h.finalize()
 }
@@ -492,7 +492,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
-                txin.script_sig.write(&mut h).unwrap();
+                txin.script_sig().write(&mut h).unwrap();
             }
         }
         h.finalize()

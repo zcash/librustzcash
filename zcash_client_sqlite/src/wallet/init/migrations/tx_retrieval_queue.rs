@@ -255,7 +255,7 @@ fn queue_transparent_input_retrieval<AccountId>(
             // queue the transparent inputs for enhancement
             queue_tx_retrieval(
                 conn,
-                b.vin.iter().map(|txin| *txin.prevout.txid()),
+                b.vin.iter().map(|txin| *txin.prevout().txid()),
                 Some(tx_ref),
             )?;
         }
@@ -393,11 +393,7 @@ mod tests {
             ))]
             Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
-                vin: vec![TxIn {
-                    prevout: OutPoint::fake(),
-                    script_sig: Script(vec![]),
-                    sequence: 0,
-                }],
+                vin: vec![TxIn::from_parts(OutPoint::fake(), Script(vec![]), 0)],
                 vout: vec![TxOut {
                     value: Zatoshis::const_from_u64(10_000),
                     script_pubkey: TransparentAddress::PublicKeyHash([7; 20]).script(),

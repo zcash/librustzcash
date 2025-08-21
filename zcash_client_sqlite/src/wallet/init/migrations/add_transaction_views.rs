@@ -425,11 +425,7 @@ mod tests {
             ))]
             Zatoshis::ZERO,
             Some(transparent::Bundle {
-                vin: vec![TxIn {
-                    prevout: OutPoint::fake(),
-                    script_sig: Script(vec![]),
-                    sequence: 0,
-                }],
+                vin: vec![TxIn::from_parts(OutPoint::fake(), Script(vec![]), 0)],
                 vout: vec![TxOut {
                     value: Zatoshis::const_from_u64(1100000000),
                     script_pubkey: Script(vec![]),

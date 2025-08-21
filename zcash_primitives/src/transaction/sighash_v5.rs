@@ -121,10 +121,10 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
             let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
             if let SignableInput::Transparent(input) = input {
                 let txin = &bundle.vin[*input.index()];
-                txin.prevout.write(&mut ch).unwrap();
+                txin.prevout().write(&mut ch).unwrap();
                 ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
                 input.script_pubkey().write(&mut ch).unwrap();
-                ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
+                ch.write_all(&txin.sequence().to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();
 

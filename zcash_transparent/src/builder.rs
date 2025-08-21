@@ -353,11 +353,7 @@ impl TransparentBuilder {
 impl TxIn<Unauthorized> {
     #[cfg(feature = "transparent-inputs")]
     pub fn new(prevout: OutPoint) -> Self {
-        TxIn {
-            prevout,
-            script_sig: (),
-            sequence: u32::MAX,
-        }
+        TxIn::from_parts(prevout, (), u32::MAX)
     }
 }
 
@@ -438,11 +434,11 @@ impl Bundle<Unauthorized> {
                 .iter()
                 .zip(script_sigs)
                 .map(|(txin, sig)| {
-                    Ok(TxIn {
-                        prevout: txin.prevout.clone(),
-                        script_sig: sig?,
-                        sequence: txin.sequence,
-                    })
+                    Ok(TxIn::from_parts(
+                        txin.prevout().clone(),
+                        sig?,
+                        txin.sequence(),
+                    ))
                 })
                 .collect::<Result<_, _>>()?,
             vout: self.vout,
@@ -459,7 +455,7 @@ impl Bundle<Unauthorized> {
         self,
         calculate_sighash: F,
         secp_ctx: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-    ) -> Result<TransparentSignatureContext<secp256k1::VerifyOnly>, Error>
+    ) -> Result<TransparentSignatureContext<'_, secp256k1::VerifyOnly>, Error>
     where
         F: Fn(SignableInput) -> [u8; 32], // The closure's signature
     {
@@ -593,10 +589,12 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
                 .original_vin_unauthorized
                 .iter()
                 .zip(fully_signed_scripts)
-                .map(|(txin_unauth, sig_script)| TxIn {
-                    prevout: txin_unauth.prevout.clone(),
-                    script_sig: sig_script,
-                    sequence: txin_unauth.sequence,
+                .map(|(txin_unauth, sig_script)| {
+                    TxIn::from_parts(
+                        txin_unauth.prevout().clone(),
+                        sig_script,
+                        txin_unauth.sequence(),
+                    )
                 })
                 .collect(),
             vout: self.original_vout,
