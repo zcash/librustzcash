@@ -66,10 +66,7 @@ impl super::Bundle {
         let vout = self
             .outputs
             .iter()
-            .map(|output| TxOut {
-                value: output.value,
-                script_pubkey: output.script_pubkey.clone(),
-            })
+            .map(|output| TxOut::new(output.value, output.script_pubkey.clone()))
             .collect::<Vec<_>>();
 
         Ok(if vin.is_empty() && vout.is_empty() {
@@ -96,10 +93,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
     let inputs = bundle
         .inputs
         .iter()
-        .map(|input| TxOut {
-            value: input.value,
-            script_pubkey: input.script_pubkey.clone(),
-        })
+        .map(|input| TxOut::new(input.value, input.script_pubkey.clone()))
         .collect();
 
     EffectsOnly { inputs }

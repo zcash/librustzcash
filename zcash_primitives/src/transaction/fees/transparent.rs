@@ -40,7 +40,7 @@ pub trait InputView: core::fmt::Debug {
 
     /// The size of the transparent script required to spend this input.
     fn serialized_size(&self) -> InputSize {
-        match self.coin().script_pubkey.address() {
+        match self.coin().script_pubkey().address() {
             Some(TransparentAddress::PublicKeyHash(_)) => InputSize::STANDARD_P2PKH,
             _ => InputSize::Unknown(self.outpoint().clone()),
         }
@@ -86,10 +86,10 @@ pub trait OutputView: core::fmt::Debug {
 
 impl OutputView for TxOut {
     fn value(&self) -> Zatoshis {
-        self.value
+        self.value()
     }
 
     fn script_pubkey(&self) -> &Script {
-        &self.script_pubkey
+        self.script_pubkey()
     }
 }

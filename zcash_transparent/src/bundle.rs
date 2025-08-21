@@ -31,13 +31,13 @@ impl Authorization for EffectsOnly {
 
 impl TransparentAuthorizingContext for EffectsOnly {
     fn input_amounts(&self) -> Vec<Zatoshis> {
-        self.inputs.iter().map(|input| input.value).collect()
+        self.inputs.iter().map(|input| input.value()).collect()
     }
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
         self.inputs
             .iter()
-            .map(|input| input.script_pubkey.clone())
+            .map(|input| input.script_pubkey().clone())
             .collect()
     }
 }
@@ -129,7 +129,7 @@ impl<A: Authorization> Bundle<A> {
         let output_sum = self
             .vout
             .iter()
-            .map(|p| ZatBalance::from(p.value))
+            .map(|p| ZatBalance::from(p.value()))
             .sum::<Option<ZatBalance>>()
             .ok_or(BalanceError::Overflow)?;
 
@@ -259,10 +259,13 @@ impl TxIn<Authorized> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
+    #[deprecated(since = "0.4.1", note = "use the value() accessor instead.")]
     pub value: Zatoshis,
+    #[deprecated(since = "0.4.1", note = "use the script_pubkey() accessor instead.")]
     pub script_pubkey: Script,
 }
 
+#[allow(deprecated)]
 impl TxOut {
     // Constructs a new `TxOut` from its constituent parts.
     pub fn new(value: Zatoshis, script_pubkey: Script) -> Self {
@@ -295,6 +298,14 @@ impl TxOut {
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
     pub fn recipient_address(&self) -> Option<TransparentAddress> {
         self.script_pubkey.address()
+    }
+
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    pub fn script_pubkey(&self) -> &Script {
+        &self.script_pubkey
     }
 }
 
@@ -344,7 +355,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
-            TxOut { value, script_pubkey }
+            TxOut::new(value, script_pubkey)
         }
     }
 

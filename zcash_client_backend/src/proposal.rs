@@ -417,7 +417,7 @@ impl<NoteRef> Step<NoteRef> {
 
         let transparent_input_total = transparent_inputs
             .iter()
-            .map(|out| out.txout().value)
+            .map(|out| out.txout().value())
             .try_fold(Zatoshis::ZERO, |acc, a| {
                 (acc + a).ok_or(ProposalError::Overflow)
             })?;

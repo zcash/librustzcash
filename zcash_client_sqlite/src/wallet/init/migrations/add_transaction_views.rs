@@ -426,10 +426,10 @@ mod tests {
             Zatoshis::ZERO,
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script(vec![]), 0)],
-                vout: vec![TxOut {
-                    value: Zatoshis::const_from_u64(1100000000),
-                    script_pubkey: Script(vec![]),
-                }],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(1100000000),
+                    Script(vec![]),
+                )],
                 authorization: Authorized,
             }),
             None,

@@ -13,9 +13,12 @@ workspace.
 ### Added
 - `zcash_transparent::bundle::TxIn::from_parts`
 - `zcash_transparent::bundle::TxIn::{prevout, script_sig, sequence}` accessor methods.
+- `zcash_transparent::bundle::TxOut::{value, script_pubkey}` accessor methods.
 
 ### Deprecated
 - `zcash_transparent::bundle::TxIn::{prevout, script_sig, sequence}` public fields
+  are deprecated; use the newly added accessor methods instead.
+- `zcash_transparent::bundle::TxOut::{value, script_pubkey}` public fields
   are deprecated; use the newly added accessor methods instead.
 
 ## [0.4.0] - 2025-07-31

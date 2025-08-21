@@ -413,20 +413,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             match recipient_address {
                 Address::Transparent(addr) => {
                     payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                    transparent_outputs.push(TxOut {
-                        value: payment.amount(),
-                        script_pubkey: addr.script(),
-                    });
+                    transparent_outputs.push(TxOut::new(payment.amount(), addr.script()));
                 }
                 #[cfg(feature = "transparent-inputs")]
                 Address::Tex(data) => {
                     let p2pkh_addr = TransparentAddress::PublicKeyHash(data);
 
                     tr1_payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                    tr1_transparent_outputs.push(TxOut {
-                        value: payment.amount(),
-                        script_pubkey: p2pkh_addr.script(),
-                    });
+                    tr1_transparent_outputs.push(TxOut::new(payment.amount(), p2pkh_addr.script()));
                     tr1_payments.push(
                         Payment::new(
                             payment.recipient_address().clone(),
@@ -467,10 +461,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
                     if let Some(addr) = addr.transparent() {
                         payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                        transparent_outputs.push(TxOut {
-                            value: payment.amount(),
-                            script_pubkey: addr.script(),
-                        });
+                        transparent_outputs.push(TxOut::new(payment.amount(), addr.script()));
                         continue;
                     }
 

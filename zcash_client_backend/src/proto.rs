@@ -592,7 +592,7 @@ impl proposal::Proposal {
                             txid: utxo.outpoint().hash().to_vec(),
                             value_pool: proposal::ValuePool::Transparent.into(),
                             index: utxo.outpoint().n(),
-                            value: utxo.txout().value.into(),
+                            value: utxo.txout().value().into(),
                         })),
                     })
                     .chain(step.shielded_inputs().iter().flat_map(|s_in| {

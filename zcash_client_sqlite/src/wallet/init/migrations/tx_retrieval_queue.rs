@@ -394,10 +394,10 @@ mod tests {
             Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script(vec![]), 0)],
-                vout: vec![TxOut {
-                    value: Zatoshis::const_from_u64(10_000),
-                    script_pubkey: TransparentAddress::PublicKeyHash([7; 20]).script(),
-                }],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(10_000),
+                    TransparentAddress::PublicKeyHash([7; 20]).script(),
+                )],
                 authorization: transparent::bundle::Authorized,
             }),
             None,

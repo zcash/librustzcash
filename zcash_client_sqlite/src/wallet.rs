@@ -2895,10 +2895,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     &params,
                     &WalletTransparentOutput::from_parts(
                         outpoint.clone(),
-                        TxOut {
-                            value: output.value(),
-                            script_pubkey: ephemeral_address.script(),
-                        },
+                        TxOut::new(output.value(), ephemeral_address.script()),
                         None,
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
@@ -3382,7 +3379,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                         from_account_uuid: account_uuid,
                         output_index,
                         recipient,
-                        value: txout.value,
+                        value: txout.value(),
                     });
                 }
             } else {
@@ -3417,7 +3414,7 @@ fn determine_fee(
             let t_out_total = t_bundle
                 .vout
                 .iter()
-                .map(|o| o.value)
+                .map(|o| o.value())
                 .sum::<Option<Zatoshis>>()
                 .ok_or(BalanceError::Overflow)?;
             let value_balance = (value_balance - t_out_total).ok_or(BalanceError::Underflow)?;
@@ -3437,7 +3434,7 @@ fn determine_fee(
                         get_wallet_transparent_output(_conn, t_in.prevout(), true)?,
                     ) {
                         (Some(b), Some(out)) => {
-                            result = Some((b + out.txout().value).ok_or(BalanceError::Overflow)?)
+                            result = Some((b + out.txout().value()).ok_or(BalanceError::Overflow)?)
                         }
                         _ => {
                             result = None;
