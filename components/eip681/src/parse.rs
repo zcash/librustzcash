@@ -50,6 +50,9 @@ pub enum ParseError<'a> {
 
     #[snafu(display("Bit size must be a multiple of 8, saw {seen}"))]
     InvalidBitSize { seen: u64 },
+
+    #[snafu(display("Invalid parameter value. Expected a number."))]
+    InvalidParameterValue,
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -93,6 +96,9 @@ pub enum ValidationError {
     #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]
     SmallExponent { expected: usize, seen: u64 },
 
+    #[snafu(display("Exponent {seen} is too big and has saturated"))]
+    BigExponent { seen: u64 },
+
     #[snafu(display("Could not decode url-encoded string: {source}"))]
     UrlEncoding { source: std::str::Utf8Error },
 }
@@ -125,6 +131,24 @@ impl Digits {
             total += *digit as u64 * 10u64.pow(mag as u32);
         }
         total
+    }
+
+    /// Returns the digits as a ratio, where prefixed zeros
+    /// are treated as a denominator.
+    pub fn as_decimal_ratio(&self) -> (u64, u64) {
+        let mut numerator = 0;
+        let denominator = 10u64.pow(self.places.len() as u32);
+        // Skip the prefixed zeros to build an integer numerator
+        let rest = self
+            .places
+            .iter()
+            .skip_while(|n| **n == 0)
+            .collect::<Vec<_>>();
+        for (mag, digit) in rest.into_iter().rev().enumerate() {
+            numerator += *digit as u64 * 10u64.pow(mag as u32);
+        }
+
+        (numerator, denominator)
     }
 
     pub fn from_u64(mut v: u64) -> Self {
@@ -267,24 +291,6 @@ impl core::fmt::Display for Number {
 }
 
 impl Number {
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(dec) = self.decimal.as_ref() {
-            let exp_value = self
-                .exponent
-                .as_ref()
-                .and_then(|(_e, maybe_exp)| maybe_exp.as_ref().map(Digits::as_u64))
-                .unwrap_or_default();
-            snafu::ensure!(
-                exp_value >= dec.places.len() as u64,
-                SmallExponentSnafu {
-                    expected: dec.places.len(),
-                    seen: exp_value,
-                }
-            );
-        }
-        Ok(())
-    }
-
     /// Parse a `Number`.
     ///
     /// /// ```abnf
@@ -333,6 +339,56 @@ impl Number {
             },
         ))
     }
+
+    /// Returns the value of the integer portion of the number.
+    pub fn integer(&self) -> u64 {
+        self.integer.as_u64()
+    }
+
+    /// Returns the value of the decimal portion of the number as a ratio
+    /// of `u64`s.
+    pub fn decimal(&self) -> (u64, u64) {
+        self.decimal
+            .as_ref()
+            .map(|d| d.as_decimal_ratio())
+            .unwrap_or((0, 1))
+    }
+
+    /// Convert this [`Number`] into an i128, if possible.
+    pub fn as_i128(&self) -> Result<i128, ValidationError> {
+        let signum = self
+            .signum
+            .map(|is_positive| if is_positive { 1 } else { -1 })
+            .unwrap_or(1i128);
+        dbg!(signum);
+        let integer = self.integer();
+        dbg!(integer);
+        let (decimal_numerator, decimal_denominator) = self.decimal();
+        dbg!(decimal_numerator);
+        dbg!(decimal_denominator);
+        let exp = self
+            .exponent
+            .as_ref()
+            .and_then(|(_, maybe_exp)| maybe_exp.as_ref().map(|digits| digits.as_u64() as u32))
+            .unwrap_or_default();
+        dbg!(exp);
+        let multiplier = 10u64.saturating_pow(exp);
+        snafu::ensure!(multiplier < u64::MAX, BigExponentSnafu { seen: exp });
+        dbg!(multiplier);
+        let modulo = multiplier % decimal_denominator;
+        dbg!(modulo);
+        snafu::ensure!(
+            modulo == 0 || decimal_numerator == 0,
+            SmallExponentSnafu {
+                expected: decimal_denominator.ilog10() as usize,
+                seen: exp
+            }
+        );
+        let multiplied_integer = integer * multiplier;
+        let decimal_multiplier = multiplier / decimal_denominator;
+        let multiplied_decimal = decimal_numerator * decimal_multiplier;
+        Ok(signum * (multiplied_integer as i128 + multiplied_decimal as i128))
+    }
 }
 
 /// Ethereum Name Service name.
@@ -370,7 +426,7 @@ impl core::fmt::Display for EnsName {
 }
 
 impl EnsName {
-    const DELIMITERS: &[char] = &['@', '/', '?'];
+    const DELIMITERS: &[char] = &['@', '/', '?', '&'];
 
     /// Parse an `EnsName`.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
@@ -518,6 +574,14 @@ impl Value {
         // UNWRAP: safe because this was an array of 3
         results.into_iter().next().unwrap()
     }
+
+    /// Return the value as a [`Number`], if possible.
+    pub fn as_number(&self) -> Option<&Number> {
+        match self {
+            Value::Number(n) => Some(n),
+            _ => None,
+        }
+    }
 }
 
 /// An Ethereum ABI type name.
@@ -617,12 +681,179 @@ impl Parameter {
         let (i, key) = Key::parse(i)?;
         let (i, _eq) = nom::character::complete::char('=')(i)?;
         let (i, value) = Value::parse(i)?;
+        // If key in the parameter list is value, gasLimit, gasPrice or gas then
+        // value MUST be a number. Otherwise, it must correspond to the TYPE
+        // string used as key.
+        match &key {
+            Key::Value | Key::Gas | Key::GasLimit | Key::GasPrice => {
+                snafu::ensure!(
+                    matches!(value, Value::Number(_)),
+                    InvalidParameterValueSnafu
+                );
+            }
+            Key::Type(_ty) => {
+                // For the moment, we're not going to check the type here.
+            }
+        }
+
         Ok((i, Parameter { key, value }))
+    }
+}
+
+/// A collection of [`Parameter`].
+#[derive(Debug, PartialEq)]
+pub struct Parameters(Vec<Parameter>);
+
+impl core::fmt::Display for Parameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.0.iter();
+        if let Some(first) = iter.next() {
+            first.fmt(f)?;
+            for other in iter {
+                f.write_str("&")?;
+                other.fmt(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Parameters {
+    /// Parses zero or more parameters, separated by '&'.
+    ///
+    /// ## Note
+    /// This parser never fails.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, maybe_head) = nom::combinator::opt(Parameter::parse).parse(i)?;
+        if let Some(head) = maybe_head {
+            let parse_next_param =
+                nom::sequence::preceded(nom::bytes::complete::tag("&"), Parameter::parse);
+            let (i, tail) = nom::multi::many0(parse_next_param)(i)?;
+            let mut parameters = vec![head];
+            parameters.extend(tail);
+            Ok((i, Parameters(parameters)))
+        } else {
+            Ok((i, Parameters(vec![])))
+        }
+    }
+
+    /// Return the value of the parameter with the given `key`, if any.
+    pub fn get_value(&self, key: &Key) -> Option<&Value> {
+        for param in self.0.iter() {
+            if &param.key == key {
+                return Some(&param.value);
+            }
+        }
+        None
+    }
+}
+
+/// Schema prefix.
+///
+/// ```absnf
+/// schema_prefix = "ethereum" ":" [ "pay-" ]
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct SchemaPrefix {
+    has_pay: bool,
+}
+
+impl core::fmt::Display for SchemaPrefix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ethereum:")?;
+        if self.has_pay {
+            f.write_str("pay-")?;
+        }
+        Ok(())
+    }
+}
+
+impl SchemaPrefix {
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, _) = nom::bytes::complete::tag("ethereum:")(i)?;
+        let (i, maybe_pay) = nom::combinator::opt(nom::bytes::complete::tag("pay-"))(i)?;
+        let has_pay = maybe_pay.is_some();
+        Ok((i, SchemaPrefix { has_pay }))
+    }
+}
+
+/// Ethereum transaction request.
+///
+/// ```abnf
+/// request = schema_prefix target_address [ "@" chain_id ] [ "/" function_name ] [ "?" parameters ]
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct EthereumTransactionRequest {
+    pub schema_prefix: SchemaPrefix,
+    pub target_address: EthereumAddress,
+    pub chain_id: Option<Digits>,
+    pub function_name: Option<UrlEncodedUnicodeString>,
+    pub parameters: Parameters,
+}
+
+impl core::fmt::Display for EthereumTransactionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            schema_prefix,
+            target_address,
+            chain_id,
+            function_name,
+            parameters,
+        } = self;
+        schema_prefix.fmt(f)?;
+        target_address.fmt(f)?;
+        if let Some(chain_id) = chain_id {
+            f.write_str("@")?;
+            chain_id.fmt(f)?;
+        }
+        if let Some(fn_name) = function_name {
+            f.write_str("/")?;
+            fn_name.fmt(f)?;
+        }
+        if !parameters.0.is_empty() {
+            f.write_str("?")?;
+            parameters.fmt(f)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl EthereumTransactionRequest {
+    /// Parse a transaction request.
+    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        let (i, schema_prefix) = SchemaPrefix::parse(i)?;
+        let (i, target_address) = EthereumAddress::parse(i)?;
+
+        let parse_chain_id =
+            nom::sequence::preceded(nom::bytes::complete::tag("@"), |i| Digits::parse_min(i, 1));
+        let (i, chain_id) = nom::combinator::opt(parse_chain_id)(i)?;
+
+        let parse_function_name = nom::sequence::preceded(
+            nom::bytes::complete::tag("/"),
+            UrlEncodedUnicodeString::parse,
+        );
+        let (i, function_name) = nom::combinator::opt(parse_function_name)(i)?;
+
+        let (i, _) = nom::combinator::opt(nom::bytes::complete::tag("?"))(i)?;
+        let (i, parameters) = Parameters::parse(i)?;
+        Ok((
+            i,
+            Self {
+                schema_prefix,
+                target_address,
+                chain_id,
+                function_name,
+                parameters,
+            },
+        ))
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::ops::RangeInclusive;
+
     use super::*;
 
     use prop::strategy::Union;
@@ -640,14 +871,27 @@ mod test {
         assert_eq!(vec![1, 2, 3], Digits::from_u64(123).places);
     }
 
-    fn arb_digits_with(min_digits: usize) -> impl Strategy<Value = Digits> {
-        let size_range = min_digits..=Digits::MAX_PLACES;
+    #[test]
+    fn digits_as_decimal_ratio() {
+        // 0.0123
+        let digits = Digits {
+            places: vec![0, 1, 2, 3],
+        };
+        assert_eq!((123, 10_000), digits.as_decimal_ratio());
 
+        // 0.666
+        let digits = Digits {
+            places: vec![6, 6, 6],
+        };
+        assert_eq!((666, 1000), digits.as_decimal_ratio());
+    }
+
+    fn arb_digits_in(size_range: RangeInclusive<usize>) -> impl Strategy<Value = Digits> {
         prop::collection::vec(0..10u8, size_range).prop_map(|places| Digits { places })
     }
 
     fn arb_digits(min_digits: usize) -> impl Strategy<Value = Digits> {
-        arb_digits_with(min_digits)
+        arb_digits_in(min_digits..=Digits::MAX_PLACES)
     }
 
     fn arb_hex_digits(min_digits: usize, max_digits: usize) -> impl Strategy<Value = HexDigits> {
@@ -657,19 +901,19 @@ mod test {
 
     proptest! {
         #[test]
-        fn arb_digits_sanity(digits in arb_digits_with(2)) {
+        fn arb_digits_sanity(digits in arb_digits_in(2..=Digits::MAX_PLACES)) {
             assert!(digits.places.len() >= 2, "digits: {digits:#?}");
             assert!(digits.places.len() <= Digits::MAX_PLACES, "digits: {digits:#?}");
         }
     }
 
-    fn arb_digits_gte(min_value: u64) -> impl Strategy<Value = Digits> {
-        (min_value..).prop_map(Digits::from_u64)
+    fn arb_digits_gte(min_value: u64, max_value: u64) -> impl Strategy<Value = Digits> {
+        (min_value..=max_value).prop_map(Digits::from_u64)
     }
 
     proptest! {
         #[test]
-        fn arb_digits_gte_sanity(digits in arb_digits_gte(20)) {
+        fn arb_digits_gte_sanity(digits in arb_digits_gte(20, u64::MAX)) {
             assert!(digits.as_u64() >= 20);
         }
     }
@@ -691,17 +935,23 @@ mod test {
         }
     }
 
+    #[test]
+    fn number_as_i128_sanity() {
+        let (_, n) = Number::parse("666.0").unwrap();
+        assert_eq!(666, n.as_i128().unwrap());
+    }
+
     fn arb_valid_number() -> impl Strategy<Value = Number> {
         (
             prop::option::of(any::<bool>()),
             arb_digits(0),
             any::<bool>(),
-            prop::option::of(arb_digits(1)),
+            prop::option::of(arb_digits_in(1..=10)),
         )
             .prop_flat_map(|(signum, integer, little_e, decimal)| {
                 if let Some(dec) = decimal.as_ref() {
                     // If there is a decimal, ensure that the exponent "covers" it
-                    arb_digits_gte(dec.places.len() as u64)
+                    arb_digits_gte(dec.places.len() as u64, u64::MAX.ilog10() as u64 / 2)
                         .prop_map(Some)
                         .boxed()
                 } else {
@@ -736,7 +986,7 @@ mod test {
     proptest! {
         #[test]
         fn arb_valid_number_sanity(number in arb_valid_number()) {
-            assert_eq!(Ok(()), number.validate());
+            assert!(number.as_i128().is_ok());
         }
     }
 
@@ -747,7 +997,8 @@ mod test {
             let (i, seen_ns) = Number::parse(&s).unwrap();
             assert!(i.is_empty());
             assert_eq!(ns, seen_ns);
-            assert_eq!(Ok(()), seen_ns.validate());
+            let result = seen_ns.as_i128();
+            assert!(result.is_ok(), "{}", result.unwrap_err());
         }
     }
 
@@ -1058,19 +1309,48 @@ mod test {
         assert_eq!(expected, seen);
     }
 
+    #[test]
+    /// Parsing a value as an ENS name consumes more input than as a string, so ENS name should
+    /// win.
+    fn parse_value_ens_name_over_string() {
+        let expected = Value::Address(EthereumAddress::Name(EnsName("aa.a0".to_string())));
+        let input = expected.to_string();
+        let (_output, seen) = Value::parse(&input).unwrap();
+        pretty_assertions::assert_eq!(expected, seen);
+    }
+
     proptest! {
         #[test]
         fn parse_arb_value(expected in arb_value()) {
             let input = expected.to_string();
             let (output, seen) = Value::parse(&input).unwrap();
-            assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen:?}' from input '{input}'");
-            assert_eq!("", output);
+            assert_eq!(
+                "",
+                output,
+                "`input` was not fully consumed. Parsed '{seen:?}' from input '{input}'"
+            );
             assert_eq!(expected, seen);
         }
     }
 
     fn arb_parameter() -> impl Strategy<Value = Parameter> {
-        (arb_key(), arb_value()).prop_map(|(key, value)| Parameter { key, value })
+        arb_key().prop_flat_map(|key| {
+            if matches!(key, Key::Value | Key::Gas | Key::GasLimit | Key::GasPrice) {
+                arb_valid_number()
+                    .prop_map(move |n| Parameter {
+                        key: key.clone(),
+                        value: Value::Number(n),
+                    })
+                    .boxed()
+            } else {
+                arb_value()
+                    .prop_map(move |v| Parameter {
+                        key: key.clone(),
+                        value: v,
+                    })
+                    .boxed()
+            }
+        })
     }
 
     proptest! {
@@ -1081,5 +1361,126 @@ mod test {
             assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen}'");
             assert_eq!(expected, seen);
         }
+    }
+
+    #[test]
+    fn parse_parameter_sanity() {
+        let expected = Parameter {
+            key: Key::Value,
+            value: Value::Address(EthereumAddress::Name(EnsName("aa.a0".to_owned()))),
+        };
+        let input = "value=aa.a0&value=31554253.75819936219e60504434428";
+        println!("{input}");
+        let (_output, seen) = Parameter::parse(input).unwrap();
+        pretty_assertions::assert_eq!(expected, seen);
+    }
+
+    #[test]
+    fn parse_parameters_sanity() {
+        let expected = Parameters(vec![
+            Parameter {
+                key: Key::Value,
+                value: Value::Address(EthereumAddress::Name(EnsName("aa.a0".to_owned()))),
+            },
+            Parameter {
+                key: Key::Value,
+                value: Value::Number(Number {
+                    signum: None,
+                    integer: Digits {
+                        places: vec![3, 1, 5, 5, 4, 2, 5, 3],
+                    },
+                    decimal: Some(Digits {
+                        places: vec![7, 5, 8, 1, 9, 9, 3, 6, 2, 1, 9],
+                    }),
+                    exponent: Some((
+                        true,
+                        Some(Digits {
+                            places: vec![6, 0, 5, 0, 4, 4, 3, 4, 4, 2, 8],
+                        }),
+                    )),
+                }),
+            },
+        ]);
+        let input = expected.to_string();
+        let (_output, seen) = Parameters::parse(&input).unwrap();
+        println!("parsed: {input}");
+        pretty_assertions::assert_eq!(expected, seen);
+    }
+
+    fn arb_parameters() -> impl Strategy<Value = Parameters> {
+        proptest::collection::vec(arb_parameter(), 0..10).prop_map(Parameters)
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_parameters(expected in arb_parameters()) {
+            let input = expected.to_string();
+            let (output, seen) = Parameters::parse(&input).unwrap();
+            assert_eq!("", output, "`input` was not fully consumed. Parsed '{seen}' from '{input}'");
+            assert_eq!(expected, seen);
+        }
+    }
+
+    fn arb_schema_prefix() -> impl Strategy<Value = SchemaPrefix> {
+        any::<bool>().prop_map(|has_pay| SchemaPrefix { has_pay })
+    }
+
+    proptest! {
+    #[test]
+    fn parse_arb_schema_prefix(expected in arb_schema_prefix()) {
+            let input = expected.to_string();
+            let (output, seen) = SchemaPrefix::parse(&input).unwrap();
+            assert_eq!("", output);
+            assert_eq!(expected, seen);
+        }
+    }
+
+    fn arb_request() -> impl Strategy<Value = EthereumTransactionRequest> {
+        (
+            arb_schema_prefix(),
+            arb_eth_addy(),
+            prop::option::of(arb_digits(1)),
+            prop::option::of(arb_url_encoded_string()),
+            prop::option::of(arb_parameters()),
+        )
+            .prop_map(
+                |(schema_prefix, target_address, chain_id, function_name, paramaters)| {
+                    EthereumTransactionRequest {
+                        schema_prefix,
+                        target_address,
+                        chain_id,
+                        function_name,
+                        parameters: paramaters.unwrap_or(Parameters(vec![])),
+                    }
+                },
+            )
+    }
+
+    proptest! {
+        #[test]
+        fn parse_arb_request(expected in arb_request()) {
+            let input = expected.to_string();
+            let (output, seen) = EthereumTransactionRequest::parse(&input).unwrap();
+            assert_eq!("", output);
+            pretty_assertions::assert_eq!(expected, seen);
+        }
+    }
+
+    #[test]
+    fn test_vectors_eip_681() {
+        let input = "ethereum:0xfb6916095ca1df60bb79Ce92ce3ea74c37c5d359?value=2.014e18";
+        let (_, seen) = EthereumTransactionRequest::parse(input).unwrap();
+        pretty_assertions::assert_eq!(
+            "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359",
+            seen.target_address.to_string()
+        );
+        let value = seen
+            .parameters
+            .get_value(&Key::Value)
+            .unwrap()
+            .as_number()
+            .unwrap();
+        assert_eq!(2, value.integer());
+        assert_eq!(2.014e18 as i128, value.as_i128().unwrap());
     }
 }

@@ -29,6 +29,7 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["std", "test-dependencies"] }
+pretty_assertions = "1.4.1"
 proptest.workspace = true
 
 [features]
