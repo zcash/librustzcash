@@ -279,7 +279,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .take_while(|note| {
                 let take = match target_value {
                     TargetValue::AtLeast(target) => value_acc <= target,
-                    TargetValue::MaxSpendable => unimplemented!(),
+                    TargetValue::AllFunds(_) => unimplemented!(),
                 };
                 value_acc = (value_acc + note.note.value()).expect("value overflow");
                 take

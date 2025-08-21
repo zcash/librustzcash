@@ -46,8 +46,8 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use crate::{
     data_api::{
-        error::Error, wallet::input_selection::propose_send_max, Account, SentTransaction,
-        SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
+        error::Error, wallet::input_selection::propose_send_max, Account, MaxSpendMode,
+        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{
@@ -398,7 +398,7 @@ impl ConfirmationsPolicy {
     /// notes irrespective of origin, and 0 confirmations for transparent UTXOs.
     ///
     /// Test-only.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub const MIN: Self = ConfirmationsPolicy {
         trusted: NonZeroU32::MIN,
         untrusted: NonZeroU32::MIN,
@@ -455,7 +455,7 @@ impl ConfirmationsPolicy {
     ///
     /// # Panics
     /// Panics if `trusted > untrusted` or either argument value is zero.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new_unchecked(
         trusted: u32,
         untrusted: u32,
@@ -475,7 +475,7 @@ impl ConfirmationsPolicy {
     ///
     /// # Panics
     /// Panics if `min_confirmations == 0`
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new_symmetrical_unchecked(
         min_confirmations: u32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
@@ -661,6 +661,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     fee_rule: &FeeRuleT,
     recipient: &Address,
     memo: Option<MemoBytes>,
+    mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
@@ -685,6 +686,7 @@ where
         spend_pools,
         target_height,
         anchor_height,
+        mode,
         confirmations_policy,
         recipient,
         memo,

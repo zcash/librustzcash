@@ -9,7 +9,7 @@ use zcash_client_backend::{
     data_api::{
         scanning::ScanPriority,
         wallet::{ConfirmationsPolicy, TargetHeight},
-        NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+        MaxSpendMode, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
     },
     wallet::ReceivedNote,
 };
@@ -183,33 +183,37 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    match get_anchor_height(conn, target_height, confirmations_policy.trusted())? {
-        Some(anchor_height) => match target_value {
-            TargetValue::MaxSpendable => select_all_spendable_notes(
-                conn,
-                params,
-                account,
-                target_height,
-                anchor_height,
-                confirmations_policy,
-                exclude,
-                protocol,
-                to_spendable_note,
-            ),
-            TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
-                conn,
-                params,
-                account,
-                zats,
-                target_height,
-                anchor_height,
-                confirmations_policy,
-                exclude,
-                protocol,
-                to_spendable_note,
-            ),
-        },
-        None => Ok(vec![]),
+    let Some(anchor_height) =
+        get_anchor_height(conn, target_height, confirmations_policy.trusted())?
+    else {
+        return Ok(vec![]);
+    };
+
+    match target_value {
+        TargetValue::AllFunds(mode) => select_all_spendable_notes(
+            conn,
+            params,
+            account,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            exclude,
+            protocol,
+            &to_spendable_note,
+            mode,
+        ),
+        TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
+            conn,
+            params,
+            account,
+            zats,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            exclude,
+            protocol,
+            &to_spendable_note,
+        ),
     }
 }
 
@@ -234,6 +238,7 @@ fn select_all_spendable_notes<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
+    max_spend_mode: MaxSpendMode,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -337,34 +342,35 @@ where
 
     row_results
         .map(|t| match t? {
-            (Some(note), Some(shard_priority))
-                if shard_priority <= ScanPriority::Scanned
-                    && note.mined_height().iter().any(|h| h <= &anchor_height) =>
-            {
-                let received_height = note
-                    .mined_height()
-                    .expect("mined height checked to be non-null");
+            (Some(note), Some(shard_priority)) => {
+                let can_construct_witness = shard_priority <= ScanPriority::Scanned
+                    && note.mined_height().iter().any(|h| *h <= anchor_height);
 
-                let has_confirmations = match note.spending_key_scope() {
-                    Scope::Internal => {
-                        // The note was has at least `trusted` confirmations.
+                let has_confirmations = match (note.mined_height(), note.spending_key_scope()) {
+                    (None, _) => false,
+                    (Some(received_height), Scope::Internal) => {
+                        // The note has the required number of confirmations for a trusted note.
                         received_height <= trusted_height &&
-                        // And, if the note was the output of a shielding transaction, its
+                        // And, if the note was the output of a shielding transaction, its inputs
                         // have at least `untrusted` confirmations
                         note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
                     }
-                    Scope::External => received_height <= untrusted_height,
+                    (Some(received_height), Scope::External) => {
+                        // The note has the required number of confirmations for an untrusted note.
+                        received_height <= untrusted_height
+                    }
                 };
 
-                if has_confirmations {
-                    Ok(note)
-                } else {
-                    Err(SqliteClientError::IneligibleNotes)
+                match (max_spend_mode, can_construct_witness && has_confirmations) {
+                    (MaxSpendMode::Everything, false) => Err(SqliteClientError::IneligibleNotes),
+                    (MaxSpendMode::MaxSpendable, false) => Ok(None),
+                    (_, true) => Ok(Some(note)),
                 }
             }
             _ => Err(SqliteClientError::IneligibleNotes),
         })
-        .collect::<Result<_, _>>()
+        .filter_map(|r| r.transpose())
+        .collect()
 }
 
 /// Selects the set of spendable notes whose sum will be equal or greater that the

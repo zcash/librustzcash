@@ -145,8 +145,11 @@ pub enum NullifierQuery {
 }
 
 /// An intent of representing spendable value to reach a certain targeted
-/// amount.  `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
+/// amount.  
+///
+/// `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
 /// at minimum the given zatoshis that is conformed by the sum of spendable notes.
+///
 ///
 /// Discussion: why not just use ``Zatoshis``?
 ///
@@ -157,9 +160,21 @@ pub enum NullifierQuery {
 #[derive(Debug, Clone, Copy)]
 pub enum TargetValue {
     AtLeast(Zatoshis),
-    MaxSpendable,
+    AllFunds(MaxSpendMode),
 }
 
+/// Specifies how an TargetValue::AllFunds should be evaluated
+#[derive(Debug, Clone, Copy)]
+pub enum MaxSpendMode {
+    /// `MaxSpendable` will target to spend all _currently_ spendable funds where it
+    /// could be the case that the wallet has received other funds that are not
+    /// confirmed and therefore not spendable yet and the caller evaluates that as
+    /// an acceptable scenario.
+    MaxSpendable,
+    /// `Everything` will target to spend **all funds** and will fail if there are
+    /// unspendable funds in the wallet or if the wallet is not yet synced.
+    Everything,
+}
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {

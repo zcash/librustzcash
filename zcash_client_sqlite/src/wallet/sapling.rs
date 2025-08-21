@@ -508,8 +508,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn send_max_single_step_proposed_transfer() {
-        testing::pool::send_max_single_step_proposed_transfer::<SaplingPoolTester>()
+    fn spend_max_spendable_single_step_proposed_transfer() {
+        testing::pool::spend_max_spendable_single_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn spend_everything_single_step_proposed_transfer() {
+        testing::pool::spend_everything_single_step_proposed_transfer::<SaplingPoolTester>()
     }
 
     #[test]
@@ -525,23 +530,23 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_single_note_max_amount_proposed_transfer() {
-        testing::pool::send_multi_step_single_note_max_amount_proposed_transfer::<SaplingPoolTester>(
+    fn spend_everything_multi_step_single_note_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<SaplingPoolTester>(
         )
     }
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer() {
-        testing::pool::send_multi_step_with_marginal_notes_max_amount_proposed_transfer::<
+    fn spend_everything_multi_step_with_marginal_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_with_marginal_notes_proposed_transfer::<
             SaplingPoolTester,
         >()
     }
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_many_notes_max_amount_proposed_transfer() {
-        testing::pool::send_multi_step_many_notes_max_amount_proposed_transfer::<SaplingPoolTester>(
+    fn spend_everything_multi_step_many_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<SaplingPoolTester>(
         )
     }
 

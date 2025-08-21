@@ -63,7 +63,7 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use crate::data_api::Balance;
 use crate::{
-    data_api::{wallet::TargetHeight, TargetValue},
+    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
     fees::{
         standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
@@ -1017,6 +1017,7 @@ where
         fee_rule: &FeeRuleT,
         to: Address,
         memo: Option<MemoBytes>,
+        mode: MaxSpendMode,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
@@ -1034,6 +1035,7 @@ where
             fee_rule,
             &to,
             memo,
+            mode,
             confirmations_policy,
         )
     }

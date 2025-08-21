@@ -25,7 +25,8 @@ use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        wallet::TargetHeight, InputSource, SimpleNoteRetention, SpendableNotes, TargetValue,
+        wallet::TargetHeight, InputSource, MaxSpendMode, SimpleNoteRetention, SpendableNotes,
+        TargetValue,
     },
     fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs},
@@ -701,6 +702,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     spend_pools: &[ShieldedProtocol],
     target_height: TargetHeight,
     anchor_height: BlockHeight,
+    mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
     recipient: &Address,
     memo: Option<MemoBytes>,
@@ -716,7 +718,7 @@ where
     let spendable_notes = wallet_db
         .select_spendable_notes(
             source_account,
-            TargetValue::MaxSpendable,
+            TargetValue::AllFunds(mode),
             spend_pools,
             target_height,
             confirmations_policy,
