@@ -13,10 +13,13 @@ workspace.
 - `zcash_client_backend::fees`:
   - `impl sapling::OutputView for Zatoshis`
   - `impl orchard::OutputView for Zatoshis`
-- `zcash_client_backend::data_api::wallet`:
-  - `propose_send_max_transfer`: Selects transaction inputs, computes fees, and
-    constructs a proposal for a transaction (or series of them) that would spend all
-    the available funds from the given spend pools.
+- `zcash_client_backend::data_api`:
+  - `MaxSpendMode` enum has been added to specify what means to spend "All" funds when specifying
+    a  `TargetValue` (see Changed section for more details and context).
+  - `::wallet`:
+    - `propose_send_max_transfer`: Selects transaction inputs, computes fees, and
+      constructs a proposal for a transaction (or series of them) that would spend all
+      the available funds from the given spend pools.
   - `input_selection::propose_send_max`: Performs input selection and returns
     a proposal for the construction of a transaction that sends the maximum
     amount possible from a given account to the specified recipient ignoring
@@ -29,7 +32,10 @@ workspace.
 
 ### Changed
 - `zcash_client_backend::data_api`:
-  - `TargetValue` has a new `MaxSpendable` variant.
+  - `TargetValue` has a new `AllFunds(MaxSpendMode)` variant to choose whether to consider "All"
+  funds being the `MaxSpendable` amount that it is currently in the wallet (there could be pending
+  funds or wallet could be unsynced) or if "All" means `Everything` where the presence of unconfirmed
+  funds or pending shards to be scanned would trigger an error.
   - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`.
     Existing calls to this function that used `Zatoshis` now use
     `TargetValue::AtLeast(Zatoshis)`
