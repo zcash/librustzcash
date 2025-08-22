@@ -298,7 +298,7 @@ impl Account {
         Ok(self
             .addresses
             .values()
-            .map(|ua| ua.to_address(network))
+            .map(|ua| ua.to_zcash_address(network))
             .find(|addr| receiver.corresponds(addr)))
     }
 

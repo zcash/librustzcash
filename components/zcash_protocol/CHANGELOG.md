@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Hash for zcash_protocol::ShieldedProtocol`
+
 ## [0.6.1] - 2025-08-06
 
 ### Added
