@@ -1,3 +1,18 @@
+//! The Signer role (capability holders can contribute).
+//!
+//! - Needs the spend authorization randomizers to create signatures.
+//! - Needs sufficient information to verify that the proof is over the correct data,
+//!   without needing to verify the proof itself.
+//! - A Signer should only need to implement:
+//!   - Pedersen commitments using Jubjub / Pallas arithmetic (for note and value
+//!     commitments)
+//!   - BLAKE2b and BLAKE2s (and the various PRFs / CRHs they are used in)
+//!   - Nullifier check (using Jubjub / Pallas arithmetic)
+//!   - KDF plus note decryption (AEAD_CHACHA20_POLY1305)
+//!   - SignatureHash algorithm
+//!   - Signatures (RedJubjub / RedPallas)
+//!   - A source of randomness.
+
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
 
@@ -7,6 +22,11 @@ use zcash_primitives::transaction::{
     TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
+#[cfg(all(
+    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+    feature = "zip-233"
+))]
+use zcash_protocol::value::Zatoshis;
 
 use crate::{
     common::{
@@ -16,7 +36,7 @@ use crate::{
     Pczt,
 };
 
-use super::tx_extractor::determine_lock_time;
+use crate::common::determine_lock_time;
 
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
@@ -245,7 +265,7 @@ pub(crate) fn pczt_to_tx_data(
     orchard: &orchard::pczt::Bundle,
 ) -> Result<TransactionData<EffectsOnly>, Error> {
     let version = match (global.tx_version, global.version_group_id) {
-        (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+        (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
         (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
             version,
             version_group_id,
@@ -266,9 +286,13 @@ pub(crate) fn pczt_to_tx_data(
     Ok(TransactionData::from_parts(
         version,
         consensus_branch_id,
-        determine_lock_time(global, transparent.inputs())
-            .map_err(|_| Error::IncompatibleLockTimes)?,
+        determine_lock_time(global, transparent.inputs()).ok_or(Error::IncompatibleLockTimes)?,
         global.expiry_height.into(),
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
+        Zatoshis::ZERO,
         transparent_bundle,
         None,
         sapling_bundle,

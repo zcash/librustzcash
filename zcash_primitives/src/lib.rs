@@ -4,7 +4,7 @@
 //! for working with Zcash.
 //!
 //! ## Feature flags
-#![doc = document_features::document_features!()]
+#![cfg_attr(feature = "std", doc = document_features::document_features!())]
 //!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -16,8 +16,16 @@
 // Present to reduce refactoring noise from changing all the imports inside this crate for
 // the `sapling` crate extraction.
 #![allow(clippy::single_component_path_imports)]
+#![no_std]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
 
 pub mod block;
+pub(crate) mod encoding;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
 pub mod merkle_tree;

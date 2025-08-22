@@ -19,11 +19,15 @@ use zcash_protocol::{
 use zip321::TransactionRequest;
 
 use crate::{
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
+    data_api::{
+        wallet::TargetHeight, InputSource, SimpleNoteRetention, SpendableNotes, TargetValue,
+    },
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
+
+use super::ConfirmationsPolicy;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -72,30 +76,26 @@ impl<DE: fmt::Display, SE: fmt::Display, CE: fmt::Display, N: fmt::Display> fmt:
             InputSelectorError::DataSource(e) => {
                 write!(
                     f,
-                    "The underlying datasource produced the following error: {}",
-                    e
+                    "The underlying datasource produced the following error: {e}"
                 )
             }
             InputSelectorError::Selection(e) => {
-                write!(f, "Note selection encountered the following error: {}", e)
+                write!(f, "Note selection encountered the following error: {e}")
             }
             InputSelectorError::Change(e) => write!(
                 f,
-                "Proposal generation failed due to an error in computing change or transaction fees: {}",
-                e
+                "Proposal generation failed due to an error in computing change or transaction fees: {e}"
             ),
             InputSelectorError::Proposal(e) => {
                 write!(
                     f,
-                    "Input selection attempted to generate an invalid proposal: {}",
-                    e
+                    "Input selection attempted to generate an invalid proposal: {e}"
                 )
             }
             InputSelectorError::Address(e) => {
                 write!(
                     f,
-                    "An error occurred decoding the address from a payment request: {}.",
-                    e
+                    "An error occurred decoding the address from a payment request: {e}."
                 )
             }
             InputSelectorError::InsufficientFunds {
@@ -180,8 +180,9 @@ pub trait InputSelector {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -231,8 +232,8 @@ pub trait ShieldingSelector {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -263,8 +264,7 @@ impl fmt::Display for GreedyInputSelectorError {
         match &self {
             GreedyInputSelectorError::Balance(e) => write!(
                 f,
-                "A balance calculation violated amount validity bounds: {:?}.",
-                e
+                "A balance calculation violated amount validity bounds: {e:?}."
             ),
             GreedyInputSelectorError::UnsupportedAddress(_) => {
                 // we can't encode the UA to its string representation because we
@@ -368,8 +368,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -438,7 +439,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("cannot fail because memo is None"),
                     );
                     total_ephemeral = (total_ephemeral + payment.amount())
-                        .ok_or_else(|| GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+                        .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                 }
                 #[cfg(not(feature = "transparent-inputs"))]
                 Address::Tex(_) => {
@@ -749,9 +750,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
-                    amount_required,
+                    TargetValue::AtLeast(amount_required),
                     selectable_pools,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
@@ -785,8 +787,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -798,7 +800,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
+                wallet_db.get_spendable_transparent_outputs(
+                    taddr,
+                    target_height,
+                    confirmations_policy,
+                )
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?

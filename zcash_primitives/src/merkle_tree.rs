@@ -1,13 +1,15 @@
 //! Parsers and serializers for Zcash Merkle trees.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use alloc::vec::Vec;
+use core2::io::{self, Read, Write};
+
+use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use incrementalmerkletree::{
     frontier::{CommitmentTree, Frontier, NonEmptyFrontier},
     witness::IncrementalWitness,
     Address, Hashable, Level, MerklePath, Position,
 };
 use orchard::tree::MerkleHashOrchard;
-use std::io::{self, Read, Write};
 use zcash_encoding::{Optional, Vector};
 
 /// A hashable node within a Merkle tree.
@@ -62,41 +64,44 @@ impl HashSer for MerkleHashOrchard {
 /// is platform-dependent, we consistently represent it as u64 in serialized
 /// formats.
 pub fn write_usize_leu64<W: Write>(mut writer: W, value: usize) -> io::Result<()> {
-    // Panic if we get a usize value that can't fit into a u64.
-    writer.write_u64::<LittleEndian>(value.try_into().unwrap())
+    writer.write_u64_le(u64::try_from(value).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "usize value was outside the representable range of a u64",
+        )
+    })?)
 }
 
 /// Reads a usize value encoded as a u64 in little-endian order. Since usize
 /// is platform-dependent, we consistently represent it as u64 in serialized
 /// formats.
 pub fn read_leu64_usize<R: Read>(mut reader: R) -> io::Result<usize> {
-    reader.read_u64::<LittleEndian>()?.try_into().map_err(|e| {
+    let mut repr = [0u8; 8];
+    reader.read_exact(&mut repr)?;
+    usize::try_from(u64::from_le_bytes(repr)).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "usize could not be decoded from a 64-bit value on this platform: {:?}",
-                e
-            ),
+            "usize could not be decoded from a 64-bit value",
         )
     })
 }
 
 pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
-    writer.write_u64::<LittleEndian>(position.into())
+    writer.write_u64_le(u64::from(position))
 }
 
 pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
-    reader.read_u64::<LittleEndian>().map(Position::from)
+    reader.read_u64_le().map(Position::from)
 }
 
 pub fn write_address<W: Write>(mut writer: W, addr: Address) -> io::Result<()> {
     writer.write_u8(addr.level().into())?;
-    writer.write_u64::<LittleEndian>(addr.index())
+    writer.write_u64_le(addr.index())
 }
 
 pub fn read_address<R: Read>(mut reader: R) -> io::Result<Address> {
     let level = reader.read_u8().map(Level::from)?;
-    let index = reader.read_u64::<LittleEndian>()?;
+    let index = reader.read_u64_le()?;
     Ok(Address::from_parts(level, index))
 }
 
@@ -132,7 +137,6 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
-#[allow(clippy::redundant_closure)]
 pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<NonEmptyFrontier<H>> {
@@ -149,10 +153,10 @@ pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
         left
     };
 
-    NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|err| {
+    NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|_err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
+            "Parsing resulted in an invalid Merkle frontier",
         )
     })
 }
@@ -164,14 +168,13 @@ pub fn write_frontier_v1<H: HashSer, W: Write>(
     Optional::write(writer, frontier.value(), write_nonempty_frontier_v1)
 }
 
-#[allow(clippy::redundant_closure)]
 pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Frontier<H, 32>> {
     match Optional::read(reader, read_nonempty_frontier_v1)? {
         None => Ok(Frontier::empty()),
-        Some(f) => Frontier::try_from(f).map_err(|err| {
+        Some(f) => Frontier::try_from(f).map_err(|_err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
+                "Parsing resulted in an invalid Merkle frontier",
             )
         }),
     }
@@ -206,7 +209,6 @@ pub fn write_commitment_tree<Node: HashSer, W: Write, const DEPTH: u8>(
 }
 
 /// Reads an `IncrementalWitness` from its serialized form.
-#[allow(clippy::redundant_closure)]
 pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
     mut reader: R,
 ) -> io::Result<IncrementalWitness<Node, DEPTH>> {
@@ -214,7 +216,10 @@ pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
     let filled = Vector::read(&mut reader, |r| Node::read(r))?;
     let cursor = Optional::read(&mut reader, read_commitment_tree)?;
 
-    Ok(IncrementalWitness::from_parts(tree, filled, cursor))
+    IncrementalWitness::from_parts(tree, filled, cursor).ok_or(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid witness: inconsistency detected between witness parts",
+    ))
 }
 
 /// Serializes an `IncrementalWitness` as an array of bytes.
@@ -266,25 +271,21 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
     if auth_path.len() != usize::from(DEPTH) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("length of auth path is not the expected {} elements", DEPTH),
+            "auth path has unexpected length",
         ));
     }
 
     // Read the position from the witness
-    let position = witness.read_u64::<LittleEndian>().map(Position::from)?;
+    let position = witness.read_u64_le().map(Position::from)?;
 
     // The witness should be empty now; if it wasn't, the caller would
     // have provided more information than they should have, indicating
     // a bug downstream
     if witness.is_empty() {
-        let path_len = auth_path.len();
         MerklePath::from_parts(auth_path, position).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "auth path expected to contain {} elements, got {}",
-                    DEPTH, path_len
-                ),
+                "auth path contained incorrect number of elements",
             )
         })
     } else {
@@ -297,43 +298,43 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+    use crate::encoding::{ReadBytesExt, WriteBytesExt};
+    use alloc::string::String;
+    use core2::io::{self, Read, Write};
     use incrementalmerkletree::frontier::testing::TestNode;
-    use std::io::{self, Read, Write};
     use zcash_encoding::Vector;
 
     use super::HashSer;
 
     impl HashSer for TestNode {
         fn read<R: Read>(mut reader: R) -> io::Result<TestNode> {
-            reader.read_u64::<LittleEndian>().map(TestNode)
+            reader.read_u64_le().map(TestNode)
         }
 
         fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-            writer.write_u64::<LittleEndian>(self.0)
+            writer.write_u64_le(self.0)
         }
     }
 
     impl HashSer for String {
         fn read<R: Read>(reader: R) -> io::Result<String> {
             Vector::read(reader, |r| r.read_u8()).and_then(|xs| {
-                String::from_utf8(xs).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Not a valid utf8 string: {:?}", e),
-                    )
+                String::from_utf8(xs).map_err(|_e| {
+                    io::Error::new(io::ErrorKind::InvalidData, "not a valid utf8 string")
                 })
             })
         }
 
         fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-            Vector::write(writer, self.as_bytes(), |w, b| w.write_u8(*b))
+            Vector::write(writer, self.as_bytes(), |w, b| w.write_all(&[*b]))
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
     use assert_matches::assert_matches;
     use incrementalmerkletree::{
         frontier::{testing::arb_commitment_tree, Frontier, PathFiller},
@@ -826,7 +827,14 @@ mod tests {
             let cmu = Node::from_bytes(cmu[..].try_into().unwrap()).unwrap();
 
             // Witness here
-            witnesses.push((IncrementalWitness::from_tree(tree.clone()), last_cmu));
+            witnesses.push((
+                if tree.is_empty() {
+                    IncrementalWitness::invalid_empty_witness()
+                } else {
+                    IncrementalWitness::from_tree(tree.clone()).unwrap()
+                },
+                last_cmu,
+            ));
 
             // Now append a commitment to the tree
             assert!(tree.append(cmu).is_ok());

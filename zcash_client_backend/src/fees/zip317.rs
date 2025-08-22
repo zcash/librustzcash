@@ -4,18 +4,18 @@
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     ShieldedProtocol,
 };
 
 use crate::{
-    data_api::{AccountMeta, InputSource, NoteFilter},
+    data_api::{wallet::TargetHeight, AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
 };
 
@@ -119,7 +119,7 @@ where
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -228,7 +228,7 @@ where
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -264,7 +264,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, num::NonZeroUsize};
+    use core::{convert::Infallible, num::NonZeroUsize};
 
     use ::transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
@@ -306,7 +306,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -351,7 +352,8 @@ mod tests {
                     &Network::TestNetwork,
                     Network::TestNetwork
                         .activation_height(NetworkUpgrade::Nu5)
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
                     &(
@@ -401,7 +403,8 @@ mod tests {
                 &Network::TestNetwork,
                 Network::TestNetwork
                     .activation_height(NetworkUpgrade::Nu5)
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -425,12 +428,129 @@ mod tests {
                 result,
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_7500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(25000)
+            );
+        }
+
+        {
+            // spend a single Sapling note and produce no change outputs, as the value of outputs
+            // has been requested such that it exactly empties the wallet
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Ok(balance) if
+                    balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, None)] &&
+                    balance.fee_required() == Zatoshis::const_from_u64(10000)
+            );
+        }
+
+        {
+            // spend a single Sapling note, with insufficient funds to cover the minimum fee.
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(40001))][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Err(ChangeError::InsufficientFunds { available, required })
+                    if available == Zatoshis::const_from_u64(50000)
+                       && required == Zatoshis::const_from_u64(50001)
+            );
+        }
+
+        {
+            // Spend a single Sapling note, creating two output notes that cause the transaction to
+            // balance exactly. This will fail, because even though there are enough funds in the
+            // wallet for the transaction to go through, and the fee is correct for a two-output
+            // transaction, we prohibit this case in order to prevent the transaction recipients
+            // from being able to reason about the value of the input note via knowledge that there
+            // is no change output.
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap()
+                    .into(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[
+                        SaplingPayment::new(Zatoshis::const_from_u64(30000)),
+                        SaplingPayment::new(Zatoshis::const_from_u64(10000)),
+                    ][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Err(ChangeError::InsufficientFunds { available, required })
+                    if available == Zatoshis::const_from_u64(50000)
+                       && required == Zatoshis::const_from_u64(55000)
             );
         }
     }
@@ -450,7 +570,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -504,7 +625,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
@@ -550,7 +672,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -595,7 +718,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -646,7 +770,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -702,7 +827,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -748,7 +874,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(

@@ -95,7 +95,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
 
         // Iterate over the JoinSplit inputs
         for (i, input) in self.inputs.into_iter().enumerate() {
-            let cs = &mut cs.namespace(|| format!("input {}", i));
+            let cs = &mut cs.namespace(|| format!("input {i}"));
 
             // Accumulate the value of the left hand side
             if let Some(value) = input.value {
@@ -155,7 +155,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
 
         // Iterate over the JoinSplit outputs
         for (i, output) in self.outputs.into_iter().enumerate() {
-            let cs = &mut cs.namespace(|| format!("output {}", i));
+            let cs = &mut cs.namespace(|| format!("output {i}"));
 
             let value = NoteValue::new(cs.namespace(|| "value"), output.value)?;
 
@@ -240,7 +240,7 @@ impl NoteValue {
         let mut bits = vec![];
         for (i, value) in values.into_iter().enumerate() {
             bits.push(AllocatedBit::alloc(
-                cs.namespace(|| format!("bit {}", i)),
+                cs.namespace(|| format!("bit {i}")),
                 value,
             )?);
         }
@@ -294,7 +294,7 @@ where
         let mut tmp = vec![];
         for b in value
             .iter()
-            .flat_map(|&m| (0..8).rev().map(move |i| m >> i & 1 == 1))
+            .flat_map(|&m| (0..8).rev().map(move |i| (m >> i) & 1 == 1))
             .skip(skip_bits)
         {
             tmp.push(Some(b));
@@ -309,7 +309,7 @@ where
 
     for (i, value) in bit_values.into_iter().enumerate() {
         bits.push(Boolean::from(AllocatedBit::alloc(
-            cs.namespace(|| format!("bit {}", i)),
+            cs.namespace(|| format!("bit {i}")),
             value,
         )?));
     }
@@ -435,7 +435,7 @@ fn test_sprout_constraints() {
         js.synthesize(&mut cs).unwrap();
 
         if let Some(s) = cs.which_is_unsatisfied() {
-            panic!("{:?}", s);
+            panic!("{s:?}");
         }
         assert!(cs.is_satisfied());
         assert_eq!(cs.num_constraints(), 1989085);

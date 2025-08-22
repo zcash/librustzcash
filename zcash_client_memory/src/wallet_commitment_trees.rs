@@ -187,7 +187,8 @@ pub(crate) mod serialization {
         for proto_shard in proto_tree.shards {
             let shard_root = Address::from_parts(shard_root_level, proto_shard.shard_index);
             let shard_tree = read_shard(&mut Cursor::new(proto_shard.shard_data))?;
-            let shard = LocatedPrunableTree::from_parts(shard_root, shard_tree);
+            let shard = LocatedPrunableTree::from_parts(shard_root, shard_tree)
+                .map_err(|_| Error::Other("shard persistence invalid".to_string()))?;
             tree.store_mut().put_shard(shard)?;
         }
 

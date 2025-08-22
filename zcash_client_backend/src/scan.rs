@@ -145,7 +145,7 @@ impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
         // linked list. `crossbeam_channel` allocates memory for the linked list in blocks
         // of 31 items.
         const ITEMS_PER_BLOCK: usize = 31;
-        let num_blocks = (num_items + ITEMS_PER_BLOCK - 1) / ITEMS_PER_BLOCK;
+        let num_blocks = num_items.div_ceil(ITEMS_PER_BLOCK);
 
         // The structure of a block is:
         // - A pointer to the next block.
@@ -255,6 +255,7 @@ impl<Item: Task + DynamicUsage> Tasks<Item> for WithUsage {
 
 /// A task that will clean up its own heap usage from the overall running usage once it is
 /// complete.
+#[allow(dead_code)]
 pub(crate) struct WithUsageTask<Item> {
     /// The item being run.
     item: Item,

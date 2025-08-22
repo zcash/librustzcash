@@ -9,6 +9,9 @@ use ::sapling::bundle::GrothProofBytes;
 #[cfg(zcash_unstable = "zfuture")]
 use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+use super::sighash_v6::v6_signature_hash;
+
 #[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ALL` instead.")]
 pub const SIGHASH_ALL: u8 = ::transparent::sighash::SIGHASH_ALL;
 #[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_NONE` instead.")]
@@ -34,7 +37,7 @@ pub enum SignableInput<'a> {
     },
 }
 
-impl<'a> SignableInput<'a> {
+impl SignableInput<'_> {
     pub fn hash_type(&self) -> u8 {
         match self {
             SignableInput::Shielded => ::transparent::sighash::SIGHASH_ALL,
@@ -67,13 +70,15 @@ pub fn signature_hash<
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
             v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
 
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
         #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
     })
 }

@@ -73,6 +73,7 @@ message LightdInfo {
     uint64 estimatedHeight = 12;        // less than tip height if zcashd is syncing
     string zcashdBuild = 13;            // example: "v4.1.1-877212414"
     string zcashdSubversion = 14;       // example: "/MagicBean:4.1.1/"
+    string donationAddress = 15;        // Zcash donation UA address
 }
 
 // TransparentAddressBlockFilter restricts the results to the given address
@@ -173,7 +174,9 @@ service CompactTxStreamer {
     // Submit the given transaction to the Zcash network
     rpc SendTransaction(RawTransaction) returns (SendResponse) {}
 
-    // Return the txids corresponding to the given t-address within the given block range
+    // Return RawTransactions that match the given transparent address filter.
+    //
+    // Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
     rpc GetTaddressTxids(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
     rpc GetTaddressBalance(AddressList) returns (Balance) {}
     rpc GetTaddressBalanceStream(stream Address) returns (Balance) {}

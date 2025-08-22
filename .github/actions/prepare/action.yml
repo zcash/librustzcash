@@ -5,6 +5,10 @@ inputs:
     description: 'Extra feature flags to enable'
     required: false
     default: ''
+  all-pools:
+    description: 'Enable all pool-specific feature flags'
+    required: false
+    default: true
   test-dependencies:
     description: 'Include test dependencies'
     required: false
@@ -16,11 +20,20 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - id: pools
+      shell: bash
+      run: echo "features=orchard transparent-inputs" >> $GITHUB_OUTPUT
+      if: inputs.all-pools == 'true'
+
     - id: test
       shell: bash
       run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
       if: inputs.test-dependencies == 'true'
-    - name: Prepare feature flags
+
+    # `steps.pools.outputs.features` and `steps.test.outputs.feature` cannot
+    # expand into attacker-controllable code because the previous steps only
+    # enable them to have one of two fixed values.
+    - name: Prepare feature flags # zizmor: ignore[template-injection]
       id: prepare
       shell: bash
       run: >
@@ -30,10 +43,12 @@ runs:
         lightwalletd-tonic
         sync
         temporary-zcashd
-        transparent-inputs
         unstable
         unstable-serialization
         unstable-spanning-tree
-        ${{ inputs.extra-features }}
+        ${EXTRA_FEATURES}
+        ${{ steps.pools.outputs.features }}
         ${{ steps.test.outputs.feature }}
         '" >> $GITHUB_OUTPUT
+      env:
+        EXTRA_FEATURES: ${{ inputs.extra-features }}

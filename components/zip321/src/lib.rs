@@ -47,7 +47,7 @@ pub enum Zip321Error {
 
 impl<E: Display> From<ConversionError<E>> for Zip321Error {
     fn from(value: ConversionError<E>) -> Self {
-        Zip321Error::ParseError(format!("Address parsing failed: {}", value))
+        Zip321Error::ParseError(format!("Address parsing failed: {value}"))
     }
 }
 
@@ -55,17 +55,15 @@ impl Display for Zip321Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Zip321Error::InvalidBase64(err) => {
-                write!(f, "Memo value was not correctly base64-encoded: {:?}", err)
+                write!(f, "Memo value was not correctly base64-encoded: {err:?}")
             }
             Zip321Error::MemoBytesError(err) => write!(
                 f,
-                "Memo exceeded maximum length or violated UTF-8 encoding restrictions: {:?}",
-                err
+                "Memo exceeded maximum length or violated UTF-8 encoding restrictions: {err:?}"
             ),
             Zip321Error::TooManyPayments(n) => write!(
                 f,
-                "Cannot create a Zcash transaction containing {} payments",
-                n
+                "Cannot create a Zcash transaction containing {n} payments"
             ),
             Zip321Error::DuplicateParameter(param, idx) => write!(
                 f,
@@ -75,13 +73,12 @@ impl Display for Zip321Error {
             ),
             Zip321Error::TransparentMemo(idx) => write!(
                 f,
-                "Payment {} is invalid: cannot send a memo to a transparent recipient address",
-                idx
+                "Payment {idx} is invalid: cannot send a memo to a transparent recipient address"
             ),
             Zip321Error::RecipientMissing(idx) => {
-                write!(f, "Payment {} is missing its recipient address", idx)
+                write!(f, "Payment {idx} is missing its recipient address")
             }
-            Zip321Error::ParseError(s) => write!(f, "Parse failure: {}", s),
+            Zip321Error::ParseError(s) => write!(f, "Parse failure: {s}"),
         }
     }
 }
@@ -379,7 +376,7 @@ impl TransactionRequest {
     pub fn from_uri(uri: &str) -> Result<Self, Zip321Error> {
         // Parse the leading zcash:<address>
         let (rest, primary_addr_param) = parse::lead_addr(uri)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {}", e)))?;
+            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {e}")))?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = if rest.is_empty() {
@@ -389,9 +386,7 @@ impl TransactionRequest {
                 char('?'),
                 separated_list0(char('&'), parse::zcashparam),
             ))(rest)
-            .map_err(|e| {
-                Zip321Error::ParseError(format!("Error parsing query parameters: {}", e))
-            })?
+            .map_err(|e| Zip321Error::ParseError(format!("Error parsing query parameters: {e}")))?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.
@@ -469,7 +464,7 @@ mod render {
     /// that must be appended to a parameter name when constructing a ZIP 321 URI.
     pub fn param_index(idx: Option<usize>) -> String {
         match idx {
-            Some(i) if i > 0 => format!(".{}", i),
+            Some(i) if i > 0 => format!(".{i}"),
             _otherwise => "".to_string(),
         }
     }
@@ -486,9 +481,9 @@ mod render {
         let coins = u64::from(amount) / COIN;
         let zats = u64::from(amount) % COIN;
         if zats == 0 {
-            format!("{}", coins)
+            format!("{coins}")
         } else {
-            format!("{}.{:0>8}", coins, zats)
+            format!("{coins}.{zats:0>8}")
                 .trim_end_matches('0')
                 .to_string()
         }
@@ -717,7 +712,7 @@ mod parse {
                     .map_err(|e| e.to_string())?;
 
                 let zats: u64 = match decimal_s {
-                    Some(d) => format!("{:0<8}", d)
+                    Some(d) => format!("{d:0<8}")
                         .parse::<u64>()
                         .map_err(|e| e.to_string())?,
                     None => 0,
@@ -728,7 +723,7 @@ mod parse {
                     .and_then(|coin_zats| coin_zats.checked_add(zats))
                     .ok_or(BalanceError::Overflow)
                     .and_then(Zatoshis::from_u64)
-                    .map_err(|_| format!("Not a valid zat amount: {}.{}", coins, zats))
+                    .map_err(|_| format!("Not a valid zat amount: {coins}.{zats}"))
             },
         )(input)
     }
@@ -741,10 +736,7 @@ mod parse {
                 .map(Box::new)
                 .map(Param::Addr)
                 .map_err(|err| {
-                    format!(
-                        "Could not interpret {} as a valid Zcash address: {}",
-                        value, err
-                    )
+                    format!("Could not interpret {value} as a valid Zcash address: {err}")
                 }),
 
             "amount" => parse_amount(value)
@@ -764,10 +756,10 @@ mod parse {
             "memo" => memo_from_base64(value)
                 .map(Box::new)
                 .map(Param::Memo)
-                .map_err(|e| format!("Decoded memo was invalid: {:?}", e)),
+                .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
 
             other if other.starts_with("req-") => {
-                Err(format!("Required parameter {} not recognized", other))
+                Err(format!("Required parameter {other} not recognized"))
             }
 
             other => percent_decode(value.as_bytes())
@@ -875,9 +867,6 @@ mod tests {
         memo::{Memo, MemoBytes},
         value::{testing::arb_zatoshis, Zatoshis},
     };
-
-    #[cfg(feature = "local-consensus")]
-    use zcash_protocol::{local_consensus::LocalNetwork, BlockHeight};
 
     use super::{
         memo_from_base64, memo_to_base64,
@@ -1039,21 +1028,10 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "local-consensus")]
     #[test]
     fn test_zip321_spec_regtest_valid_examples() {
-        let params = LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(1)),
-            blossom: Some(BlockHeight::from_u32(1)),
-            heartwood: Some(BlockHeight::from_u32(1)),
-            canopy: Some(BlockHeight::from_u32(1)),
-            nu5: Some(BlockHeight::from_u32(1)),
-            nu6: Some(BlockHeight::from_u32(1)),
-            z_future: Some(BlockHeight::from_u32(1)),
-        };
         let valid_1 = "zcash:zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
-        let v1r = TransactionRequest::from_uri(&params, valid_1).unwrap();
+        let v1r = TransactionRequest::from_uri(valid_1).unwrap();
         assert_eq!(
             v1r.payments.get(&0).map(|p| p.amount),
             Some(Zatoshis::const_from_u64(100000000))

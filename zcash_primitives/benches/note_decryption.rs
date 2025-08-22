@@ -1,4 +1,4 @@
-use std::iter;
+use core::iter;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ff::Field;
@@ -17,6 +17,7 @@ use zcash_note_encryption::batch;
 use zcash_primitives::transaction::components::sapling::zip212_enforcement;
 use zcash_protocol::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
+    memo::Memo,
     value::ZatBalance,
 };
 
@@ -44,7 +45,12 @@ fn bench_note_decryption(c: &mut Criterion) {
             sapling::Anchor::empty_tree(),
         );
         builder
-            .add_output(None, pa, NoteValue::from_raw(100), None)
+            .add_output(
+                None,
+                pa,
+                NoteValue::from_raw(100),
+                Memo::Empty.encode().into_bytes(),
+            )
             .unwrap();
         let (bundle, _) = builder
             .build::<MockSpendProver, MockOutputProver, _, ZatBalance>(&[], &mut rng)
@@ -96,13 +102,12 @@ fn bench_note_decryption(c: &mut Criterion) {
                 .map(|output| (SaplingDomain::new(zip212_enforcement), output))
                 .collect();
 
-            group.bench_function(
-                BenchmarkId::new(format!("valid-{}", nivks), noutputs),
-                |b| b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs)),
-            );
+            group.bench_function(BenchmarkId::new(format!("valid-{nivks}"), noutputs), |b| {
+                b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs))
+            });
 
             group.bench_function(
-                BenchmarkId::new(format!("invalid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("invalid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_note_decryption(&invalid_ivks, &outputs)),
             );
 
@@ -112,12 +117,12 @@ fn bench_note_decryption(c: &mut Criterion) {
                 .collect();
 
             group.bench_function(
-                BenchmarkId::new(format!("compact-valid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("compact-valid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_compact_note_decryption(&valid_ivks, &compact)),
             );
 
             group.bench_function(
-                BenchmarkId::new(format!("compact-invalid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("compact-invalid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_compact_note_decryption(&invalid_ivks, &compact)),
             );
         }

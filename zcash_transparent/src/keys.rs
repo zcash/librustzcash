@@ -2,6 +2,7 @@
 
 use bip32::ChildNumber;
 use subtle::{Choice, ConstantTimeEq};
+use zip32::DiversifierIndex;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -10,7 +11,6 @@ use {
     alloc::vec::Vec,
     bip32::{ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix},
     secp256k1::PublicKey,
-    sha2::{Digest, Sha256},
     zcash_protocol::consensus::{self, NetworkConstants},
     zcash_spec::PrfExpand,
     zip32::AccountId,
@@ -67,7 +67,7 @@ impl From<TransparentKeyScope> for ChildNumber {
 /// A child index for a derived transparent address.
 ///
 /// Only NON-hardened derivation is supported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NonHardenedChildIndex(u32);
 
 impl ConstantTimeEq for NonHardenedChildIndex {
@@ -77,28 +77,57 @@ impl ConstantTimeEq for NonHardenedChildIndex {
 }
 
 impl NonHardenedChildIndex {
+    /// The minimum valid non-hardened child index.
     pub const ZERO: NonHardenedChildIndex = NonHardenedChildIndex(0);
+
+    /// The maximum valid non-hardened child index.
+    pub const MAX: NonHardenedChildIndex = NonHardenedChildIndex((1 << 31) - 1);
 
     /// Parses the given ZIP 32 child index.
     ///
     /// Returns `None` if the hardened bit is set.
-    pub fn from_index(i: u32) -> Option<Self> {
-        if i < (1 << 31) {
+    pub const fn from_index(i: u32) -> Option<Self> {
+        if i <= Self::MAX.0 {
             Some(NonHardenedChildIndex(i))
         } else {
             None
         }
     }
 
+    /// Constructs a [`NonHardenedChildIndex`] from a ZIP 32 child index.
+    ///
+    /// Panics: if the hardened bit is set.
+    pub const fn const_from_index(i: u32) -> Self {
+        assert!(i <= Self::MAX.0);
+        NonHardenedChildIndex(i)
+    }
+
     /// Returns the index as a 32-bit integer.
-    pub fn index(&self) -> u32 {
+    pub const fn index(&self) -> u32 {
         self.0
     }
 
-    pub fn next(&self) -> Option<Self> {
+    /// Returns the successor to this index.
+    pub const fn next(&self) -> Option<Self> {
         // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
         // which in that case would lead from_index to return None.
         Self::from_index(self.0 + 1)
+    }
+
+    /// Subtracts the given delta from this index.
+    pub const fn saturating_sub(&self, delta: u32) -> Self {
+        NonHardenedChildIndex(self.0.saturating_sub(delta))
+    }
+
+    /// Adds the given delta to this index, returning a maximum possible value of
+    /// [`NonHardenedChildIndex::MAX`].
+    pub const fn saturating_add(&self, delta: u32) -> Self {
+        let idx = self.0.saturating_add(delta);
+        if idx > Self::MAX.0 {
+            Self::MAX
+        } else {
+            NonHardenedChildIndex(idx)
+        }
     }
 }
 
@@ -117,6 +146,61 @@ impl TryFrom<ChildNumber> for NonHardenedChildIndex {
 impl From<NonHardenedChildIndex> for ChildNumber {
     fn from(value: NonHardenedChildIndex) -> Self {
         Self::new(value.index(), false).expect("NonHardenedChildIndex is correct by construction")
+    }
+}
+
+impl TryFrom<DiversifierIndex> for NonHardenedChildIndex {
+    type Error = ();
+
+    fn try_from(value: DiversifierIndex) -> Result<Self, Self::Error> {
+        let idx = u32::try_from(value).map_err(|_| ())?;
+        NonHardenedChildIndex::from_index(idx).ok_or(())
+    }
+}
+
+impl From<NonHardenedChildIndex> for DiversifierIndex {
+    fn from(value: NonHardenedChildIndex) -> Self {
+        DiversifierIndex::from(value.0)
+    }
+}
+
+/// An end-exclusive iterator over a range of non-hardened child indexes.
+pub struct NonHardenedChildIter {
+    next: Option<NonHardenedChildIndex>,
+    end: NonHardenedChildIndex,
+}
+
+impl Iterator for NonHardenedChildIter {
+    type Item = NonHardenedChildIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cur = self.next;
+        self.next = self
+            .next
+            .and_then(|i| i.next())
+            .filter(|succ| succ < &self.end);
+        cur
+    }
+}
+
+/// An end-exclusive range of non-hardened child indexes.
+pub struct NonHardenedChildRange(core::ops::Range<NonHardenedChildIndex>);
+
+impl From<core::ops::Range<NonHardenedChildIndex>> for NonHardenedChildRange {
+    fn from(value: core::ops::Range<NonHardenedChildIndex>) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoIterator for NonHardenedChildRange {
+    type Item = NonHardenedChildIndex;
+    type IntoIter = NonHardenedChildIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        NonHardenedChildIter {
+            next: Some(self.0.start),
+            end: self.0.end,
+        }
     }
 }
 
@@ -348,15 +432,6 @@ impl AccountPubKey {
     }
 }
 
-/// Derives the P2PKH transparent address corresponding to the given pubkey.
-#[cfg(feature = "transparent-inputs")]
-#[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
-pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
-    TransparentAddress::PublicKeyHash(
-        *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
-    )
-}
-
 #[cfg(feature = "transparent-inputs")]
 pub(crate) mod private {
     use super::TransparentKeyScope;
@@ -393,7 +468,7 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Size
         address_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, bip32::Error> {
         let child_key = self.extended_pubkey().derive_child(address_index.into())?;
-        Ok(pubkey_to_address(child_key.public_key()))
+        Ok(TransparentAddress::from_pubkey(child_key.public_key()))
     }
 
     /// Searches the space of child indexes for an index that will
@@ -510,7 +585,7 @@ impl EphemeralIvk {
     ) -> Result<TransparentAddress, bip32::Error> {
         let child_key = self.0.derive_child(address_index.into())?;
         #[allow(deprecated)]
-        Ok(pubkey_to_address(child_key.public_key()))
+        Ok(TransparentAddress::from_pubkey(child_key.public_key()))
     }
 }
 
@@ -542,7 +617,6 @@ mod tests {
     use super::AccountPubKey;
     use super::NonHardenedChildIndex;
     #[allow(deprecated)]
-    use crate::keys::pubkey_to_address;
     use crate::{
         address::TransparentAddress,
         keys::{AccountPrivKey, IncomingViewingKey, TransparentKeyScope},
@@ -569,7 +643,8 @@ mod tests {
             let address_pubkey = account_pubkey
                 .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
                 .unwrap();
-            assert_eq!(pubkey_to_address(&address_pubkey), address);
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(TransparentAddress::from_pubkey(&address_pubkey), address);
 
             let expected_path = [
                 ChildNumber::new(44, true).unwrap(),
@@ -642,7 +717,12 @@ mod tests {
             // The test vectors are broken here: they should be deriving an address at the
             // address level, but instead use the account pubkey as an address.
             let address = TransparentAddress::PublicKeyHash(tv.address);
-            assert_eq!(pubkey_to_address(account_pubkey.0.public_key()), address);
+
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(
+                TransparentAddress::from_pubkey(account_pubkey.0.public_key()),
+                address
+            );
         }
     }
 

@@ -41,7 +41,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
@@ -51,15 +51,18 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_standard_transfer_to_address, propose_transfer, ConfirmationsPolicy,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
-    SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
+    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+    TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
+#[cfg(feature = "transparent-inputs")]
+use crate::data_api::Balance;
 use crate::{
+    data_api::{wallet::TargetHeight, TargetValue},
     fees::{
         standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
@@ -73,10 +76,11 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::wallet::input_selection::ShieldingSelector,
+    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
     crate::wallet::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     std::ops::Range,
+    transparent::GapLimits,
 };
 
 #[cfg(feature = "orchard")]
@@ -85,10 +89,11 @@ use {
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
-#[cfg(feature = "orchard")]
-pub mod orchard;
 pub mod pool;
 pub mod sapling;
+
+#[cfg(feature = "orchard")]
+pub mod orchard;
 #[cfg(feature = "transparent-inputs")]
 pub mod transparent;
 
@@ -99,6 +104,8 @@ pub struct TransactionSummary<AccountId> {
     expiry_height: Option<BlockHeight>,
     mined_height: Option<BlockHeight>,
     account_value_delta: ZatBalance,
+    total_spent: Zatoshis,
+    total_received: Zatoshis,
     fee_paid: Option<Zatoshis>,
     spent_note_count: usize,
     has_change: bool,
@@ -121,6 +128,8 @@ impl<AccountId> TransactionSummary<AccountId> {
         expiry_height: Option<BlockHeight>,
         mined_height: Option<BlockHeight>,
         account_value_delta: ZatBalance,
+        total_spent: Zatoshis,
+        total_received: Zatoshis,
         fee_paid: Option<Zatoshis>,
         spent_note_count: usize,
         has_change: bool,
@@ -136,6 +145,8 @@ impl<AccountId> TransactionSummary<AccountId> {
             expiry_height,
             mined_height,
             account_value_delta,
+            total_spent,
+            total_received,
             fee_paid,
             spent_note_count,
             has_change,
@@ -178,6 +189,16 @@ impl<AccountId> TransactionSummary<AccountId> {
     /// show `-fee_paid` as the account value delta.
     pub fn account_value_delta(&self) -> ZatBalance {
         self.account_value_delta
+    }
+
+    /// Returns the total value of notes spent by the account in this transaction.
+    pub fn total_spent(&self) -> Zatoshis {
+        self.total_spent
+    }
+
+    /// Returns the total value of notes received by the account in this transaction.
+    pub fn total_received(&self) -> Zatoshis {
+        self.total_received
     }
 
     /// Returns the fee paid by this transaction, if known.
@@ -909,7 +930,7 @@ where
             from_account.usk(),
             request,
             OvkPolicy::Sender,
-            NonZeroU32::MIN,
+            ConfirmationsPolicy::MIN,
         )
     }
 
@@ -922,7 +943,7 @@ where
         usk: &UnifiedSpendingKey,
         request: zip321::TransactionRequest,
         ovk_policy: OvkPolicy,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::TransferErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: InputSelector<InputSource = DbT>,
@@ -944,7 +965,7 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
         )?;
 
         create_proposed_transactions(
@@ -966,7 +987,7 @@ where
         input_selector: &InputsT,
         change_strategy: &ChangeT,
         request: zip321::TransactionRequest,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -983,7 +1004,7 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
@@ -994,7 +1015,7 @@ where
         &mut self,
         spend_from_account: <DbT as InputSource>::AccountId,
         fee_rule: StandardFeeRule,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
         to: &Address,
         amount: Zatoshis,
         memo: Option<MemoBytes>,
@@ -1015,7 +1036,7 @@ where
             &network,
             fee_rule,
             spend_from_account,
-            min_confirmations,
+            confirmations_policy,
             to,
             amount,
             memo,
@@ -1043,7 +1064,7 @@ where
         shielding_threshold: Zatoshis,
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1063,21 +1084,18 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
     /// Invokes [`create_proposed_transactions`] with the given arguments.
     #[allow(clippy::type_complexity)]
-    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT>(
+    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT, N>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
-        proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
-    ) -> Result<
-        NonEmpty<TxId>,
-        super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
-    >
+        proposal: &Proposal<FeeRuleT, N>,
+    ) -> Result<NonEmpty<TxId>, super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
     where
         FeeRuleT: FeeRule,
     {
@@ -1141,14 +1159,12 @@ where
 
         let prover = LocalTxProver::bundled();
         let (spend_vk, output_vk) = prover.verifying_keys();
-        let orchard_vk = ::orchard::circuit::VerifyingKey::build();
 
         extract_and_store_transaction_from_pczt(
             self.wallet_mut(),
             pczt,
-            &spend_vk,
-            &output_vk,
-            &orchard_vk,
+            Some((&spend_vk, &output_vk)),
+            None,
         )
     }
 
@@ -1166,7 +1182,7 @@ where
         usk: &UnifiedSpendingKey,
         from_addrs: &[TransparentAddress],
         to_account: <DbT as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::ShieldErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: ShieldingSelector<InputSource = DbT>,
@@ -1187,19 +1203,19 @@ where
             usk,
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
     fn with_account_balance<T, F: FnOnce(&AccountBalance) -> T>(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
         f: F,
     ) -> T {
         let binding = self
             .wallet()
-            .get_wallet_summary(min_confirmations)
+            .get_wallet_summary(confirmations_policy)
             .unwrap()
             .unwrap();
         f(binding.account_balances().get(&account).unwrap())
@@ -1207,13 +1223,17 @@ where
 
     /// Returns the total balance in the given account at this point in the test.
     pub fn get_total_balance(&self, account: AccountIdT) -> Zatoshis {
-        self.with_account_balance(account, 0, |balance| balance.total())
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
     }
 
     /// Returns the balance in the given account that is spendable with the given number
     /// of confirmations at this point in the test.
-    pub fn get_spendable_balance(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_spendable_balance(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.spendable_value()
         })
     }
@@ -1223,9 +1243,9 @@ where
     pub fn get_pending_shielded_balance(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
         .unwrap()
@@ -1234,15 +1254,24 @@ where
     /// Returns the amount of change in the given account that is not yet spendable with
     /// the given number of confirmations at this point in the test.
     #[allow(dead_code)]
-    pub fn get_pending_change(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_pending_change(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.change_pending_confirmation()
         })
     }
 
     /// Returns a summary of the wallet at this point in the test.
-    pub fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary<AccountIdT>> {
-        self.wallet().get_wallet_summary(min_confirmations).unwrap()
+    pub fn get_wallet_summary(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Option<WalletSummary<AccountIdT>> {
+        self.wallet()
+            .get_wallet_summary(confirmations_policy)
+            .unwrap()
     }
 }
 
@@ -1353,7 +1382,11 @@ pub trait DataStoreFactory {
         + WalletCommitmentTrees;
 
     /// Constructs a new data store.
-    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error>;
+    fn new_data_store(
+        &self,
+        network: LocalNetwork,
+        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    ) -> Result<Self::DataStore, Self::Error>;
 }
 
 /// A [`TestState`] builder, that configures the environment for a test.
@@ -1365,6 +1398,8 @@ pub struct TestBuilder<Cache, DataStoreFactory> {
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
+    #[cfg(feature = "transparent-inputs")]
+    gap_limits: GapLimits,
 }
 
 impl TestBuilder<(), ()> {
@@ -1380,6 +1415,9 @@ impl TestBuilder<(), ()> {
         canopy: Some(BlockHeight::from_u32(100_000)),
         nu5: Some(BlockHeight::from_u32(100_000)),
         nu6: None,
+        nu6_1: None,
+        #[cfg(zcash_unstable = "nu7")]
+        nu7: None,
         #[cfg(zcash_unstable = "zfuture")]
         z_future: None,
     };
@@ -1394,6 +1432,8 @@ impl TestBuilder<(), ()> {
             initial_chain_state: None,
             account_birthday: None,
             account_index: None,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: GapLimits::new(10, 5, 5),
         }
     }
 }
@@ -1415,6 +1455,8 @@ impl<A> TestBuilder<(), A> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
         }
     }
 }
@@ -1433,6 +1475,24 @@ impl<A> TestBuilder<A, ()> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
+        }
+    }
+}
+
+impl<A, B> TestBuilder<A, B> {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_gap_limits(self, gap_limits: GapLimits) -> TestBuilder<A, B> {
+        TestBuilder {
+            rng: self.rng,
+            network: self.network,
+            cache: self.cache,
+            ds_factory: self.ds_factory,
+            initial_chain_state: self.initial_chain_state,
+            account_birthday: self.account_birthday,
+            account_index: self.account_index,
+            gap_limits,
         }
     }
 }
@@ -1444,7 +1504,7 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///
     /// - Must not be called twice.
     /// - Must be called before [`Self::with_account_from_sapling_activation`] or
-    /// [`Self::with_account_having_current_birthday`].
+    ///   [`Self::with_account_having_current_birthday`].
     ///
     /// # Examples
     ///
@@ -1593,7 +1653,14 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
     /// Builds the state for this test.
     pub fn build(self) -> TestState<Cache, DsFactory::DataStore, LocalNetwork> {
         let mut cached_blocks = BTreeMap::new();
-        let mut wallet_data = self.ds_factory.new_data_store(self.network).unwrap();
+        let mut wallet_data = self
+            .ds_factory
+            .new_data_store(
+                self.network,
+                #[cfg(feature = "transparent-inputs")]
+                self.gap_limits,
+            )
+            .unwrap();
 
         if let Some(initial_state) = &self.initial_chain_state {
             wallet_data
@@ -1651,13 +1718,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -1751,7 +1821,7 @@ pub trait TestFvk: Clone {
     ) -> Self::Nullifier;
 }
 
-impl<'a, A: TestFvk> TestFvk for &'a A {
+impl<A: TestFvk> TestFvk for &A {
     type Nullifier = A::Nullifier;
 
     fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {
@@ -2032,7 +2102,8 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         ::sapling::value::NoteValue::from_raw(value.into_u64()),
         rseed,
     );
-    let encryptor = sapling_note_encryption(ovk, note.clone(), *MemoBytes::empty().as_array(), rng);
+    let encryptor =
+        sapling_note_encryption(ovk, note.clone(), MemoBytes::empty().into_bytes(), rng);
     let cmu = note.cmu().to_bytes().to_vec();
     let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
@@ -2041,7 +2112,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            ciphertext: enc_ciphertext[..52].to_vec(),
         },
         note,
     )
@@ -2073,7 +2144,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
-            ciphertext: compact_action.enc_ciphertext().as_ref()[..52].to_vec(),
+            ciphertext: compact_action.enc_ciphertext()[..52].to_vec(),
         },
         note,
     )
@@ -2447,9 +2518,10 @@ impl InputSource for MockWalletDb {
     fn select_spendable_notes(
         &self,
         _account: Self::AccountId,
-        _target_value: Zatoshis,
+        _target_value: TargetValue,
         _sources: &[ShieldedProtocol],
-        _anchor_height: BlockHeight,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::empty())
@@ -2483,8 +2555,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        _derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }
@@ -2511,9 +2582,14 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn get_current_address(
+    fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        Ok(vec![])
+    }
+
+    fn get_last_generated_address_matching(
         &self,
         _account: Self::AccountId,
+        _request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }
@@ -2528,7 +2604,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_wallet_summary(
         &self,
-        _min_confirmations: u32,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         Ok(None)
     }
@@ -2564,7 +2640,7 @@ impl WalletRead for MockWalletDb {
     fn get_target_and_anchor_heights(
         &self,
         _min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         Ok(None)
     }
 
@@ -2605,6 +2681,7 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2613,8 +2690,9 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2634,6 +2712,11 @@ impl WalletRead for MockWalletDb {
         _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        Ok(BlockHeight::from(0u32))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2690,7 +2773,16 @@ impl WalletWrite for MockWalletDb {
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
-        _request: Option<UnifiedAddressRequest>,
+        _request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _diversifier_index: DiversifierIndex,
+        _request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }
@@ -2750,6 +2842,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        _request: TransactionsInvolvingAddress,
+        _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

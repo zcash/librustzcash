@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use transparent::address::TransparentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
-    ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
+    ConversionError, ToAddress, TryFromAddress, ZcashAddress,
 };
 use zcash_protocol::consensus::{self, NetworkType};
 
@@ -234,6 +234,17 @@ impl UnifiedAddress {
         );
         result.collect()
     }
+
+    /// Returns the set of receivers in the unified address, excluding unknown receiver types.
+    pub fn as_understood_receivers(&self) -> Vec<Receiver> {
+        let result = core::iter::empty();
+        #[cfg(feature = "orchard")]
+        let result = result.chain(self.orchard.map(Receiver::Orchard));
+        #[cfg(feature = "sapling")]
+        let result = result.chain(self.sapling.map(Receiver::Sapling));
+        let result = result.chain(self.transparent.map(Receiver::Transparent));
+        result.collect()
+    }
 }
 
 /// An enumeration of protocol-level receiver types.
@@ -333,16 +344,20 @@ impl From<UnifiedAddress> for Address {
     }
 }
 
-impl TryFromRawAddress for Address {
+impl TryFromAddress for Address {
     type Error = &'static str;
 
     #[cfg(feature = "sapling")]
-    fn try_from_raw_sapling(data: [u8; 43]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_sapling(
+        _net: NetworkType,
+        data: [u8; 43],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let pa = PaymentAddress::from_bytes(&data).ok_or("Invalid Sapling payment address")?;
         Ok(pa.into())
     }
 
-    fn try_from_raw_unified(
+    fn try_from_unified(
+        _net: NetworkType,
         ua: zcash_address::unified::Address,
     ) -> Result<Self, ConversionError<Self::Error>> {
         UnifiedAddress::try_from(ua)
@@ -350,17 +365,24 @@ impl TryFromRawAddress for Address {
             .map(Address::from)
     }
 
-    fn try_from_raw_transparent_p2pkh(
+    fn try_from_transparent_p2pkh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::PublicKeyHash(data).into())
     }
 
-    fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_transparent_p2sh(
+        _net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
     }
 
-    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_tex(
+        _net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address::Tex(data))
     }
 }
@@ -436,6 +458,41 @@ impl Address {
             Address::Tex(addr_bytes) => Some(TransparentAddress::PublicKeyHash(*addr_bytes)),
         }
     }
+
+    /// Returns the Sapling address corresponding to this address, if it is a ZIP 32-encoded
+    /// Sapling address, or a Unified address with a Sapling receiver.
+    #[cfg(feature = "sapling")]
+    pub fn to_sapling_address(&self) -> Option<PaymentAddress> {
+        match self {
+            Address::Sapling(addr) => Some(*addr),
+            Address::Transparent(_) => None,
+            Address::Unified(ua) => ua.sapling().copied(),
+            Address::Tex(_) => None,
+        }
+    }
+
+    /// Returns the protocol-typed unified [`Receiver`]s of this address as a vector, ignoring the
+    /// original encoding of the address.
+    ///
+    /// In the case that the underlying address is the [`Address::Unified`] variant, this is
+    /// equivalent to [`UnifiedAddress::as_understood_receivers`] in that it does not return
+    /// unknown receiver data.
+    ///
+    /// Note that this method eliminates the distinction between transparent addresses and the
+    /// transparent receiving address for a TEX address; as such, it should only be used in cases
+    /// where address uses are being detected in inspection of chain data, and NOT in any situation
+    /// where a transaction sending to this address is being constructed.
+    pub fn as_understood_unified_receivers(&self) -> Vec<Receiver> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(addr) => vec![Receiver::Sapling(*addr)],
+            Address::Transparent(addr) => vec![Receiver::Transparent(*addr)],
+            Address::Unified(ua) => ua.as_understood_receivers(),
+            Address::Tex(addr) => vec![Receiver::Transparent(TransparentAddress::PublicKeyHash(
+                *addr,
+            ))],
+        }
+    }
 }
 
 #[cfg(all(
@@ -462,7 +519,7 @@ pub mod testing {
         params: Network,
         request: UnifiedAddressRequest,
     ) -> impl Strategy<Value = UnifiedAddress> {
-        arb_unified_spending_key(params).prop_map(move |k| k.default_address(Some(request)).0)
+        arb_unified_spending_key(params).prop_map(move |k| k.default_address(request).0)
     }
 
     #[cfg(feature = "sapling")]

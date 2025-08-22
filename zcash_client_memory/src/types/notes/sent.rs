@@ -1,12 +1,11 @@
 use std::{collections::BTreeMap, ops::Deref};
 
-use zcash_primitives::transaction::{components::OutPoint, TxId};
-use zcash_protocol::{memo::Memo, value::Zatoshis, PoolType, ShieldedProtocol::Sapling};
-
+use ::transparent::bundle::OutPoint;
 use zcash_client_backend::{
     data_api::{SentTransaction, SentTransactionOutput},
-    wallet::{Note, NoteId, Recipient},
+    wallet::{NoteId, Recipient},
 };
+use zcash_protocol::{memo::Memo, value::Zatoshis, PoolType, ShieldedProtocol::Sapling, TxId};
 
 use crate::AccountId;
 
@@ -167,11 +166,15 @@ mod serialization {
     use super::*;
     use crate::{error::Error, proto::memwallet as proto, read_optional};
     use zcash_address::ZcashAddress;
-    use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::{
-        consensus::Network::MainNetwork as EncodingParams, legacy::TransparentAddress,
-    };
     use zcash_protocol::ShieldedProtocol;
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        zcash_keys::encoding::AddressCodec as _,
+        zcash_primitives::{
+            consensus::Network::MainNetwork as EncodingParams, legacy::TransparentAddress,
+        },
+    };
 
     impl From<SentNote> for proto::SentNote {
         fn from(note: SentNote) -> Self {
@@ -363,7 +366,7 @@ mod serialization {
     mod tests {
         use super::*;
         use crate::proto::memwallet as proto;
-        use zcash_primitives::transaction::components::OutPoint;
+
         use zcash_protocol::ShieldedProtocol;
 
         #[test]

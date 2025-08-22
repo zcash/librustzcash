@@ -231,21 +231,25 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::v_transactions_net, WalletMigrator},
         WalletDb,
     };
 
     #[test]
     fn received_notes_nullable_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[v_transactions_net::MIGRATION_ID],
-            false,
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
         )
         .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[v_transactions_net::MIGRATION_ID])
+            .unwrap();
 
         // Create an account in the wallet
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -270,7 +274,10 @@ mod tests {
             VALUES (0, 3, 0, '', 5, '', 'nf_b', false);").unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         {
             let mut q = db_data
@@ -300,7 +307,7 @@ mod tests {
                         assert_eq!(received_note_count, 2);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -364,7 +371,7 @@ mod tests {
                         assert_eq!(received_note_count, 0);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }

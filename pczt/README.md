@@ -1,6 +1,13 @@
 # pczt
 
-TBD
+This library implements the Partially Created Zcash Transaction (PCZT) format.
+This format enables splitting up the logical steps of creating a Zcash transaction
+across distinct entities. The entity roles roughly match those specified in
+[BIP 174: Partially Signed Bitcoin Transaction Format] and [BIP 370: PSBT Version 2],
+with additional Zcash-specific roles.
+
+[BIP 174: Partially Signed Bitcoin Transaction Format]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+[BIP 370: PSBT Version 2]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki
 
 ## License
 

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.14.0"
+version = "0.17.2"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -45,6 +45,7 @@ bs58.workspace = true
 tracing.workspace = true
 
 # - Serialization
+bitflags.workspace = true
 byteorder.workspace = true
 nonempty.workspace = true
 prost.workspace = true
@@ -79,6 +80,9 @@ regex = "1.4"
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
 maybe-rayon.workspace = true
+rand_core.workspace = true
+rand_distr.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 ambassador.workspace = true
@@ -104,6 +108,7 @@ zip321 = { workspace = true }
 
 [features]
 default = ["multicore"]
+zip-233 = ["zcash_primitives/zip-233"]
 
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
@@ -128,6 +133,12 @@ transparent-inputs = [
   "zcash_client_backend/transparent-inputs"
 ]
 
+## Enables import from legacy zcashd wallet.dat wallets.
+zcashd-compat = [
+  "zcash_keys/zcashd-compat",
+  "zcash_client_backend/zcashd-compat"
+]
+
 ## Enables `serde` derives for certain types.
 serde = ["dep:serde", "uuid/serde"]
 
@@ -145,3 +156,6 @@ pczt-tests = ["serde", "zcash_client_backend/pczt"]
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

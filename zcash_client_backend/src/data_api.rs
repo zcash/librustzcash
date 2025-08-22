@@ -69,7 +69,7 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
 use zcash_keys::{
-    address::UnifiedAddress,
+    address::{Address, UnifiedAddress},
     keys::{
         UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
@@ -81,13 +81,14 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
     ShieldedProtocol, TxId,
 };
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
     scanning::ScanRange,
 };
 use crate::{
+    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
@@ -96,15 +97,24 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::TransparentAddressMetadata,
+    getset::{CopyGetters, Getters},
     std::ops::Range,
-    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
+    std::time::SystemTime,
+    transparent::{
+        address::TransparentAddress,
+        bundle::OutPoint,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
 };
+
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
 
 #[cfg(feature = "test-dependencies")]
 use ambassador::delegatable_trait;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use {zcash_keys::address::Address, zcash_protocol::consensus::NetworkUpgrade};
+use zcash_protocol::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
@@ -127,15 +137,26 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
 
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined. This is the same as the gap limit in Bitcoin.
-pub const GAP_LIMIT: u32 = 20;
-
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
 pub enum NullifierQuery {
     Unspent,
     All,
+}
+
+/// An intent of representing spendable value to reach a certain targeted
+/// amount.  `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
+/// at minimum the given zatoshis that is conformed by the sum of spendable notes.
+///
+/// Discussion: why not just use ``Zatoshis``?
+///
+/// the `Zatoshis` value isn't enough to explain intent when seeking to match a
+/// given a given amount. Is the value expressed in `Zatoshis` the ceiling value
+/// or the minimum value of a given spend intent? How would you express that the
+/// value spend intent is "as much as possible" without knowing the value upfront?
+#[derive(Debug, Clone, Copy)]
+pub enum TargetValue {
+    AtLeast(Zatoshis),
 }
 
 /// Balance information for a value within a single pool in an account.
@@ -144,6 +165,7 @@ pub struct Balance {
     spendable_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
+    uneconomic_value: Zatoshis,
 }
 
 impl Balance {
@@ -152,6 +174,7 @@ impl Balance {
         spendable_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
+        uneconomic_value: Zatoshis::ZERO,
     };
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
@@ -203,6 +226,18 @@ impl Balance {
         Ok(())
     }
 
+    /// Returns the value in the account of notes that have value less than the marginal
+    /// fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        self.uneconomic_value
+    }
+
+    /// Adds the specified value to the uneconomic value total, checking for overflow.
+    pub fn add_uneconomic_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.uneconomic_value = (self.uneconomic_value + value).ok_or(BalanceError::Overflow)?;
+        Ok(())
+    }
+
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
         (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
@@ -210,17 +245,31 @@ impl Balance {
     }
 }
 
+impl core::ops::Add<Balance> for Balance {
+    type Output = Result<Balance, BalanceError>;
+
+    fn add(self, rhs: Balance) -> Self::Output {
+        Ok(Balance {
+            spendable_value: (self.spendable_value + rhs.spendable_value)
+                .ok_or(BalanceError::Overflow)?,
+            change_pending_confirmation: (self.change_pending_confirmation
+                + rhs.change_pending_confirmation)
+                .ok_or(BalanceError::Overflow)?,
+            value_pending_spendability: (self.value_pending_spendability
+                + rhs.value_pending_spendability)
+                .ok_or(BalanceError::Overflow)?,
+            uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
+                .ok_or(BalanceError::Overflow)?,
+        })
+    }
+}
+
 /// Balance information for a single account. The sum of this struct's fields is the total balance
 /// of the wallet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
-    /// The value of unspent Sapling outputs belonging to the account.
     sapling_balance: Balance,
-
-    /// The value of unspent Orchard outputs belonging to the account.
     orchard_balance: Balance,
-
-    /// The value of all unspent transparent outputs belonging to the account.
     unshielded_balance: Balance,
 }
 
@@ -282,6 +331,14 @@ impl AccountBalance {
     }
 
     /// Returns the [`Balance`] of unshielded funds in the account.
+    ///
+    /// Note that because transparent UTXOs may be shielded with zero confirmations and this crate
+    /// does not provide capabilities to directly spend transparent UTXOs in non-shielding
+    /// transactions, the [`change_pending_confirmation`] and [`value_pending_spendability`] fields
+    /// of the returned [`Balance`] will always be zero.
+    ///
+    /// [`change_pending_confirmation`]: Balance::change_pending_confirmation
+    /// [`value_pending_spendability`]: Balance::value_pending_spendability
     pub fn unshielded_balance(&self) -> &Balance {
         &self.unshielded_balance
     }
@@ -298,7 +355,7 @@ impl AccountBalance {
         Ok(result)
     }
 
-    /// Returns the total value of funds belonging to the account.
+    /// Returns the total value of economically relevant notes and UTXOs belonging to the account.
     pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
@@ -328,6 +385,15 @@ impl AccountBalance {
             + self.orchard_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
+
+    /// Returns the value in the account of notes and transparent UTXOs that have value less than
+    /// the marginal fee, and consequently cannot be spent except as a grace input.
+    pub fn uneconomic_value(&self) -> Zatoshis {
+        (self.sapling_balance.uneconomic_value
+            + self.orchard_balance.uneconomic_value
+            + self.unshielded_balance.uneconomic_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
 }
 
 /// Source metadata for a ZIP 32-derived key.
@@ -335,14 +401,22 @@ impl AccountBalance {
 pub struct Zip32Derivation {
     seed_fingerprint: SeedFingerprint,
     account_index: zip32::AccountId,
+    #[cfg(feature = "zcashd-compat")]
+    legacy_address_index: Option<zcashd::LegacyAddressIndex>,
 }
 
 impl Zip32Derivation {
     /// Constructs new derivation metadata from its constituent parts.
-    pub fn new(seed_fingerprint: SeedFingerprint, account_index: zip32::AccountId) -> Self {
+    pub fn new(
+        seed_fingerprint: SeedFingerprint,
+        account_index: zip32::AccountId,
+        #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
+    ) -> Self {
         Self {
             seed_fingerprint,
             account_index,
+            #[cfg(feature = "zcashd-compat")]
+            legacy_address_index,
         }
     }
 
@@ -354,6 +428,11 @@ impl Zip32Derivation {
     /// Returns the account-level index in the ZIP 32 derivation path.
     pub fn account_index(&self) -> zip32::AccountId {
         self.account_index
+    }
+
+    #[cfg(feature = "zcashd-compat")]
+    pub fn legacy_address_index(&self) -> Option<zcashd::LegacyAddressIndex> {
+        self.legacy_address_index
     }
 }
 
@@ -497,6 +576,53 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
 
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         self.1.clone()
+    }
+}
+
+/// Information about an address in the wallet.
+pub struct AddressInfo {
+    address: Address,
+    diversifier_index: DiversifierIndex,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_key_scope: Option<TransparentKeyScope>,
+}
+
+impl AddressInfo {
+    /// Constructs an `AddressInfo` from its constituent parts.
+    pub fn from_parts(
+        address: Address,
+        diversifier_index: DiversifierIndex,
+        #[cfg(feature = "transparent-inputs")] transparent_key_scope: Option<TransparentKeyScope>,
+    ) -> Option<Self> {
+        // Only allow `transparent_key_scope` to be set for transparent addresses.
+        #[cfg(feature = "transparent-inputs")]
+        let valid = transparent_key_scope.is_none()
+            || matches!(address, Address::Transparent(_) | Address::Tex(_));
+        #[cfg(not(feature = "transparent-inputs"))]
+        let valid = true;
+
+        valid.then_some(Self {
+            address,
+            diversifier_index,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_key_scope,
+        })
+    }
+
+    /// Returns the address this information is about.
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+
+    /// Returns the diversifier index the address was derived at.
+    pub fn diversifier_index(&self) -> DiversifierIndex {
+        self.diversifier_index
+    }
+
+    /// Returns the key scope if this is a transparent address.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.transparent_key_scope
     }
 }
 
@@ -700,6 +826,69 @@ pub struct SpendableNotes<NoteRef> {
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+/// A type describing the mined-ness of transactions that should be returned in response to a
+/// [`TransactionDataRequest`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg(feature = "transparent-inputs")]
+pub enum TransactionStatusFilter {
+    /// Only mined transactions should be returned.
+    Mined,
+    /// Only mempool transactions should be returned.
+    Mempool,
+    /// Both mined transactions and transactions in the mempool should be returned.
+    All,
+}
+
+/// A type used to filter transactions to be returned in response to a [`TransactionDataRequest`],
+/// in terms of the spentness of the transaction's transparent outputs.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg(feature = "transparent-inputs")]
+pub enum OutputStatusFilter {
+    /// Only transactions that have currently-unspent transparent outputs should be returned.
+    Unspent,
+    /// All transactions corresponding to the data request should be returned, irrespective of
+    /// whether or not those transactions produce transparent outputs that are currently unspent.
+    All,
+}
+
+/// Payload data for [`TransactionDataRequest::TransactionsInvolvingAddress`].
+///
+/// Values of this type are not constructed directly, but are instead constructed using
+/// [`TransactionDataRequest::transactions_involving_address`].
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Getters, CopyGetters)]
+pub struct TransactionsInvolvingAddress {
+    /// The address to request transactions and/or UTXOs for.
+    #[getset(get_copy = "pub")]
+    address: TransparentAddress,
+    /// Only transactions mined at heights greater than or equal to this height should be
+    /// returned.
+    #[getset(get_copy = "pub")]
+    block_range_start: BlockHeight,
+    /// Only transactions mined at heights less than this height should be returned.
+    #[getset(get_copy = "pub")]
+    block_range_end: Option<BlockHeight>,
+    /// If a `request_at` time is set, the caller evaluating this request should attempt to
+    /// retrieve transaction data related to the specified address at a time that is as close
+    /// as practical to the specified instant, and in a fashion that decorrelates this request
+    /// to a light wallet server from other requests made by the same caller.
+    ///
+    /// This may be ignored by callers that are able to satisfy the request without exposing
+    /// correlations between addresses to untrusted parties; for example, a wallet application
+    /// that uses a private, trusted-for-privacy supplier of chain data can safely ignore this
+    /// field.
+    #[getset(get_copy = "pub")]
+    request_at: Option<SystemTime>,
+    /// The caller should respond to this request only with transactions that conform to the
+    /// specified transaction status filter.
+    #[getset(get = "pub")]
+    tx_status_filter: TransactionStatusFilter,
+    /// The caller should respond to this request only with transactions containing outputs
+    /// that conform to the specified output status filter.
+    #[getset(get = "pub")]
+    output_status_filter: OutputStatusFilter,
+}
+
 /// A request for transaction data enhancement, spentness check, or discovery
 /// of spends from a given transparent address within a specific block range.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -740,15 +929,56 @@ pub enum TransactionDataRequest {
     /// request by detecting transactions involving the specified address within the provided block
     /// range; if using `lightwalletd` for access to chain data, this may be performed using the
     /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
-    /// for each transaction so detected.
+    /// for each transaction so detected. If no transactions are detected within the given range,
+    /// the caller should instead invoke [`WalletWrite::notify_address_checked`] with
+    /// `block_end_height - 1` as the `as_of_height` argument.
     ///
     /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
     #[cfg(feature = "transparent-inputs")]
-    SpendsFromAddress {
+    TransactionsInvolvingAddress(TransactionsInvolvingAddress),
+}
+
+impl TransactionDataRequest {
+    /// Constructs a request for Information about transactions that receive or spend funds
+    /// belonging to the specified transparent address.
+    ///
+    /// # Parameters:
+    /// - `address`: The address to request transactions and/or UTXOs for.
+    /// - `block_range_start`: Only transactions mined at heights greater than or equal to this
+    ///   height should be returned.
+    /// - `block_range_end`: Only transactions mined at heights less than this height should be
+    ///   returned.
+    /// - `request_at`: If a `request_at` time is set, the caller evaluating this request should attempt to
+    ///   retrieve transaction data related to the specified address at a time that is as close
+    ///   as practical to the specified instant, and in a fashion that decorrelates this request
+    ///   to a light wallet server from other requests made by the same caller. This may be ignored
+    ///   by callers that are able to satisfy the request without exposing correlations between
+    ///   addresses to untrusted parties; for example, a wallet application that uses a private,
+    ///   trusted-for-privacy supplier of chain data can safely ignore this field.
+    /// - `tx_status_filter`: The caller should respond to this request only with transactions that
+    ///   conform to the specified transaction status filter.
+    /// - `output_status_filter: The caller should respond to this request only with transactions
+    ///   containing outputs that conform to the specified output status filter.
+    ///
+    /// See [`TransactionDataRequest::TransactionsInvolvingAddress`] for more information.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transactions_involving_address(
         address: TransparentAddress,
         block_range_start: BlockHeight,
         block_range_end: Option<BlockHeight>,
-    },
+        request_at: Option<SystemTime>,
+        tx_status_filter: TransactionStatusFilter,
+        output_status_filter: OutputStatusFilter,
+    ) -> Self {
+        TransactionDataRequest::TransactionsInvolvingAddress(TransactionsInvolvingAddress {
+            address,
+            block_range_start,
+            block_range_end,
+            request_at,
+            tx_status_filter,
+            output_status_filter,
+        })
+    }
 }
 
 /// Metadata about the status of a transaction obtained by inspecting the chain state.
@@ -1108,9 +1338,10 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
@@ -1154,8 +1385,8 @@ pub trait InputSource {
     fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _target_height: BlockHeight,
-        _min_confirmations: u32,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
@@ -1194,8 +1425,7 @@ pub trait WalletRead {
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
+        derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
@@ -1229,14 +1459,19 @@ pub trait WalletRead {
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the most recently generated unified address for the specified account, if the
-    /// account identifier specified refers to a valid account for this wallet.
+    /// Returns information about every address tracked for this account.
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error>;
+
+    /// Returns the most recently generated unified address for the specified account that conforms
+    /// to the specified address filter, if the account identifier specified refers to a valid
+    /// account for this wallet.
     ///
-    /// This will return `Ok(None)` if the account identifier does not correspond to a known
-    /// account.
-    fn get_current_address(
+    /// This will return `Ok(None)` if no previously generated address conforms to the specified
+    /// request.
+    fn get_last_generated_address_matching(
         &self,
         account: Self::AccountId,
+        address_filter: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns the birthday height for the given account, or an error if the account is not known
@@ -1249,12 +1484,12 @@ pub trait WalletRead {
     /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns a [`WalletSummary`] that represents the sync status, and the wallet balances
-    /// given the specified minimum number of confirmations for all accounts known to the
-    /// wallet; or `Ok(None)` if the wallet has no summary data available.
+    /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
+    /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
+    /// or `Ok(None)` if the wallet has no summary data available.
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
@@ -1318,7 +1553,7 @@ pub trait WalletRead {
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
@@ -1369,21 +1604,22 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
 
     /// Returns a mapping from each transparent receiver associated with the specified account
-    /// to its not-yet-shielded UTXO balance as of the end of the block at the provided
-    /// `max_height`, when that balance is non-zero.
+    /// to the balance of funds given the specified target height and confirmations policy.
     ///
     /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -1393,7 +1629,7 @@ pub trait WalletRead {
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
     /// Ok(
-    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///     if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
     ///         result.clone()
     ///     } else {
     ///         self.get_known_ephemeral_addresses(account, None)?
@@ -1414,7 +1650,7 @@ pub trait WalletRead {
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
         Ok(
-            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+            if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
                 result.clone()
             } else {
                 self.get_known_ephemeral_addresses(account, None)?
@@ -1425,10 +1661,22 @@ pub trait WalletRead {
         )
     }
 
+    /// Returns the maximum block height at which a transparent output belonging to the wallet has
+    /// been observed.
+    ///
+    /// We must start looking for UTXOs for addresses within the current gap limit as of the block
+    /// height at which they might have first been revealed. This would have occurred when the gap
+    /// advanced as a consequence of a transaction being mined. The address at the start of the current
+    /// gap was potentially first revealed after the address at index `gap_start - (gap_limit + 1)`
+    /// received an output in a mined transaction; therefore, we take that height to be where we
+    /// should start searching for UTXOs.
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
+
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for [`GAP_LIMIT`] additional indices (capped to
-    /// the maximum index).
+    /// reserved addresses, and addresses for the backend's configured gap limit worth
+    /// of additional indices (capped to the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
     /// in that range. An `index_range` of `None` is defined to be equivalent to
@@ -1879,6 +2127,17 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
     pub fn orchard_outputs(&self) -> &[DecryptedOutput<orchard::note::Note, AccountId>] {
         &self.orchard_outputs
     }
+
+    /// Returns whether the transaction has decrypted outputs
+    pub fn has_decrypted_outputs(&self) -> bool {
+        let has_sapling = !self.sapling_outputs.is_empty();
+        #[cfg(feature = "orchard")]
+        let has_orchard = !self.orchard_outputs.is_empty();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        has_sapling || has_orchard
+    }
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -1889,7 +2148,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
 pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: Zatoshis,
@@ -1912,7 +2171,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: Zatoshis,
@@ -1957,7 +2216,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     }
 
     /// Returns the block height that this transaction was created to target.
-    pub fn target_height(&self) -> BlockHeight {
+    pub fn target_height(&self) -> TargetHeight {
         self.target_height
     }
 }
@@ -1978,8 +2237,8 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// ### Fields:
     /// * `output_index` - the index of the output or action in the sent transaction
     /// * `recipient` - the recipient of the output, either a Zcash address or a
-    ///    wallet-internal account and the note belonging to the wallet created by
-    ///    the output
+    ///   wallet-internal account and the note belonging to the wallet created by
+    ///   the output
     /// * `value` - the value of the output, in zatoshis
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
@@ -2051,17 +2310,14 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
     /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
-    ///    birthday height is defined as the height of the first block to be scanned in wallet
-    ///    recovery.
+    ///   birthday height is defined as the height of the first block to be scanned in wallet
+    ///   recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
-    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
-    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
-    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
-    ///    exist no unscanned ranges between the wallet's birthday height and the provided
-    ///    `recover_until` height, exclusive.
-    ///
-    /// This API is intended primarily to be used in testing contexts and deserialization; under normal circumstances,
-    /// [`AccountBirthday::from_treestate`] should be used instead.
+    ///   order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///   visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///   "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///   exist no unscanned ranges between the wallet's birthday height and the provided
+    ///   `recover_until` height, exclusive.
     pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
             prior_chain_state,
@@ -2072,13 +2328,13 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from a [`TreeState`] returned from `lightwalletd`.
     ///
     /// * `treestate`: The tree state corresponding to the last block prior to the wallet's
-    ///    birthday height.
+    ///   birthday height.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
-    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
-    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
-    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
-    ///    exist no unscanned ranges between the wallet's birthday height and the provided
-    ///    `recover_until` height, exclusive.
+    ///   order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///   visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///   "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///   exist no unscanned ranges between the wallet's birthday height and the provided
+    ///   `recover_until` height, exclusive.
     pub fn from_treestate(
         treestate: TreeState,
         recover_until: Option<BlockHeight>,
@@ -2368,16 +2624,45 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
-    /// Generates and persists the next available diversified address for the specified account,
-    /// given the current addresses known to the wallet. If the `request` parameter is `None`,
-    /// an address should be generated using all of the available receivers for the account's UFVK.
+    /// Generates, persists, and marks as exposed the next available diversified address for the
+    /// specified account, given the current addresses known to the wallet.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error>;
+
+    /// Generates, persists, and marks as exposed a diversified address for the specified account
+    /// at the provided diversifier index.
+    ///
+    /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
+    /// to the provided request at the specified diversifier index. Such a result might arise from
+    /// the diversifier index not being valid for a [`ReceiverRequirement::Require`]'ed receiver.
+    /// Some implementations of this trait may return `Err(_)` in some cases to expose more
+    /// information, which is only accessible in a backend-specific context.
+    ///
+    /// Address generation should fail if an address has already been exposed for the given
+    /// diversifier index and the given request produced an address having different receivers than
+    /// what was originally exposed.
+    ///
+    /// # WARNINGS
+    /// If an address generated using this method has a transparent receiver and the
+    /// chosen diversifier index would be outside the wallet's internally-configured gap limit,
+    /// funds sent to these address are **likely to not be discovered on recovery from seed**. It
+    /// up to the caller of this method to either ensure that they only request transparent
+    /// receivers with indices within the range of a reasonable gap limit, or that they ensure that
+    /// their wallet provides backup facilities that can be used to ensure that funds sent to such
+    /// addresses are recoverable after a loss of wallet data.
+    ///
+    /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
+    fn get_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        diversifier_index: DiversifierIndex,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
@@ -2485,6 +2770,20 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
+
+    /// Notifies the wallet backend that the given query for transactions involving a particular
+    /// address has completed evaluation.
+    ///
+    /// # Arguments
+    /// - `request`: the [`TransactionsInvolvingAddress`] request that was executed.
+    /// - `as_of_height`: The maximum height among blocks that were inspected in the process of
+    ///   performing the requested check.
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        request: TransactionsInvolvingAddress,
+        as_of_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 }
 

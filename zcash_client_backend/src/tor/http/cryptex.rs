@@ -1,11 +1,14 @@
 //! Cryptocurrency exchange rate APIs.
 
 use futures_util::{future::join_all, join};
+use hyper::StatusCode;
 use rand::{seq::IteratorRandom, thread_rng};
 use rust_decimal::Decimal;
 use tracing::{error, trace};
 
 use crate::tor::{Client, Error};
+
+use super::Retry;
 
 mod binance;
 mod coinbase;
@@ -14,7 +17,40 @@ mod gemini;
 mod ku_coin;
 mod mexc;
 
+/// Maximum number of retries for exchange queries implemented in this crate.
+const RETRY_LIMIT: u8 = 1;
+
+/// A retry filter that attempts to avoid Tor exit node connection failures.
+///
+/// A common failure with HTTP requests over Tor is a particular exit node being blocked
+/// by the server. This may be due to other exit node activity causing some IP rate limit
+/// to be exceeded, for example.
+///
+/// If the HTTP request doesn't require a persistent Tor client identity across queries,
+/// we can retry with an isolated client in order to use new circuits that have a decent
+/// chance of using a different exit node. The isolation is not for privacy; the server
+/// can trivially link the two requests together via timing.
+///
+/// This filter attempts retries as follows:
+/// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+///   retry with an isolated client.
+/// - All other errors will cause a retry with the same client.
+fn retry_filter(res: Result<StatusCode, &Error>) -> Option<Retry> {
+    match res {
+        Ok(status) => {
+            if status.is_client_error() {
+                Some(Retry::Isolated)
+            } else {
+                (!status.is_success()).then_some(Retry::Same)
+            }
+        }
+        Err(_) => Some(Retry::Same),
+    }
+}
+
 /// Exchanges for which we know how to query data over Tor.
+///
+/// Queries to these exchanges will be retried a single time on error.
 pub mod exchanges {
     pub use super::binance::Binance;
     pub use super::coinbase::Coinbase;
@@ -27,7 +63,6 @@ pub mod exchanges {
 /// An exchange that can be queried for ZEC data.
 #[trait_variant::make(Exchange: Send)]
 #[dynosaur::dynosaur(DynExchange = dyn Exchange)]
-#[dynosaur::dynosaur(DynLocalExchange = dyn LocalExchange)]
 pub trait LocalExchange {
     /// Queries data about the USD/ZEC pair.
     ///
@@ -135,6 +170,8 @@ impl Client {
         &self,
         exchanges: &Exchanges,
     ) -> Result<Decimal, Error> {
+        self.ensure_bootstrapped().await?;
+
         // Fetch the data in parallel.
         let res = join!(
             exchanges.trusted.query_zec_to_usd(self),

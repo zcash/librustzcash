@@ -1,11 +1,13 @@
 //! Functions for initializing the various databases.
 
+use std::borrow::BorrowMut;
 use std::fmt;
 use std::rc::Rc;
 
+use rand_core::RngCore;
 use regex::Regex;
 use schemerz::{Migrator, MigratorError};
-use schemerz_rusqlite::RusqliteAdapter;
+use schemerz_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
@@ -17,9 +19,9 @@ use zcash_protocol::{consensus, value::BalanceError};
 use self::migrations::verify_network_compatibility;
 
 use super::commitment_tree;
-use crate::{error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, util::Clock, WalletDb};
 
-mod migrations;
+pub mod migrations;
 
 const SQLITE_MAJOR_VERSION: u32 = 3;
 const MIN_SQLITE_MINOR_VERSION: u32 = 35;
@@ -59,13 +61,13 @@ pub enum WalletMigrationError {
     BalanceError(BalanceError),
 
     /// Wrapper for commitment tree invariant violations
-    CommitmentTree(ShardTreeError<commitment_tree::Error>),
+    CommitmentTree(Box<ShardTreeError<commitment_tree::Error>>),
 
     /// Reverting the specified migration is not supported.
     CannotRevert(Uuid),
 
     /// Some other unexpected violation of database business rules occurred
-    Other(SqliteClientError),
+    Other(Box<SqliteClientError>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -82,7 +84,7 @@ impl From<BalanceError> for WalletMigrationError {
 
 impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
     fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
-        WalletMigrationError::CommitmentTree(e)
+        WalletMigrationError::CommitmentTree(Box::new(e))
     }
 }
 
@@ -97,12 +99,14 @@ impl From<SqliteClientError> for WalletMigrationError {
         match value {
             SqliteClientError::CorruptedData(err) => WalletMigrationError::CorruptedData(err),
             SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
-            SqliteClientError::CommitmentTree(err) => WalletMigrationError::CommitmentTree(err),
+            SqliteClientError::CommitmentTree(err) => {
+                WalletMigrationError::CommitmentTree(Box::new(err))
+            }
             SqliteClientError::BalanceError(err) => WalletMigrationError::BalanceError(err),
             SqliteClientError::AddressGeneration(err) => {
                 WalletMigrationError::AddressGeneration(err)
             }
-            other => WalletMigrationError::Other(other),
+            other => WalletMigrationError::Other(Box::new(other)),
         }
     }
 }
@@ -113,8 +117,7 @@ impl fmt::Display for WalletMigrationError {
             WalletMigrationError::DatabaseNotSupported(version) => {
                 write!(
                     f,
-                    "The installed SQLite version {} does not support operations required by the wallet.",
-                    version
+                    "The installed SQLite version {version} does not support operations required by the wallet."
                 )
             }
             WalletMigrationError::SeedRequired => {
@@ -130,23 +133,19 @@ impl fmt::Display for WalletMigrationError {
                 )
             }
             WalletMigrationError::CorruptedData(reason) => {
-                write!(f, "Wallet database is corrupted: {}", reason)
+                write!(f, "Wallet database is corrupted: {reason}")
             }
-            WalletMigrationError::DbError(e) => write!(f, "{}", e),
-            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
-            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
+            WalletMigrationError::DbError(e) => write!(f, "{e}"),
+            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {e:?}"),
+            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {e:?}"),
             WalletMigrationError::AddressGeneration(e) => {
-                write!(f, "Address generation error: {:?}", e)
+                write!(f, "Address generation error: {e:?}")
             }
             WalletMigrationError::CannotRevert(uuid) => {
-                write!(f, "Reverting migration {} is not supported", uuid)
+                write!(f, "Reverting migration {uuid} is not supported")
             }
             WalletMigrationError::Other(err) => {
-                write!(
-                    f,
-                    "Unexpected violation of database business rules: {}",
-                    err
-                )
+                write!(f, "Unexpected violation of database business rules: {err}")
             }
         }
     }
@@ -191,9 +190,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::InvalidMemo(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::AddressGeneration(e) => WalletMigrationError::AddressGeneration(e),
         SqliteClientError::BadAccountData(e) => WalletMigrationError::CorruptedData(e),
-        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(e),
+        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(Box::new(e)),
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
-            format!("Wallet DB contains unsupported pool type {}", pool),
+            format!("Wallet DB contains unsupported pool type {pool}"),
         ),
         SqliteClientError::BalanceError(e) => WalletMigrationError::BalanceError(e),
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
@@ -220,15 +219,28 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't call methods that require a known chain height")
         }
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::ReachedGapLimit(_, _) => {
+        SqliteClientError::ReachedGapLimit(..) => {
             unreachable!("we don't do ephemeral address tracking")
         }
-        #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::EphemeralAddressReuse(_, _) => {
-            unreachable!("we don't do ephemeral address tracking")
+        SqliteClientError::DiversifierIndexReuse(i, _) => {
+            WalletMigrationError::CorruptedData(format!(
+                "invalid attempt to overwrite address at diversifier index {}",
+                u128::from(i)
+            ))
+        }
+        SqliteClientError::AddressReuse(_, _) => {
+            unreachable!("we don't create transactions in migrations")
         }
         SqliteClientError::NoteFilterInvalid(_) => {
             unreachable!("we don't do note selection in migrations")
+        }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::Scheduling(e) => {
+            WalletMigrationError::Other(Box::new(SqliteClientError::Scheduling(e)))
+        }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::NotificationMismatch { .. } => {
+            unreachable!("we don't service transaction data requests in migrations")
         }
     }
 }
@@ -259,8 +271,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
-/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
-/// accounts are not migrated.
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
 ///
 /// It is safe to use a wallet database previously created without the ability to create
 /// transparent spends with a build that enables transparent spends (via use of the
@@ -277,9 +289,11 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # use std::error::Error;
 /// # use secrecy::SecretVec;
 /// # use tempfile::NamedTempFile;
+/// use rand_core::OsRng;
 /// use zcash_protocol::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
+///     util::SystemClock,
 ///     wallet::init::{WalletMigrationError, init_wallet_db},
 /// };
 ///
@@ -287,7 +301,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # let data_file = NamedTempFile::new().unwrap();
 /// # let get_data_db_path = || data_file.path();
 /// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
-/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork)?;
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
 /// match init_wallet_db(&mut db, None) {
 ///     Err(e)
 ///         if matches!(
@@ -309,22 +323,241 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 // the library that does not support transparent use. It might be a good idea to add an explicit
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
-pub fn init_wallet_db<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+pub fn init_wallet_db<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+    CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
+    wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, &[], true)
+    if let Some(seed) = seed {
+        WalletMigrator::new().with_seed(seed)
+    } else {
+        WalletMigrator::new()
+    }
+    .init_or_migrate(wdb)
 }
 
-pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+/// A migrator that sets up the internal structure of the wallet database.
+///
+/// This procedure will automatically perform migration operations to update the wallet
+/// database to the database structure required by the current version of this library,
+/// and should be invoked at least once any time a client program upgrades to a new
+/// version of this library. The operation of this procedure is idempotent, so it is safe
+/// (though not required) to invoke this operation every time the wallet is opened.
+///
+/// In order to correctly apply migrations to accounts derived from a seed, sometimes the
+/// seed is required. The migrator should first be used without calling [`Self::with_seed`];
+/// if a pending migration requires the seed, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// The caller can then call [`Self::with_seed`] and then re-call [`Self::init_or_migrate`]
+/// with the necessary seed.
+///
+/// > Note that currently only one seed can be provided; as such, wallets containing
+/// > accounts derived from several different seeds are unsupported, and will result in an
+/// > error. Support for multi-seed wallets is being tracked in [zcash/librustzcash#1284].
+///
+/// When a seed is provided, it is checked against the database for _relevance_: if any
+/// account in the wallet for which [`Account::source`] is [`AccountSource::Derived`] can
+/// be derived from the given seed, the seed is relevant to the wallet. If the given seed
+/// is not relevant, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+///
+/// We do not check whether the seed is relevant to any imported account, because that
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
+///
+/// It is safe to use a wallet database previously created without the ability to create
+/// transparent spends with a build that enables transparent spends (via use of the
+/// `transparent-inputs` feature flag.) The reverse is unsafe, as wallet balance
+/// calculations would ignore the transparent UTXOs already controlled by the wallet.
+///
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [`Account::source`]: zcash_client_backend::data_api::Account::source
+/// [`AccountSource::Derived`]: zcash_client_backend::data_api::AccountSource::Derived
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use secrecy::SecretVec;
+/// # use tempfile::NamedTempFile;
+/// use rand_core::OsRng;
+/// use zcash_protocol::consensus::Network;
+/// use zcash_client_sqlite::{
+///     WalletDb,
+///     util::SystemClock,
+///     wallet::init::{WalletMigrationError, WalletMigrator},
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let data_file = NamedTempFile::new().unwrap();
+/// # let get_data_db_path = || data_file.path();
+/// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
+/// match WalletMigrator::new().init_or_migrate(&mut db) {
+///     Err(e)
+///         if matches!(
+///             e.source().and_then(|e| e.downcast_ref()),
+///             Some(&WalletMigrationError::SeedRequired)
+///         ) =>
+///     {
+///         let seed = load_seed()?;
+///         WalletMigrator::new()
+///             .with_seed(seed)
+///             .init_or_migrate(&mut db)
+///     }
+///     res => res,
+/// }?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct WalletMigrator {
     seed: Option<SecretVec<u8>>,
+    verify_seed_relevance: bool,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
+}
+
+impl Default for WalletMigrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WalletMigrator {
+    /// Constructs a new wallet migrator.
+    pub fn new() -> Self {
+        Self {
+            seed: None,
+            verify_seed_relevance: true,
+            external_migrations: None,
+        }
+    }
+
+    /// Sets the seed for the migrator to use.
+    pub fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    /// API for internal test usage only.
+    #[cfg(test)]
+    pub(crate) fn ignore_seed_relevance(mut self) -> Self {
+        self.verify_seed_relevance = false;
+        self
+    }
+
+    /// Sets the external migration graph to apply alongside the internal migrations.
+    ///
+    /// From a data management perspective, it can be useful to store additional data
+    /// alongside the `zcash_client_sqlite` wallet database. This method enables you to
+    /// provide an external [`schemerz`] migration graph that the migrator will apply to
+    /// the wallet database.
+    ///
+    /// # WARNING
+    ///
+    /// **DO NOT** depend on or modify internal details of the `zcash_client_sqlite`
+    /// schema!
+    ///
+    /// The internal migrations are written to take into account internal relationships
+    /// between the `zcash_client_sqlite` tables, but they will never take into account
+    /// external tables. In particular, this means that you **MUST NOT**:
+    /// - Modify the structure or contents of any internal table.
+    /// - Assume that internal IDs will exist indefinitely (instead have a backup plan for
+    ///   recovering your data relationships if a new internal migration affects your
+    ///   foreign keys).
+    ///
+    /// The `zcash_client_sqlite` schema does not have any common prefix it uses for
+    /// tables, indexes, or views. However, we promise to not use the prefix `ext_` for
+    /// any internal names. Schema created by external migrations **MUST** use name
+    /// prefixing with a prefix that is unlikely to collide with either the internal names
+    /// or other potential external schemas (e.g. `ext_myappname_*`).
+    ///
+    /// # Integration
+    ///
+    /// In order to enable anchoring your external migrations correctly with respect to
+    /// this library's internal migrations, we provide constants in the [`migrations`]
+    /// module (for each release that adds a migration) which you can include within your
+    /// [`schemerz::Migration::dependencies`] set.
+    ///
+    /// Each migration runs inside a database transaction, which has the following
+    /// implications:
+    /// - `PRAGMA foreign_keys` has no effect inside a transaction, so the migrator
+    ///   handles foreign key enforcement itself:
+    ///   - `PRAGMA foreign_keys = OFF` is set before running any migrations.
+    ///   - `PRAGMA foreign_keys = ON` is set after all migrations are successful.
+    /// - `PRAGMA legacy_alter_table` should only be used in cases where its effect is
+    ///   explicitly intended, so the migrator does not use it globally. If you want to
+    ///   rename tables without breaking foreign key relationships, you need to do so
+    ///   yourself inside individual migrations:
+    ///   ```sql
+    ///   PRAGMA legacy_alter_table = ON;
+    ///   DROP TABLE table_name;
+    ///   ALTER TABLE table_name_new RENAME TO table_name;
+    ///   PRAGMA legacy_alter_table = OFF;
+    ///   ```
+    pub fn with_external_migrations(
+        mut self,
+        migrations: Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>,
+    ) -> Self {
+        self.external_migrations = Some(migrations);
+        self
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub fn init_or_migrate<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        self.init_or_migrate_to(wdb, &[])
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub(crate) fn init_or_migrate_to<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+        target_migrations: &[Uuid],
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        init_wallet_db_internal(
+            wdb,
+            self.seed,
+            self.external_migrations,
+            target_migrations,
+            self.verify_seed_relevance,
+        )
+    }
+}
+
+fn init_wallet_db_internal<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+    CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
+    wdb: &mut WalletDb<C, P, CL, R>,
+    seed: Option<SecretVec<u8>>,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
-    verify_sqlite_version_compatibility(&wdb.conn).map_err(MigratorError::Adapter)?;
+    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)?;
 
     // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
     // key references in table definitions.
@@ -332,6 +565,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // It is necessary to perform this operation globally using the outer connection because this
     // pragma has no effect when set or unset within a transaction.
     wdb.conn
+        .borrow()
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
@@ -342,7 +576,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // https://github.com/zcash/schemerz/issues/6)
     {
         let adapter = RusqliteAdapter::<'_, WalletMigrationError>::new(
-            &mut wdb.conn,
+            wdb.conn.borrow_mut(),
             Some(MIGRATIONS_TABLE.to_string()),
         );
         adapter.init().expect("Migrations table setup succeeds.");
@@ -351,15 +585,26 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // Now that we are certain that the migrations table exists, verify that if the database
     // already contains account data, any stored UFVKs correspond to the same network that the
     // migrations are being run for.
-    verify_network_compatibility(&wdb.conn, &wdb.params).map_err(MigratorError::Adapter)?;
+    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(MigratorError::Adapter)?;
 
     // Now create the adapter that we're actually going to use to perform the migrations, and
     // proceed.
-    let adapter = RusqliteAdapter::new(&mut wdb.conn, Some(MIGRATIONS_TABLE.to_string()));
+    let adapter = RusqliteAdapter::new(wdb.conn.borrow_mut(), Some(MIGRATIONS_TABLE.to_string()));
     let mut migrator = Migrator::new(adapter);
     migrator
-        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()).into_iter())
+        .register_multiple(
+            migrations::all_migrations(
+                &wdb.params,
+                wdb.clock.clone(),
+                wdb.rng.clone(),
+                seed.clone(),
+            )
+            .into_iter(),
+        )
         .expect("Wallet migration registration should have been successful.");
+    if let Some(migrations) = external_migrations {
+        migrator.register_multiple(migrations.into_iter())?;
+    }
     if target_migrations.is_empty() {
         migrator.up(None)?;
     } else {
@@ -368,6 +613,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
         }
     }
     wdb.conn
+        .borrow()
         .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
@@ -432,7 +678,32 @@ fn verify_sqlite_version_compatibility(
 }
 
 #[cfg(test)]
+pub(crate) mod testing {
+    use rand::RngCore;
+    use schemerz::MigratorError;
+    use secrecy::SecretVec;
+    use uuid::Uuid;
+    use zcash_protocol::consensus;
+
+    use crate::{util::Clock, WalletDb};
+
+    use super::WalletMigrationError;
+
+    pub(crate) fn init_wallet_db<
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
+        seed: Option<SecretVec<u8>>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        super::init_wallet_db_internal(wdb, seed, None, &[], true)
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use rand::RngCore;
     use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
 
@@ -452,9 +723,13 @@ mod tests {
     use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
     use zip32::AccountId;
 
-    use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
-
-    use super::init_wallet_db;
+    use super::testing::init_wallet_db;
+    use crate::{
+        testing::db::{test_clock, test_rng, TestDbFactory},
+        util::Clock,
+        wallet::db,
+        WalletDb, UA_TRANSPARENT,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -464,6 +739,12 @@ mod tests {
         zcash_client_backend::data_api::WalletWrite,
         zip32::DiversifierIndex,
     };
+
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    use zcash_protocol::value::Zatoshis;
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         let result = conn
@@ -487,7 +768,6 @@ mod tests {
             db::TABLE_ACCOUNTS,
             db::TABLE_ADDRESSES,
             db::TABLE_BLOCKS,
-            db::TABLE_EPHEMERAL_ADDRESSES,
             db::TABLE_NULLIFIER_MAP,
             db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
             db::TABLE_ORCHARD_RECEIVED_NOTES,
@@ -529,6 +809,8 @@ mod tests {
             db::INDEX_ACCOUNTS_UUID,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
@@ -557,6 +839,8 @@ mod tests {
         }
 
         let expected_views = vec![
+            db::VIEW_ADDRESS_FIRST_USE.to_owned(),
+            db::VIEW_ADDRESS_USES.to_owned(),
             db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
@@ -588,9 +872,28 @@ mod tests {
     }
 
     #[test]
+    fn external_schema_prefix_unused() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let mut names_query = st
+            .wallet()
+            .db()
+            .conn
+            .prepare("SELECT tbl_name FROM sqlite_schema")
+            .unwrap();
+        let mut rows = names_query.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let name: String = row.get(0).unwrap();
+            assert!(!name.starts_with("ext_"));
+        }
+    }
+
+    #[test]
     fn init_migrate_from_0_3_0() {
-        fn init_0_3_0<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_0_3_0<P: consensus::Parameters, CL: Clock + Clone, R: RngCore + Clone>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -694,7 +997,13 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -711,8 +1020,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_autoshielding_poc() {
-        fn init_autoshielding<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_autoshielding<P: consensus::Parameters, CL, R>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -835,10 +1144,15 @@ mod tests {
             )?;
 
             let tx = TransactionData::from_parts(
-                TxVersion::Sapling,
+                TxVersion::V4,
                 BranchId::Canopy,
                 0,
                 BlockHeight::from(0),
+                #[cfg(all(
+                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                    feature = "zip-233"
+                ))]
+                Zatoshis::ZERO,
                 None,
                 None,
                 None,
@@ -866,7 +1180,13 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -883,8 +1203,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_main_pre_migrations() {
-        fn init_main<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_main<P: consensus::Parameters, CL, R>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
             ufvk: &UnifiedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -987,9 +1307,9 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
-                ufvk.default_address(Some(ua_request))
+                ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
@@ -1009,7 +1329,7 @@ mod tests {
             {
                 let taddr = Address::Transparent(
                     *ufvk
-                        .default_address(Some(ua_request))
+                        .default_address(ua_request)
                         .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
@@ -1034,7 +1354,13 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -1060,7 +1386,8 @@ mod tests {
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
         assert_matches!(init_wallet_db(&mut db_data, None), Ok(_));
 
         // Prior to adding any accounts, every seed phrase is relevant to the wallet.
@@ -1079,6 +1406,11 @@ mod tests {
         let (account_id, _usk) = db_data
             .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
+
+        // We have to have the chain tip height in order to allocate new addresses, to record the
+        // exposed-at height.
+        db_data.update_chain_tip(birthday.height()).unwrap();
+
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(
@@ -1103,20 +1435,29 @@ mod tests {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) =
-                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
-                        .unwrap()
-                        .expect("create_account generated the first address");
+                // hardcoded with knowledge of test vectors
+                let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Require);
+
+                let (ua, di) = wallet::get_last_generated_address_matching(
+                    &db_data.conn,
+                    &db_data.params,
+                    account_id,
+                    if tv.diversifier_index == 0 {
+                        UnifiedAddressRequest::AllAvailableKeys
+                    } else {
+                        ua_request
+                    },
+                )
+                .unwrap()
+                .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
-                // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
-                    .get_next_available_address(account_id, Some(ua_request))
+                    .get_next_available_address(account_id, ua_request)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

@@ -8,6 +8,7 @@ use std::{
     fmt::{self, Display},
     io,
 };
+use zcash_address::unified::{self, Encoding};
 
 use sapling::{self, note::ExtractedNoteCommitment, Node};
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
@@ -17,7 +18,7 @@ use zcash_primitives::{
     transaction::TxId,
 };
 use zcash_protocol::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight, NetworkType},
     memo::{self, MemoBytes},
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -127,7 +128,7 @@ impl compact_formats::CompactSaplingOutput {
     /// [`CompactOutput.cmu`]: #structfield.cmu
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
-        repr.as_mut().copy_from_slice(&self.cmu[..]);
+        repr.copy_from_slice(&self.cmu[..]);
         Option::from(ExtractedNoteCommitment::from_bytes(&repr)).ok_or(())
     }
 
@@ -261,6 +262,85 @@ impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOr
     }
 }
 
+impl service::LightdInfo {
+    /// Returns the network type for the chain this server is following, or `None` if it
+    /// is not recognised.
+    pub fn chain_name(&self) -> Option<NetworkType> {
+        match self.chain_name.as_str() {
+            "main" => Some(NetworkType::Main),
+            "test" => Some(NetworkType::Test),
+            "regtest" => Some(NetworkType::Regtest),
+            _ => None,
+        }
+    }
+
+    /// Returns the Sapling activation height for the chain this server is following.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.sapling_activation_height` is not
+    /// representable within a `u32`.
+    pub fn sapling_activation_height(&self) -> BlockHeight {
+        self.sapling_activation_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the current consensus branch ID for the chain tip of the chain this server
+    /// is following, or `None` if it is not recognised.
+    pub fn consensus_branch_id(&self) -> Option<consensus::BranchId> {
+        u32::from_str_radix(&self.consensus_branch_id, 16)
+            .ok()?
+            .try_into()
+            .ok()
+    }
+
+    /// Returns the chain tip height reported by the full node backing this server.
+    ///
+    /// If the full node is still syncing, this may not be the network's chain tip; in
+    /// this case, [`Self::estimated_height`] will report a larger height.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.block_height` is not representable within
+    /// a `u32`.
+    pub fn block_height(&self) -> BlockHeight {
+        self.block_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the estimated chain tip height for the chain this server is following.
+    ///
+    /// If the full node backing this server is fully synced, this is always equal to
+    /// [`Self::block_height`].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.estimated_height` is not representable
+    /// within a `u32`.
+    pub fn estimated_height(&self) -> BlockHeight {
+        self.estimated_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the donation address for this server.
+    ///
+    /// Returns `None` if:
+    /// - no donation address was provided.
+    /// - the provided donation address is not a valid [`unified::Address`].
+    /// - the provided donation address is for a different chain.
+    pub fn donation_address(&self) -> Option<unified::Address> {
+        if self.donation_address.is_empty() {
+            None
+        } else {
+            let (network_type, address) = unified::Address::decode(&self.donation_address).ok()?;
+            (Some(network_type) == self.chain_name()).then_some(address)
+        }
+    }
+}
+
 impl service::TreeState {
     /// Deserializes and returns the Sapling note commitment tree field of the tree state.
     pub fn sapling_tree(
@@ -272,7 +352,7 @@ impl service::TreeState {
             let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
+                    format!("Hex decoding of Sapling tree bytes failed: {e:?}"),
                 )
             })?;
             read_commitment_tree::<Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
@@ -293,7 +373,7 @@ impl service::TreeState {
             let orchard_tree_bytes = hex::decode(&self.orchard_tree).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Hex decoding of Orchard tree bytes failed: {:?}", e),
+                    format!("Hex decoding of Orchard tree bytes failed: {e:?}"),
                 )
             })?;
             read_commitment_tree::<
@@ -311,7 +391,7 @@ impl service::TreeState {
         let mut hash_bytes = hex::decode(&self.hash).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Block hash is not valid hex: {:?}", e),
+                format!("Block hash is not valid hex: {e:?}"),
             )
         })?;
         // Zcashd hex strings for block hashes are byte-reversed.
@@ -383,60 +463,52 @@ impl<E: Display> Display for ProposalDecodingError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProposalDecodingError::NoSteps => write!(f, "The proposal had no steps."),
-            ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {}", err),
+            ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {err}"),
             ProposalDecodingError::NullInput(i) => {
-                write!(f, "Proposed input was null at index {}", i)
+                write!(f, "Proposed input was null at index {i}")
             }
             ProposalDecodingError::TxIdInvalid(err) => {
-                write!(f, "Invalid transaction id: {:?}", err)
+                write!(f, "Invalid transaction id: {err:?}")
             }
             ProposalDecodingError::ValuePoolNotSupported(id) => {
-                write!(f, "Invalid value pool identifier: {:?}", id)
+                write!(f, "Invalid value pool identifier: {id:?}")
             }
-            ProposalDecodingError::InputRetrieval(err) => write!(
-                f,
-                "An error occurred retrieving a transaction input: {}",
-                err
-            ),
-            ProposalDecodingError::InputNotFound(txid, pool, idx) => write!(
-                f,
-                "No {} input found for txid {}, index {}",
-                pool, txid, idx
-            ),
+            ProposalDecodingError::InputRetrieval(err) => {
+                write!(f, "An error occurred retrieving a transaction input: {err}")
+            }
+            ProposalDecodingError::InputNotFound(txid, pool, idx) => {
+                write!(f, "No {pool} input found for txid {txid}, index {idx}")
+            }
             ProposalDecodingError::BalanceInvalid => {
                 write!(f, "An error occurred decoding the proposal balance.")
             }
             ProposalDecodingError::MemoInvalid(err) => {
-                write!(f, "An error occurred decoding a proposed memo: {}", err)
+                write!(f, "An error occurred decoding a proposed memo: {err}")
             }
             ProposalDecodingError::VersionInvalid(v) => {
-                write!(f, "Unrecognized proposal version {}", v)
+                write!(f, "Unrecognized proposal version {v}")
             }
             ProposalDecodingError::FeeRuleNotSupported(r) => {
                 write!(
                     f,
-                    "Fee calculation using the {:?} fee rule is not supported.",
-                    r
+                    "Fee calculation using the {r:?} fee rule is not supported."
                 )
             }
-            ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
+            ProposalDecodingError::ProposalInvalid(err) => write!(f, "{err}"),
             ProposalDecodingError::EmptyShieldedInputs(protocol) => write!(
                 f,
-                "An inputs field was present for {:?}, but contained no note references.",
-                protocol
+                "An inputs field was present for {protocol:?}, but contained no note references."
             ),
             ProposalDecodingError::TransparentMemo => {
                 write!(f, "Transparent outputs cannot have memos.")
             }
             ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
                 f,
-                "Change outputs to the {} pool are not supported.",
-                pool_type
+                "Change outputs to the {pool_type} pool are not supported."
             ),
             ProposalDecodingError::InvalidEphemeralRecipient(pool_type) => write!(
                 f,
-                "Ephemeral outputs to the {} pool are not supported.",
-                pool_type
+                "Ephemeral outputs to the {pool_type} pool are not supported."
             ),
         }
     }
@@ -804,7 +876,7 @@ impl proposal::Proposal {
 
                 Proposal::multi_step(
                     fee_rule,
-                    self.min_target_height.into(),
+                    BlockHeight::from_u32(self.min_target_height).into(),
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
                 .map_err(ProposalDecodingError::ProposalInvalid)

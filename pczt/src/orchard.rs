@@ -1,3 +1,5 @@
+//! The Orchard fields of a PCZT.
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -33,6 +35,7 @@ pub struct Bundle {
     ///
     /// This is set by the Creator. The Constructor MUST only add spends and outputs that
     /// are consistent with these flags (i.e. are dummies as appropriate).
+    #[getset(get = "pub")]
     pub(crate) flags: u8,
 
     /// The net value of Orchard spends minus outputs.
@@ -40,11 +43,13 @@ pub struct Bundle {
     /// This is initialized by the Creator, and updated by the Constructor as spends or
     /// outputs are added to the PCZT. It enables per-spend and per-output values to be
     /// redacted from the PCZT after they are no longer necessary.
+    #[getset(get = "pub")]
     pub(crate) value_sum: (u64, bool),
 
     /// The Orchard anchor for this transaction.
     ///
     /// Set by the Creator.
+    #[getset(get = "pub")]
     pub(crate) anchor: [u8; 32],
 
     /// The Orchard bundle proof.
@@ -59,6 +64,7 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
+/// Information about an Orchard action within a transaction.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Action {
     //
@@ -67,6 +73,7 @@ pub struct Action {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) cv_net: [u8; 32],
     #[getset(get = "pub")]
     pub(crate) spend: Spend,
@@ -85,7 +92,7 @@ pub struct Action {
     pub(crate) rcv: Option<[u8; 32]>,
 }
 
-/// Information about a Sapling spend within a transaction.
+/// Information about the spend part of an Orchard action.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Spend {
@@ -97,6 +104,7 @@ pub struct Spend {
     //
     #[getset(get = "pub")]
     pub(crate) nullifier: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) rk: [u8; 32],
 
     /// The spend authorization signature.
@@ -173,7 +181,7 @@ pub struct Spend {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
-/// Information about an Orchard output within a transaction.
+/// Information about the output part of an Orchard action.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Output {
@@ -183,7 +191,9 @@ pub struct Output {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) cmx: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) ephemeral_key: [u8; 32],
     /// The encrypted note plaintext for the output.
     ///
@@ -191,10 +201,12 @@ pub struct Output {
     ///
     /// Once we have memo bundles, we will be able to set memos independently of Outputs.
     /// For now, the Constructor sets both at the same time.
+    #[getset(get = "pub")]
     pub(crate) enc_ciphertext: Vec<u8>,
     /// The encrypted note plaintext for the output.
     ///
     /// Encoded as a `Vec<u8>` because its length depends on the transaction version.
+    #[getset(get = "pub")]
     pub(crate) out_ciphertext: Vec<u8>,
 
     /// The [raw encoding] of the Orchard payment address that will receive the output.

@@ -18,6 +18,17 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.82 -> 1.0.83"
 
+[[audits.arti-client]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+No `unsafe` changes. The introduction of a path resolver affects filesystem
+access but is driven by API changes in dependencies; nothing looks untoward in
+the changes to this crate (though the various macros make some of it harder to
+reason about).
+"""
+
 [[audits.async-trait]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -47,6 +58,15 @@ notes = """
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "1.15.0 -> 1.16.0"
+
+[[audits.bytes]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.6.0 -> 1.6.1"
+notes = """
+New `unsafe` function is a code-duplicate of an existing `unsafe` function, but
+using the correct `Shared` type for `BytesMut` in order to fix a bug.
+"""
 
 [[audits.cc]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -78,6 +98,12 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
 delta = "4.5.0 -> 4.4.18"
 
+[[audits.cpp_demangle]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.4.3 -> 0.4.4"
+notes = "No added unsafe code; adds support for additional c++23 types."
+
 [[audits.darling]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -92,6 +118,31 @@ delta = "0.20.9 -> 0.20.10"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
+
+[[audits.directories]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "5.0.1 -> 6.0.0"
+
+[[audits.dirs]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "5.0.1 -> 6.0.0"
+
+[[audits.dirs-sys]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.1 -> 0.5.0"
+notes = """
+One change to an `unsafe` block, adapting to an API change in `windows_sys`
+(`Win32::Foundation::HANDLE` changed from `isize` to `*mut c_void`). I confirmed
+that the Windows documentation permits an argument of `std::ptr::null_mut()`.
+"""
+
+[[audits.dynosaur]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.2.0"
 
 [[audits.either]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -147,6 +198,11 @@ delta = "0.3.29 -> 0.3.30"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.29 -> 0.3.30"
+
+[[audits.futures-task]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.29 -> 0.3.26"
 
 [[audits.getset]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -218,6 +274,12 @@ delta = "0.1.5 -> 0.1.6"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.11.17 -> 0.11.19"
+
+[[audits.inferno]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.11.19 -> 0.11.21"
+notes = "No added unsafe code."
 
 [[audits.is-terminal]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -326,6 +388,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.29 -> 0.3.30"
 
+[[audits.pprof]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-run"
+delta = "0.13.0 -> 0.14.0"
+notes = """
+I did not audit the correctness of the new `unsafe` block (initializing an
+`aligned_vec::AVec`), but the changes therein don't affect `safe-to-run`.
+"""
+
 [[audits.prettyplease]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -396,21 +467,58 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.13.1 -> 0.13.4"
 
+[[audits.redjubjub]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.7.0 -> 0.8.0"
+notes = "This release adds `no-std` compatibility."
+
 [[audits.redox_syscall]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.4.1 -> 0.5.1"
 notes = "Uses of unsafe look plausible."
 
+[[audits.redox_users]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.5 -> 0.5.0"
+notes = """
+Changes `Config` from using scheme prefixes (with a default of `file:`) to root
+FS prefixes (with a default of `/`). The behaviour of `Config::scheme` changed
+correspondingly but without being renamed. The effect on the rest of the crate
+is that the passwd, shadow, and group files now default to UNIX-style paths
+(`/etc/passwd`) instead of scheme syntax (`file:etc/passwd`).
+"""
+
 [[audits.regex-automata]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.4.6 -> 0.4.7"
 
+[[audits.regex-automata]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.7 -> 0.4.9"
+
 [[audits.regex-syntax]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.8.3 -> 0.8.4"
+
+[[audits.retry-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.6.3"
+
+[[audits.rgb]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.8.37 -> 0.8.50"
+notes = """
+Some clearly-marked unsafe code is moved; adds safer alternative to the
+`as-bytes` feature (which is still enabled by default)
+"""
 
 [[audits.rustc-demangle]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -473,6 +581,11 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "1.0.17 -> 1.0.18"
 
+[[audits.safelog]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.5"
+
 [[audits.secp256k1]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -517,6 +630,12 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.5.6 -> 0.5.7"
 notes = "The new uses of unsafe to access getsockopt/setsockopt look reasonable."
+
+[[audits.symbolic-common]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "12.9.2 -> 12.13.3"
+notes = "Just minor code & Cargo.toml cleanups."
 
 [[audits.syn]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -568,6 +687,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.1.14 -> 0.1.15"
 
+[[audits.tokio-stream]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.15 -> 0.1.17"
+notes = """
+No new `unsafe` code or powerful imports. The new async polling logic added as
+`StreamMap::poll_next_many` looks plausible.
+"""
+
 [[audits.tokio-util]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -604,6 +732,92 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
 notes = "Changes to generated code make sense and don't result in anything unexpected."
+
+[[audits.tonic-build]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.12.3 -> 0.13.0"
+notes = "Changes to generated code look sensible (adapting to `tonic` API changes)."
+
+[[audits.tor-async-utils]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+Some macro complexity but it appears to only be used for defining error types;
+no changes to `unsafe` code or powerful imports.
+"""
+
+[[audits.tor-bytes]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-cert]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+No new `unsafe` APIs, but does add a new API that could be used to violate crate
+semantics; it is gated as an experimental feature and follows the Tor crate
+naming convention of using a `dangerously_*` method prefix.
+"""
+
+[[audits.tor-checkable]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-consdiff]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-dirclient]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-dirmgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-log-ratelim]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-persist]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = "No new `unsafe` code, and three new `#![forbid(unsafe_code)]` annotations."
+
+[[audits.tor-protover]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-relay-selection]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tower-layer]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
+
+[[audits.tower-service]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
 
 [[audits.utf8parse]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -712,6 +926,12 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2020-06-26"
 end = "2025-04-22"
 
+[[trusted.equihash]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-02-21"
+end = "2026-02-21"
+
 [[trusted.f4jumble]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
 user-id = 6289 # Jack Grigg (str4d)
@@ -732,7 +952,7 @@ end = "2025-04-22"
 
 [[trusted.halo2_legacy_pdqsort]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 199950 # Daira Emma Hopwood (daira)
+user-id = 199950 # Daira-Emma Hopwood (daira)
 start = "2023-02-24"
 end = "2025-04-22"
 
@@ -804,9 +1024,21 @@ end = "2025-08-12"
 
 [[trusted.pczt]]
 criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2024-10-08"
+end = "2026-03-13"
+
+[[trusted.pczt]]
+criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2025-12-17"
+
+[[trusted.redjubjub]]
+criteria = "safe-to-deploy"
+user-id = 199950 # Daira-Emma Hopwood (daira)
+start = "2023-03-30"
+end = "2026-02-21"
 
 [[trusted.sapling-crypto]]
 criteria = "safe-to-deploy"
@@ -938,7 +1170,7 @@ end = "2025-08-26"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2025-04-22"
+end = "2026-06-02"
 
 [[trusted.zcash_client_sqlite]]
 criteria = "safe-to-deploy"
@@ -950,7 +1182,7 @@ end = "2025-10-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2025-04-22"
+end = "2026-06-02"
 
 [[trusted.zcash_encoding]]
 criteria = "safe-to-deploy"
@@ -963,6 +1195,12 @@ criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-08-31"
 end = "2025-12-13"
+
+[[trusted.zcash_encoding]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-19"
+end = "2026-02-21"
 
 [[trusted.zcash_extensions]]
 criteria = "safe-to-deploy"
@@ -986,7 +1224,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2025-04-22"
+end = "2026-05-12"
 
 [[trusted.zcash_note_encryption]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -1034,7 +1272,13 @@ end = "2025-12-13"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-27"
-end = "2025-04-22"
+end = "2026-06-02"
+
+[[trusted.zcash_spec]]
+criteria = "safe-to-deploy"
+user-id = 199950 # Daira-Emma Hopwood (daira)
+start = "2025-02-20"
+end = "2026-02-21"
 
 [[trusted.zcash_spec]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
@@ -1060,8 +1304,14 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2023-12-06"
 end = "2025-04-22"
 
+[[trusted.zip32]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-02-20"
+end = "2026-02-21"
+
 [[trusted.zip321]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2025-04-22"
+end = "2026-07-16"

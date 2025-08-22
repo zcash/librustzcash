@@ -1,18 +1,21 @@
 //! Structs representing the TZE components within Zcash transactions.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::TryFrom;
-use std::fmt::Debug;
-use std::io::{self, Read, Write};
+use alloc::vec::Vec;
+use core::convert::TryFrom;
+use core::fmt::Debug;
+use core2::io::{self, Read, Write};
 
+use crate::{
+    encoding::{ReadBytesExt, WriteBytesExt},
+    extensions::transparent as tze,
+    transaction::TxId,
+};
 use zcash_encoding::{CompactSize, Vector};
-
-use super::amount::Amount;
-use crate::{extensions::transparent as tze, transaction::TxId};
+use zcash_protocol::value::Zatoshis;
 
 pub mod builder;
 
-fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
+fn to_io_error(_: core::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }
 
@@ -20,8 +23,8 @@ pub trait Authorization: Debug {
     type Witness: Debug + Clone + PartialEq;
 }
 
-impl Authorization for std::convert::Infallible {
-    type Witness = std::convert::Infallible;
+impl Authorization for core::convert::Infallible {
+    type Witness = core::convert::Infallible;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -92,13 +95,13 @@ impl OutPoint {
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let txid = TxId::read(&mut reader)?;
-        let n = reader.read_u32::<LittleEndian>()?;
+        let n = reader.read_u32_le()?;
         Ok(OutPoint { txid, n })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.txid.write(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.n)
+        writer.write_u32_le(self.n)
     }
 
     pub fn n(&self) -> u32 {
@@ -190,7 +193,7 @@ impl TzeIn<<Authorized as Authorization>::Witness> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TzeOut {
-    pub value: Amount,
+    pub value: Zatoshis,
     pub precondition: tze::Precondition,
 }
 
@@ -199,7 +202,7 @@ impl TzeOut {
         let value = {
             let mut tmp = [0; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_nonnegative_i64_le_bytes(tmp)
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 

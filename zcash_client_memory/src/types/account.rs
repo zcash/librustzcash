@@ -9,7 +9,7 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::wallet::TransparentAddressMetadata;
 use zcash_client_backend::{
     address::UnifiedAddress,
-    data_api::{Account as _, AccountBirthday, AccountPurpose, AccountSource, GAP_LIMIT},
+    data_api::{Account as _, AccountBirthday, AccountPurpose, AccountSource},
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey},
     wallet::NoteId,
 };
@@ -26,6 +26,12 @@ use zcash_protocol::consensus::NetworkType;
 use zip32::DiversifierIndex;
 
 use crate::error::Error;
+
+// TODO: this is a temporary constant to allow merge; in the future, the ephemeral gap limit
+// handling in this module should be replaced by generalized transparent gap limit handling
+// as is implemented in zcash_client_sqlite/src/wallet/transparent.rs
+#[cfg(feature = "transparent-inputs")]
+pub(crate) const EPHEMERAL_GAP_LIMIT: u32 = 5;
 
 /// Internal representation of ID type for accounts. Will be unique for each account.
 #[derive(
@@ -205,6 +211,7 @@ pub(crate) struct EphemeralAddress {
 }
 
 impl EphemeralAddress {
+    #[cfg(feature = "transparent-inputs")]
     fn mark_used(&mut self, tx: TxId) {
         // We update both `used_in_tx` and `seen_in_tx` here, because a used address has
         // necessarily been seen in a transaction. We will not treat this as extending the
@@ -213,6 +220,7 @@ impl EphemeralAddress {
         self.used.replace(tx);
         self.seen.replace(tx);
     }
+    #[cfg(feature = "transparent-inputs")]
     fn mark_seen(&mut self, tx: TxId) -> Option<TxId> {
         self.seen.replace(tx)
     }
@@ -270,13 +278,8 @@ impl Account {
         };
 
         // populate the addresses map with the default address
-        let ua_request = acc
-            .viewing_key
-            .to_unified_incoming_viewing_key()
-            .to_address_request()
-            .and_then(|ua_request| ua_request.intersect(&UnifiedAddressRequest::ALLOW_ALL))
-            .unwrap();
-        let (ua, diversifier_index) = acc.default_address(ua_request)?;
+        let (ua, diversifier_index) =
+            acc.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
         acc.addresses.insert(diversifier_index, ua);
         #[cfg(feature = "transparent-inputs")]
         acc.reserve_until(0)?;
@@ -308,7 +311,7 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        self.uivk().default_address(Some(request))
+        self.uivk().default_address(request)
     }
 
     pub(crate) fn birthday(&self) -> &AccountBirthday {
@@ -330,8 +333,8 @@ impl Account {
 
     pub(crate) fn next_available_address(
         &mut self,
-        request: Option<UnifiedAddressRequest>,
-    ) -> Result<Option<UnifiedAddress>, Error> {
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Error> {
         match self.ufvk() {
             Some(ufvk) => {
                 let search_from = self
@@ -347,7 +350,7 @@ impl Account {
                     .unwrap_or(Ok(DiversifierIndex::default()))?;
                 let (ua, diversifier_index) = ufvk.find_address(search_from, request)?;
                 self.addresses.insert(diversifier_index, ua.clone());
-                Ok(Some(ua))
+                Ok(Some((ua, diversifier_index)))
             }
             None => Ok(None),
         }
@@ -397,7 +400,7 @@ impl Account {
 
     pub(crate) fn first_unstored_index(&self) -> Result<u32, Error> {
         if let Some((idx, _)) = self.ephemeral_addresses.last_key_value() {
-            if *idx >= (1 << 31) + GAP_LIMIT {
+            if *idx >= (1 << 31) + EPHEMERAL_GAP_LIMIT {
                 unreachable!("violates constraint index_range_and_address_nullity")
             } else {
                 Ok(idx.checked_add(1).unwrap())
@@ -409,7 +412,7 @@ impl Account {
 
     pub(crate) fn first_unreserved_index(&self) -> Result<u32, Error> {
         self.first_unstored_index()?
-            .checked_sub(GAP_LIMIT)
+            .checked_sub(EPHEMERAL_GAP_LIMIT)
             .ok_or(Error::CorruptedData(
                 "ephemeral_addresses corrupted".to_owned(),
             ))
@@ -421,7 +424,8 @@ impl Account {
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Error> {
         if let Some(ephemeral_ivk) = self.ephemeral_ivk()? {
             let first_unstored = self.first_unstored_index()?;
-            let range_to_store = first_unstored..(next_to_reserve.checked_add(GAP_LIMIT).unwrap());
+            let range_to_store =
+                first_unstored..(next_to_reserve.checked_add(EPHEMERAL_GAP_LIMIT).unwrap());
             if range_to_store.is_empty() {
                 return Ok(Vec::new());
             }
@@ -468,7 +472,7 @@ impl Account {
             if addr.address == *address {
                 addr.mark_used(tx_id);
 
-                // Maintain the invariant that the last `GAP_LIMIT` addresses are used and unseen.
+                // Maintain the invariant that the last `EPHEMERAL_GAP_LIMIT` addresses are used and unseen.
                 let next_to_reserve = idx.checked_add(1).expect("ensured by constraint");
                 self.reserve_until(next_to_reserve)?;
                 return Ok(());
@@ -497,7 +501,7 @@ impl Account {
                 // The query should always return a value if `tx_ref` is valid.
 
                 addr.mark_seen(tx_id);
-                // Maintain the invariant that the last `GAP_LIMIT` addresses are used and unseen.
+                // Maintain the invariant that the last `EPHEMERAL_GAP_LIMIT` addresses are used and unseen.
                 let next_to_reserve = idx.checked_add(1).expect("ensured by constraint");
                 self.reserve_until(next_to_reserve)?;
                 return Ok(());
@@ -654,6 +658,8 @@ mod serialization {
                         derivation: Zip32Derivation::new(
                             SeedFingerprint::from_bytes(acc.seed_fingerprint().try_into()?),
                             read_optional!(acc, account_index)?.try_into()?,
+                            #[cfg(feature = "zcashd-compat")]
+                            None,
                         ),
                         key_source: acc.key_source,
                     },
@@ -666,6 +672,8 @@ mod serialization {
                                             seed_fingerprint.as_slice().try_into()?,
                                         ),
                                         read_optional!(acc, account_index)?.try_into()?,
+                                        #[cfg(feature = "zcashd-compat")]
+                                        None,
                                     )),
                                     None => None,
                                 },

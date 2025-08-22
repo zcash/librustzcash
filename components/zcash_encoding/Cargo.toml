@@ -1,7 +1,7 @@
 [package]
 name = "zcash_encoding"
 description = "Binary encodings used throughout the Zcash ecosystem."
-version = "0.2.2"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>",
@@ -17,11 +17,14 @@ keywords = ["zcash"]
 
 [dependencies]
 core2.workspace = true
-nonempty = { workspace = true, optional = true }
+nonempty.workspace = true
 
 [features]
 default = ["std"]
-std = ["core2/std", "dep:nonempty"]
+std = ["core2/std"]
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

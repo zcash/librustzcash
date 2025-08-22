@@ -29,7 +29,7 @@ use crate::{
         chain_tip_height,
         commitment_tree::SqliteShardStore,
         init::{migrations::shardtree_support, WalletMigrationError},
-        scope_code,
+        KeyScope,
     },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
@@ -83,8 +83,7 @@ fn select_note_scope<S: ShardStore<H = sapling::Node, CheckpointId = BlockHeight
         .get_marked_leaf(note_commitment_tree_position)
         .map_err(|e| {
             WalletMigrationError::CorruptedData(format!(
-                "Error querying note commitment tree: {:?}",
-                e
+                "Error querying note commitment tree: {e:?}"
             ))
         })?
     {
@@ -109,7 +108,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         transaction.execute_batch(
             &format!(
                 "ALTER TABLE sapling_received_notes ADD COLUMN recipient_key_scope INTEGER NOT NULL DEFAULT {};",
-                scope_code(Scope::External)
+                KeyScope::EXTERNAL.encode()
             )
         )?;
 
@@ -174,7 +173,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let ufvk_str: String = row.get(5)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
-                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {:?}", e))
+                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {e:?}"))
             })?;
 
             let dfvk = ufvk.sapling().ok_or_else(|| {
@@ -188,15 +187,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             if let Some(tx_data) = tx_data_opt {
                 let tx = Transaction::read(&tx_data[..], BranchId::Canopy).map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Unable to parse raw transaction: {:?}",
-                        e
+                        "Unable to parse raw transaction: {e:?}"
                     ))
                 })?;
                 let output = tx
                     .sapling_bundle()
                     .and_then(|b| b.shielded_outputs().get(output_index))
                     .unwrap_or_else(|| {
-                        panic!("A Sapling output must exist at index {}", output_index)
+                        panic!("A Sapling output must exist at index {output_index}")
                     });
 
                 let pivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
@@ -204,7 +202,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         "UPDATE sapling_received_notes SET recipient_key_scope = :scope
                          WHERE id_note = :note_id",
-                        named_params! {":scope": scope_code(Scope::Internal), ":note_id": note_id},
+                        named_params! {":scope": KeyScope::INTERNAL.encode(), ":note_id": note_id},
                     )?;
                 }
             } else {
@@ -227,13 +225,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let rcm_bytes: [u8; 32] =
                         row.get::<_, Vec<u8>>(8)?[..].try_into().map_err(|_| {
                             WalletMigrationError::CorruptedData(format!(
-                                "Note {} is invalid",
-                                note_id
+                                "Note {note_id} is invalid"
                             ))
                         })?;
 
                     let rcm = Option::from(jubjub::Fr::from_repr(rcm_bytes)).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!("Note {} is invalid", note_id))
+                        WalletMigrationError::CorruptedData(format!("Note {note_id} is invalid"))
                     })?;
 
                     // The wallet database always stores the `rcm` value, and not `rseed`,
@@ -261,7 +258,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         "UPDATE sapling_received_notes SET recipient_key_scope = :scope
                          WHERE id_note = :note_id",
-                        named_params! {":scope": scope_code(Scope::Internal), ":note_id": note_id},
+                        named_params! {":scope": KeyScope::INTERNAL.encode(), ":note_id": note_id},
                     )?;
                 }
             }
@@ -280,11 +277,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 mod tests {
     use std::convert::Infallible;
 
+    use crate::ParallelSliceMut;
+    #[cfg(feature = "multicore")]
+    use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
     use incrementalmerkletree::Position;
-    use maybe_rayon::{
-        iter::{IndexedParallelIterator, ParallelIterator},
-        slice::ParallelSliceMut,
-    };
     use rand_core::OsRng;
     use rusqlite::{named_params, params, Connection, OptionalExtension};
     use tempfile::NamedTempFile;
@@ -321,13 +318,15 @@ mod tests {
 
     use crate::{
         error::SqliteClientError,
+        testing::db::{test_clock, test_rng},
         wallet::{
             init::{
-                init_wallet_db_internal,
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
+                WalletMigrator,
             },
-            memo_repr, parse_scope,
+            memo_repr,
             sapling::ReceivedSaplingOutput,
+            KeyScope,
         },
         AccountRef, TxRef, WalletDb,
     };
@@ -336,8 +335,8 @@ mod tests {
     const EXTERNAL_VALUE: u64 = 10;
     const INTERNAL_VALUE: u64 = 5;
 
-    fn prepare_wallet_state<P: Parameters>(
-        db_data: &mut WalletDb<Connection, P>,
+    fn prepare_wallet_state<P: Parameters, CL, R>(
+        db_data: &mut WalletDb<Connection, P, CL, R>,
     ) -> (UnifiedFullViewingKey, BlockHeight, BuildResult) {
         // Create an account in the wallet
         let usk0 =
@@ -468,10 +467,10 @@ mod tests {
             ":tx": &tx_ref,
             ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
             ":account": account.0,
-            ":diversifier": &diversifier.0.as_ref(),
+            ":diversifier": &diversifier.0,
             ":value": output.note().value().inner(),
-            ":rcm": &rcm.as_ref(),
-            ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
+            ":rcm": &rcm,
+            ":nf": output.nullifier().map(|nf| nf.0),
             ":memo": memo_repr(output.memo()),
             ":is_change": output.is_change(),
             ":spent": spent_in,
@@ -526,17 +525,18 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[
-                add_account_birthdays::MIGRATION_ID,
-                shardtree_support::MIGRATION_ID,
-            ],
-            false,
-        )
-        .unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), params, test_clock(), test_rng()).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(
+                &mut db_data,
+                &[
+                    add_account_birthdays::MIGRATION_ID,
+                    shardtree_support::MIGRATION_ID,
+                ],
+            )
+            .unwrap();
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
@@ -546,7 +546,8 @@ mod tests {
         // Replicate its relevant innards here.
         let d_tx = decrypt_transaction(
             &params,
-            height,
+            Some(height),
+            None,
             tx,
             &[(account_id, ufvk0)].into_iter().collect(),
         );
@@ -589,7 +590,10 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data
@@ -604,10 +608,10 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
-            let scope = parse_scope(row.get(1).unwrap());
+            let scope = KeyScope::decode(row.get(1).unwrap()).unwrap();
             match value {
-                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
-                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                EXTERNAL_VALUE => assert_eq!(scope, KeyScope::EXTERNAL),
+                INTERNAL_VALUE => assert_eq!(scope, KeyScope::INTERNAL),
                 _ => {
                     panic!(
                         "(Value, Scope) pair {:?} is not expected to exist in the wallet.",
@@ -625,17 +629,18 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[
-                wallet_summaries::MIGRATION_ID,
-                shardtree_support::MIGRATION_ID,
-            ],
-            false,
-        )
-        .unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), params, test_clock(), test_rng()).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(
+                &mut db_data,
+                &[
+                    wallet_summaries::MIGRATION_ID,
+                    shardtree_support::MIGRATION_ID,
+                ],
+            )
+            .unwrap();
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
@@ -767,7 +772,10 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data
@@ -782,10 +790,10 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
-            let scope = parse_scope(row.get(1).unwrap());
+            let scope = KeyScope::decode(row.get(1).unwrap()).unwrap();
             match value {
-                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
-                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                EXTERNAL_VALUE => assert_eq!(scope, KeyScope::EXTERNAL),
+                INTERNAL_VALUE => assert_eq!(scope, KeyScope::INTERNAL),
                 _ => {
                     panic!(
                         "(Value, Scope) pair {:?} is not expected to exist in the wallet.",

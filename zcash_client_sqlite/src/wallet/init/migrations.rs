@@ -1,12 +1,23 @@
+//! Migrations for the `zcash_client_sqlite` wallet database.
+//!
+//! The constants in this module cover all states of the migration DAG that have been
+//! exposed in a public crate release, in the order that crate users would have
+//! encountered them.
+//!
+//! Omitted versions had the same migration state as the first prior version that is
+//! included.
+
 mod add_account_birthdays;
 mod add_account_uuids;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
+mod ensure_default_transparent_address;
 mod ensure_orchard_ua_receiver;
 mod ephemeral_addresses;
 mod fix_bad_change_flagging;
 mod fix_broken_commitment_trees;
+mod fix_transparent_received_outputs;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
@@ -19,11 +30,15 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
 mod support_legacy_sqlite;
+mod support_zcashd_wallet_import;
+mod transparent_gap_limit_handling;
 mod tx_retrieval_queue;
+mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
 mod v_sapling_shard_unscanned_ranges;
+mod v_transactions_additional_totals;
 mod v_transactions_net;
 mod v_transactions_note_uniqueness;
 mod v_transactions_shielding_balance;
@@ -31,8 +46,9 @@ mod v_transactions_transparent_history;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
-use std::rc::Rc;
+use std::{rc::Rc, sync::Mutex};
 
+use rand_core::RngCore;
 use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
@@ -40,10 +56,18 @@ use uuid::Uuid;
 use zcash_address::unified::{Encoding as _, Ufvk};
 use zcash_protocol::consensus;
 
+use crate::util::Clock;
+
 use super::WalletMigrationError;
 
-pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
+pub(super) fn all_migrations<
+    P: consensus::Parameters + 'static,
+    C: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
     params: &P,
+    clock: C,
+    rng: R,
     seed: Option<Rc<SecretVec<u8>>>,
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
     //                                   initial_setup
@@ -80,12 +104,19 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //            \                          \     ephemeral_addresses     /                       /
     //             \                          \            |              /                       /
     //              ------------------------------ tx_retrieval_queue ----------------------------
+    //                                              |              \
+    //                                    support_legacy_sqlite    tx_retrieval_queue_expiry
+    //                                       /              \
+    //                  fix_broken_commitment_trees         add_account_uuids
+    //                             /                                /        \
+    //          fix_bad_change_flagging      transparent_gap_limit_handling   v_transactions_additional_totals
+    //                             \                       |                      /
+    //                              \      ensure_default_transparent_address    /
+    //                               \                     |                    /
+    //                                `---- fix_transparent_received_outputs --'
     //                                                     |
-    //                                            support_legacy_sqlite
-    //                                               /           \
-    //                         fix_broken_commitment_trees      add_account_uuids
-    //                                     |
-    //                          fix_bad_change_flagging
+    //                                        support_zcashd_wallet_import
+    let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -149,6 +180,18 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(fix_bad_change_flagging::Migration),
         Box::new(add_account_uuids::Migration),
+        Box::new(v_transactions_additional_totals::Migration),
+        Box::new(transparent_gap_limit_handling::Migration {
+            params: params.clone(),
+            _clock: clock.clone(),
+            _rng: rng.clone(),
+        }),
+        Box::new(ensure_default_transparent_address::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(tx_retrieval_queue_expiry::Migration),
+        Box::new(fix_transparent_received_outputs::Migration),
+        Box::new(support_zcashd_wallet_import::Migration),
     ]
 }
 
@@ -160,24 +203,24 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
 #[allow(dead_code)]
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
-    V_0_13_0,
+    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
-const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+pub const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
 
 /// Leaf migrations in the 0.6.0 release.
-const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
+pub const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
 
 /// Leaf migrations in the 0.8.0 release.
-const V_0_8_0: &[Uuid] = &[
+pub const V_0_8_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
     wallet_summaries::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.9.0 release.
-const V_0_9_0: &[Uuid] = &[
+pub const V_0_9_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     receiving_key_scopes::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
@@ -185,21 +228,21 @@ const V_0_9_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.10.0 release.
-const V_0_10_0: &[Uuid] = &[
+pub const V_0_10_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     orchard_received_notes::MIGRATION_ID,
     orchard_shardtree::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.10.3 release.
-const V_0_10_3: &[Uuid] = &[
+pub const V_0_10_3: &[Uuid] = &[
     ensure_orchard_ua_receiver::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
     orchard_shardtree::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.11.0 release.
-const V_0_11_0: &[Uuid] = &[
+pub const V_0_11_0: &[Uuid] = &[
     ensure_orchard_ua_receiver::MIGRATION_ID,
     ephemeral_addresses::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
@@ -209,16 +252,42 @@ const V_0_11_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.11.1 release.
-const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+pub const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 /// Leaf migrations in the 0.11.2 release.
-const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+pub const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
 
 /// Leaf migrations in the 0.12.0 release.
-const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
+pub const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
 
 /// Leaf migrations in the 0.13.0 release.
-const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
+pub const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
+
+/// Leaf migrations in the 0.14.0 release.
+pub const V_0_14_0: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    add_account_uuids::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.15.0 release.
+pub const V_0_15_0: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.16.0 release.
+const V_0_16_0: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+    transparent_gap_limit_handling::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.16.2 release.
+const V_0_16_2: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+    ensure_default_transparent_address::MIGRATION_ID,
+];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
@@ -276,22 +345,30 @@ mod tests {
     use uuid::Uuid;
     use zcash_protocol::consensus::Network;
 
-    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::init::WalletMigrator,
+        WalletDb,
+    };
 
     /// Tests that we can migrate from a completely empty wallet database to the target
     /// migrations.
     pub(crate) fn test_migrate(migrations: &[Uuid]) {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         assert_matches!(
-            init_wallet_db_internal(
-                &mut db_data,
-                Some(Secret::new(seed.to_vec())),
-                migrations,
-                false
-            ),
+            WalletMigrator::new()
+                .with_seed(Secret::new(seed.to_vec()))
+                .ignore_seed_relevance()
+                .init_or_migrate_to(&mut db_data, migrations),
             Ok(_)
         );
     }
@@ -299,7 +376,13 @@ mod tests {
     #[test]
     fn migrate_between_releases_without_data() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32].to_vec();
 
@@ -319,12 +402,10 @@ mod tests {
         let mut prev_leaves: &[Uuid] = &[];
         for migrations in super::PUBLIC_MIGRATION_STATES {
             assert_matches!(
-                init_wallet_db_internal(
-                    &mut db_data,
-                    Some(Secret::new(seed.clone())),
-                    migrations,
-                    false
-                ),
+                WalletMigrator::new()
+                    .with_seed(Secret::new(seed.clone()))
+                    .ignore_seed_relevance()
+                    .init_or_migrate_to(&mut db_data, migrations),
                 Ok(_)
             );
 
@@ -341,7 +422,10 @@ mod tests {
         // Now check that we can migrate from the last public release to the current
         // migration state in this branch.
         assert_matches!(
-            init_wallet_db_internal(&mut db_data, Some(Secret::new(seed)), &[], false),
+            WalletMigrator::new()
+                .with_seed(Secret::new(seed))
+                .ignore_seed_relevance()
+                .init_or_migrate(&mut db_data),
             Ok(_)
         );
         // We don't ensure that the migration state changed, because it may not have.

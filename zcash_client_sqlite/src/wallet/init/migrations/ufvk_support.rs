@@ -85,7 +85,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         //   our second assumption above, and we report this as corrupted data.
         let mut seed_is_relevant = false;
 
-        let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
+        let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
@@ -112,8 +112,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let address: String = row.get(1)?;
                 let decoded = Address::decode(&self.params, &address).ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Could not decode {} as a valid Zcash address.",
-                        address
+                        "Could not decode {address} as a valid Zcash address."
                     ))
                 })?;
                 match decoded {
@@ -138,7 +137,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
                     Address::Unified(decoded_address) => {
-                        let (expected_address, idx) = ufvk.default_address(Some(ua_request))?;
+                        let (expected_address, idx) = ufvk.default_address(ua_request)?;
                         if decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
@@ -157,10 +156,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 seed_is_relevant = true;
 
                 let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk
-                    .default_address(Some(ua_request))?
-                    .0
-                    .encode(&self.params);
+                let address_str: String = ufvk.default_address(ua_request)?.0.encode(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily
@@ -262,8 +258,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                 let decoded_address = Address::decode(&self.params, &address).ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Could not decode {} as a valid Zcash address.",
-                        address
+                        "Could not decode {address} as a valid Zcash address."
                     ))
                 })?;
                 let output_pool = match decoded_address {

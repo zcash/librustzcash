@@ -1,27 +1,25 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     num::NonZeroU32,
-    ops::Add,
-    ops::Range,
 };
 
 use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
 use zcash_client_backend::data_api::{
-    scanning::ScanRange, BlockMetadata, NullifierQuery, WalletRead, WalletSummary,
+    scanning::ScanRange,
+    wallet::{ConfirmationsPolicy, TargetHeight},
+    AddressInfo, BlockMetadata, NullifierQuery, WalletRead, WalletSummary, Zip32Derivation,
 };
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
         scanning::ScanPriority, Account as _, AccountBalance, AccountSource, Balance, Progress,
         Ratio, SeedRelevance, TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::NoteId,
-    PoolType,
 };
-use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zcash_keys::{address::UnifiedAddress, keys::UnifiedIncomingViewingKey};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -30,15 +28,16 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BranchId},
     memo::Memo,
-    value::Zatoshis,
+    PoolType,
 };
 use zip32::fingerprint::SeedFingerprint;
-use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    core::ops::Range,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_primitives::legacy::{keys::NonHardenedChildIndex, TransparentAddress},
+    zip32::Scope,
 };
 
 use crate::{error::Error, Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier};
@@ -63,17 +62,16 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
+        d: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        tracing::debug!("get_derived_account: {:?}, {:?}", seed, account_id);
+        tracing::debug!("get_derived_account: {:?}", d);
         Ok(self
             .accounts
             .iter()
             .find_map(|(_id, acct)| match acct.kind() {
                 AccountSource::Derived { derivation, .. } => {
-                    if derivation.seed_fingerprint() == seed
-                        && derivation.account_index() == account_id
+                    if derivation.seed_fingerprint() == d.seed_fingerprint()
+                        && derivation.account_index() == d.account_index()
                     {
                         Some(acct.clone())
                     } else {
@@ -159,31 +157,20 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
         tracing::debug!("get_account_for_ufvk");
-        let ufvk_req = ufvk
-            .to_unified_incoming_viewing_key()
-            .to_address_request()
-            .expect("At least one protocol should be enabled");
         Ok(self.accounts.iter().find_map(|(_id, acct)| {
-            if acct.ufvk()?.default_address(Some(ufvk_req)).unwrap()
-                == ufvk.default_address(Some(ufvk_req)).unwrap()
+            if acct
+                .ufvk()?
+                .default_address(UnifiedAddressRequest::AllAvailableKeys)
+                .unwrap()
+                == ufvk
+                    .default_address(UnifiedAddressRequest::AllAvailableKeys)
+                    .unwrap()
             {
                 Some(acct.clone())
             } else {
                 None
             }
         }))
-    }
-
-    fn get_current_address(
-        &self,
-        account: Self::AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        tracing::debug!("get_current_address: {:?}", account);
-        Ok(self
-            .get_account(account)?
-            .map(|account| Account::current_address(&account))
-            .transpose()?
-            .map(|(addr, _)| addr.clone()))
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
@@ -198,20 +185,21 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         tracing::debug!("get_wallet_birthday");
         Ok(self
             .accounts
-            .iter()
-            .map(|(_id, account)| account.birthday().height())
+            .values()
+            .map(|account| account.birthday().height())
             .min())
     }
 
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         tracing::debug!("get_wallet_summary");
         let chain_tip_height = match self.chain_height()? {
             Some(height) => height,
             None => return Ok(None),
         };
+        let target_height = TargetHeight::from(chain_tip_height + 1);
         let birthday_height = self
             .get_wallet_birthday()?
             .expect("If a scan range exists, we know the wallet birthday.");
@@ -222,13 +210,13 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
         let mut account_balances = self
             .accounts
-            .iter()
-            .map(|(_id, account)| (account.account_id(), AccountBalance::ZERO))
+            .values()
+            .map(|account| (account.account_id(), AccountBalance::ZERO))
             .collect::<HashMap<AccountId, AccountBalance>>();
 
         for note in self.get_received_notes().iter() {
             // don't count spent notes
-            if self.note_is_spent(note, min_confirmations)? {
+            if self.note_is_spent(note, target_height)? {
                 continue;
             }
             // don't count notes in unscanned ranges
@@ -242,9 +230,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             }
             // don't count notes in unmined transactions or that have expired
             if let Ok(Some(note_tx)) = self.get_transaction(note.txid) {
-                if note_tx.expiry_height()
-                    < self.summary_height(min_confirmations)?.unwrap_or(0.into())
-                {
+                if note_tx.expiry_height() < BlockHeight::from(target_height) {
                     continue;
                 }
             }
@@ -262,7 +248,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             // This includes determining if it is change, spendable, etc
             let update_balance_with_note = |b: &mut Balance| -> Result<(), Error> {
                 match (
-                    self.note_is_pending(note, min_confirmations)?,
+                    self.note_is_pending(note, target_height, confirmations_policy)?,
                     note.is_change,
                 ) {
                     (true, true) => b.add_pending_change_value(note.note.value()),
@@ -286,10 +272,10 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         #[cfg(feature = "transparent-inputs")]
         for (account, balance) in account_balances.iter_mut() {
             let transparent_balances =
-                self.get_transparent_balances(*account, fully_scanned_height)?;
-            for (_, value) in transparent_balances {
+                self.get_transparent_balances(*account, target_height, confirmations_policy)?;
+            for (_, bal) in transparent_balances.into_iter() {
                 balance.with_unshielded_balance_mut(|b: &mut Balance| -> Result<(), Error> {
-                    b.add_spendable_value(value)?;
+                    *b = (*b + bal)?;
                     Ok(())
                 })?;
             }
@@ -461,7 +447,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         if let Some(chain_tip_height) = self.chain_height()? {
             let sapling_anchor_height =
                 self.get_sapling_max_checkpointed_height(chain_tip_height, min_confirmations)?;
@@ -478,7 +464,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .or(sapling_anchor_height)
                 .or(orchard_anchor_height);
 
-            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
+            Ok(anchor_height.map(|h| (TargetHeight::from(chain_tip_height + 1), h)))
         } else {
             Ok(None)
         }
@@ -671,6 +657,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     fn get_transparent_receivers(
         &self,
         account_id: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         let account = self
             .get_account(account_id)?
@@ -703,8 +690,9 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     fn get_transparent_balances(
         &self,
         account_id: Self::AccountId,
-        summary_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         tracing::debug!("get_transparent_balances");
 
         let mut balances = HashMap::new();
@@ -718,16 +706,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 false
             }
         }) {
-            let tx = self
-                .tx_table
-                .get(&txo.transaction_id)
-                .ok_or(Error::TransactionNotFound(txo.transaction_id))?;
-            if tx.is_mined_or_unexpired_at(summary_height)
-                && self.utxo_is_spendable(outpoint, summary_height, 0)?
-            {
+            if self.utxo_is_spendable(outpoint, target_height, confirmations_policy)? {
                 let address = txo.address;
-                let balance = balances.entry(address).or_insert(Zatoshis::ZERO);
-                *balance = balance.add(txo.txout.value).expect("balance overflow");
+                balances
+                    .entry(address)
+                    .or_insert(Balance::ZERO)
+                    .add_spendable_value(txo.txout.value)?;
             }
         }
 
@@ -741,6 +725,23 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .iter()
             .cloned()
             .collect())
+    }
+
+    fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        todo!()
+    }
+
+    fn get_last_generated_address_matching(
+        &self,
+        _account: Self::AccountId,
+        _address_filter: UnifiedAddressRequest,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        todo!()
     }
 }
 
@@ -767,8 +768,8 @@ fn seed_matches_derived_account<P: consensus::Parameters>(
             Err(_) => false,
             Ok(usk) => {
                 usk.to_unified_full_viewing_key()
-                    .default_address(Some(UnifiedAddressRequest::ALLOW_ALL))?
-                    == uivk.default_address(Some(UnifiedAddressRequest::ALLOW_ALL))?
+                    .default_address(UnifiedAddressRequest::AllAvailableKeys)?
+                    == uivk.default_address(UnifiedAddressRequest::AllAvailableKeys)?
             }
         };
 

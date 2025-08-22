@@ -15,16 +15,18 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
+use crate::TableConstants;
 use crate::{
     error::SqliteClientError,
     wallet::{block_height_extrema, init::WalletMigrationError},
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
+    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
 };
 
+use super::common::table_constants;
 use super::wallet_birthday;
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
@@ -78,7 +80,7 @@ pub(crate) fn suggest_scan_ranges(
         };
         let code = row.get::<_, i64>(2)?;
         let priority = parse_priority_code(code).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!("scan priority not recognized: {}", code))
+            SqliteClientError::CorruptedData(format!("scan priority not recognized: {code}"))
         })?;
 
         result.push(ScanRange::from_parts(range, priority));
@@ -179,7 +181,7 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
                 {
                     let code = row.get::<_, i64>(2).map_err(E::db_error)?;
                     parse_priority_code(code).ok_or_else(|| {
-                        E::corrupt(format!("scan priority not recognized: {}", code))
+                        E::corrupt(format!("scan priority not recognized: {code}"))
                     })?
                 },
             );
@@ -223,10 +225,12 @@ fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    table_prefix: &'static str,
+    protocol: ShieldedProtocol,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+
     // we'll either have both min and max bounds, or we'll have neither
     let subtree_index_bounds = required_subtree_indices
         .iter()
@@ -235,9 +239,8 @@ fn extend_range(
 
     let mut shard_end_stmt = conn.prepare_cached(&format!(
         "SELECT subtree_end_height
-                FROM {}_tree_shards
-                WHERE shard_index = :shard_index",
-        table_prefix
+                FROM {table_prefix}_tree_shards
+                WHERE shard_index = :shard_index"
     ))?;
 
     let mut shard_end = |index: u64| -> Result<Option<BlockHeight>, rusqlite::Error> {
@@ -324,7 +327,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             &range,
             required_sapling_subtrees,
-            SAPLING_TABLES_PREFIX,
+            ShieldedProtocol::Sapling,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
         )?;
@@ -334,7 +337,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             extended_range.as_ref().unwrap_or(&range),
             required_orchard_subtrees,
-            ORCHARD_TABLES_PREFIX,
+            ShieldedProtocol::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
             wallet_birthday,
         )?
@@ -372,16 +375,15 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
 fn tip_shard_end_height(
     conn: &rusqlite::Transaction<'_>,
-    table_prefix: &'static str,
-) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    protocol: ShieldedProtocol,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     conn.query_row(
-        &format!(
-            "SELECT MAX(subtree_end_height) FROM {}_tree_shards",
-            table_prefix
-        ),
+        &format!("SELECT MAX(subtree_end_height) FROM {table_prefix}_tree_shards"),
         [],
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
+    .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn update_chain_tip<P: consensus::Parameters>(
@@ -424,9 +426,9 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
-    let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
+    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Sapling)?;
     #[cfg(feature = "orchard")]
-    let orchard_shard_tip = tip_shard_end_height(conn, ORCHARD_TABLES_PREFIX)?;
+    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Orchard)?;
 
     #[cfg(feature = "orchard")]
     let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
@@ -570,6 +572,7 @@ pub(crate) mod tests {
             pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
             InitialChainState, TestBuilder, TestState,
         },
+        wallet::ConfirmationsPolicy,
         AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
     use zcash_primitives::block::BlockHash;
@@ -593,7 +596,7 @@ pub(crate) mod tests {
     use {
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
-        std::{convert::Infallible, num::NonZeroU32},
+        std::convert::Infallible,
         zcash_client_backend::{
             data_api::{
                 testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
@@ -767,7 +770,7 @@ pub(crate) mod tests {
         // shard is incomplete.
         assert_eq!(
             st.wallet()
-                .get_wallet_summary(0)
+                .get_wallet_summary(ConfirmationsPolicy::MIN)
                 .unwrap()
                 .map(|s| T::next_subtree_index(&s)),
             Some(2),
@@ -1302,7 +1305,7 @@ pub(crate) mod tests {
         // We have scan ranges and a subtree, but have scanned no blocks. Given the number of
         // blocks scanned in the previous subtree, we estimate the number of notes in the current
         // subtree
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(
             summary.as_ref().and_then(|s| s.progress().recovery()),
             no_recovery,
@@ -1345,7 +1348,7 @@ pub(crate) mod tests {
 
         // We have scanned a block, so we now have a starting tree position, 500 blocks above the
         // wallet birthday but before the end of the shard.
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
         assert_eq!(
@@ -1452,7 +1455,7 @@ pub(crate) mod tests {
             + (10
                 + ((1234 + 10) * (new_tip - max_scanned))
                     / (max_scanned - (birthday.height() - 10)));
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(
             summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
@@ -1715,7 +1718,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_complete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
@@ -1761,7 +1764,7 @@ pub(crate) mod tests {
             Zatoshis::const_from_u64(100000)
         );
         assert_eq!(
-            st.get_spendable_balance(account.id(), 10),
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
             Zatoshis::const_from_u64(100000)
         );
 
@@ -1791,15 +1794,16 @@ pub(crate) mod tests {
                 &input_selector,
                 &change_strategy,
                 request,
-                NonZeroU32::new(10).unwrap(),
+                ConfirmationsPolicy::default(),
             )
             .unwrap();
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        );
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
     }
 
@@ -1808,7 +1812,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_incomplete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(false);
         let account = st.test_account().cloned().unwrap();
@@ -1849,7 +1853,10 @@ pub(crate) mod tests {
             st.get_total_balance(account.id()),
             Zatoshis::const_from_u64(100000)
         );
-        assert_eq!(st.get_spendable_balance(account.id(), 10), Zatoshis::ZERO);
+        assert_eq!(
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
+            Zatoshis::ZERO
+        );
 
         // Attempting to spend the note should fail to generate a proposal
         let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
@@ -1876,7 +1883,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request.clone(),
-            NonZeroU32::new(10).unwrap(),
+            ConfirmationsPolicy::default(),
         );
 
         assert_matches!(proposal, Err(_));
@@ -1890,7 +1897,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request,
-            NonZeroU32::new(10).unwrap(),
+            ConfirmationsPolicy::default(),
         );
 
         assert_matches!(proposal, Ok(_));

@@ -11,7 +11,7 @@ pub struct TestVector {
     pub diversifier_index: u32,
 }
 
-// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/unified_address.py
+// From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/unified_address.py
 #[cfg(any(test, feature = "test-dependencies"))]
 pub const TEST_VECTORS: &[TestVector] = &[
     TestVector {

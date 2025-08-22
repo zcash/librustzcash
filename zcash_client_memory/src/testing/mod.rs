@@ -1,33 +1,31 @@
 use std::convert::{identity, Infallible};
 use std::fmt::Debug;
 
-use zcash_client_backend::data_api::InputSource;
-use zcash_client_backend::data_api::OutputOfSentTx;
-use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
-use zcash_client_backend::wallet::Note;
-use zcash_client_backend::wallet::Recipient;
-use zcash_client_backend::wallet::WalletTransparentOutput;
 use zcash_client_backend::{
     data_api::{
         testing::{DataStoreFactory, Reset, TestCache, TestState},
-        WalletRead, WalletTest,
+        OutputOfSentTx, WalletRead, WalletTest, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
+    wallet::{Note, NoteId, ReceivedNote, Recipient},
 };
 use zcash_keys::address::Address;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_protocol::value::ZatBalance;
-use zcash_protocol::ShieldedProtocol;
+use zcash_protocol::{
+    consensus::BlockHeight,
+    local_consensus::LocalNetwork,
+    value::{ZatBalance, Zatoshis},
+    ShieldedProtocol, TxId,
+};
 
 use shardtree::store::ShardStore;
-use zcash_client_backend::wallet::NoteId;
-use zcash_client_backend::wallet::ReceivedNote;
-
-use zcash_primitives::transaction::TxId;
-use zcash_protocol::consensus::BlockHeight;
-use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId};
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::{
+    data_api::{testing::transparent::GapLimits, InputSource},
+    wallet::WalletTransparentOutput,
+};
 
 pub mod pool;
 
@@ -52,7 +50,11 @@ impl DataStoreFactory for TestMemDbFactory {
     type DsError = Error;
     type DataStore = MemoryWalletDb<LocalNetwork>;
 
-    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error> {
+    fn new_data_store(
+        &self,
+        network: LocalNetwork,
+        #[cfg(feature = "transparent-inputs")] _gap_limits: GapLimits,
+    ) -> Result<Self::DataStore, Self::Error> {
         Ok(MemoryWalletDb::new(network, 100))
     }
 }
@@ -81,7 +83,7 @@ where
 {
     type Handle = ();
 
-    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> Self::Handle {
+    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> () {
         let new_wallet = MemoryWalletDb::new(st.wallet().params.clone(), 100);
         let _ = std::mem::replace(st.wallet_mut(), new_wallet);
     }
@@ -106,6 +108,7 @@ where
                     ),
                     None,
                 )),
+                #[cfg(feature = "transparent-inputs")]
                 Recipient::EphemeralTransparent {
                     ephemeral_address,
                     receiving_account,
@@ -140,7 +143,7 @@ where
             .map(|res: Result<_, Error>| {
                 let (amount, external_recipient, ephemeral_address) = res?;
                 Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
-                    NonNegativeAmount::from_u64(amount)?,
+                    Zatoshis::from_u64(amount)?,
                     external_recipient,
                     ephemeral_address,
                 ))
@@ -156,7 +159,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_output(
         &self,
-        outpoint: &zcash_primitives::transaction::components::OutPoint,
+        outpoint: &::transparent::bundle::OutPoint,
         _allow_unspendable: bool,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         Ok(self
@@ -171,7 +174,7 @@ where
     fn get_notes(
         &self,
         protocol: zcash_protocol::ShieldedProtocol,
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Error> {
+    ) -> Result<Vec<ReceivedNote<NoteId, Note>>, Error> {
         Ok(self
             .received_notes
             .iter()
@@ -322,11 +325,13 @@ where
 
                 Ok(
                     zcash_client_backend::data_api::testing::TransactionSummary::from_parts(
-                        account_id,                                                                  // account_id
+                        account_id,                                                             // account_id
                         *txid,              // txid
                         tx.expiry_height(), // expiry_height
                         tx.mined_height(),  // mined_height
-                        ZatBalance::const_from_i64((balance_gained as i64) - (balance_lost as i64)), // account_value_delta
+                        ZatBalance::from_i64((balance_gained as i64) - (balance_lost as i64))?, // account_value_delta
+                        Zatoshis::from_u64(balance_lost)?,
+                        Zatoshis::from_u64(balance_gained)?,
                         tx.fee(),                              // fee_paid
                         spent_notes.len() + spent_utxos.len(), // spent_note_count
                         has_change,                            // has_change

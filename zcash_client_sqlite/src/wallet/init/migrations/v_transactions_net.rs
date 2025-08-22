@@ -212,21 +212,25 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::add_transaction_views, WalletMigrator},
         WalletDb,
     };
 
     #[test]
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[add_transaction_views::MIGRATION_ID],
-            false,
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
         )
         .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[add_transaction_views::MIGRATION_ID])
+            .unwrap();
 
         // Create two accounts in the wallet.
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -383,7 +387,7 @@ mod tests {
                         assert_eq!(memo_count, 0);
                     }
                     other => {
-                        panic!("Transaction {} is not a sent tx.", other);
+                        panic!("Transaction {other} is not a sent tx.");
                     }
                 }
             }
@@ -391,7 +395,10 @@ mod tests {
         }
 
         // Run this migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // Corrected behavior after v_transactions has been updated
         {
@@ -446,7 +453,7 @@ mod tests {
                         assert_eq!(received_note_count, 1);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -498,7 +505,7 @@ mod tests {
                         assert!(is_change);
                     }
                     other => {
-                        panic!("Unexpected output index for tx {}: {}.", tx, other);
+                        panic!("Unexpected output index for tx {tx}: {other}.");
                     }
                 }
             }
@@ -543,10 +550,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }
@@ -577,10 +581,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }

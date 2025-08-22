@@ -48,11 +48,11 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
-        |e, account_id, expected_bad_index| {
+        |e, _, expected_bad_index| {
             matches!(
                 e,
-                crate::error::SqliteClientError::ReachedGapLimit(acct, bad_index)
-                if acct == &account_id && bad_index == &expected_bad_index)
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
         },
     )
 }
@@ -268,4 +268,35 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>()
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
+    use rusqlite::named_params;
+
+    zcash_client_backend::data_api::testing::pool::wallet_recovery_computes_fees::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |db, txid| {
+            db.db_mut().conn.execute(
+                "UPDATE transactions
+                 SET fee = NULL
+                 WHERE txid = :txid",
+                named_params! {
+                     ":txid": txid.as_ref(),
+                },
+            )?;
+            Ok(())
+        },
+    )
+}
+
+pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
+    for is_trusted in [false, true] {
+        zcash_client_backend::data_api::testing::pool::zip_315_confirmations_test_steps::<T>(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            is_trusted,
+        );
+    }
 }

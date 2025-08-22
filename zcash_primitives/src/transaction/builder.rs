@@ -1,16 +1,10 @@
 //! Structs for building transactions.
 
+use core::cmp::Ordering;
+use core::fmt;
 use rand::{CryptoRng, RngCore};
-use std::cmp::Ordering;
-use std::error;
-use std::fmt;
-use std::sync::mpsc::Sender;
 
-use ::sapling::{
-    builder::SaplingMetadata,
-    prover::{OutputProver, SpendProver},
-    Note, PaymentAddress,
-};
+use ::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
 use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -23,16 +17,29 @@ use crate::transaction::{
         transparent::{InputView, OutputView},
         FeeRule,
     },
-    sighash::{signature_hash, SignableInput},
-    txid::TxIdDigester,
-    Transaction, TransactionData, TxVersion, Unauthorized,
+    Transaction, TxVersion,
+};
+
+#[cfg(feature = "std")]
+use std::sync::mpsc::Sender;
+
+#[cfg(feature = "circuits")]
+use {
+    crate::transaction::{
+        sighash::{signature_hash, SignableInput},
+        txid::TxIdDigester,
+        TransactionData, Unauthorized,
+    },
+    ::sapling::prover::{OutputProver, SpendProver},
+    ::transparent::builder::TransparentSigningSet,
+    alloc::vec::Vec,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 #[cfg(zcash_unstable = "zfuture")]
 use crate::{
@@ -47,7 +54,6 @@ use crate::{
 };
 
 use super::components::sapling::zip212_enforcement;
-use ::transparent::builder::TransparentSigningSet;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -63,8 +69,8 @@ pub enum FeeError<FE> {
 impl<FE: fmt::Display> fmt::Display for FeeError<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FeeError::FeeRule(e) => write!(f, "An error occurred in fee calculation: {}", e),
-            FeeError::Bundle(b) => write!(f, "Bundle structure invalid in fee calculation: {}", b),
+            FeeError::FeeRule(e) => write!(f, "An error occurred in fee calculation: {e}"),
+            FeeError::Bundle(b) => write!(f, "Bundle structure invalid in fee calculation: {b}"),
         }
     }
 }
@@ -108,21 +114,19 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
         match self {
             Error::InsufficientFunds(amount) => write!(
                 f,
-                "Insufficient funds for transaction construction; need an additional {:?} zatoshis",
-                amount
+                "Insufficient funds for transaction construction; need an additional {amount:?} zatoshis"
             ),
             Error::ChangeRequired(amount) => write!(
                 f,
-                "The transaction requires an additional change output of {:?} zatoshis",
-                amount
+                "The transaction requires an additional change output of {amount:?} zatoshis"
             ),
-            Error::Balance(e) => write!(f, "Invalid amount {:?}", e),
-            Error::Fee(e) => write!(f, "An error occurred in fee calculation: {}", e),
+            Error::Balance(e) => write!(f, "Invalid amount {e:?}"),
+            Error::Fee(e) => write!(f, "An error occurred in fee calculation: {e}"),
             Error::TransparentBuild(err) => err.fmt(f),
             Error::SaplingBuild(err) => err.fmt(f),
-            Error::OrchardBuild(err) => write!(f, "{:?}", err),
-            Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {}", err),
-            Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {}", err),
+            Error::OrchardBuild(err) => write!(f, "{err:?}"),
+            Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {err}"),
+            Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {err}"),
             Error::SaplingBuilderNotAvailable => write!(
                 f,
                 "Cannot create Sapling transactions without a Sapling anchor"
@@ -137,7 +141,8 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
     }
 }
 
-impl<FE: fmt::Debug + fmt::Display> error::Error for Error<FE> {}
+#[cfg(feature = "std")]
+impl<FE: fmt::Debug + fmt::Display> std::error::Error for Error<FE> {}
 
 impl<FE> From<BalanceError> for Error<FE> {
     fn from(e: BalanceError) -> Self {
@@ -298,17 +303,22 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    zip233_amount: Zatoshis,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
-    tze_builder: std::marker::PhantomData<&'a ()>,
-    progress_notifier: U,
+    tze_builder: core::marker::PhantomData<&'a ()>,
+    _progress_notifier: U,
 }
 
-impl<'a, P, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -381,14 +391,19 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
-            tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
         }
     }
 
@@ -398,25 +413,31 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// sent represents the total steps completed so far. It will eventually send number
     /// of spends + outputs. If there's an error building the transaction, the channel is
     /// closed.
+    #[cfg(feature = "std")]
     pub fn with_progress_notifier(
         self,
-        progress_notifier: Sender<Progress>,
+        _progress_notifier: Sender<Progress>,
     ) -> Builder<'a, P, Sender<Progress>> {
         Builder {
             params: self.params,
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: self.zip233_amount,
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
             tze_builder: self.tze_builder,
-            progress_notifier,
+            _progress_notifier,
         }
     }
 }
 
-impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -450,7 +471,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value),
-                Some(*memo.as_array()),
+                memo.into_bytes(),
             )
             .map_err(Error::OrchardRecipient)
     }
@@ -487,8 +508,8 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .add_output(
                 ovk,
                 to,
-                sapling::value::NoteValue::from_raw(value.into()),
-                Some(*memo.as_array()),
+                sapling::value::NoteValue::from_raw(u64::from(value)),
+                memo.into_bytes(),
             )
             .map_err(Error::SaplingBuild)
     }
@@ -513,7 +534,14 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         self.transparent_builder.add_output(to, value)
     }
 
-    /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
+    /// Adds a transparent "null data" (OP_RETURN) output with the given data payload.
+    pub fn add_transparent_null_data_output<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
+        self.transparent_builder
+            .add_null_data_output(data)
+            .map_err(Error::TransparentBuild)
+    }
+
+    /// Returns the sum of the transparent, Sapling, Orchard, zip233_amount and TZE value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
@@ -530,6 +558,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            -self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
@@ -634,11 +667,20 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .map_err(FeeError::FeeRule)
     }
 
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
+        self.zip233_amount = zip233_amount;
+    }
+
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "circuits")]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
         transparent_signing_set: &TransparentSigningSet,
@@ -694,6 +736,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "circuits")]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
         transparent_signing_set: &TransparentSigningSet,
@@ -714,8 +757,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
@@ -746,7 +788,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                                     spend_prover,
                                     output_prover,
                                     &mut rng,
-                                    self.progress_notifier,
+                                    self._progress_notifier,
                                 ),
                                 sapling_meta,
                             )
@@ -781,6 +823,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
             expiry_height: self.expiry_height,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: self.zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
@@ -857,6 +904,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: unauthed_tx.zip233_amount,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
@@ -897,8 +949,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
@@ -981,10 +1032,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     fn add_tze_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: ZatBalance,
+        value: Zatoshis,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
-        self.tze_builder.add_output(extension_id, value, guarded_by)
+        self.tze_builder.add_output(extension_id, value, guarded_by);
+        Ok(())
     }
 }
 
@@ -1000,7 +1052,7 @@ mod testing {
     use super::{BuildResult, Builder, Error};
     use crate::transaction::fees::zip317;
 
-    impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+    impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(
@@ -1046,7 +1098,7 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
+    use core::convert::Infallible;
 
     use assert_matches::assert_matches;
     use ff::Field;
@@ -1097,13 +1149,18 @@ mod tests {
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
-            tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
             orchard_builder: None,
         };
 
@@ -1157,7 +1214,7 @@ mod tests {
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(tree);
+        let witness1 = IncrementalWitness::from_tree(tree).unwrap();
 
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -1264,6 +1321,24 @@ mod tests {
             );
         }
 
+        // Fail if there is only a burn
+        // 0.0005 burned, 0.0001 t-ZEC fee
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder.set_zip233_amount(Zatoshis::const_from_u64(50000));
+
+            assert_matches!(
+                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected ==
+                    (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+            );
+        }
+
         let note1 = to.create_note(
             sapling::value::NoteValue::from_raw(59999),
             Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
@@ -1271,10 +1346,10 @@ mod tests {
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let mut witness1 = IncrementalWitness::from_tree(tree.clone());
+        let mut witness1 = IncrementalWitness::from_tree(tree.clone()).unwrap();
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1308,6 +1383,43 @@ mod tests {
             );
         }
 
+        // Fail if there is insufficient input
+        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.00015 t-ZEC fee, 0.00059999 z-ZEC in
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note1.clone(),
+                    witness1.path().unwrap(),
+                )
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    Zatoshis::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    Zatoshis::const_from_u64(5000),
+                )
+                .unwrap();
+            builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
+            assert_matches!(
+                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
+            );
+        }
+
         let note2 = to.create_note(
             sapling::value::NoteValue::from_raw(1),
             Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
@@ -1315,10 +1427,58 @@ mod tests {
         let cmu2 = Node::from_cmu(&note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
-        let witness2 = IncrementalWitness::from_tree(tree);
+        let witness2 = IncrementalWitness::from_tree(tree).unwrap();
 
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note1.clone(),
+                    witness1.path().unwrap(),
+                )
+                .unwrap();
+            builder
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note2.clone(),
+                    witness2.path().unwrap(),
+                )
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    Zatoshis::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    Zatoshis::const_from_u64(15000),
+                )
+                .unwrap();
+            let res = builder
+                .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
+                .unwrap();
+            assert_eq!(
+                res.transaction()
+                    .fee_paid(|_| Err(BalanceError::Overflow))
+                    .unwrap(),
+                Some(Zatoshis::const_from_u64(15_000))
+            );
+        }
+
+        // Succeeds if there is sufficient input
+        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1350,9 +1510,10 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    Zatoshis::const_from_u64(15000),
+                    Zatoshis::const_from_u64(5000),
                 )
                 .unwrap();
+            builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
             let res = builder
                 .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
                 .unwrap();
@@ -1360,7 +1521,7 @@ mod tests {
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
-                ZatBalance::const_from_i64(15_000)
+                Some(Zatoshis::const_from_u64(15_000))
             );
         }
     }

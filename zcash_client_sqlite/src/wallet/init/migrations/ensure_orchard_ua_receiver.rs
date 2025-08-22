@@ -65,9 +65,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?
             };
 
-            let (default_addr, diversifier_index) = uivk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, Require, UA_TRANSPARENT),
-            ))?;
+            let (default_addr, diversifier_index) = uivk.default_address(
+                UnifiedAddressRequest::unsafe_custom(UA_ORCHARD, Require, UA_TRANSPARENT),
+            )?;
 
             let mut di_be = *diversifier_index.as_bytes();
             di_be.reverse();
@@ -99,14 +99,21 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::addresses_table, WalletMigrator},
         WalletDb, UA_ORCHARD, UA_TRANSPARENT,
     };
 
     #[test]
     fn init_migrate_add_orchard_receiver() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = vec![0x10; 32];
         let account_id = 0u32;
@@ -119,12 +126,10 @@ mod tests {
         .to_unified_full_viewing_key();
 
         assert_matches!(
-            init_wallet_db_internal(
-                &mut db_data,
-                Some(SecretVec::new(seed.clone())),
-                &[addresses_table::MIGRATION_ID],
-                false
-            ),
+            WalletMigrator::new()
+                .with_seed(SecretVec::new(seed.clone()))
+                .ignore_seed_relevance()
+                .init_or_migrate_to(&mut db_data, &[addresses_table::MIGRATION_ID]),
             Ok(_)
         );
 
@@ -142,11 +147,11 @@ mod tests {
             .unwrap();
 
         let (addr, diversifier_index) = ufvk
-            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+            .default_address(UnifiedAddressRequest::unsafe_custom(
                 Omit,
                 Require,
                 UA_TRANSPARENT,
-            )))
+            ))
             .unwrap();
         let mut di_be = *diversifier_index.as_bytes();
         di_be.reverse();
@@ -174,11 +179,13 @@ mod tests {
                 assert!(ua.has_sapling());
                 assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
-            other => panic!("Unexpected result from address decoding: {:?}", other),
+            other => panic!("Unexpected result from address decoding: {other:?}"),
         }
 
         assert_matches!(
-            init_wallet_db(&mut db_data, Some(SecretVec::new(seed))),
+            WalletMigrator::new()
+                .with_seed(SecretVec::new(seed))
+                .init_or_migrate(&mut db_data),
             Ok(_)
         );
 
@@ -192,7 +199,7 @@ mod tests {
                 assert!(ua.has_sapling());
                 assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
-            other => panic!("Unexpected result from address decoding: {:?}", other),
+            other => panic!("Unexpected result from address decoding: {other:?}"),
         }
     }
 }

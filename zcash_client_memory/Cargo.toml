@@ -17,6 +17,7 @@ zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
+transparent.workspace = true
 zip32.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
@@ -68,6 +69,7 @@ ciborium = "0.2.2"
 serde_json.workspace = true
 postcard = { version = "1.0.10", features = ["alloc"] }
 pretty_assertions = "1.4.1"
+zcash_client_backend = { workspace = true, features = ["test-dependencies"] }
 
 
 [features]
@@ -90,6 +92,9 @@ transparent-inputs = ["dep:bip32", "zcash_keys/transparent-inputs", "zcash_clien
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
+
+## Enables compatibility with legacy zcashd wallet data
+zcashd-compat = ["zcash_keys/zcashd-compat", "zcash_client_backend/zcashd-compat"]
 
 [build-dependencies]
 prost-build = "0.13.3"

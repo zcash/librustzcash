@@ -186,6 +186,8 @@ impl From<ReceivedNote>
             value.note,
             value.recipient_key_scope.unwrap(),
             value.commitment_tree_position.unwrap(),
+            None,
+            None,
         )
     }
 }
@@ -307,6 +309,8 @@ pub(crate) fn to_spendable_notes(
                         .ok_or(Error::Missing("recipient key scope".into()))?,
                     note.commitment_tree_position
                         .ok_or(Error::Missing("commitment tree position".into()))?,
+                    None,
+                    None,
                 ))
             } else {
                 Err(Error::Other("Note is not a sapling note".to_owned()))
@@ -328,6 +332,8 @@ pub(crate) fn to_spendable_notes(
                         .ok_or(Error::Missing("recipient key scope".into()))?,
                     note.commitment_tree_position
                         .ok_or(Error::Missing("commitment tree position".into()))?,
+                    None,
+                    None,
                 ))
             } else {
                 Err(Error::Other("Note is not an orchard note".to_owned()))

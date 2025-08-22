@@ -103,6 +103,9 @@ pub struct LightdInfo {
     /// example: "/MagicBean:4.1.1/"
     #[prost(string, tag = "14")]
     pub zcashd_subversion: ::prost::alloc::string::String,
+    /// Zcash donation UA address
+    #[prost(string, tag = "15")]
+    pub donation_address: ::prost::alloc::string::String,
 }
 /// TransparentAddressBlockFilter restricts the results to the given address
 /// or block range.
@@ -275,7 +278,7 @@ pub mod compact_tx_streamer_client {
     }
     impl<T> CompactTxStreamerClient<T>
     where
-        T: tonic::client::GrpcService<tonic::body::BoxBody>,
+        T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
         T::ResponseBody: Body<Data = Bytes> + std::marker::Send + 'static,
         <T::ResponseBody as Body>::Error: Into<StdError> + std::marker::Send,
@@ -296,13 +299,13 @@ pub mod compact_tx_streamer_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
+                http::Request<tonic::body::Body>,
                 Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
+                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
                 >,
             >,
             <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
+                http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             CompactTxStreamerClient::new(InterceptedService::new(inner, interceptor))
@@ -543,7 +546,9 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Return the txids corresponding to the given t-address within the given block range
+        /// Return RawTransactions that match the given transparent address filter.
+        ///
+        /// Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
         pub async fn get_taddress_txids(
             &mut self,
             request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,

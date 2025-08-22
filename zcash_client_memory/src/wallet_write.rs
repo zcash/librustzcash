@@ -1,22 +1,21 @@
-use std::cmp::{max, min};
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Range,
 };
 
-use incrementalmerkletree::{Marking, Position, Retention};
 use rayon::prelude::*;
-use secrecy::ExposeSecret;
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
+
+use ::transparent::bundle::OutPoint;
+use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::store::ShardStore;
-use zcash_client_backend::data_api::Zip32Derivation;
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         chain::ChainState,
         scanning::{ScanPriority, ScanRange},
         AccountPurpose, AccountSource, TransactionStatus, WalletCommitmentTrees as _,
-        SAPLING_SHARD_HEIGHT,
+        Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     data_api::{
         AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction,
@@ -26,24 +25,13 @@ use zcash_client_backend::{
     wallet::{NoteId, Recipient, WalletTransparentOutput},
     TransferType,
 };
-use zcash_primitives::{
-    consensus::BlockHeight,
-    transaction::{
-        components::{OutPoint, TxOut},
-        TxId,
-    },
-};
 use zcash_protocol::{
-    consensus::{self, NetworkUpgrade},
+    consensus::{self, BlockHeight, NetworkUpgrade},
     PoolType,
     ShieldedProtocol::{self, Sapling},
+    TxId,
 };
-use zip32::fingerprint::SeedFingerprint;
-#[cfg(feature = "orchard")]
-use {
-    shardtree::error::ShardTreeError, std::collections::BTreeMap,
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::Error, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, PRUNING_DEPTH,
@@ -51,11 +39,18 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use zcash_protocol::ShieldedProtocol::Orchard;
+use {
+    shardtree::error::ShardTreeError, std::collections::BTreeMap,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    zcash_protocol::ShieldedProtocol::Orchard,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    ::transparent::bundle::TxOut,
+    zcash_client_backend::{
+        data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
+    },
     zcash_primitives::legacy::TransparentAddress,
 };
 
@@ -76,10 +71,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             )
         } else {
             let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
-                .ok_or_else(|| Self::Error::InvalidSeedLength)?;
+                .ok_or(Self::Error::InvalidSeedLength)?;
             let account_index = self
                 .max_zip32_account_index(&seed_fingerprint)?
-                .map(|a| a.next().ok_or_else(|| Self::Error::AccountOutOfRange))
+                .map(|a| a.next().ok_or(Self::Error::AccountOutOfRange))
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
 
@@ -90,7 +85,12 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             let (id, _account) = self.add_account(
                 account_name,
                 AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_string()),
                 },
                 ufvk,
@@ -104,8 +104,8 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
         tracing::debug!("get_next_available_address");
         self.accounts
             .get_mut(account)
@@ -593,14 +593,14 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
         tracing::debug!("put_received_transparent_utxo");
         #[cfg(feature = "transparent-inputs")]
         {
-            let address = output.recipient_address();
+            let address = _output.recipient_address();
             if let Some(account_id) = self.find_account_for_transparent_address(address)? {
-                self.put_transparent_output(output, &account_id, false)
+                self.put_transparent_output(_output, &account_id, false)
             } else {
                 Err(Error::AddressNotRecognized(*address))
             }
@@ -1196,6 +1196,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         account_id: Self::AccountId,
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        use zcash_keys::keys::AddressGenerationError;
         // TODO: We need to implement first_unsafe_index to make sure we dont violate gap invarient
 
         use zcash_primitives::legacy::keys::NonHardenedChildIndex;
@@ -1211,7 +1212,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
             if allocation.end > first_unsafe {
                 return Err(Error::ReachedGapLimit(
                     account_id,
-                    max(first_unreserved, first_unsafe),
+                    core::cmp::max(first_unreserved, first_unsafe),
                 ));
             }
             let _reserved = account.reserve_until(allocation.end)?;
@@ -1226,19 +1227,36 @@ Instead derive the ufvk in the calling code and import it using `import_account_
             Err(Self::Error::AccountUnknown(account_id))
         }
     }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _diversifier_index: DiversifierIndex,
+        _request: UnifiedAddressRequest,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        _request: TransactionsInvolvingAddress,
+        _as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]
 fn range_from(i: u32, n: u32) -> Range<u32> {
-    let first = min(1 << 31, i);
-    let last = min(1 << 31, i.saturating_add(n));
+    let first = core::cmp::min(1 << 31, i);
+    let last = core::cmp::min(1 << 31, i.saturating_add(n));
     first..last
 }
 
 use zcash_client_backend::wallet::Note;
 use zcash_keys::address::Receiver;
 use zcash_keys::encoding::AddressCodec;
-use zcash_keys::keys::AddressGenerationError;
 #[cfg(feature = "orchard")]
 use {incrementalmerkletree::frontier::Frontier, shardtree::store::Checkpoint};
 

@@ -3,12 +3,129 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
 
+### Added
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. For additional information
+  refer to the `zcash_client_backend 0.20.0` release notes.
+
 ### Changed
-- Migrated to `nonempty 0.11`
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
+  `zcash_transparent 0.4`, `zcash_primitives 0.24`, `zcash_proofs 0.24`,
+  `zcash_client_backend 0.20`.
+
+## [0.16.4, 0.17.2] - 2025-08-19
+
+### Fixed
+- `TransactionDataRequest::GetStatus` requests for txids that do not
+  correspond to unexpired transactions in the transactions table are now
+  deleted from the status check queue when `set_transaction_status` is
+  called with a status of either `TxidNotRecognized` or `NotInMainChain`.
+- This release fixes a bug that caused transparent UTXO value to be
+  double_counted in the wallet summary, contributing to both spendable and
+  pending balance, when queried with `min_confirmations == 0`.
+- Transaction fees are now restored when possible by calls to
+  `WalletDb::store_decrypted_tx`.
+
+## [0.16.3, 0.17.1] - 2025-06-17
+
+### Fixed
+- `TransactionDataRequest`s will no longer be generated for coinbase inputs
+  (which are represented as having the all-zeros txid).
+
+## [0.17.0] - 2025-05-30
+
+### Added
+- `zcash_client_sqlite::wallet::init::WalletMigrator`
+- `zcash_client_sqlite::wallet::init::migrations`
+- `zcash_client_sqlite::WalletDb::params`
+
+### Changed
+- Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
+  `zcash_primitives 0.23`, `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`,
+  `zcash_client_backend 0.19`
+- `zcash_client_sqlite::wallet::init::WalletMigrationError::`
+  - Variants `WalletMigrationError::CommitmentTree` and
+    `WalletMigrationError::Other` now `Box` their contents.
+
+## [0.16.2] - 2025-04-02
+
+### Fixed
+- This release fixes a migration error that could cause some wallets
+  to crash on startup due to an attempt to associate a received transparent
+  output with an address that does not exist in the wallet's `addresses`
+  table.
+
+## [0.16.1] - 2025-03-26
+
+### Fixed
+- This release fixes a migration error that could cause some wallets
+  to crash on startup due to an attempt to derive a unified address with
+  a Sapling receiver at an index for which no Sapling receiver can exist.
+
+## [0.16.0] - 2025-03-19
+
+### Added
+- `zcash_client_sqlite::WalletDb::with_gap_limits`
+- `zcash_client_sqlite::GapLimits`
+- `zcash_client_sqlite::util`
+- `zcash_client_sqlite::schedule_ephemeral_address_checks` has been added under
+  the `transparent-inputs` feature flag.
+- `zcash_client_sqlite::wallet::transparent::SchedulingError`
+
+### Changed
+- Updated to `zcash_keys 0.8`, `zcash_client_backend 0.18`
+- `zcash_client_sqlite::WalletDb` has added fields and type parameters:
+    - a `clock` field and corresponding type parameter. Tests that make use of
+      `WalletDb` now use a `zcash_client_sqlite::util::FixedClock` for this
+      field value.
+    - an `rng` field and corresponding type parameter. Tests that make use of
+      `WalletDb` now use a `ChaChaRng` value initialized with the all-zeros
+      seed for this field value.
+    - the following methods have been changed to accept additional parameters
+      as a result of these changes:
+      - `WalletDb::for_path`
+      - `WalletDb::from_connection`
+      - `wallet::init::init_wallet_db` has additional type constraints
+- `zcash_client_sqlite::WalletDb::get_address_for_index` now returns some of
+  its failure modes via `Err(SqliteClientError::AddressGeneration)` instead of
+  `Ok(None)`.
+- `zcash_client_sqlite::error::SqliteClientError` variants have changed:
+  - The `EphemeralAddressReuse` variant has been removed and replaced
+    by a new generalized `AddressReuse` error variant.
+  - The `ReachedGapLimit` variant no longer includes the account UUID
+    for the account that reached the limit in its payload. In addition
+    to the transparent address index, it also contains the key scope
+    involved when the error was encountered.
+  - A new `DiversifierIndexReuse` variant has been added.
+  - A new `Scheduling` variant has been added.
+- Each row returned from the `v_received_outputs` view now exposes an
+  internal identifier for the address that received that output. This should
+  be ignored by external consumers of this view.
+
+## [0.15.0] - 2025-02-21
+
+### Added
+- `zcash_client_sqlite::WalletDb::from_connection`
+- `zcash_client_sqlite::WalletDb::check_witnesses`
+- `zcash_client_sqlite::WalletDb::queue_rescans`
+
+### Changed
+- MSRV is now 1.81.0.
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.`incrementalmerkletree 0.8`,
+  `shardtree 0.6`, `orchard 0.11`, `sapling-crypto 0.5`, `zcash_encoding 0.3`,
+  `zcash_protocol 0.5`, `zcash_address 0.7`, `zcash_transparent 0.2`,
+  `zcash_primitives 0.22`, `zcash_keys 0.7`, `zcash_client_backend 0.17`.
+- `zcash_client_sqlite::wallet::init::init_wallet_db` now has an additional
+  generic parameter, enabling it to be used with wallets constructed via
+  `WalletDb::from_connection`.
+- The `v_transactions` view has added columns `total_spent` and `total_received`.
 
 ## [0.14.0] - 2024-12-16
 

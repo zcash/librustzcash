@@ -3,15 +3,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use ::transparent::bundle::{OutPoint, TxOut};
 use zcash_client_backend::wallet::WalletTransparentOutput;
-use zcash_primitives::{
-    legacy::TransparentAddress,
-    transaction::{
-        components::{OutPoint, TxOut},
-        TxId,
-    },
-};
-use zcash_protocol::consensus::BlockHeight;
+use zcash_primitives::legacy::TransparentAddress;
+use zcash_protocol::{consensus::BlockHeight, TxId};
 
 use super::AccountId;
 use crate::Error;
@@ -25,10 +20,7 @@ impl TransparentReceivedOutputs {
         Self(BTreeMap::new())
     }
 
-    pub fn get(&self, outpoint: &OutPoint) -> Option<&ReceivedTransparentOutput> {
-        self.0.get(outpoint)
-    }
-
+    #[cfg(feature = "transparent-inputs")]
     pub fn detect_spending_accounts<'a>(
         &self,
         spent: impl Iterator<Item = &'a OutPoint>,
@@ -66,6 +58,7 @@ impl TransparentReceivedOutputSpends {
         Self(BTreeMap::new())
     }
 
+    #[cfg(feature = "transparent-inputs")]
     pub fn get(&self, outpoint: &OutPoint) -> Option<&TxId> {
         self.0.get(outpoint)
     }
@@ -142,6 +135,7 @@ impl TransparentSpendCache {
     }
 
     /// Get all the outpoints for a given transaction ID.
+    #[cfg(feature = "transparent-inputs")]
     pub fn contains(&self, txid: &TxId, outpoint: &OutPoint) -> bool {
         self.0.contains(&(*txid, outpoint.clone()))
     }

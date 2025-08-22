@@ -3,12 +3,60 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
 
+
+### Added
+- `zcash_primitives::transaction::tests::data` has been exposed under the
+  `test-dependencies` feature to provide access to test vectors.
+- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
+
+## [0.24.0] - 2025-07-31
+
 ### Changed
-- Migrated to `nonempty 0.11`
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zcash_transparent 0.4`
+- The type of `zcash_primitives::transaction::TransactionData::fee_paid` has
+  changed. The closure provided to this method for input retrieval can now
+  indicate that an input for the given outpoint is not available, and
+  `fee_paid` will return `Ok(None)` when this is the case. In addition, this
+  method now requires nonnegative input values be provided by the closure, and
+  will only return positive fee value; negative fee value will result in an
+  error instead of reporting a potentially invalid result.
+
+## [0.23.1] - 2025-07-16
+
+### Changed
+- Migrated to `zcash_protocol 0.5.4` to alleviate a type inference issue
+  observed by downstream users.
+
+## [0.23.0] - 2025-05-30
+
+### Changed
+- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`
+- Variants of `zcash_primitives::transaction::TxVersion` have changed. They
+  now represent explicit transaction versions, in order to avoid accidental
+  confusion with the names of the network upgrades that they were introduced
+  in.
+
+## [0.22.1] - 2025-07-18
+
+### Fixed
+- This fixes a potential build error caused by incautious use of `into()`,
+  where the addition of a `From` impl can cause resolution failure.
+
+## [0.22.0] - 2025-02-21
+
+### Changed
+- MSRV is now 1.81.0.
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `secp256k1 0.29`,
+  `incrementalmerkletree 0.8`, `redjubjub 0.8`, `orchard 0.11`,
+  `sapling-crypto 0.5`, `zcash_encoding 0.3`, `zcash_protocol 0.5`,
+  `zcash_address 0.7`, `zcash_transparent 0.2`.
 
 ### Deprecated
 - `zcash_primitives::consensus` (use `zcash_protocol::consensus` instead)
@@ -69,6 +117,11 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::sighash`:
   - `SignableInput::Transparent` is now a wrapper around
     `zcash_transparent::sighash::SignableInput`.
+
+## [0.19.1, 0.20.1] - 2025-05-09
+
+### Fixed
+- Migrated to `orchard 0.10.2` to fix a missing feature dependency.
 
 ## [0.20.0] - 2024-11-14
 

@@ -1,3 +1,5 @@
+//! The transparent fields of a PCZT.
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,6 +24,7 @@ pub struct Bundle {
     pub(crate) outputs: Vec<Output>,
 }
 
+/// Information about a transparent input within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Input {
@@ -41,6 +44,7 @@ pub struct Input {
     /// - This is set by the Constructor.
     /// - If omitted, the sequence number is assumed to be the final sequence number
     ///   (`0xffffffff`).
+    #[getset(get = "pub")]
     pub(crate) sequence: Option<u32>,
 
     /// The minimum Unix timstamp that this input requires to be set as the transaction's
@@ -66,6 +70,7 @@ pub struct Input {
     // needed for computing the binding signatures.
     #[getset(get = "pub")]
     pub(crate) value: u64,
+    #[getset(get = "pub")]
     pub(crate) script_pubkey: Vec<u8>,
 
     /// The script required to spend this output, if it is P2SH.
@@ -130,6 +135,7 @@ pub struct Input {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
+/// Information about a transparent output within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Output {
@@ -139,7 +145,9 @@ pub struct Output {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) value: u64,
+    #[getset(get = "pub")]
     pub(crate) script_pubkey: Vec<u8>,
 
     /// The script required to spend this output, if it is P2SH.

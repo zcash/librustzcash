@@ -5,8 +5,7 @@
 //!
 //! - [`ZcashAddress`] can be parsed from, and encoded to, strings.
 //! - [`ZcashAddress::convert`] or [`ZcashAddress::convert_if_network`] can be used to
-//!   convert a parsed address into custom types that implement the [`TryFromAddress`] or
-//!   [`TryFromRawAddress`] traits.
+//!   convert a parsed address into custom types that implement the [`TryFromAddress`] trait.
 //! - Custom types can be converted into a [`ZcashAddress`] via its implementation of the
 //!   [`ToAddress`] trait.
 //!
@@ -63,7 +62,7 @@
 //! use std::ffi::{CStr, c_char, c_void};
 //! use std::ptr;
 //!
-//! use zcash_address::{ConversionError, TryFromRawAddress, ZcashAddress};
+//! use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
 //! use zcash_protocol::consensus::NetworkType;
 //!
 //! // Functions that return a pointer to a heap-allocated address of the given kind in
@@ -75,10 +74,11 @@
 //!
 //! struct ParsedAddress(*mut c_void);
 //!
-//! impl TryFromRawAddress for ParsedAddress {
+//! impl TryFromAddress for ParsedAddress {
 //!     type Error = &'static str;
 //!
-//!     fn try_from_raw_sapling(
+//!     fn try_from_sapling(
+//!         _net: NetworkType,
 //!         data: [u8; 43],
 //!     ) -> Result<Self, ConversionError<Self::Error>> {
 //!         let parsed = unsafe { addr_from_sapling(data[..].as_ptr()) };
@@ -89,7 +89,8 @@
 //!         }
 //!     }
 //!
-//!     fn try_from_raw_transparent_p2pkh(
+//!     fn try_from_transparent_p2pkh(
+//!         _net: NetworkType,
 //!         data: [u8; 20],
 //!     ) -> Result<Self, ConversionError<Self::Error>> {
 //!         let parsed = unsafe { addr_from_transparent_p2pkh(data[..].as_ptr()) };
@@ -116,7 +117,7 @@
 //!     match addr.convert_if_network::<ParsedAddress>(NetworkType::Main) {
 //!         Ok(parsed) => parsed.0,
 //!         Err(e) => {
-//!             // We didn't implement all of the methods of `TryFromRawAddress`, so if an
+//!             // We didn't implement all of the methods of `TryFromAddress`, so if an
 //!             // address with one of those kinds is parsed, it will result in an error
 //!             // here that should be passed back across the FFI.
 //!             ptr::null_mut()
@@ -146,9 +147,7 @@ mod kind;
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod test_vectors;
 
-pub use convert::{
-    ConversionError, ToAddress, TryFromAddress, TryFromRawAddress, UnsupportedAddress,
-};
+pub use convert::{ConversionError, Converter, ToAddress, TryFromAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
@@ -180,12 +179,12 @@ impl ZcashAddress {
     /// Encodes this Zcash address in its canonical string representation.
     ///
     /// This provides the encoded string representation of the address as defined by the
-    /// [Zcash protocol specification](https://zips.z.cash/protocol.pdf) and/or
+    /// [Zcash protocol specification](https://zips.z.cash/protocol/protocol.pdf) and/or
     /// [ZIP 316](https://zips.z.cash/zip-0316). The [`Display` implementation] can also
     /// be used to produce this encoding using [`address.to_string()`].
     ///
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
     pub fn encode(&self) -> String {
         format!("{}", self)
     }
@@ -194,7 +193,7 @@ impl ZcashAddress {
     ///
     /// This simply calls [`s.parse()`], leveraging the [`FromStr` implementation].
     ///
-    /// [`s.parse()`]: std::primitive::str::parse
+    /// [`s.parse()`]: str::parse
     /// [`FromStr` implementation]: ZcashAddress#impl-FromStr
     ///
     /// # Errors
@@ -210,7 +209,7 @@ impl ZcashAddress {
     /// ```
     /// use zcash_address::ZcashAddress;
     ///
-    /// let encoded = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly";
+    /// let encoded = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya";
     /// let addr = ZcashAddress::try_from_encoded(&encoded);
     /// assert_eq!(encoded.parse(), addr);
     /// ```
@@ -229,8 +228,8 @@ impl ZcashAddress {
     /// method or the [`Display` implementation] via [`address.to_string()`] instead.
     ///
     /// [`encode`]: Self::encode
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
     pub fn convert<T: TryFromAddress>(self) -> Result<T, ConversionError<T::Error>> {
         match self.kind {
             AddressKind::Sprout(data) => T::try_from_sprout(self.net, data),
@@ -244,19 +243,18 @@ impl ZcashAddress {
 
     /// Converts this address into another type, if it matches the expected network.
     ///
-    /// `convert_if_network` can convert into any type that implements the
-    /// [`TryFromRawAddress`] trait. This enables `ZcashAddress` to be used as a common
-    /// parsing and serialization interface for Zcash addresses, while delegating
-    /// operations on those addresses (such as constructing transactions) to downstream
-    /// crates.
+    /// `convert_if_network` can convert into any type that implements the [`TryFromAddress`]
+    /// trait. This enables `ZcashAddress` to be used as a common parsing and serialization
+    /// interface for Zcash addresses, while delegating operations on those addresses (such as
+    /// constructing transactions) to downstream crates.
     ///
     /// If you want to get the encoded string for this address, use the [`encode`]
     /// method or the [`Display` implementation] via [`address.to_string()`] instead.
     ///
     /// [`encode`]: Self::encode
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
-    pub fn convert_if_network<T: TryFromRawAddress>(
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
+    pub fn convert_if_network<T: TryFromAddress>(
         self,
         net: NetworkType,
     ) -> Result<T, ConversionError<T::Error>> {
@@ -267,18 +265,37 @@ impl ZcashAddress {
             network_matches || (self.net == NetworkType::Test && net == NetworkType::Regtest);
 
         match self.kind {
-            AddressKind::Sprout(data) if regtest_exception => T::try_from_raw_sprout(data),
-            AddressKind::Sapling(data) if network_matches => T::try_from_raw_sapling(data),
-            AddressKind::Unified(data) if network_matches => T::try_from_raw_unified(data),
+            AddressKind::Sprout(data) if regtest_exception => T::try_from_sprout(net, data),
+            AddressKind::Sapling(data) if network_matches => T::try_from_sapling(net, data),
+            AddressKind::Unified(data) if network_matches => T::try_from_unified(net, data),
             AddressKind::P2pkh(data) if regtest_exception => {
-                T::try_from_raw_transparent_p2pkh(data)
+                T::try_from_transparent_p2pkh(net, data)
             }
-            AddressKind::P2sh(data) if regtest_exception => T::try_from_raw_transparent_p2sh(data),
-            AddressKind::Tex(data) if network_matches => T::try_from_raw_tex(data),
+            AddressKind::P2sh(data) if regtest_exception => T::try_from_transparent_p2sh(net, data),
+            AddressKind::Tex(data) if network_matches => T::try_from_tex(net, data),
             _ => Err(ConversionError::IncorrectNetwork {
                 expected: net,
                 actual: self.net,
             }),
+        }
+    }
+
+    /// Converts this address into another type using the specified converter.
+    ///
+    /// `convert` can convert into any type `T` for which an implementation of the [`Converter<T>`]
+    /// trait exists. This enables conversion of [`ZcashAddress`] values into other types to rely
+    /// on additional context.
+    pub fn convert_with<T, C: Converter<T>>(
+        self,
+        converter: C,
+    ) -> Result<T, ConversionError<C::Error>> {
+        match self.kind {
+            AddressKind::Sprout(data) => converter.convert_sprout(self.net, data),
+            AddressKind::Sapling(data) => converter.convert_sapling(self.net, data),
+            AddressKind::Unified(data) => converter.convert_unified(self.net, data),
+            AddressKind::P2pkh(data) => converter.convert_transparent_p2pkh(self.net, data),
+            AddressKind::P2sh(data) => converter.convert_transparent_p2sh(self.net, data),
+            AddressKind::Tex(data) => converter.convert_tex(self.net, data),
         }
     }
 

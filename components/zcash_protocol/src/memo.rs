@@ -22,7 +22,7 @@ where
     let len = bytes.as_ref().len();
 
     for (i, byte) in bytes.as_ref().iter().enumerate() {
-        write!(f, "{:02x}", byte)?;
+        write!(f, "{byte:02x}")?;
 
         if i != len - 1 {
             write!(f, ":")?;
@@ -42,8 +42,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {}", e),
-            Error::TooLong(n) => write!(f, "Memo length {} is larger than maximum of 512", n),
+            Error::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {e}"),
+            Error::TooLong(n) => write!(f, "Memo length {n} is larger than maximum of 512"),
         }
     }
 }
@@ -113,6 +113,11 @@ impl MemoBytes {
     /// Returns the raw byte array containing the memo bytes, including null padding.
     pub fn as_array(&self) -> &[u8; 512] {
         &self.0
+    }
+
+    /// Consumes this `MemoBytes` value and returns the underlying byte array.
+    pub fn into_bytes(self) -> [u8; 512] {
+        *self.0
     }
 
     /// Returns a slice of the raw bytes, excluding null padding.

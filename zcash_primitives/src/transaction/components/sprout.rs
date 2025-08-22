@@ -1,6 +1,7 @@
 //! Structs representing the components within Zcash transactions.
 
-use std::io::{self, Read, Write};
+use alloc::vec::Vec;
+use core2::io::{self, Read, Write};
 
 use super::GROTH_PROOF_SIZE;
 use zcash_protocol::value::ZatBalance;
@@ -37,8 +38,8 @@ pub(crate) enum SproutProof {
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
-impl std::fmt::Debug for SproutProof {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl core::fmt::Debug for SproutProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         match self {
             SproutProof::Groth(_) => write!(f, "SproutProof::Groth"),
             SproutProof::PHGR(_) => write!(f, "SproutProof::PHGR"),
@@ -60,8 +61,8 @@ pub struct JsDescription {
     pub(crate) ciphertexts: [[u8; 601]; ZC_NUM_JS_OUTPUTS],
 }
 
-impl std::fmt::Debug for JsDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl core::fmt::Debug for JsDescription {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         write!(
             f,
             "JSDescription(

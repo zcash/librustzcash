@@ -3,43 +3,49 @@
 mod serialization;
 
 use std::{
-    cmp::min,
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     num::NonZeroU32,
     ops::{Range, RangeInclusive},
     usize,
 };
 
+use ::transparent::bundle::OutPoint;
 use incrementalmerkletree::{Address, Level, Marking, Position, Retention};
 use scanning::ScanQueue;
 use shardtree::{
     store::{memory::MemoryShardStore, ShardStore},
     ShardTree,
 };
-use transparent::{
-    TransparentReceivedOutputSpends, TransparentReceivedOutputs, TransparentSpendCache,
-};
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         Account as _, AccountBirthday, AccountSource, InputSource, Ratio, TransactionStatus,
-        WalletRead, GAP_LIMIT, SAPLING_SHARD_HEIGHT,
+        WalletRead, SAPLING_SHARD_HEIGHT,
     },
-    wallet::{NoteId, WalletSaplingOutput, WalletTransparentOutput},
+    wallet::{NoteId, WalletSaplingOutput},
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::{
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
-    legacy::TransparentAddress,
-    transaction::{components::OutPoint, Transaction, TxId},
+    ShieldedProtocol, TxId,
 };
-use zcash_protocol::ShieldedProtocol;
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{fingerprint::SeedFingerprint, Scope};
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    ::transparent::address::TransparentAddress,
+    zcash_client_backend::wallet::WalletTransparentOutput,
+};
+
 use crate::error::Error;
+use crate::types::transparent::{
+    TransparentReceivedOutputSpends, TransparentReceivedOutputs, TransparentSpendCache,
+};
 use crate::types::*;
 
 /// The main in-memory wallet database. Implements all the traits needed to be used as a backend.
@@ -269,9 +275,11 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             0
         };
 
-        Ok(min(
+        Ok(core::cmp::min(
             1 << 31,
-            first_unmined_index.checked_add(GAP_LIMIT).unwrap(),
+            first_unmined_index
+                .checked_add(account::EPHEMERAL_GAP_LIMIT)
+                .unwrap(),
         ))
     }
 
@@ -331,7 +339,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .filter(|v| v.nullifier() == Some(&Nullifier::Sapling(nf)))
             .map(|v| v.note_id())
             .next()
-            .ok_or_else(|| Error::NoteNotFound)?;
+            .ok_or(Error::NoteNotFound)?;
         self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
     }
@@ -342,7 +350,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     pub(crate) fn note_is_spent(
         &self,
         note: &ReceivedNote,
-        min_confirmations: u32,
+        target_height: TargetHeight,
     ) -> Result<bool, Error> {
         let spend = self.received_note_spends.get(&note.note_id());
 
@@ -351,15 +359,16 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 let spending_tx = self
                     .tx_table
                     .get(txid)
-                    .ok_or_else(|| Error::TransactionNotFound(*txid))?;
+                    .ok_or(Error::TransactionNotFound(*txid))?;
                 match spending_tx.status() {
                     TransactionStatus::Mined(_height) => true,
                     TransactionStatus::TxidNotRecognized => unreachable!(),
                     TransactionStatus::NotInMainChain => {
-                        // check the expiry
-                        spending_tx.expiry_height().is_none() // no expiry, tx could be mined any time so we consider it spent
-                            // expiry is in the future so it could still be mined
-                            || spending_tx.expiry_height() > self.summary_height(min_confirmations)?
+                        // transaction either never expires, or expires in the future.
+                        spending_tx
+                            .expiry_height()
+                            .iter()
+                            .all(|h| *h >= BlockHeight::from(target_height))
                     }
                 }
             }
@@ -385,24 +394,26 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         &self,
         note: &ReceivedNote,
         birthday_height: BlockHeight,
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[<MemoryWalletDb<P> as InputSource>::NoteRef],
     ) -> Result<bool, Error> {
         let note_account = self
             .get_account(note.account_id())?
-            .ok_or_else(|| Error::AccountUnknown(note.account_id))?;
+            .ok_or(Error::AccountUnknown(note.account_id))?;
         let note_txn = self
             .tx_table
             .get(&note.txid())
             .ok_or_else(|| Error::TransactionNotFound(note.txid()))?;
 
         let unscanned_ranges = self.unscanned_ranges();
+        let anchor_height = target_height - u32::from(confirmations_policy.trusted());
 
         let note_in_unscanned_range =
             unscanned_ranges
                 .iter()
                 .any(|(start_height, end_height, start, end_exclusive)| {
-                    let in_range = note.commitment_tree_position.map_or(false, |pos| {
+                    let in_range = note.commitment_tree_position.is_some_and(|pos| {
                         if let (Some(start), Some(end_exclusive)) = (start, end_exclusive) {
                             pos >= *start && pos < *end_exclusive
                         } else {
@@ -412,36 +423,58 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                     in_range && *end_height > birthday_height && *start_height <= anchor_height
                 });
 
-        Ok(!self.note_is_spent(note, 0)?
+        Ok(!self.note_is_spent(note, target_height)?
             && !note_in_unscanned_range
             && note.note.value().into_u64() > 5000
             && note_account.ufvk().is_some()
-            && note.recipient_key_scope.is_some()
             && note.nullifier().is_some()
             && note.commitment_tree_position.is_some()
             && note_txn.mined_height().is_some()
-            && note_txn.mined_height().unwrap() <= anchor_height
+            && match note.recipient_key_scope {
+                Some(Scope::External) => {
+                    target_height.saturating_sub(u32::from(confirmations_policy.untrusted()))
+                        >= note_txn.mined_height().unwrap()
+                }
+                Some(Scope::Internal) => {
+                    target_height.saturating_sub(u32::from(confirmations_policy.trusted()))
+                        >= note_txn.mined_height().unwrap()
+                }
+                None => false,
+            }
             && !exclude.contains(&note.note_id()))
     }
 
     /// To be pending a note must be:
-    /// - ?
+    /// - mined, but without sufficient confirmations to be spent; or
+    /// - unmined and unexpired
     pub(crate) fn note_is_pending(
         &self,
         note: &ReceivedNote,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<bool, Error> {
-        if let (Some(summary_height), Some(received_height)) = (
-            self.summary_height(min_confirmations)?,
-            self.tx_table
-                .get(&note.txid())
-                .ok_or_else(|| Error::TransactionNotFound(note.txid()))?
-                .mined_height(),
-        ) {
-            Ok(received_height > summary_height)
-        } else {
-            Ok(true) // no summary height or note not mined means it's pending
-        }
+        let tx = self
+            .tx_table
+            .get(&note.txid())
+            .ok_or_else(|| Error::TransactionNotFound(note.txid()))?;
+
+        Ok(tx.mined_height().map_or_else(
+            || {
+                tx.expiry_height()
+                    .iter()
+                    .all(|h| *h >= BlockHeight::from(target_height))
+            },
+            |h| match note.recipient_key_scope {
+                // If we don't know the recipient key scope, we treat the note as untrusted.
+                Some(Scope::External) | None => {
+                    BlockHeight::from(target_height) - h
+                        < u32::from(confirmations_policy.untrusted())
+                }
+                Some(Scope::Internal) => {
+                    BlockHeight::from(target_height) - h < u32::from(confirmations_policy.trusted())
+                }
+            },
+        ))
     }
 
     pub(crate) fn summary_height(
@@ -469,7 +502,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .filter(|v| v.nullifier() == Some(&Nullifier::Orchard(nf)))
             .map(|v| v.note_id())
             .next()
-            .ok_or_else(|| Error::NoteNotFound)?;
+            .ok_or(Error::NoteNotFound)?;
         self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
     }
@@ -1008,7 +1041,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         receiving_account: &AccountId,
         known_unspent: bool,
     ) -> Result<OutPoint, Error> {
-        use transparent::ReceivedTransparentOutput;
+        use crate::types::transparent::ReceivedTransparentOutput;
 
         let address = output.recipient_address();
         // get the block height of the block that mined the output only if we have it in the block table

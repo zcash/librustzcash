@@ -27,9 +27,11 @@ impl Deref for TransactionDataRequestQueue {
 mod serialization {
     use super::*;
     use crate::{error::Error, proto::memwallet as proto, read_optional};
-    use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::{
-        consensus::Network::MainNetwork as EncodingParams, legacy::TransparentAddress,
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        ::transparent::address::TransparentAddress, zcash_keys::encoding::AddressCodec as _,
+        zcash_primitives::consensus::Network::MainNetwork as EncodingParams,
     };
 
     impl From<TransactionDataRequest> for proto::TransactionDataRequest {
@@ -50,16 +52,12 @@ mod serialization {
                     block_range_end: None,
                 },
                 #[cfg(feature = "transparent-inputs")]
-                TransactionDataRequest::SpendsFromAddress {
-                    address,
-                    block_range_start,
-                    block_range_end,
-                } => Self {
+                TransactionDataRequest::TransactionsInvolvingAddress(req) => Self {
                     request_type: proto::TransactionDataRequestType::SpendsFromAddress as i32,
                     tx_id: None,
-                    address: Some(address.encode(&EncodingParams).as_bytes().to_vec()),
-                    block_range_start: Some(block_range_start.into()),
-                    block_range_end: block_range_end.map(Into::into),
+                    address: Some(req.address().encode(&EncodingParams).as_bytes().to_vec()),
+                    block_range_start: Some(u32::from(req.block_range_start())),
+                    block_range_end: req.block_range_end().map(u32::from),
                 },
             }
         }
@@ -78,14 +76,21 @@ mod serialization {
                 }
                 #[cfg(feature = "transparent-inputs")]
                 proto::TransactionDataRequestType::SpendsFromAddress => {
-                    TransactionDataRequest::SpendsFromAddress {
-                        address: TransparentAddress::decode(
+                    use zcash_client_backend::data_api::{
+                        OutputStatusFilter, TransactionStatusFilter,
+                    };
+
+                    TransactionDataRequest::transactions_involving_address(
+                        TransparentAddress::decode(
                             &EncodingParams,
                             &String::from_utf8(read_optional!(request, address)?)?,
                         )?,
-                        block_range_start: read_optional!(request, block_range_start)?.into(),
-                        block_range_end: Some(read_optional!(request, block_range_end)?.into()),
-                    }
+                        read_optional!(request, block_range_start)?.into(),
+                        Some(read_optional!(request, block_range_end)?.into()),
+                        None,
+                        TransactionStatusFilter::Mined,
+                        OutputStatusFilter::All,
+                    )
                 }
                 #[cfg(not(feature = "transparent-inputs"))]
                 _ => panic!("invalid request type"),

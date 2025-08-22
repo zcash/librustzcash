@@ -3,7 +3,10 @@ use std::{
     ops::Deref,
 };
 
-use zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTx};
+use zcash_client_backend::{
+    data_api::{wallet::TargetHeight, TransactionStatus},
+    wallet::WalletTx,
+};
 use zcash_primitives::{
     consensus::BlockHeight,
     transaction::{Transaction, TxId},
@@ -41,7 +44,7 @@ pub(crate) struct TransactionEntry {
     ///   will only be set for transactions created using this wallet specifically, and not any
     ///   other wallet that uses the same seed (including previous installations of the same
     ///   wallet application.)
-    _target_height: Option<BlockHeight>,
+    _target_height: Option<TargetHeight>,
 }
 impl TransactionEntry {
     pub fn new_from_tx_meta(tx_meta: WalletTx<AccountId>, height: BlockHeight) -> Self {
@@ -78,12 +81,13 @@ impl TransactionEntry {
         self.raw.as_deref()
     }
 
+    #[cfg(feature = "transparent-inputs")]
     pub(crate) fn is_mined_or_unexpired_at(&self, height: BlockHeight) -> bool {
         match self.tx_status {
             TransactionStatus::Mined(tx_height) => tx_height <= height,
             TransactionStatus::NotInMainChain => self
                 .expiry_height
-                .map_or(false, |expiry_height| expiry_height > height),
+                .is_some_and(|expiry_height| expiry_height > height),
             _ => false,
         }
     }
@@ -102,8 +106,8 @@ impl TransactionTable {
         self.0.get(txid).map(|entry| entry.tx_status)
     }
 
-    pub(crate) fn _get_transaction(&self, txid: TxId) -> Option<&TransactionEntry> {
-        self.0.get(&txid)
+    pub(crate) fn get_transaction(&self, txid: &TxId) -> Option<&TransactionEntry> {
+        self.0.get(txid)
     }
 
     pub(crate) fn get_by_height_and_index(
@@ -168,7 +172,7 @@ impl TransactionTable {
         &mut self,
         tx: &Transaction,
         fee: Option<Zatoshis>,
-        target_height: Option<BlockHeight>,
+        target_height: Option<TargetHeight>,
     ) {
         match self.0.entry(tx.txid()) {
             Entry::Occupied(mut entry) => {
@@ -304,11 +308,13 @@ mod serialization {
                     }
                 },
                 block: entry.block.map(Into::into),
-                tx_index: entry.tx_index.map(Into::into),
+                tx_index: entry.tx_index,
                 expiry_height: entry.expiry_height.map(Into::into),
                 raw: entry.raw_tx,
                 fee: entry.fee.map(|fee| fee.try_into()).transpose()?,
-                _target_height: entry.target_height.map(Into::into),
+                _target_height: entry
+                    .target_height
+                    .map(|h| TargetHeight::from(BlockHeight::from(h))),
             })
         }
     }

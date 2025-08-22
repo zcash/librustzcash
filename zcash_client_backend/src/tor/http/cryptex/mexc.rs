@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData};
+use super::{retry_filter, Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the MEXC exchange.
@@ -43,10 +43,12 @@ impl Exchange for Mexc {
         // API documentation:
         // https://mexcdevelop.github.io/apidocs/spot_v3_en/#24hr-ticker-price-change-statistics
         let res = client
-            .get_json::<MexcData>(
+            .http_get_json::<MexcData>(
                 "https://api.mexc.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),
+                RETRY_LIMIT,
+                retry_filter,
             )
             .await?;
         let data = res.into_body();

@@ -111,7 +111,7 @@ pub enum Error {
     UnknownZip32Derivation,
 
     #[error("Error converting int to zip32: {0}")]
-    Zip32FromInt(#[from] zip32::TryFromIntError),
+    Zip32FromInt(zip32::TryFromIntError),
 }
 
 impl From<zcash_address::ParseError> for Error {
@@ -165,5 +165,11 @@ impl From<ShardTreeError<Infallible>> for Error {
 impl From<Vec<u8>> for Error {
     fn from(value: Vec<u8>) -> Self {
         Error::ByteVecToArrayConversion(value)
+    }
+}
+
+impl From<zip32::TryFromIntError> for Error {
+    fn from(value: zip32::TryFromIntError) -> Self {
+        Error::Zip32FromInt(value)
     }
 }

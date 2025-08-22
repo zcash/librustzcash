@@ -2,6 +2,7 @@
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
+use alloc::vec::Vec;
 use core::cmp::max;
 
 use ::transparent::bundle::OutPoint;
@@ -136,13 +137,12 @@ impl From<BalanceError> for FeeError {
     }
 }
 
-impl std::fmt::Display for FeeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for FeeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match &self {
             FeeError::Balance(e) => write!(
                 f,
-                "A balance calculation violated amount validity bounds: {}.",
-                e
+                "A balance calculation violated amount validity bounds: {e}."
             ),
             FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
         }
@@ -181,7 +181,7 @@ impl super::FeeRule for FeeRule {
 
         let t_out_total_size = transparent_output_sizes.into_iter().sum();
 
-        let ceildiv = |num: usize, den: usize| (num + den - 1) / den;
+        let ceildiv = |num: usize, den: usize| num.div_ceil(den);
 
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),

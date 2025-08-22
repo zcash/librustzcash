@@ -5,16 +5,20 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::ops::Shl;
 use core2::io::{self, Read, Write};
+use zcash_address::TryFromAddress;
+use zcash_protocol::consensus::NetworkType;
 
-use zcash_address::TryFromRawAddress;
 use zcash_encoding::Vector;
+
+#[cfg(feature = "transparent-inputs")]
+use sha2::{Digest, Sha256};
 
 /// Defined script opcodes.
 ///
 /// Most of the opcodes are unused by this crate, but we define them so that the alternate
 /// `Debug` impl for [`Script`] renders correctly for unexpected scripts.
 #[derive(Debug)]
-enum OpCode {
+pub(crate) enum OpCode {
     // push value
     Op0 = 0x00, // False
     PushData1 = 0x4c,
@@ -275,7 +279,7 @@ pub struct Script(pub Vec<u8>);
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct ScriptPrinter<'s>(&'s [u8]);
-        impl<'s> fmt::Debug for ScriptPrinter<'s> {
+        impl fmt::Debug for ScriptPrinter<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let mut l = f.debug_list();
                 let mut unknown: Option<String> = None;
@@ -286,7 +290,7 @@ impl fmt::Debug for Script {
                         }
                         l.entry(&opcode);
                     } else {
-                        let encoded = format!("{:02x}", b);
+                        let encoded = format!("{b:02x}");
                         if let Some(s) = &mut unknown {
                             s.push_str(&encoded);
                         } else {
@@ -406,18 +410,28 @@ impl TransparentAddress {
             }
         }
     }
+
+    /// Derives the P2PKH transparent address corresponding to the given pubkey.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn from_pubkey(pubkey: &secp256k1::PublicKey) -> Self {
+        TransparentAddress::PublicKeyHash(
+            *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
+        )
+    }
 }
 
-impl TryFromRawAddress for TransparentAddress {
+impl TryFromAddress for TransparentAddress {
     type Error = ();
 
-    fn try_from_raw_transparent_p2pkh(
+    fn try_from_transparent_p2pkh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(TransparentAddress::PublicKeyHash(data))
     }
 
-    fn try_from_raw_transparent_p2sh(
+    fn try_from_transparent_p2sh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data))

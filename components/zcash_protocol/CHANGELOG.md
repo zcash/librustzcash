@@ -3,15 +3,67 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
+
+## [0.6.1] - 2025-08-06
+
+### Added
+- `zcash_protocol::constants::`
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+- `impl Neg<Output = ZatBalance> for Zatoshis`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` is now a sealed trait, and may
+  no longer be implemented by third parties. In addition, it has added method
+  `b58_secret_key_prefix`.
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_1` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_1` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_1`.
+- The testnet activation height has been set for `consensus::BranchId::Nu6_1`
+
+## [0.6.0] - YANKED
+
+## [0.5.4] - 2025-07-15
+
+### Added
+- `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance>}`
+
+## [0.5.3] - 2025-06-12
+### Added
+  - `zcash_protocol::txid::TxId::is_null`
+
+## [0.5.2] - 2025-05-30
+### Added
+- `zcash_protocol::constants::`
+  - `V3_TX_VERSION`
+  - `V3_VERSION_GROUP_ID`
+  - `V4_TX_VERSION`
+  - `V4_VERSION_GROUP_ID`
+  - `V5_TX_VERSION`
+  - `V5_VERSION_GROUP_ID`
+
+## [0.5.1] - 2025-03-19
+### Added
+- `impl<P: zcash_protocol::consensus::Parameters> zcash::consensus::Parameters for &P`
+
+## [0.5.0] - 2025-02-21
+### Added
+- `zcash_protocol::memo::MemoBytes::into_bytes`
 
 ### Changed
 - `zcash_protocol::consensus::NetworkConstants` has added methods:
   - `hrp_unified_address`
   - `hrp_unified_fvk`
   - `hrp_unified_ivk`
+- Migrated to `incrementalmerkletree 0.8` for functionality provided
+  under the `test-dependencies` feature flag.
 
 ## [0.4.3] - 2024-12-16
 ### Added

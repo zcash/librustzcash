@@ -83,22 +83,25 @@ mod tests {
     use zip32::AccountId;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
-    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::init::WalletMigrator,
+        WalletDb,
+    };
 
     #[test]
     fn migrate() {
         let data_file = NamedTempFile::new().unwrap();
         let network = Network::TestNetwork;
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
 
         let seed_bytes = vec![0xab; 32];
-        init_wallet_db_internal(
-            &mut db_data,
-            Some(Secret::new(seed_bytes.clone())),
-            DEPENDENCIES,
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes.clone()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
 
         let usk =
             UnifiedSpendingKey::from_seed(&network, &seed_bytes[..], AccountId::ZERO).unwrap();
@@ -119,12 +122,10 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db_internal(
-            &mut db_data,
-            Some(Secret::new(seed_bytes)),
-            &[MIGRATION_ID],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
     }
 }

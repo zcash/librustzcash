@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.16.0"
+version = "0.19.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -29,7 +29,7 @@ zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_note_encryption.workspace = true
-zcash_primitives.workspace = true
+zcash_primitives = { workspace = true, features = ["std", "circuits"] }
 zcash_protocol.workspace = true
 zip32.workspace = true
 zip321.workspace = true
@@ -90,15 +90,14 @@ jubjub = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 zcash_proofs = { workspace = true, optional = true }
 
-# - ZIP 321
-nom = "7"
-
 # - Tor
+# -- Exposed types: `arti_client::DormantMode`, `fs_mistrust::MistrustBuilder`.
 # -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
 #    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
 #    changes to error handling.
 arti-client = { workspace = true, optional = true }
 dynosaur = { workspace = true, optional = true }
+fs-mistrust = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["client", "http1"] }
 serde_json = { workspace = true, optional = true }
 trait-variant = { workspace = true, optional = true }
@@ -132,9 +131,17 @@ serde = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true, optional = true }
 
+# Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
+time-core.workspace = true
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
-which = "6"
+which = "7"
 
 [dev-dependencies]
 ambassador.workspace = true
@@ -146,6 +153,7 @@ proptest.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
+tempfile = "3.5.0"
 tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
@@ -176,6 +184,9 @@ transparent-inputs = [
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 
+## Enables compatibility with legacy zcashd wallet data
+zcashd-compat = ["zcash_keys/zcashd-compat"]
+
 ## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
 pczt = [
   "orchard",
@@ -203,6 +214,7 @@ sync = [
 tor = [
     "dep:arti-client",
     "dep:dynosaur",
+    "dep:fs-mistrust",
     "dep:futures-util",
     "dep:http-body-util",
     "dep:hyper",
@@ -220,6 +232,9 @@ tor = [
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
+##
+## NOTE: Semver-breaking changes to the APIs exposed by this feature may be
+## present in any release version, including patch releases.
 test-dependencies = [
     "dep:ambassador",
     "dep:assert_matches",
@@ -259,3 +274,6 @@ bench = false
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

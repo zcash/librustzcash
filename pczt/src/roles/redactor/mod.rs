@@ -1,3 +1,10 @@
+//! The Redactor role (anyone can execute).
+//!
+//! - Removes information that is unnecessary for subsequent entities to proceed.
+//! - This can be useful e.g. when creating a transaction that has inputs from multiple
+//!   independent Signers; each can receive a PCZT with just the information they need
+//!   to sign, but (e.g.) not the `alpha` values for other Signers.
+
 use crate::{common::Global, Pczt};
 
 pub mod orchard;
@@ -32,7 +39,7 @@ impl Redactor {
 /// An Redactor for the global transaction details.
 pub struct GlobalRedactor<'a>(&'a mut Global);
 
-impl<'a> GlobalRedactor<'a> {
+impl GlobalRedactor<'_> {
     /// Redacts the proprietary value at the given key.
     pub fn redact_proprietary(&mut self, key: &str) {
         self.0.proprietary.remove(key);

@@ -2,11 +2,9 @@
 
 use crate::{
     extensions::transparent as tze,
-    transaction::components::{
-        amount::Amount,
-        tze::{builder::TzeBuildInput, OutPoint, TzeOut},
-    },
+    transaction::components::tze::{builder::TzeBuildInput, OutPoint, TzeOut},
 };
+use zcash_protocol::value::Zatoshis;
 
 /// This trait provides a minimized view of a TZE input suitable for use in
 /// fee computation.
@@ -30,13 +28,13 @@ impl InputView for TzeBuildInput {
 /// fee computation.
 pub trait OutputView {
     /// The value of the newly created output
-    fn value(&self) -> Amount;
+    fn value(&self) -> Zatoshis;
     /// The precondition that must be satisfied in order to spend this output.
     fn precondition(&self) -> &tze::Precondition;
 }
 
 impl OutputView for TzeOut {
-    fn value(&self) -> Amount {
+    fn value(&self) -> Zatoshis {
         self.value
     }
 

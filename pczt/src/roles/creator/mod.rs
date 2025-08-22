@@ -1,3 +1,7 @@
+//! The Creator role (single entity).
+//!
+//!  - Creates the base PCZT with no information about spends or outputs.
+
 use alloc::collections::BTreeMap;
 
 use crate::{
@@ -5,8 +9,10 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+    Pczt,
 };
+
+use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 /// Initial flags allowing any modification.
 const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
@@ -104,15 +110,20 @@ impl Creator {
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
         use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
-        use zcash_protocol::consensus::NetworkConstants;
+        use zcash_protocol::{consensus::NetworkConstants, constants::V4_TX_VERSION};
 
-        use crate::{common::FLAG_HAS_SIGHASH_SINGLE, SAPLING_TX_VERSION};
+        use crate::common::FLAG_HAS_SIGHASH_SINGLE;
+
+        #[cfg(zcash_unstable = "nu7")]
+        use zcash_protocol::constants::V6_TX_VERSION;
 
         let tx_version = match parts.version {
             zcash_primitives::transaction::TxVersion::Sprout(_)
-            | zcash_primitives::transaction::TxVersion::Overwinter => None,
-            zcash_primitives::transaction::TxVersion::Sapling => Some(SAPLING_TX_VERSION),
-            zcash_primitives::transaction::TxVersion::Zip225 => Some(V5_TX_VERSION),
+            | zcash_primitives::transaction::TxVersion::V3 => None,
+            zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
+            zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
+            #[cfg(zcash_unstable = "nu7")]
+            zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
             #[cfg(zcash_unstable = "zfuture")]
             zcash_primitives::transaction::TxVersion::ZFuture => None,
         }?;
@@ -120,7 +131,7 @@ impl Creator {
         // Spends and outputs not modifiable.
         let mut tx_modifiable = 0b0000_0000;
         // Check if any input is using `SIGHASH_SINGLE` (with or without `ANYONECANPAY`).
-        if parts.transparent.as_ref().map_or(false, |bundle| {
+        if parts.transparent.as_ref().is_some_and(|bundle| {
             bundle.inputs().iter().any(|input| {
                 (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE
             })

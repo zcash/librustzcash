@@ -11,6 +11,10 @@ mod grpc;
 
 pub mod http;
 
+// Re-exported as this is currently the only `arti_client` type users would need to use
+// our minimal client API.
+pub use arti_client::DormantMode;
+
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
 pub struct Client {
@@ -24,20 +28,32 @@ impl Client {
     /// Preserving the contents of this directory will speed up subsequent calls to
     /// `Client::create`.
     ///
+    /// If the `with_permissions` closure does not make any changes (e.g. is
+    /// passed as `|_| {}`), the default from [`arti_client`] will be used.
+    /// This default will enable permissions checks unless the
+    /// `ARTI_FS_DISABLE_PERMISSION_CHECKS` env variable is set.
+    ///
     /// Returns an error if `tor_dir` does not exist, or if bootstrapping fails.
-    pub async fn create(tor_dir: &Path) -> Result<Self, Error> {
+    pub async fn create(
+        tor_dir: &Path,
+        with_permissions: impl FnOnce(&mut fs_mistrust::MistrustBuilder),
+    ) -> Result<Self, Error> {
         let runtime = PreferredRuntime::current()?;
 
         if !tokio::fs::try_exists(tor_dir).await? {
             return Err(Error::MissingTorDirectory);
         }
 
-        let config = TorClientConfigBuilder::from_directories(
+        let mut config_builder = TorClientConfigBuilder::from_directories(
             tor_dir.join("arti-data"),
             tor_dir.join("arti-cache"),
-        )
-        .build()
-        .expect("all required fields initialized");
+        );
+
+        with_permissions(config_builder.storage().permissions());
+
+        let config = config_builder
+            .build()
+            .expect("all required fields initialized");
 
         let client_builder = TorClient::with_runtime(runtime).config(config);
 
@@ -46,6 +62,24 @@ impl Client {
         debug!("Tor bootstrapped");
 
         Ok(Self { inner })
+    }
+
+    /// Ensures the Tor client is bootstrapped.
+    ///
+    /// This should be called first inside every public method that makes network requests
+    /// using the Tor client.
+    ///
+    /// `Client` ensures it cannot be constructed in an un-bootstrapped state, but Tor
+    /// clients can become less bootstrapped over time (for example if it loses its
+    /// internet connectivity, or if its directory information expires before it's able to
+    /// replace it).
+    async fn ensure_bootstrapped(&self) -> Result<(), Error> {
+        if !self.inner.bootstrap_status().ready_for_traffic() {
+            debug!("Re-bootstrapping Tor");
+            self.inner.bootstrap().await?;
+            debug!("Tor re-bootstrapped");
+        }
+        Ok(())
     }
 
     /// Returns a new isolated `tor::Client` handle.
@@ -68,6 +102,17 @@ impl Client {
         Self {
             inner: self.inner.isolated_client(),
         }
+    }
+
+    /// Changes the client's current dormant mode, putting background tasks to sleep or
+    /// waking them up as appropriate.
+    ///
+    /// This can be used to conserve CPU usage if you aren’t planning on using the client
+    /// for a while, especially on mobile platforms.
+    ///
+    /// See the [`DormantMode`] documentation for more details.
+    pub fn set_dormant(&self, mode: DormantMode) {
+        self.inner.set_dormant(mode);
     }
 }
 
@@ -92,10 +137,10 @@ impl fmt::Display for Error {
         match self {
             Error::MissingTorDirectory => write!(f, "Tor directory is missing"),
             #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-            Error::Grpc(e) => write!(f, "gRPC-over-Tor error: {}", e),
-            Error::Http(e) => write!(f, "HTTP-over-Tor error: {}", e),
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::Tor(e) => write!(f, "Tor error: {}", e),
+            Error::Grpc(e) => write!(f, "gRPC-over-Tor error: {e}"),
+            Error::Http(e) => write!(f, "HTTP-over-Tor error: {e}"),
+            Error::Io(e) => write!(f, "IO error: {e}"),
+            Error::Tor(e) => write!(f, "Tor error: {e}"),
         }
     }
 }

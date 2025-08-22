@@ -1,3 +1,5 @@
+//! The Sapling fields of a PCZT.
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -27,11 +29,13 @@ pub struct Bundle {
     /// This is initialized by the Creator, and updated by the Constructor as spends or
     /// outputs are added to the PCZT. It enables per-spend and per-output values to be
     /// redacted from the PCZT after they are no longer necessary.
+    #[getset(get = "pub")]
     pub(crate) value_sum: i128,
 
     /// The Sapling anchor for this transaction.
     ///
     /// Set by the Creator.
+    #[getset(get = "pub")]
     pub(crate) anchor: [u8; 32],
 
     /// The Sapling binding signature signing key.
@@ -51,8 +55,11 @@ pub struct Spend {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) cv: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) nullifier: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) rk: [u8; 32],
 
     /// The Spend proof.
@@ -161,8 +168,11 @@ pub struct Output {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) cv: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) cmu: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) ephemeral_key: [u8; 32],
     /// The encrypted note plaintext for the output.
     ///
@@ -172,10 +182,12 @@ pub struct Output {
     /// Outputs. For now, the Constructor sets both at the same time.
     ///
     /// [memo bundles]: https://zips.z.cash/zip-0231
+    #[getset(get = "pub")]
     pub(crate) enc_ciphertext: Vec<u8>,
     /// The encrypted note plaintext for the output.
     ///
     /// Encoded as a `Vec<u8>` because its length depends on the transaction version.
+    #[getset(get = "pub")]
     pub(crate) out_ciphertext: Vec<u8>,
 
     /// The Output proof.
