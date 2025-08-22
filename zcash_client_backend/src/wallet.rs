@@ -67,7 +67,7 @@ impl NoteId {
 /// * for wallet-internal outputs, the internal account ID and metadata about the note.
 /// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
 ///   internal account ID and metadata about the outpoint;
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
     External {
         recipient_address: ZcashAddress,
