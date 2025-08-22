@@ -348,23 +348,6 @@ pub(crate) fn to_spendable_notes(
     ))
 }
 
-#[derive(PartialEq, PartialOrd, Eq, Ord, Debug)]
-pub enum SentNoteId {
-    Shielded(NoteId),
-}
-
-impl From<NoteId> for SentNoteId {
-    fn from(note_id: NoteId) -> Self {
-        SentNoteId::Shielded(note_id)
-    }
-}
-
-impl From<&NoteId> for SentNoteId {
-    fn from(note_id: &NoteId) -> Self {
-        SentNoteId::Shielded(*note_id)
-    }
-}
-
 mod serialization {
     use super::*;
     use crate::{proto::memwallet as proto, read_optional};

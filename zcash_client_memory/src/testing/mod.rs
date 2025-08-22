@@ -83,7 +83,7 @@ where
 {
     type Handle = ();
 
-    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> () {
+    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) {
         let new_wallet = MemoryWalletDb::new(st.wallet().params.clone(), 100);
         let _ = std::mem::replace(st.wallet_mut(), new_wallet);
     }

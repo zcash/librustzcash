@@ -28,7 +28,7 @@ impl Eq for MemoryWalletBlock {}
 
 impl PartialOrd for MemoryWalletBlock {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some((self.height, self.block_time).cmp(&(other.height, other.block_time)))
+        Some(self.cmp(other))
     }
 }
 

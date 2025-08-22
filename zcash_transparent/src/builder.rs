@@ -459,7 +459,7 @@ impl Bundle<Unauthorized> {
         self,
         calculate_sighash: F,
         secp_ctx: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-    ) -> Result<TransparentSignatureContext<secp256k1::VerifyOnly>, Error>
+    ) -> Result<TransparentSignatureContext<'_, secp256k1::VerifyOnly>, Error>
     where
         F: Fn(SignableInput) -> [u8; 32], // The closure's signature
     {

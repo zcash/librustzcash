@@ -6,7 +6,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     num::NonZeroU32,
     ops::{Range, RangeInclusive},
-    usize,
 };
 
 use ::transparent::bundle::OutPoint;

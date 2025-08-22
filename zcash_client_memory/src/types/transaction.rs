@@ -258,7 +258,7 @@ impl TxLocatorMap {
     pub(crate) fn get(&self, height: BlockHeight, index: u32) -> Option<&TxId> {
         self.0.get(&(height, index))
     }
-    pub(crate) fn entry(&mut self, k: (BlockHeight, u32)) -> Entry<(BlockHeight, u32), TxId> {
+    pub(crate) fn entry(&mut self, k: (BlockHeight, u32)) -> Entry<'_, (BlockHeight, u32), TxId> {
         self.0.entry(k)
     }
 }

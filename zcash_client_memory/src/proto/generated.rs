@@ -432,14 +432,11 @@ pub struct MemoryWallet {
     pub orchard_tree_shard_end_heights: ::prost::alloc::vec::Vec<TreeEndHeightsRecord>,
     /// UTXOs known to this wallet
     #[prost(message, repeated, tag = "15")]
-    pub transparent_received_outputs: ::prost::alloc::vec::Vec<
-        TransparentReceivedOutputRecord,
-    >,
+    pub transparent_received_outputs: ::prost::alloc::vec::Vec<TransparentReceivedOutputRecord>,
     /// UTXOs spent by this wallet
     #[prost(message, repeated, tag = "16")]
-    pub transparent_received_output_spends: ::prost::alloc::vec::Vec<
-        TransparentReceivedOutputSpendRecord,
-    >,
+    pub transparent_received_output_spends:
+        ::prost::alloc::vec::Vec<TransparentReceivedOutputSpendRecord>,
     /// Map from spends to their location in the blockchain
     #[prost(message, repeated, tag = "17")]
     pub transparent_spend_map: ::prost::alloc::vec::Vec<TransparentSpendCacheRecord>,
