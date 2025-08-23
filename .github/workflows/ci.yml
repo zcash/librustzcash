@@ -209,7 +209,6 @@ jobs:
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
-          -- --ignored
       - name: Verify working directory is clean
         run: git diff --exit-code
 
