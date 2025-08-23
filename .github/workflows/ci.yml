@@ -536,6 +536,8 @@ jobs:
           cargo check
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: run cargo-fmt to handle the case that regeneration sometimes produces unformatted output
+        run: cargo fmt
       - name: Verify working directory is clean
         run: git diff --exit-code
 
