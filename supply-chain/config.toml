@@ -1513,6 +1513,10 @@ criteria = "safe-to-deploy"
 version = "0.2.88"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasm_sync]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.weak-table]]
 version = "0.3.2"
 criteria = "safe-to-deploy"

@@ -68,7 +68,6 @@ bytes = "1.9.0"
 ciborium = "0.2.2"
 serde_json.workspace = true
 postcard = { version = "1.0.10", features = ["alloc"] }
-pretty_assertions = "1.4.1"
 zcash_client_backend = { workspace = true, features = ["test-dependencies"] }
 
 
@@ -98,4 +97,4 @@ zcashd-compat = ["zcash_keys/zcashd-compat", "zcash_client_backend/zcashd-compat
 
 [build-dependencies]
 prost-build = "0.13.3"
-which = "6"
+which = "7"

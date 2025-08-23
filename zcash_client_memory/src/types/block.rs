@@ -127,7 +127,6 @@ mod serialization {
     mod tests {
         use super::*;
         use crate::proto::memwallet as proto;
-        use pretty_assertions::assert_eq;
         use zcash_primitives::block::BlockHash;
 
         #[test]
