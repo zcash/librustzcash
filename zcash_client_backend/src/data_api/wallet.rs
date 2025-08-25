@@ -659,7 +659,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     spend_from_account: <DbT as InputSource>::AccountId,
     spend_pools: &[ShieldedProtocol],
     fee_rule: &FeeRuleT,
-    recipient: &Address,
+    recipient: ZcashAddress,
     memo: Option<MemoBytes>,
     mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,

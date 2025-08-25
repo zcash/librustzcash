@@ -8,7 +8,7 @@ use std::{
 };
 
 use ::transparent::bundle::TxOut;
-use zcash_address::ConversionError;
+use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
     transparent::InputSize,
@@ -704,7 +704,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     anchor_height: BlockHeight,
     mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
-    recipient: &Address,
+    recipient: ZcashAddress,
     memo: Option<MemoBytes>,
 ) -> Result<
     Proposal<FeeRuleT, InputSourceT::NoteRef>,
@@ -769,7 +769,11 @@ where
     #[cfg(feature = "orchard")]
     let use_orchard = orchard_action_count > 0;
 
-    let (tr0_fee, tr1_fee) = match recipient {
+    let recipient_address: Address = recipient
+        .clone()
+        .convert_if_network(params.network_type())?;
+
+    let (tr0_fee, tr1_fee) = match recipient_address {
         Address::Sapling(_) => fee_rule
             .fee_required(
                 params,
@@ -870,19 +874,12 @@ where
     let tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
         .expect("the sum of an single-element vector of fee values cannot overflow");
 
-    let payment = zip321::Payment::new(
-        recipient.to_zcash_address(params),
-        total_to_recipient,
-        memo,
-        None,
-        None,
-        vec![],
-    )
-    .ok_or_else(|| {
-        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
-            0,
-        )))
-    })?;
+    let payment = zip321::Payment::new(recipient, total_to_recipient, memo, None, None, vec![])
+        .ok_or_else(|| {
+            InputSelectorError::Proposal(ProposalError::Zip321(
+                zip321::Zip321Error::TransparentMemo(0),
+            ))
+        })?;
 
     let transaction_request =
         TransactionRequest::new(vec![payment.clone()]).map_err(|payment_error| {

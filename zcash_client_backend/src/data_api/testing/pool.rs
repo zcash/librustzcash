@@ -80,7 +80,6 @@ use {
     },
     zcash_proofs::prover::LocalTxProver,
     zcash_protocol::{value::ZatBalance, TxId},
-    zip321::Zip321Error,
 };
 
 #[cfg(feature = "orchard")]
@@ -513,7 +512,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to,
+            to.to_zcash_address(st.network()),
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::MaxSpendable,
             confirmation_policy,
@@ -672,7 +671,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to,
+            to.to_zcash_address(st.network()),
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
@@ -785,6 +784,8 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
+    use zip321::Zip321Error;
+
     use crate::data_api::MaxSpendMode;
 
     let mut st = TestBuilder::new()
@@ -830,7 +831,7 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
         st.propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to,
+            to.to_zcash_address(st.network()),
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN
@@ -909,7 +910,7 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
         st.propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to,
+            to.to_zcash_address(st.network()),
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::new_symmetrical_unchecked(
@@ -991,7 +992,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to,
+            to.to_zcash_address(st.network()),
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::MaxSpendable,
             ConfirmationsPolicy::new_symmetrical_unchecked(
@@ -1180,7 +1181,7 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
             .propose_send_max_transfer(
                 account_id,
                 &fee_rule,
-                tex_addr.clone(),
+                tex_addr.to_zcash_address(st.network()),
                 None,
                 MaxSpendMode::Everything,
                 ConfirmationsPolicy::MIN,
@@ -1533,7 +1534,7 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
             .propose_send_max_transfer(
                 account_id,
                 &fee_rule,
-                tex_addr.clone(),
+                tex_addr.to_zcash_address(st.network()),
                 None,
                 MaxSpendMode::Everything,
                 ConfirmationsPolicy::MIN,
@@ -1889,7 +1890,7 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
             .propose_send_max_transfer(
                 account_id,
                 &fee_rule,
-                tex_addr.clone(),
+                tex_addr.to_zcash_address(st.network()),
                 None,
                 MaxSpendMode::Everything,
                 ConfirmationsPolicy::MIN,
