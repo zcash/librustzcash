@@ -65,10 +65,10 @@ fn transparent_to_orchard() {
 
     // Pretend we already have a transparent coin.
     let utxo = transparent::OutPoint::fake();
-    let coin = transparent::TxOut {
-        value: Zatoshis::const_from_u64(1_000_000),
-        script_pubkey: transparent_addr.script(),
-    };
+    let coin = transparent::TxOut::new(
+        Zatoshis::const_from_u64(1_000_000),
+        transparent_addr.script(),
+    );
 
     // Create the transaction's I/O.
     let mut builder = Builder::new(

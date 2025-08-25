@@ -1170,16 +1170,15 @@ mod tests {
             .derive_external_secret_key(NonHardenedChildIndex::ZERO)
             .unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
-        let prev_coin = TxOut {
-            value: Zatoshis::const_from_u64(50000),
-            script_pubkey: tsk
-                .to_account_pubkey()
+        let prev_coin = TxOut::new(
+            Zatoshis::const_from_u64(50000),
+            tsk.to_account_pubkey()
                 .derive_external_ivk()
                 .unwrap()
                 .derive_address(NonHardenedChildIndex::ZERO)
                 .unwrap()
                 .script(),
-        };
+        );
         builder
             .add_transparent_input(pubkey, OutPoint::fake(), prev_coin)
             .unwrap();

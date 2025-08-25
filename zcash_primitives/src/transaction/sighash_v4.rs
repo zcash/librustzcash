@@ -36,7 +36,7 @@ macro_rules! update_hash {
 fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 36);
     for t_in in vin {
-        t_in.prevout.write(&mut data).unwrap();
+        t_in.prevout().write(&mut data).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -47,7 +47,7 @@ fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash
 fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
-        data.extend_from_slice(&t_in.sequence.to_le_bytes());
+        data.extend_from_slice(&t_in.sequence().to_le_bytes());
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -234,10 +234,13 @@ pub fn v4_signature_hash<
             SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-                    bundle.vin[*input.index()].prevout.write(&mut data).unwrap();
+                    bundle.vin[*input.index()]
+                        .prevout()
+                        .write(&mut data)
+                        .unwrap();
                     input.script_code().write(&mut data).unwrap();
                     data.extend_from_slice(&input.value().to_i64_le_bytes());
-                    data.extend_from_slice(&bundle.vin[*input.index()].sequence.to_le_bytes());
+                    data.extend_from_slice(&bundle.vin[*input.index()].sequence().to_le_bytes());
                     h.update(&data);
                 } else {
                     panic!(

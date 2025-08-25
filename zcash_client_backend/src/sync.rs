@@ -516,11 +516,11 @@ where
                             .try_into()
                             .map_err(|_| Error::MisbehavingServer)?,
                     ),
-                    TxOut {
-                        value: Zatoshis::from_nonnegative_i64(reply.value_zat)
+                    TxOut::new(
+                        Zatoshis::from_nonnegative_i64(reply.value_zat)
                             .map_err(|_| Error::MisbehavingServer)?,
-                        script_pubkey: Script(reply.script),
-                    },
+                        Script(reply.script),
+                    ),
                     Some(
                         BlockHeight::try_from(reply.height)
                             .map_err(|_| Error::MisbehavingServer)?,
