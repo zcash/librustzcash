@@ -678,6 +678,10 @@ where
         .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
+    if memo.is_some() && !recipient.can_receive_memo() {
+        return Err(Error::MemoForbidden);
+    }
+
     let proposal = propose_send_max(
         params,
         wallet_db,

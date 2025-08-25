@@ -784,8 +784,6 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use zip321::Zip321Error;
-
     use crate::data_api::MaxSpendMode;
 
     let mut st = TestBuilder::new()
@@ -836,9 +834,7 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN
         ),
-        Err(data_api::error::Error::Proposal(ProposalError::Zip321(
-            Zip321Error::TransparentMemo(0)
-        )))
+        Err(data_api::error::Error::MemoForbidden)
     );
 }
 
