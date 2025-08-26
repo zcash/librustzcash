@@ -259,7 +259,7 @@ where
 
                 let sent_txo_value: u64 = received_txo
                     .iter()
-                    .map(|(_, o)| u64::from(o.txout.value))
+                    .map(|(_, o)| u64::from(o.txout.value()))
                     .sum();
 
                 // notes received by the transaction

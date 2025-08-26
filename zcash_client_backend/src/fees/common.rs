@@ -61,7 +61,7 @@ where
 
     let t_in = transparent_inputs
         .iter()
-        .map(|t_in| t_in.coin().value)
+        .map(|t_in| t_in.coin().value())
         .chain(ephemeral_balance.and_then(|b| b.ephemeral_input_amount()))
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
@@ -586,7 +586,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
         .filter_map(|i| {
             // For now, we're just assuming P2PKH inputs, so we don't check the
             // size of the input script.
-            if i.coin().value <= marginal_fee {
+            if i.coin().value() <= marginal_fee {
                 Some(i.outpoint().clone())
             } else {
                 None

@@ -256,10 +256,12 @@ fn zip_0244() {
                 vin: b
                     .vin
                     .iter()
-                    .map(|vin| TxIn {
-                        prevout: vin.prevout.clone(),
-                        script_sig: vin.script_sig.clone(),
-                        sequence: vin.sequence,
+                    .map(|vin| {
+                        TxIn::from_parts(
+                            vin.prevout().clone(),
+                            vin.script_sig().clone(),
+                            vin.sequence(),
+                        )
                     })
                     .collect(),
                 vout: b.vout.clone(),
@@ -415,10 +417,12 @@ fn zip_0233() {
                 vin: b
                     .vin
                     .iter()
-                    .map(|vin| TxIn {
-                        prevout: vin.prevout.clone(),
-                        script_sig: vin.script_sig.clone(),
-                        sequence: vin.sequence,
+                    .map(|vin| {
+                        TxIn::from_parts(
+                            vin.prevout().clone(),
+                            vin.script_sig().clone(),
+                            vin.sequence(),
+                        )
                     })
                     .collect(),
                 vout: b.vout.clone(),

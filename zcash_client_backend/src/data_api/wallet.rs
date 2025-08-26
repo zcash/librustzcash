@@ -2284,7 +2284,7 @@ where
                         Ok(SentTransactionOutput::from_parts(
                             output_index,
                             recipient,
-                            output.value,
+                            output.value(),
                             None,
                         ))
                     })

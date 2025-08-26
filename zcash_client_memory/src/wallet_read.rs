@@ -711,7 +711,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 balances
                     .entry(address)
                     .or_insert(Balance::ZERO)
-                    .add_spendable_value(txo.txout.value)?;
+                    .add_spendable_value(txo.txout.value())?;
             }
         }
 

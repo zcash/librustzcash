@@ -707,10 +707,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(
         outpoint,
-        TxOut {
-            value,
-            script_pubkey,
-        },
+        TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
     )
     .ok_or_else(|| {
@@ -1633,8 +1630,8 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         ":account_id": account_id.0,
         ":address_id": address_id.0,
         ":address": output.recipient_address().encode(params),
-        ":script": &output.txout().script_pubkey.0,
-        ":value_zat": &i64::from(ZatBalance::from(output.txout().value)),
+        ":script": &output.txout().script_pubkey().0,
+        ":value_zat": &i64::from(ZatBalance::from(output.txout().value())),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
 

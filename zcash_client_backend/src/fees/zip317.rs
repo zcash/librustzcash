@@ -628,10 +628,7 @@ mod tests {
                 .unwrap()
                 .into(),
             &[] as &[TestTransparentInput],
-            &[TxOut {
-                value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
-            }],
+            &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -676,15 +673,12 @@ mod tests {
                 .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
-                coin: TxOut {
-                    value: Zatoshis::const_from_u64(50000),
-                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
-                },
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(50000),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                ),
             }],
-            &[TxOut {
-                value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
-            }],
+            &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -722,15 +716,12 @@ mod tests {
                 .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
-                coin: TxOut {
-                    value: Zatoshis::const_from_u64(63000),
-                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
-                },
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(63000),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                ),
             }],
-            &[TxOut {
-                value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
-            }],
+            &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -774,15 +765,12 @@ mod tests {
                 .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
-                coin: TxOut {
-                    value: Zatoshis::const_from_u64(56000),
-                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
-                },
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(56000),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                ),
             }],
-            &[TxOut {
-                value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
-            }],
+            &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,

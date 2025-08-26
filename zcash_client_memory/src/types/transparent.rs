@@ -185,8 +185,8 @@ mod serialization {
     impl From<TxOut> for proto::TxOut {
         fn from(txout: TxOut) -> Self {
             Self {
-                script: txout.script_pubkey.0,
-                value: txout.value.into(),
+                script: txout.script_pubkey().0.clone(),
+                value: u64::from(txout.value()),
             }
         }
     }
@@ -195,10 +195,10 @@ mod serialization {
         type Error = crate::Error;
 
         fn try_from(txout: proto::TxOut) -> Result<Self, Self::Error> {
-            Ok(Self {
-                script_pubkey: Script(txout.script),
-                value: Zatoshis::try_from(txout.value)?,
-            })
+            Ok(Self::new(
+                Zatoshis::try_from(txout.value)?,
+                Script(txout.script),
+            ))
         }
     }
 }

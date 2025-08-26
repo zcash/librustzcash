@@ -201,7 +201,7 @@ impl TransparentBuilder {
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
-        match coin.script_pubkey.address() {
+        match coin.script_pubkey().address() {
             Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
@@ -220,10 +220,7 @@ impl TransparentBuilder {
     }
 
     pub fn add_output(&mut self, to: &TransparentAddress, value: Zatoshis) -> Result<(), Error> {
-        self.vout.push(TxOut {
-            value,
-            script_pubkey: to.script(),
-        });
+        self.vout.push(TxOut::new(value, to.script()));
 
         Ok(())
     }
@@ -233,7 +230,7 @@ impl TransparentBuilder {
         let input_sum = self
             .inputs
             .iter()
-            .map(|input| input.coin.value)
+            .map(|input| input.coin.value())
             .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
@@ -243,7 +240,7 @@ impl TransparentBuilder {
         let output_sum = self
             .vout
             .iter()
-            .map(|vo| vo.value)
+            .map(|vo| vo.value())
             .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
@@ -288,8 +285,8 @@ impl TransparentBuilder {
                 required_time_lock_time: None,
                 required_height_lock_time: None,
                 script_sig: None,
-                value: i.coin.value,
-                script_pubkey: i.coin.script_pubkey.clone(),
+                value: i.coin.value(),
+                script_pubkey: i.coin.script_pubkey().clone(),
                 // We don't currently support spending P2SH coins.
                 redeem_script: None,
                 partial_signatures: BTreeMap::new(),
@@ -313,8 +310,8 @@ impl TransparentBuilder {
                 .vout
                 .into_iter()
                 .map(|o| pczt::Output {
-                    value: o.value,
-                    script_pubkey: o.script_pubkey,
+                    value: o.value(),
+                    script_pubkey: o.script_pubkey().clone(),
                     // We don't currently support spending P2SH coins, so we only ever see
                     // external P2SH recipients here, for which we never know the redeem
                     // script.
@@ -342,10 +339,7 @@ impl TransparentBuilder {
 
         let script = Script::default() << OpCode::Return << data;
 
-        self.vout.push(TxOut {
-            value: Zatoshis::ZERO,
-            script_pubkey: script,
-        });
+        self.vout.push(TxOut::new(Zatoshis::ZERO, script));
         Ok(())
     }
 }
@@ -353,11 +347,7 @@ impl TransparentBuilder {
 impl TxIn<Unauthorized> {
     #[cfg(feature = "transparent-inputs")]
     pub fn new(prevout: OutPoint) -> Self {
-        TxIn {
-            prevout,
-            script_sig: (),
-            sequence: u32::MAX,
-        }
+        TxIn::from_parts(prevout, (), u32::MAX)
     }
 }
 
@@ -375,13 +365,13 @@ impl TransparentAuthorizingContext for Unauthorized {
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
     fn input_amounts(&self) -> Vec<Zatoshis> {
-        self.inputs.iter().map(|txin| txin.coin.value).collect()
+        self.inputs.iter().map(|txin| txin.coin.value()).collect()
     }
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
         self.inputs
             .iter()
-            .map(|txin| txin.coin.script_pubkey.clone())
+            .map(|txin| txin.coin.script_pubkey().clone())
             .collect()
     }
 }
@@ -413,9 +403,9 @@ impl Bundle<Unauthorized> {
                 let sighash = calculate_sighash(SignableInput {
                     hash_type: SighashType::ALL,
                     index,
-                    script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
-                    script_pubkey: &info.coin.script_pubkey,
-                    value: info.coin.value,
+                    script_code: info.coin.script_pubkey(), // for p2pkh, always the same as script_pubkey
+                    script_pubkey: info.coin.script_pubkey(),
+                    value: info.coin.value(),
                 });
 
                 let msg = secp256k1::Message::from_digest(sighash);
@@ -438,11 +428,11 @@ impl Bundle<Unauthorized> {
                 .iter()
                 .zip(script_sigs)
                 .map(|(txin, sig)| {
-                    Ok(TxIn {
-                        prevout: txin.prevout.clone(),
-                        script_sig: sig?,
-                        sequence: txin.sequence,
-                    })
+                    Ok(TxIn::from_parts(
+                        txin.prevout().clone(),
+                        sig?,
+                        txin.sequence(),
+                    ))
                 })
                 .collect::<Result<_, _>>()?,
             vout: self.vout,
@@ -474,9 +464,9 @@ impl Bundle<Unauthorized> {
                     hash_type: SighashType::ALL,
                     index,
                     // for p2pkh, script_code is always the same as script_pubkey
-                    script_code: &info.coin.script_pubkey,
-                    script_pubkey: &info.coin.script_pubkey,
-                    value: info.coin.value,
+                    script_code: info.coin.script_pubkey(),
+                    script_pubkey: info.coin.script_pubkey(),
+                    value: info.coin.value(),
                 })
             })
             .collect::<Vec<_>>();
@@ -593,10 +583,12 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
                 .original_vin_unauthorized
                 .iter()
                 .zip(fully_signed_scripts)
-                .map(|(txin_unauth, sig_script)| TxIn {
-                    prevout: txin_unauth.prevout.clone(),
-                    script_sig: sig_script,
-                    sequence: txin_unauth.sequence,
+                .map(|(txin_unauth, sig_script)| {
+                    TxIn::from_parts(
+                        txin_unauth.prevout().clone(),
+                        sig_script,
+                        txin_unauth.sequence(),
+                    )
                 })
                 .collect(),
             vout: self.original_vout,
@@ -627,10 +619,7 @@ mod tests {
         let pk_hash_bytes: [u8; 20] = pk_hash_generic_array.into();
         let taddr = TransparentAddress::PublicKeyHash(pk_hash_bytes);
 
-        let txout = TxOut {
-            value: Zatoshis::from_u64(10000).unwrap(),
-            script_pubkey: taddr.script(),
-        };
+        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script());
 
         let txid = [0u8; 32]; // Dummy txid
         let outpoint = OutPoint::new(txid, 0);

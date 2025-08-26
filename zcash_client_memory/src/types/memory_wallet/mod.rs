@@ -292,7 +292,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             self.transparent_received_outputs.detect_spending_accounts(
                 tx.transparent_bundle()
                     .iter()
-                    .flat_map(|bundle| bundle.vin.iter().map(|txin| &txin.prevout)),
+                    .flat_map(|bundle| bundle.vin.iter().map(|txin| txin.prevout())),
             )?,
         );
 

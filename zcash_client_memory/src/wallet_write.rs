@@ -788,7 +788,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             .iter()
             .flat_map(|b| b.vin.iter())
         {
-            self.mark_transparent_output_spent(&d_tx.tx().txid(), &txin.prevout)?;
+            self.mark_transparent_output_spent(&d_tx.tx().txid(), txin.prevout())?;
         }
 
         // This `if` is just an optimization for cases where we would do nothing in the loop.
@@ -884,7 +884,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         let sent_tx_output = SentTransactionOutput::from_parts(
                             output_index,
                             recipient,
-                            txout.value,
+                            txout.value(),
                             None,
                         );
                         self.sent_notes.put_sent_output(
@@ -1150,10 +1150,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                     } => {
                         let txo = WalletTransparentOutput::from_parts(
                             outpoint.clone(),
-                            TxOut {
-                                value: output.value(),
-                                script_pubkey: ephemeral_address.script(),
-                            },
+                            TxOut::new(output.value(), ephemeral_address.script()),
                             None,
                         )
                         .unwrap();

@@ -86,7 +86,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
                                     .flat_map(|b| b.vin.iter())
                                     .filter_map(|txin| {
                                         self.tx_table
-                                            .get_transaction(txin.prevout.txid())
+                                            .get_transaction(txin.prevout().txid())
                                             .and_then(|input_tx| input_tx.mined_height())
                                     })
                                     .max()

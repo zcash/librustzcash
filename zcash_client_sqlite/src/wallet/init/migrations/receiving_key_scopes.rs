@@ -377,17 +377,16 @@ mod tests {
                         .unwrap(),
                 ),
                 transparent::OutPoint::fake(),
-                transparent::TxOut {
-                    value: Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
-                    script_pubkey: usk0
-                        .transparent()
+                transparent::TxOut::new(
+                    Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
+                    usk0.transparent()
                         .to_account_pubkey()
                         .derive_external_ivk()
                         .unwrap()
                         .default_address()
                         .0
                         .script(),
-                },
+                ),
             )
             .unwrap();
         builder

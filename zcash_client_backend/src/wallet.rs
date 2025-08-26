@@ -205,7 +205,7 @@ impl WalletTransparentOutput {
     }
 
     pub fn value(&self) -> Zatoshis {
-        self.txout.value
+        self.txout.value()
     }
 }
 

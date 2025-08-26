@@ -901,10 +901,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .unwrap();
     let pubkey = transparent_signing_set.add_key(sk);
     let outpoint = OutPoint::fake();
-    let txout = TxOut {
-        script_pubkey: default_addr.script(),
-        value,
-    };
+    let txout = TxOut::new(value, default_addr.script());
     // Add the fake input to our UTXO set so that we can ensure we recognize the outpoint.
     st.wallet_mut()
         .put_received_transparent_utxo(
@@ -1960,10 +1957,7 @@ where
     let spent_outpoint = OutPoint::fake();
     let utxo = WalletTransparentOutput::from_parts(
         spent_outpoint.clone(),
-        TxOut {
-            value: Zatoshis::const_from_u64(100000),
-            script_pubkey: taddr.script(),
-        },
+        TxOut::new(Zatoshis::const_from_u64(100000), taddr.script()),
         Some(h),
     )
     .unwrap();

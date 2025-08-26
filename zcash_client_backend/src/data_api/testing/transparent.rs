@@ -108,10 +108,7 @@ where
     // Create a fake transparent output.
     let value = Zatoshis::const_from_u64(100000);
     let outpoint = OutPoint::fake();
-    let txout = TxOut {
-        value,
-        script_pubkey: taddr.script(),
-    };
+    let txout = TxOut::new(value, taddr.script());
 
     // Pretend the output's transaction was mined at `height_1`.
     let utxo = WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), Some(height_1))
@@ -216,10 +213,7 @@ where
 
     // Create a fake transparent output.
     let value = Zatoshis::from_u64(100000).unwrap();
-    let txout = TxOut {
-        value,
-        script_pubkey: taddr.script(),
-    };
+    let txout = TxOut::new(value, taddr.script());
 
     // Pretend the output was received in the chain tip.
     let height = st.wallet().chain_height().unwrap().unwrap();
@@ -360,10 +354,7 @@ where
 
     // Create a fake transparent output.
     let value = Zatoshis::from_u64(100000).unwrap();
-    let txout = TxOut {
-        value,
-        script_pubkey: taddr.script(),
-    };
+    let txout = TxOut::new(value, taddr.script());
 
     // Pretend the output was received in the chain tip.
     let height = st.wallet().chain_height().unwrap().unwrap();

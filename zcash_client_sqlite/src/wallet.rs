@@ -2365,7 +2365,7 @@ pub(crate) fn get_funding_accounts(
         conn,
         tx.transparent_bundle()
             .iter()
-            .flat_map(|bundle| bundle.vin.iter().map(|txin| &txin.prevout)),
+            .flat_map(|bundle| bundle.vin.iter().map(|txin| txin.prevout())),
     )?);
 
     funding_accounts.extend(sapling::detect_spending_accounts(
@@ -2895,10 +2895,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     &params,
                     &WalletTransparentOutput::from_parts(
                         outpoint.clone(),
-                        TxOut {
-                            value: output.value(),
-                            script_pubkey: ephemeral_address.script(),
-                        },
+                        TxOut::new(output.value(), ephemeral_address.script()),
                         None,
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
@@ -3382,7 +3379,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                         from_account_uuid: account_uuid,
                         output_index,
                         recipient,
-                        value: txout.value,
+                        value: txout.value(),
                     });
                 }
             } else {
@@ -3417,7 +3414,7 @@ fn determine_fee(
             let t_out_total = t_bundle
                 .vout
                 .iter()
-                .map(|o| o.value)
+                .map(|o| o.value())
                 .sum::<Option<Zatoshis>>()
                 .ok_or(BalanceError::Overflow)?;
             let value_balance = (value_balance - t_out_total).ok_or(BalanceError::Underflow)?;
@@ -3434,10 +3431,10 @@ fn determine_fee(
                 for t_in in &t_bundle.vin {
                     match (
                         result,
-                        get_wallet_transparent_output(_conn, &t_in.prevout, true)?,
+                        get_wallet_transparent_output(_conn, t_in.prevout(), true)?,
                     ) {
                         (Some(b), Some(out)) => {
-                            result = Some((b + out.txout().value).ok_or(BalanceError::Overflow)?)
+                            result = Some((b + out.txout().value()).ok_or(BalanceError::Overflow)?)
                         }
                         _ => {
                             result = None;
@@ -3740,7 +3737,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         .iter()
         .flat_map(|b| b.vin.iter())
     {
-        transparent::mark_transparent_utxo_spent(conn, tx_ref, &txin.prevout)?;
+        transparent::mark_transparent_utxo_spent(conn, tx_ref, txin.prevout())?;
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -4018,7 +4015,7 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
             // queue the transparent inputs for enhancement
             queue_tx_retrieval(
                 conn,
-                b.vin.iter().map(|txin| *txin.prevout.txid()),
+                b.vin.iter().map(|txin| *txin.prevout().txid()),
                 Some(tx_ref),
             )?;
         }
