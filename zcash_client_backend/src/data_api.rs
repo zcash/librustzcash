@@ -249,7 +249,7 @@ impl core::ops::Add<Balance> for Balance {
     type Output = Result<Balance, BalanceError>;
 
     fn add(self, rhs: Balance) -> Self::Output {
-        Ok(Balance {
+        let result = Balance {
             spendable_value: (self.spendable_value + rhs.spendable_value)
                 .ok_or(BalanceError::Overflow)?,
             change_pending_confirmation: (self.change_pending_confirmation
@@ -260,7 +260,11 @@ impl core::ops::Add<Balance> for Balance {
                 .ok_or(BalanceError::Overflow)?,
             uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
                 .ok_or(BalanceError::Overflow)?,
-        })
+        };
+
+        result.check_total_adding(Zatoshis::ZERO)?;
+
+        Ok(result)
     }
 }
 
@@ -1825,8 +1829,10 @@ pub trait WalletTest: InputSource + WalletRead {
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
 
-    /// Optionally perform final checks at the conclusion of each test
-    /// Allows wallet backend developers to perform any necessary consistency checks or cleanup
+    /// Performs final checks at the conclusion of each test.
+    ///
+    /// This method allows wallet backend developers to perform any necessary consistency
+    /// checks or cleanup. By default it does nothing.
     fn finally(&self) {}
 }
 

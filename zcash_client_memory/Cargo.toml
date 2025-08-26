@@ -1,6 +1,6 @@
 [package]
 name = "zcash_client_memory"
-version = "0.1.0"
+version = "0.0.0"
 repository.workspace = true
 # readme = "README.md"
 license.workspace = true

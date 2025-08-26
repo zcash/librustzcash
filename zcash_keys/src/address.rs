@@ -176,6 +176,7 @@ impl UnifiedAddress {
         &self.unknown
     }
 
+    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network.
     pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
         let items = self
             .unknown
