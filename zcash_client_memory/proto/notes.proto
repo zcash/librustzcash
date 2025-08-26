@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memwallet;
 
-import "proto/primitives.proto";
+import "primitives.proto";
 
 message Note {
   ShieldedProtocol protocol = 1;

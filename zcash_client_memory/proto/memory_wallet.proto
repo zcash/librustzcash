@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package memwallet;
 
-import "proto/notes.proto";
-import "proto/primitives.proto";
-import "proto/shardtree.proto";
-import "proto/transparent.proto";
+import "notes.proto";
+import "primitives.proto";
+import "shardtree.proto";
+import "transparent.proto";
 
 // A serialized zcash wallet state
 message MemoryWallet {
