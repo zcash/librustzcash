@@ -72,12 +72,6 @@ pub(crate) fn spend_everything_multi_step_many_notes_proposed_transfer<T: Shield
     >(
         TestDbFactory::default(),
         BlockCache::new(),
-        |e, _, expected_bad_index| {
-            matches!(
-                e,
-                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
-                if bad_index == &expected_bad_index)
-        },
     )
 }
 
@@ -91,12 +85,6 @@ pub(crate) fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     >(
         TestDbFactory::default(),
         BlockCache::new(),
-        |e, _, expected_bad_index| {
-            matches!(
-                e,
-                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
-                if bad_index == &expected_bad_index)
-        },
     )
 }
 
@@ -108,12 +96,6 @@ pub(crate) fn spend_everything_multi_step_single_note_proposed_transfer<T: Shiel
     >(
         TestDbFactory::default(),
         BlockCache::new(),
-        |e, _, expected_bad_index| {
-            matches!(
-                e,
-                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
-                if bad_index == &expected_bad_index)
-        },
     )
 }
 
