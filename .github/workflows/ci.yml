@@ -24,6 +24,7 @@ jobs:
           - Sapling-only
           - Orchard
           - all-pools
+          - all-features
           - NU7
 
         include:
@@ -31,13 +32,15 @@ jobs:
             os: ubuntu-latest-8cores
 
           - state: transparent
-            extra_flags: transparent-inputs
+            extra_flags: transparent-inputs transparent-key-encoding
           - state: Orchard
             extra_flags: orchard
           - state: all-pools
-            extra_flags: orchard transparent-inputs
+            extra_flags: orchard transparent-inputs transparent-key-encoding
+          - state: all-features
+            all-features: true
           - state: NU7
-            extra_flags: orchard transparent-inputs
+            all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -52,6 +55,7 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-pools: false
+          all-features: ${{ matrix.all-features }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -70,27 +74,6 @@ jobs:
       - name: Verify working directory is clean
         run: git diff --exit-code
 
-  test-all-features:
-    name: Test with --all-features
-    runs-on: ubuntu-latest-8cores
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run tests with --all-features enabled
-        run: cargo test --workspace --all-features
-      - name: Verify working directory is clean
-        run: git diff --exit-code
-
   test:
     name: Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -105,6 +88,7 @@ jobs:
           - Sapling-only
           - Orchard
           - all-pools
+          - all-features
           - NU7
 
         include:
@@ -114,16 +98,20 @@ jobs:
             os: windows-latest-8cores
 
           - state: transparent
-            extra_flags: transparent-inputs
+            extra_flags: transparent-inputs transparent-key-encoding
           - state: Orchard
             extra_flags: orchard
           - state: all-pools
-            extra_flags: orchard transparent-inputs
+            extra_flags: orchard transparent-inputs transparent-key-encoding
+          - state: all-features
+            all-features: true
           - state: NU7
-            extra_flags: orchard transparent-inputs
+            all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
+          - target: macOS
+            state: all-features
           - target: macOS
             state: NU7
 
@@ -139,6 +127,7 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-pools: false
+          all-features: ${{ matrix.all-features }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -165,11 +154,11 @@ jobs:
       matrix:
         target:
           - Linux
-        state:
+        state: # all-pools intentionally omitted
           - transparent
           - Sapling-only
           - Orchard
-          - all-pools
+          - all-features
           - NU7
 
         include:
@@ -180,10 +169,10 @@ jobs:
             extra_flags: transparent-inputs
           - state: Orchard
             extra_flags: orchard
-          - state: all-pools
-            extra_flags: orchard transparent-inputs
+          - state: all-features
+            all-features: true
           - state: NU7
-            extra_flags: orchard transparent-inputs
+            all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -198,6 +187,7 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-pools: false
+          all-features: ${{ matrix.all-features }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -230,6 +220,7 @@ jobs:
           - Windows
         state:
           - ZFuture
+          - ZFuture-allfeatures
 
         include:
           - target: Linux
@@ -240,6 +231,9 @@ jobs:
             os: windows-latest
 
           - state: ZFuture
+            rustflags: '--cfg zcash_unstable="zfuture"'
+          - state: ZFuture-allfeatures
+            all-features: true
             rustflags: '--cfg zcash_unstable="zfuture"'
 
     env:
@@ -253,6 +247,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          all-features: ${{ matrix.all-features }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
