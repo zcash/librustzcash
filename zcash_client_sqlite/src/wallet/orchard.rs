@@ -490,6 +490,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn spend_max_spendable_single_step_proposed_transfer() {
+        testing::pool::spend_max_spendable_single_step_proposed_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn spend_everything_single_step_proposed_transfer() {
+        testing::pool::spend_everything_single_step_proposed_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fails_to_send_max_to_transparent_with_memo() {
+        testing::pool::fails_to_send_max_to_transparent_with_memo::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn send_max_proposal_fails_when_unconfirmed_funds_present() {
+        testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_single_note_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_many_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_with_marginal_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_with_marginal_notes_proposed_transfer::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
     fn send_with_multiple_change_outputs() {
         testing::pool::send_with_multiple_change_outputs::<OrchardPoolTester>()
     }

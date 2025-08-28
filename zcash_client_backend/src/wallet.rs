@@ -1,5 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
+use std::fmt::Debug;
 
 use incrementalmerkletree::Position;
 
@@ -378,7 +379,7 @@ impl Note {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ReceivedNote<NoteRef, NoteT> {
     note_id: NoteRef,
     txid: TxId,
@@ -470,6 +471,41 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             mined_height: self.mined_height,
             max_shielding_input_height: self.max_shielding_input_height,
         }
+    }
+}
+
+impl<NoteRef: Debug> Debug for ReceivedNote<NoteRef, sapling::Note> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedNote")
+            .field("note_id", &self.note_id)
+            .field("txid", &self.txid)
+            .field("output_index", &self.output_index)
+            .field("note_value", &self.note_value())
+            .field("spending_key_scope", &self.spending_key_scope)
+            .field(
+                "note_commitment_tree_position",
+                &self.note_commitment_tree_position,
+            )
+            .field("mined_height", &self.mined_height)
+            .finish()
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef: Debug> Debug for ReceivedNote<NoteRef, orchard::note::Note> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedNote")
+            .field("note_id", &self.note_id)
+            .field("txid", &self.txid)
+            .field("output_index", &self.output_index)
+            .field("note_value", &self.note_value())
+            .field("spending_key_scope", &self.spending_key_scope)
+            .field(
+                "note_commitment_tree_position",
+                &self.note_commitment_tree_position,
+            )
+            .field("mined_height", &self.mined_height)
+            .finish()
     }
 }
 

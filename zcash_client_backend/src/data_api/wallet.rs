@@ -46,8 +46,8 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use crate::{
     data_api::{
-        error::Error, Account, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
-        WalletRead, WalletWrite,
+        error::Error, wallet::input_selection::propose_send_max, Account, MaxSpendMode,
+        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{
@@ -75,7 +75,7 @@ use zcash_primitives::transaction::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 use zip32::Scope;
@@ -104,7 +104,7 @@ use {
     serde::{Deserialize, Serialize},
     transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
+    zcash_protocol::consensus::NetworkConstants,
 };
 
 pub mod input_selection;
@@ -226,6 +226,18 @@ pub type ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error<
     <<ChangeT as ChangeStrategy>::FeeRule as FeeRule>::Error,
     <ChangeT as ChangeStrategy>::Error,
     <<InputsT as InputSelector>::InputSource as InputSource>::NoteRef,
+>;
+
+/// Errors that may be generated in construction of proposals for shielded->shielded or
+/// shielded->transparent transactions that transfer the maximum value available within an account
+/// and do not produce change outputs.
+pub type ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    CommitmentTreeErrT,
+    BalanceError,
+    <FeeRuleT as FeeRule>::Error,
+    <FeeRuleT as FeeRule>::Error,
+    <DbT as InputSource>::NoteRef,
 >;
 
 /// Errors that may be generated in construction of proposals for transparent->shielded
@@ -386,7 +398,7 @@ impl ConfirmationsPolicy {
     /// notes irrespective of origin, and 0 confirmations for transparent UTXOs.
     ///
     /// Test-only.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub const MIN: Self = ConfirmationsPolicy {
         trusted: NonZeroU32::MIN,
         untrusted: NonZeroU32::MIN,
@@ -443,7 +455,7 @@ impl ConfirmationsPolicy {
     ///
     /// # Panics
     /// Panics if `trusted > untrusted` or either argument value is zero.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new_unchecked(
         trusted: u32,
         untrusted: u32,
@@ -463,7 +475,7 @@ impl ConfirmationsPolicy {
     ///
     /// # Panics
     /// Panics if `min_confirmations == 0`
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new_symmetrical_unchecked(
         min_confirmations: u32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
@@ -634,6 +646,57 @@ where
         request,
         confirmations_policy,
     )
+}
+
+/// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
+/// of transactions that would spend all available funds from the given `spend_pool`s that can then
+/// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    spend_pools: &[ShieldedProtocol],
+    fee_rule: &FeeRuleT,
+    recipient: ZcashAddress,
+    memo: Option<MemoBytes>,
+    mode: MaxSpendMode,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<
+    Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+    ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
+>
+where
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule + Clone,
+{
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted())
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
+    if memo.is_some() && !recipient.can_receive_memo() {
+        return Err(Error::MemoForbidden);
+    }
+
+    let proposal = propose_send_max(
+        params,
+        wallet_db,
+        fee_rule,
+        spend_from_account,
+        spend_pools,
+        target_height,
+        anchor_height,
+        mode,
+        confirmations_policy,
+        recipient,
+        memo,
+    )?;
+
+    Ok(proposal)
 }
 
 /// Constructs a proposal to shield all of the funds belonging to the provided set of

@@ -51,7 +51,8 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer, ConfirmationsPolicy,
+        propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
+        ConfirmationsPolicy,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
@@ -62,7 +63,7 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use crate::data_api::Balance;
 use crate::{
-    data_api::{wallet::TargetHeight, TargetValue},
+    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
     fees::{
         standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
@@ -1004,6 +1005,37 @@ where
             input_selector,
             change_strategy,
             request,
+            confirmations_policy,
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments.
+    #[allow(clippy::type_complexity)]
+    pub fn propose_send_max_transfer<FeeRuleT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        fee_rule: &FeeRuleT,
+        to: ZcashAddress,
+        memo: Option<MemoBytes>,
+        mode: MaxSpendMode,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<
+        Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeSendMaxErrT<DbT, Infallible, FeeRuleT>,
+    >
+    where
+        FeeRuleT: FeeRule + Clone,
+    {
+        let network = self.network().clone();
+        propose_send_max_transfer::<_, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+            fee_rule,
+            to,
+            memo,
+            mode,
             confirmations_policy,
         )
     }

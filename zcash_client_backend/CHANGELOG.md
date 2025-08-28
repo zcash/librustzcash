@@ -13,13 +13,22 @@ workspace.
 ## [0.20.0] - PLANNED
 
 ### Added
-- `zcash_client_backend::data_api::TransactionsInvolvingAddress`
-- `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
-- `zcash_client_backend::data_api::AccountBirthday::{from_parts, prior_chain_state}`
-- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy`
-- `zcash_client_backend::data_api::wallet::TargetHeight`
-- `zcash_client_backend::data_api::Balance::uneconomic_value`
-- `zcash_client_backend::data_api::AccountBalance::uneconomic_value`
+- `zcash_client_backend::data_api`:
+  - `AccountBalance::uneconomic_value`
+  - `AccountBirthday::{from_parts, prior_chain_state}`
+  - `Balance::uneconomic_value`
+  - `MaxSpendMode`
+  - `TransactionsInvolvingAddress`
+  - `TransactionDataRequest::transactions_involving_address`
+  - `wallet::ConfirmationsPolicy`
+  - `wallet::TargetHeight`
+  - `wallet::propose_send_max_transfer`: Selects transaction inputs, computes fees, and
+    constructs a proposal for a transaction (or series of them) that would spend all
+    the available funds from the given spend pools.
+  - `ProposeSendMaxErrT` (type alias)
+- `zcash_client_backend::fees`:
+  - `impl sapling::OutputView for Zatoshis`
+  - `impl orchard::OutputView for Zatoshis`
 - `zcash_client_backend::wallet::ReceivedNote::mined_height`
 - A `zcashd-compat` feature flag has been added in service of being able to
   import data from the zcashd `wallet.dat` format. It enables functionality
@@ -86,10 +95,21 @@ workspace.
     `TargetHeight` instead of a `BlockHeight` for its `target_height` argument,
     and the `SentTransaction::target_height` accessor now returns a
     `TargetHeight`.
-  - `test-dependencies` trait `WalletTest` has added method `finally`
+  - `TargetValue` has a new `AllFunds(MaxSpendMode)` variant to choose whether
+    to consider "All" funds being the `MaxSpendable` amount that it is
+    currently in the wallet (there could be pending funds or wallet could be
+    unsynced) or if "All" means `Everything` where the presence of unconfirmed
+    funds or pending shards to be scanned would trigger an error.
+  - `zcash_client_backend::proposal::ProposalError` has added variant:
+    - `Zip321(Zip321Error)`
+  - `WalletTest` (available only under the `test-dependencies` feature) has
+    added method `finally`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed; it now takes
-    a `TargetHeight` instead of a `BlockHeight`.
+    a `TargetHeight` instead of a `BlockHeight`. Also, the type of the
+    `ephemeral_balance` argument has changed slightly.
+  - The associated error type `ChangeStrategy::Error` is now additionally
+    bounded on `From<(Self::FeeRule as FeeRule>::Error>`.
 - `zcash_client_backend::proposal`:
   - Arguments to `Proposal::{single_step, multi_step}` have changed; it now takes
     a `TargetHeight` instead of a `BlockHeight`.

@@ -124,7 +124,7 @@ where
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        ephemeral_balance: Option<&EphemeralBalance>,
+        ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
@@ -233,7 +233,7 @@ where
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        ephemeral_balance: Option<&EphemeralBalance>,
+        ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let cfg = SinglePoolBalanceConfig::new(
