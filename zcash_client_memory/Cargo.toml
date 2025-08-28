@@ -8,7 +8,9 @@ edition.workspace = true
 rust-version.workspace = true
 categories.workspace = true
 build = "build.rs"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
 
 [dependencies]
 zcash_address.workspace = true

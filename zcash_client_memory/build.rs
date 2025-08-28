@@ -41,7 +41,7 @@ fn build() -> io::Result<()> {
     )?;
 
     // Copy the generated types into the source tree so changes can be committed.
-    fs::copy(out.join("memwallet.rs"), "src/proto/generated.rs")?;
+    fs::copy(out.join("memwallet.rs"), "src/proto/memwallet.rs")?;
 
     Ok(())
 }
