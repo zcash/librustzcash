@@ -1862,7 +1862,8 @@ pub trait WalletTest: InputSource + WalletRead {
 pub struct OutputOfSentTx {
     value: Zatoshis,
     external_recipient: Option<Address>,
-    ephemeral_address: Option<(Address, u32)>,
+    #[cfg(feature = "transparent-inputs")]
+    ephemeral_address: Option<(Address, NonHardenedChildIndex)>,
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -1875,13 +1876,34 @@ impl OutputOfSentTx {
     pub fn from_parts(
         value: Zatoshis,
         external_recipient: Option<Address>,
-        ephemeral_address: Option<(Address, u32)>,
+        #[cfg(feature = "transparent-inputs")] ephemeral_address: Option<(
+            Address,
+            NonHardenedChildIndex,
+        )>,
     ) -> Self {
         Self {
             value,
             external_recipient,
+            #[cfg(feature = "transparent-inputs")]
             ephemeral_address,
         }
+    }
+
+    /// Returns the value of the output.
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    /// Returns the recipient of the sent output.
+    pub fn external_recipient(&self) -> Option<&Address> {
+        self.external_recipient.as_ref()
+    }
+
+    /// Returns the ephemeral address to which the output was sent, along with the non-hardened
+    /// transparent child index at which that address was derived.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn ephemeral_address(&self) -> Option<&(Address, NonHardenedChildIndex)> {
+        self.ephemeral_address.as_ref()
     }
 }
 
