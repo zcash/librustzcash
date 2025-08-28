@@ -39,7 +39,7 @@ pczt = { workspace = true, optional = true }
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Data Access API
-time = "0.3.22"
+time.workspace = true
 nonempty.workspace = true
 
 # - CSPRNG
@@ -162,6 +162,8 @@ zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 
 [features]
+default = ["time/default"]
+
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
 

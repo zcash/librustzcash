@@ -15,7 +15,7 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::TransactionsInvolvingAddress`
 - `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
-- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- `zcash_client_backend::data_api::AccountBirthday::{from_parts, prior_chain_state}`
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy`
 - `zcash_client_backend::data_api::wallet::TargetHeight`
 - `zcash_client_backend::data_api::Balance::uneconomic_value`
@@ -28,6 +28,15 @@ workspace.
   v4.7.0` migration to permit use of a mnemonic seed for wallet backup.
   The following additions are guarded by this feature flag:
   - `zcash_client_backend::data_api::Zip32Derivation::legacy_address_index`
+- `impl Add<Balance> for zcash_client_backend::data_api::Balance`
+- `impl Hash for zcash_client_backend::wallet::NoteId`
+- `impl {PartialEq, Eq}` for:
+  - `zcash_client_backend::data_api::TransactionStatus`
+  - `zcash_client_backend::data_api::AccountBirthday`
+  - `zcash_client_backend::data_api::chain::ChainState`
+  - `zcash_client_backend::wallet::Recipient`
+- `impl Clone` for:
+  - `zcash_client_backend::wallet::{WalletTx, WalletSpend, WalletOutput}`
 
 ### Changed
 - Migrated to `zcash_protocol 0.6.2`, `zcash_address 0.9`, `zip321 0.5`,
@@ -77,6 +86,7 @@ workspace.
     `TargetHeight` instead of a `BlockHeight` for its `target_height` argument,
     and the `SentTransaction::target_height` accessor now returns a
     `TargetHeight`.
+  - `test-dependencies` trait `WalletTest` has added method `finally`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed; it now takes
     a `TargetHeight` instead of a `BlockHeight`.

@@ -245,6 +245,29 @@ impl Balance {
     }
 }
 
+impl core::ops::Add<Balance> for Balance {
+    type Output = Result<Balance, BalanceError>;
+
+    fn add(self, rhs: Balance) -> Self::Output {
+        let result = Balance {
+            spendable_value: (self.spendable_value + rhs.spendable_value)
+                .ok_or(BalanceError::Overflow)?,
+            change_pending_confirmation: (self.change_pending_confirmation
+                + rhs.change_pending_confirmation)
+                .ok_or(BalanceError::Overflow)?,
+            value_pending_spendability: (self.value_pending_spendability
+                + rhs.value_pending_spendability)
+                .ok_or(BalanceError::Overflow)?,
+            uneconomic_value: (self.uneconomic_value + rhs.uneconomic_value)
+                .ok_or(BalanceError::Overflow)?,
+        };
+
+        result.check_total_adding(Zatoshis::ZERO)?;
+
+        Ok(result)
+    }
+}
+
 /// Balance information for a single account. The sum of this struct's fields is the total balance
 /// of the wallet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -963,7 +986,7 @@ impl TransactionDataRequest {
 }
 
 /// Metadata about the status of a transaction obtained by inspecting the chain state.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransactionStatus {
     /// The requested transaction ID was not recognized by the node.
     TxidNotRecognized,
@@ -1593,7 +1616,6 @@ pub trait WalletRead {
     /// Returns a mapping from each transparent receiver associated with the specified account
     /// to the balance of funds given the specified target height and confirmations policy.
     ///
-    ///
     /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
@@ -1806,6 +1828,12 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
+
+    /// Performs final checks at the conclusion of each test.
+    ///
+    /// This method allows wallet backend developers to perform any necessary consistency
+    /// checks or cleanup. By default it does nothing.
+    fn finally(&self) {}
 }
 
 /// The output of a transaction sent by the wallet.
@@ -2260,7 +2288,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 
 /// A data structure used to set the birthday height for an account, and ensure that the initial
 /// note commitment tree state is recorded at that height.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountBirthday {
     prior_chain_state: ChainState,
     recover_until: Option<BlockHeight>,
@@ -2349,6 +2377,11 @@ impl AccountBirthday {
     /// Returns the height at which the wallet should exit "recovery mode".
     pub fn recover_until(&self) -> Option<BlockHeight> {
         self.recover_until
+    }
+
+    /// Returns the [`ChainState`] corresponding to the last block prior to the wallet's birthday
+    pub fn prior_chain_state(&self) -> &ChainState {
+        &self.prior_chain_state
     }
 
     #[cfg(any(test, feature = "test-dependencies"))]

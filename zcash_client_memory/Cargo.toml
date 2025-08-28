@@ -1,0 +1,102 @@
+[package]
+name = "zcash_client_memory"
+version = "0.0.0"
+repository.workspace = true
+# readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+build = "build.rs"
+
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
+[dependencies]
+zcash_address.workspace = true
+zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree", "sync"] }
+zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["sapling"] }
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+transparent.workspace = true
+zip32.workspace = true
+
+tokio = { workspace = true, features = ["sync"] }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Errors
+bip32 = { workspace = true, optional = true }
+bs58.workspace = true
+
+# - Logging and metrics
+tracing.workspace = true
+
+# - Serialization
+byteorder.workspace = true
+nonempty.workspace = true
+prost.workspace = true
+group.workspace = true
+jubjub.workspace = true
+serde.workspace = true
+
+# - Secret management
+secrecy.workspace = true
+subtle.workspace = true
+
+# - Static assertions
+static_assertions.workspace = true
+
+# - Shielded protocols
+orchard = { workspace = true, optional = true }
+sapling.workspace = true
+
+# - Note commitment trees
+incrementalmerkletree.workspace = true
+shardtree = { workspace = true, features = ["legacy-api"] }
+thiserror = "1.0.61"
+
+rayon.workspace = true
+async-trait = { version = "0.1" }
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+wasm_sync = "0.1.2"
+time.workspace = true
+bytes = "1.9.0"
+
+[dev-dependencies]
+ciborium = "0.2.2"
+serde_json.workspace = true
+postcard = { version = "1.0.10", features = ["alloc"] }
+zcash_client_backend = { workspace = true, features = ["test-dependencies"] }
+
+
+[features]
+default = ["multicore"]
+local-consensus = ["zcash_protocol/local-consensus"]
+## Enables multithreading support for creating proofs and building subtrees.
+multicore = ["zcash_primitives/multicore"]
+
+## Enables support for storing data related to the sending and receiving of 
+## Orchard funds.
+orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = ["dep:proptest", "incrementalmerkletree/test-dependencies", "shardtree/test-dependencies", "zcash_primitives/test-dependencies", "zcash_client_backend/test-dependencies", "incrementalmerkletree/test-dependencies"]
+
+## Enables receiving transparent funds and sending to transparent recipients
+transparent-inputs = ["dep:bip32", "zcash_keys/transparent-inputs", "zcash_client_backend/transparent-inputs"]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
+unstable = ["zcash_client_backend/unstable"]
+
+## Enables compatibility with legacy zcashd wallet data
+zcashd-compat = ["zcash_keys/zcashd-compat", "zcash_client_backend/zcashd-compat"]
+
+[build-dependencies]
+prost-build = "0.13.3"
+which = "7"

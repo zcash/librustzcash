@@ -9,6 +9,7 @@ members = [
     "pczt",
     "zcash",
     "zcash_client_backend",
+    "zcash_client_memory",
     "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
@@ -145,7 +146,7 @@ subtle = { version = "2.2.3", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 schemerz = "0.2"
 schemerz-rusqlite = "0.320"
-time = "0.3.22"
+time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
 # Static constants and assertions
@@ -174,9 +175,9 @@ trait-variant = "0.1"
 
 # ZIP 32
 aes = "0.8"
+bip0039 = { version = "0.12" }
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
-bip0039 = { version = "0.12" }
 
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"

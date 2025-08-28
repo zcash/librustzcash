@@ -176,7 +176,8 @@ impl UnifiedAddress {
         &self.unknown
     }
 
-    fn to_address(&self, net: NetworkType) -> ZcashAddress {
+    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
         let items = self
             .unknown
             .iter()
@@ -213,7 +214,7 @@ impl UnifiedAddress {
 
     /// Returns the string encoding of this `UnifiedAddress` for the given network.
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_address(params.network_type()).to_string()
+        self.to_zcash_address(params.network_type()).to_string()
     }
 
     /// Returns the set of receiver typecodes.
@@ -419,7 +420,7 @@ impl Address {
                     ZcashAddress::from_transparent_p2sh(net, *data)
                 }
             },
-            Address::Unified(ua) => ua.to_address(net),
+            Address::Unified(ua) => ua.to_zcash_address(net),
             Address::Tex(data) => ZcashAddress::from_tex(net, *data),
         }
     }

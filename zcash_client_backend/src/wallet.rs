@@ -26,7 +26,7 @@ use crate::fees::orchard as orchard_fees;
 use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
     txid: TxId,
     protocol: ShieldedProtocol,
@@ -67,7 +67,7 @@ impl NoteId {
 /// * for wallet-internal outputs, the internal account ID and metadata about the note.
 /// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
 ///   internal account ID and metadata about the outpoint;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
     External {
         recipient_address: ZcashAddress,
@@ -89,6 +89,7 @@ pub enum Recipient<AccountId> {
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
+#[derive(Clone)]
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: usize,
@@ -218,6 +219,7 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 }
 
 /// A reference to a spent note belonging to the wallet within a transaction.
+#[derive(Clone)]
 pub struct WalletSpend<Nf, AccountId> {
     index: usize,
     nf: Nf,
@@ -257,6 +259,7 @@ pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, Account
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 
 /// An output that was successfully decrypted in the process of wallet scanning.
+#[derive(Clone)]
 pub struct WalletOutput<Note, Nullifier, AccountId> {
     index: usize,
     ephemeral_key: EphemeralKeyBytes,

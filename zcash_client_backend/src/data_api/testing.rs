@@ -456,6 +456,12 @@ impl<Cache, DataStore: WalletTest, Network> TestState<Cache, DataStore, Network>
     }
 }
 
+impl<Cache, DataStore: WalletTest, Network> Drop for TestState<Cache, DataStore, Network> {
+    fn drop(&mut self) {
+        self.wallet_data.finally();
+    }
+}
+
 impl<Cache, DataStore: WalletTest, Network: consensus::Parameters>
     TestState<Cache, DataStore, Network>
 {

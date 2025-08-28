@@ -21,7 +21,6 @@ use tonic::{
 };
 use tracing::{debug, info};
 
-use zcash_keys::encoding::AddressCodec as _;
 use zcash_primitives::merkle_tree::HashSer;
 use zcash_protocol::consensus::{BlockHeight, Parameters};
 
@@ -48,6 +47,7 @@ use {
         address::Script,
         bundle::{OutPoint, TxOut},
     },
+    zcash_keys::encoding::AddressCodec as _,
     zcash_protocol::value::Zatoshis,
 };
 
