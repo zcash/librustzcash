@@ -168,6 +168,38 @@ where
     }
 }
 
+/// A directive that specifies how `select_unspent_notes` should filter and/or error on unspendable
+/// notes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NoteRequest {
+    /// Retrieve all currently spendable notes, ignoring those for which the wallet does not yet
+    /// have enough information to construct spends, given the provided anchor height.
+    Spendable { anchor_height: BlockHeight },
+    /// Retrieve all currently unspent notes, including those for which the wallet does not yet
+    /// have enough information to construct spends.
+    Unspent,
+    /// Retrieve all currently unspent notes, or an error if any notes exist for which the wallet
+    /// does not yet have enough information to construct spends.
+    UnspentOrError { anchor_height: BlockHeight },
+}
+
+impl NoteRequest {
+    pub(crate) fn from_max_spend_mode(value: MaxSpendMode, anchor_height: BlockHeight) -> Self {
+        match value {
+            MaxSpendMode::MaxSpendable => NoteRequest::Spendable { anchor_height },
+            MaxSpendMode::Everything => NoteRequest::UnspentOrError { anchor_height },
+        }
+    }
+
+    pub(crate) fn anchor_height(&self) -> Option<BlockHeight> {
+        match self {
+            NoteRequest::Spendable { anchor_height } => Some(*anchor_height),
+            NoteRequest::Unspent => None,
+            NoteRequest::UnspentOrError { anchor_height } => Some(*anchor_height),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
@@ -190,17 +222,16 @@ where
     };
 
     match target_value {
-        TargetValue::AllFunds(mode) => select_all_spendable_notes(
+        TargetValue::AllFunds(mode) => select_unspent_notes(
             conn,
             params,
             account,
             target_height,
-            anchor_height,
             confirmations_policy,
             exclude,
             protocol,
             &to_spendable_note,
-            mode,
+            NoteRequest::from_max_spend_mode(mode, anchor_height),
         ),
         TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
@@ -216,7 +247,6 @@ where
         ),
     }
 }
-
 /// Selects all the spendable notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
@@ -224,21 +254,21 @@ where
 /// Implementation details:
 ///
 /// - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
-/// - Note spendability is determined using the `anchor_height`
+/// - Note spendability is determined using the `target_height`. If the note is mined at a greater
+///   height than the target height, it will still be returned by this query.
 /// - The `to_spendable_note` function is expected to return `Ok(None)` in the case that spending
 ///   key details cannot be determined.
 #[allow(clippy::too_many_arguments)]
-fn select_all_spendable_notes<P: consensus::Parameters, F, Note>(
+pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
     target_height: TargetHeight,
-    anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
-    to_spendable_note: F,
-    max_spend_mode: MaxSpendMode,
+    to_received_note: F,
+    note_request: NoteRequest,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -289,7 +319,7 @@ where
            SELECT {table_prefix}_received_note_id
            FROM {table_prefix}_received_note_spends rns
            JOIN transactions stx ON stx.id_tx = rns.transaction_id
-           WHERE stx.block IS NOT NULL -- the spending tx is mined
+           WHERE stx.mined_height < :target_height -- the spending tx is mined
            OR stx.expiry_height IS NULL -- the spending tx will not expire
            OR stx.expiry_height >= :target_height -- the spending tx is unexpired
          )
@@ -320,7 +350,7 @@ where
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
         |row| -> Result<_, SqliteClientError> {
-            let result_note = to_spendable_note(params, row)?;
+            let result_note = to_received_note(params, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
             let shard_scan_priority = max_priority_raw
                 .map(|code| {
@@ -342,9 +372,15 @@ where
 
     row_results
         .map(|t| match t? {
-            (Some(note), Some(shard_priority)) => {
-                let can_construct_witness = shard_priority <= ScanPriority::Scanned
-                    && note.mined_height().iter().any(|h| *h <= anchor_height);
+            (Some(note), max_shard_priority) => {
+                let shard_scanned = max_shard_priority
+                    .iter()
+                    .any(|p| *p <= ScanPriority::Scanned);
+
+                let mined_at_anchor = note
+                    .mined_height()
+                    .zip(note_request.anchor_height())
+                    .is_some_and(|(h, ah)| h <= ah);
 
                 let has_confirmations = match (note.mined_height(), note.spending_key_scope()) {
                     (None, _) => false,
@@ -361,10 +397,15 @@ where
                     }
                 };
 
-                match (max_spend_mode, can_construct_witness && has_confirmations) {
-                    (MaxSpendMode::Everything, false) => Err(SqliteClientError::IneligibleNotes),
-                    (MaxSpendMode::MaxSpendable, false) => Ok(None),
-                    (_, true) => Ok(Some(note)),
+                match (
+                    note_request,
+                    shard_scanned && mined_at_anchor && has_confirmations,
+                ) {
+                    (NoteRequest::UnspentOrError { .. }, false) => {
+                        Err(SqliteClientError::IneligibleNotes)
+                    }
+                    (NoteRequest::Spendable { .. }, false) => Ok(None),
+                    (NoteRequest::Unspent, false) | (_, true) => Ok(Some(note)),
                 }
             }
             _ => Err(SqliteClientError::IneligibleNotes),

@@ -11,7 +11,7 @@ use zcash_primitives::transaction::TxId;
 use zcash_protocol::{memo::Memo, PoolType, ShieldedProtocol::Sapling};
 
 use zcash_client_backend::{
-    data_api::{SentTransactionOutput, SpendableNotes},
+    data_api::{ReceivedNotes, SentTransactionOutput},
     wallet::{Note, NoteId, Recipient, WalletSaplingOutput},
 };
 
@@ -294,7 +294,7 @@ impl DerefMut for ReceivedNoteTable {
 pub(crate) fn to_spendable_notes(
     sapling_received_notes: &[&ReceivedNote],
     #[cfg(feature = "orchard")] orchard_received_notes: &[&ReceivedNote],
-) -> Result<SpendableNotes<NoteId>, Error> {
+) -> Result<ReceivedNotes<NoteId>, Error> {
     let sapling = sapling_received_notes
         .iter()
         .map(|note| {
@@ -341,7 +341,7 @@ pub(crate) fn to_spendable_notes(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(SpendableNotes::new(
+    Ok(ReceivedNotes::new(
         sapling,
         #[cfg(feature = "orchard")]
         orchard,

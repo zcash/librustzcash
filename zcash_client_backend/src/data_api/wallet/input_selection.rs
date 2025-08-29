@@ -25,7 +25,7 @@ use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        wallet::TargetHeight, InputSource, MaxSpendMode, SimpleNoteRetention, SpendableNotes,
+        wallet::TargetHeight, InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention,
         TargetValue,
     },
     fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
@@ -478,7 +478,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             }
         }
 
-        let mut shielded_inputs = SpendableNotes::empty();
+        let mut shielded_inputs = ReceivedNotes::empty();
         let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];

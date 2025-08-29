@@ -56,7 +56,7 @@ use super::{
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+    ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TransactionDataRequest,
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
@@ -2555,8 +2555,18 @@ impl InputSource for MockWalletDb {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
-    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
-        Ok(SpendableNotes::empty())
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::empty())
+    }
+
+    fn select_unspent_notes(
+        &self,
+        _account: Self::AccountId,
+        _sources: &[ShieldedProtocol],
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Err(())
     }
 
     fn get_account_metadata(
