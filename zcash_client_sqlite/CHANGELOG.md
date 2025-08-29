@@ -25,6 +25,16 @@ workspace.
     and there are funds that haven't been confirmed and all spendable notes
     can't be selected.
 
+## [0.17.3] - 2025-08-29
+
+### Fixed
+- This release fixes possible false positive in the way that the
+  `expired_unmined` column of the `v_transactions` view is computed. It now
+  checks against the `mined_height` field of the UTXO, instead of joining
+  against the `blocks` table to determine whether the UTXO has expired unmined;
+  after this change, the corresponding block need not have been scanned in
+  order to correctly determine whether the UTXO actually expired.
+
 ## [0.16.4, 0.17.2] - 2025-08-19
 
 ### Fixed
