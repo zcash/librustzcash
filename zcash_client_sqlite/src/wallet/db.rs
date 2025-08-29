@@ -955,7 +955,7 @@ SELECT accounts.uuid                AS account_uuid,
        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
        blocks.time                       AS block_time,
        (
-            blocks.height IS NULL
+            notes.mined_height IS NULL
             AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
        ) AS expired_unmined,
        SUM(notes.spent_note_count) AS spent_note_count,
@@ -974,7 +974,7 @@ FROM notes
 LEFT JOIN accounts ON accounts.id = notes.account_id
 LEFT JOIN transactions
      ON notes.txid = transactions.txid
-JOIN blocks_max_height
+LEFT JOIN blocks_max_height
 LEFT JOIN blocks ON blocks.height = notes.mined_height
 LEFT JOIN sent_note_counts
      ON sent_note_counts.account_id = notes.account_id
