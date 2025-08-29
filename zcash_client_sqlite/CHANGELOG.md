@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.17.3] - PLANNED
+## [0.17.3] - 2025-08-29
 
 ### Fixed
 - This release fixes possible false positive in the way that the
