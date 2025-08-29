@@ -200,10 +200,10 @@ pub(super) fn all_migrations<
 ///
 /// Omitted versions had the same migration state as the first prior version that is
 /// included.
-#[allow(dead_code)]
+#[allow(dead_code)] // marked as dead code so that this appears in docs with --document-private-items
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
-    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_17_3,
+    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -276,21 +276,38 @@ pub const V_0_15_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.16.0 release.
-const V_0_16_0: &[Uuid] = &[
+pub const V_0_16_0: &[Uuid] = &[
     fix_bad_change_flagging::MIGRATION_ID,
     v_transactions_additional_totals::MIGRATION_ID,
     transparent_gap_limit_handling::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.16.2 release.
-const V_0_16_2: &[Uuid] = &[
+pub const V_0_16_2: &[Uuid] = &[
     fix_bad_change_flagging::MIGRATION_ID,
     v_transactions_additional_totals::MIGRATION_ID,
     ensure_default_transparent_address::MIGRATION_ID,
 ];
 
+/// Leaf migrations in the 0.16.4 release.
+pub const V_0_16_4: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+    ensure_default_transparent_address::MIGRATION_ID,
+    tx_retrieval_queue_expiry::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.17.0 release.
+pub const V_0_17_0: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
+
+/// Leaf migrations in the 0.17.2 release.
+pub const V_0_17_2: &[Uuid] = &[
+    tx_retrieval_queue_expiry::MIGRATION_ID,
+    fix_transparent_received_outputs::MIGRATION_ID,
+];
+
 /// Leaf migrations in the 0.17.3 release.
-const V_0_17_3: &[Uuid] = &[
+pub const V_0_17_3: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     fix_v_transactions_expired_unmined::MIGRATION_ID,
 ];
