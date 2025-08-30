@@ -1391,7 +1391,7 @@ pub trait InputSource {
         &self,
         _outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        Ok(None)
+        unimplemented!()
     }
 
     /// Returns the list of spendable transparent outputs received by this wallet at `address`
@@ -1409,7 +1409,7 @@ pub trait InputSource {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        Ok(vec![])
+        unimplemented!()
     }
 }
 
@@ -1627,7 +1627,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        Ok(HashMap::new())
+        unimplemented!()
     }
 
     /// Returns a mapping from each transparent receiver associated with the specified account
@@ -1641,7 +1641,7 @@ pub trait WalletRead {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
-        Ok(HashMap::new())
+        unimplemented!()
     }
 
     /// Returns the metadata associated with a given transparent receiver in an account
@@ -1733,7 +1733,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(vec![])
+        unimplemented!()
     }
 
     /// If a given ephemeral address might have been reserved, i.e. would be included in
