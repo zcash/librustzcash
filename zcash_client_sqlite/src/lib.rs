@@ -1050,22 +1050,43 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
                 ],
                 |row| {
                     let v = row.get(0)?;
-                    let to_address = row
-                        .get::<_, Option<String>>(1)?
-                        .and_then(|s| Address::decode(&self.params, &s));
-                    let ephemeral_address = row
-                        .get::<_, Option<String>>(2)?
-                        .and_then(|s| Address::decode(&self.params, &s));
-                    let address_index: Option<u32> = row.get(3)?;
+                    let to_address = row.get::<_, Option<String>>(1)?;
+                    let ephemeral_address = row.get::<_, Option<String>>(2)?;
+                    let address_index = row.get::<_, Option<u32>>(3)?;
                     Ok((v, to_address, ephemeral_address.zip(address_index)))
                 },
             )?
             .map(|res| {
-                let (amount, external_recipient, ephemeral_address) = res?;
-                Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
+                let (amount, external_recipient, _ephemeral_address) = res?;
+                Ok::<_, SqliteClientError>(OutputOfSentTx::from_parts(
                     Zatoshis::from_u64(amount)?,
-                    external_recipient,
-                    ephemeral_address,
+                    external_recipient
+                        .map(|s| {
+                            Address::decode(&self.params, &s).ok_or_else(|| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "invalid transparent address: {s}"
+                                ))
+                            })
+                        })
+                        .transpose()?,
+                    #[cfg(feature = "transparent-inputs")]
+                    _ephemeral_address
+                        .map(|(addr_str, idx)| {
+                            let addr =
+                                Address::decode(&self.params, &addr_str).ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(format!(
+                                        "invalid transparent address: {addr_str}"
+                                    ))
+                                })?;
+                            let i = NonHardenedChildIndex::from_index(idx).ok_or_else(|| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "invalid non-hardened child index: {idx}"
+                                ))
+                            })?;
+
+                            Ok::<_, SqliteClientError>((addr, i))
+                        })
+                        .transpose()?,
                 ))
             })
             .collect::<Result<_, _>>()?;

@@ -1957,7 +1957,10 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         assert!(to_addr.is_some());
         assert_eq!(
             ephemeral_address,
-            to_addr.map(|addr| (addr, expected_index)),
+            to_addr.map(|addr| (
+                addr,
+                NonHardenedChildIndex::const_from_index(expected_index)
+            )),
         );
 
         assert_eq!(confirmed_sent[1].len(), 1);

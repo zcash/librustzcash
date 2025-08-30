@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use zcash_client_backend::{
     data_api::{
         testing::{DataStoreFactory, Reset, TestCache, TestState},
-        OutputOfSentTx, WalletRead, WalletTest, SAPLING_SHARD_HEIGHT,
+        OutputOfSentTx, WalletTest, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient},
@@ -23,7 +23,7 @@ use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::{
-    data_api::{testing::transparent::GapLimits, InputSource},
+    data_api::{testing::transparent::GapLimits, InputSource, WalletRead},
     wallet::WalletTransparentOutput,
 };
 
@@ -95,58 +95,47 @@ where
 {
     #[allow(clippy::type_complexity)]
     fn get_sent_outputs(&self, txid: &TxId) -> Result<Vec<OutputOfSentTx>, Error> {
-        self
-            .sent_notes
+        self.sent_notes
             .iter()
             .filter(|(note_id, _)| note_id.txid() == txid)
-            .map(|(_, note)| match note.to.clone() {
-                Recipient::External{recipient_address, ..} => Ok((
-                    note.value.into_u64(),
-                    Some(
-                        Address::try_from_zcash_address(&self.params, recipient_address)
-                            .map_err(Error::from)?,
+            .map(|(_, note)| {
+                Ok(match note.to.clone() {
+                    Recipient::External {
+                        recipient_address, ..
+                    } => OutputOfSentTx::from_parts(
+                        note.value,
+                        Some(
+                            Address::try_from_zcash_address(&self.params, recipient_address)
+                                .map_err(Error::from)?,
+                        ),
+                        #[cfg(feature = "transparent-inputs")]
+                        None,
                     ),
-                    None,
-                )),
-                #[cfg(feature = "transparent-inputs")]
-                Recipient::EphemeralTransparent {
-                    ephemeral_address,
-                    receiving_account,
-                    ..
-                } => {
                     #[cfg(feature = "transparent-inputs")]
-                    {
+                    Recipient::EphemeralTransparent {
+                        ephemeral_address,
+                        receiving_account,
+                        ..
+                    } => {
                         let account = self.get_account(receiving_account)?.unwrap();
                         let (_addr, meta) = account
                             .ephemeral_addresses()?
                             .into_iter()
                             .find(|(addr, _)| addr == &ephemeral_address)
-                            .unwrap();
-                        Ok((
-                            // TODO: Use the ephemeral address index to look up the address
-                            // and find the correct index
-                            note.value.into_u64(),
+                            .expect("ephemeral address exists in the wallet");
+                        OutputOfSentTx::from_parts(
+                            note.value,
                             Some(Address::from(ephemeral_address)),
-                            Some((
-                                Address::from(ephemeral_address),
-                                meta.address_index().index(),
-                            )),
-                        ))
+                            Some((Address::from(ephemeral_address), meta.address_index())),
+                        )
                     }
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    {
-                        unimplemented!("EphemeralTransparent recipients are not supported without the `transparent-inputs` feature.")
-                    }
-                }
-                Recipient::InternalAccount { .. } => Ok((note.value.into_u64(), None, None)),
-            })
-            .map(|res: Result<_, Error>| {
-                let (amount, external_recipient, ephemeral_address) = res?;
-                Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
-                    Zatoshis::from_u64(amount)?,
-                    external_recipient,
-                    ephemeral_address,
-                ))
+                    Recipient::InternalAccount { .. } => OutputOfSentTx::from_parts(
+                        note.value,
+                        None,
+                        #[cfg(feature = "transparent-inputs")]
+                        None,
+                    ),
+                })
             })
             .collect::<Result<_, Error>>()
     }
