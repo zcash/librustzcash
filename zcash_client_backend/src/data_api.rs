@@ -839,7 +839,7 @@ impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
     }
 }
 
-/// Spendable shielded outputs controlled by the wallet.
+/// Shielded outputs that were received by the wallet.
 #[derive(Debug)]
 pub struct ReceivedNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
