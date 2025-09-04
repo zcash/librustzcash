@@ -1370,10 +1370,10 @@ pub trait InputSource {
     /// target height.
     fn select_unspent_notes(
         &self,
-        _account: Self::AccountId,
-        _sources: &[ShieldedProtocol],
-        _target_height: TargetHeight,
-        _exclude: &[Self::NoteRef],
+        account: Self::AccountId,
+        sources: &[ShieldedProtocol],
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.

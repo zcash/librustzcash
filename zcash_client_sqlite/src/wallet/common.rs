@@ -247,15 +247,15 @@ where
         ),
     }
 }
-/// Selects all the spendable notes with value greater than [`zip317::MARGINAL_FEE`] and for the
+/// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
 ///
 /// Implementation details:
 ///
 /// - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
-/// - Note spendability is determined using the `target_height`. If the note is mined at a greater
-///   height than the target height, it will still be returned by this query.
+/// - Note spendability is determined using the `target_height`. If the note is mined at a height
+///   greater than or equal to the target height, it will still be returned by this query.
 /// - The `to_spendable_note` function is expected to return `Ok(None)` in the case that spending
 ///   key details cannot be determined.
 #[allow(clippy::too_many_arguments)]
@@ -280,9 +280,7 @@ where
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
 
-    // Select all unspent notes belonging to the given account, ignoring dust notes; if any notes
-    // are unspendable because they are not yet mined or the shard that contains the note is
-    // not fully scanned, we will return an error.
+    // Select all unspent notes belonging to the given account, ignoring dust notes.
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "SELECT
              rn.id AS id, t.txid, rn.{output_index_col},
