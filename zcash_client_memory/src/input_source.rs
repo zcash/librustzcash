@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use zcash_client_backend::{
     data_api::{
         wallet::{ConfirmationsPolicy, TargetHeight},
-        AccountMeta, InputSource, NoteFilter, PoolMeta, TargetValue, WalletRead,
+        AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
     },
     wallet::NoteId,
 };
@@ -107,7 +107,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
-    ) -> Result<zcash_client_backend::data_api::SpendableNotes<Self::NoteRef>, Self::Error> {
+    ) -> Result<zcash_client_backend::data_api::ReceivedNotes<Self::NoteRef>, Self::Error> {
         let sapling_eligible_notes = if sources.contains(&Sapling) {
             self.select_spendable_notes_from_pool(
                 account,
@@ -140,6 +140,16 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
             #[cfg(feature = "orchard")]
             &orchard_eligible_notes,
         )
+    }
+
+    fn select_unspent_notes(
+        &self,
+        _account: Self::AccountId,
+        _sources: &[ShieldedProtocol],
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        unimplemented!()
     }
 
     /// Returns the list of spendable transparent outputs received by this wallet at `address`

@@ -839,16 +839,16 @@ impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
     }
 }
 
-/// Spendable shielded outputs controlled by the wallet.
+/// Shielded outputs that were received by the wallet.
 #[derive(Debug)]
-pub struct SpendableNotes<NoteRef> {
+pub struct ReceivedNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
     #[cfg(feature = "orchard")]
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
-impl<NoteRef> SpendableNotes<NoteRef> {
-    /// Construct a new empty [`SpendableNotes`].
+impl<NoteRef> ReceivedNotes<NoteRef> {
+    /// Construct a new empty [`ReceivedNotes`].
     pub fn empty() -> Self {
         Self::new(
             vec![],
@@ -857,7 +857,7 @@ impl<NoteRef> SpendableNotes<NoteRef> {
         )
     }
 
-    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    /// Construct a new [`ReceivedNotes`] from its constituent parts.
     pub fn new(
         sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
         #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
@@ -915,7 +915,7 @@ impl<NoteRef> SpendableNotes<NoteRef> {
         return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
     }
 
-    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// Consumes this [`ReceivedNotes`] value and produces a vector of
     /// [`ReceivedNote<NoteRef, Note>`] values.
     pub fn into_vec(
         self,
@@ -1364,7 +1364,17 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
-    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
+
+    /// Returns the list of notes belonging to the wallet that are unspent as of the specified
+    /// target height.
+    fn select_unspent_notes(
+        &self,
+        account: Self::AccountId,
+        sources: &[ShieldedProtocol],
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///

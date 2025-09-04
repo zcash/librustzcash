@@ -106,7 +106,7 @@ impl<AccountId: Copy> ReceivedOrchardOutput for DecryptedOutput<Note, AccountId>
     }
 }
 
-fn to_spendable_note<P: consensus::Parameters>(
+pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
@@ -216,7 +216,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
         txid,
         index,
         ShieldedProtocol::Orchard,
-        to_spendable_note,
+        to_received_note,
     )
 }
 
@@ -238,7 +238,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         confirmations_policy,
         exclude,
         ShieldedProtocol::Orchard,
-        to_spendable_note,
+        to_received_note,
     )
 }
 

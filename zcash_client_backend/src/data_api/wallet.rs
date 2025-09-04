@@ -395,10 +395,8 @@ impl Default for ConfirmationsPolicy {
 
 impl ConfirmationsPolicy {
     /// A policy to use the minimum number of confirmations possible: 1 confirmation for shielded
-    /// notes irrespective of origin, and 0 confirmations for transparent UTXOs.
-    ///
-    /// Test-only.
-    #[cfg(any(test, feature = "test-dependencies"))]
+    /// notes irrespective of origin, and 0 confirmations for spends of transparent UTXOs in
+    /// wallet-internal shielding transactions.
     pub const MIN: Self = ConfirmationsPolicy {
         trusted: NonZeroU32::MIN,
         untrusted: NonZeroU32::MIN,

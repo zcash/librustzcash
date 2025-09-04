@@ -377,8 +377,8 @@ impl Note {
     }
 }
 
-/// Information about a note that is tracked by the wallet that is available for spending,
-/// with sufficient information for use in note selection.
+/// A note that was received by the wallet, along with contextual information about the output that
+/// generated the note and the key that is required to spend it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ReceivedNote<NoteRef, NoteT> {
     note_id: NoteRef,

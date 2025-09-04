@@ -105,7 +105,7 @@ impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<sapling::Note, A
     }
 }
 
-fn to_spendable_note<P: consensus::Parameters>(
+pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
@@ -221,7 +221,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         txid,
         index,
         ShieldedProtocol::Sapling,
-        to_spendable_note,
+        to_received_note,
     )
 }
 
@@ -248,7 +248,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         confirmations_policy,
         exclude,
         ShieldedProtocol::Sapling,
-        to_spendable_note,
+        to_received_note,
     )
 }
 

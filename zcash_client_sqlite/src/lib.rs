@@ -61,10 +61,10 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
-        SeedRelevance, SentTransaction, SpendableNotes, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
-        SAPLING_SHARD_HEIGHT,
+        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+        ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -581,8 +581,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
-    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
-        Ok(SpendableNotes::new(
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedProtocol::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
@@ -606,6 +606,48 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                )?
+            } else {
+                vec![]
+            },
+        ))
+    }
+
+    fn select_unspent_notes(
+        &self,
+        account: Self::AccountId,
+        sources: &[ShieldedProtocol],
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::new(
+            if sources.contains(&ShieldedProtocol::Sapling) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedProtocol::Sapling,
+                    wallet::sapling::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedProtocol::Orchard) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedProtocol::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
                 )?
             } else {
                 vec![]

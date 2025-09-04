@@ -18,6 +18,7 @@ workspace.
   - `AccountBirthday::{from_parts, prior_chain_state}`
   - `Balance::uneconomic_value`
   - `MaxSpendMode`
+  - `ReceivedNotes` (replaces `SpendableNotes` globally)
   - `TransactionsInvolvingAddress`
   - `TransactionDataRequest::transactions_involving_address`
   - `wallet::ConfirmationsPolicy`
@@ -61,6 +62,7 @@ workspace.
     as its argument instead of its parts. This minimizes the API complexity
     that would otherwise arise due to the presence of the `zcashd-compat`
     feature flag.
+  - `InputSource` has added method `select_unspent_notes`.
   - The following methods now take `TargetHeight` and `ConfirmationsPolicy`
     arguments instead of an anchor height:
     - `InputSource::select_spendable_notes`
@@ -116,6 +118,9 @@ workspace.
   - `Proposal::min_target_height` now returns `TargetHeight` instead of `BlockHeight`
 - `zcash_client_backend::wallet::ReceivedNote::from_parts` takes an additional
   `mined_height` argument.
+
+### Removed
+- `zcash_client_backend::data_api::SpendableNotes` (renamed to `ReceivedNotes`)
 
 ## [0.18.1, 0.19.1] - 2025-07-19
 

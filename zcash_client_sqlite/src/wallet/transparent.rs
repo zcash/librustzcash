@@ -819,7 +819,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
             SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE tx.mined_height IS NOT NULL -- the spending transaction is mined
+            WHERE tx.mined_height < :target_height -- the spending transaction is mined
             OR tx.expiry_height = 0 -- the spending tx will not expire
             OR tx.expiry_height >= :target_height -- the spending tx is unexpired
          )",
