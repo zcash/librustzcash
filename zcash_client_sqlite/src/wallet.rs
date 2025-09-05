@@ -3468,8 +3468,6 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     d_tx: DecryptedTransaction<AccountUuid>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
-    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
-
     let funding_accounts = get_funding_accounts(conn, d_tx.tx())?;
 
     // TODO(#1305): Correctly track accounts that fund each transaction output.
@@ -3498,6 +3496,8 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     {
         return Ok(());
     }
+
+    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
 
     // If the transaction is fully shielded, or all transparent inputs are available, set the
     // fee value.
