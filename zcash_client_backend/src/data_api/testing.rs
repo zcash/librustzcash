@@ -52,7 +52,7 @@ use super::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
-        ConfirmationsPolicy,
+        ConfirmationsPolicy, SpendingKeys,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
@@ -974,7 +974,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             &proposal,
         )
@@ -1138,7 +1142,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             proposal,
         )
@@ -1232,7 +1240,11 @@ where
             input_selector,
             change_strategy,
             shielding_threshold,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             from_addrs,
             to_account,
             confirmations_policy,
@@ -2724,6 +2736,7 @@ impl WalletRead for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _include_change: bool,
+        _include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2809,6 +2822,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 

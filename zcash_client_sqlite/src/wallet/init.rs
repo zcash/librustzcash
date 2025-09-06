@@ -813,6 +813,7 @@ mod tests {
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
             db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_PUBKEYS,
             db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,

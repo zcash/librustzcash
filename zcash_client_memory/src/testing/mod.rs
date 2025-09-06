@@ -126,7 +126,11 @@ where
                         OutputOfSentTx::from_parts(
                             note.value,
                             Some(Address::from(ephemeral_address)),
-                            Some((Address::from(ephemeral_address), meta.address_index())),
+                            Some((
+                                Address::from(ephemeral_address),
+                                meta.address_index()
+                                    .expect("ephemeral addresses are derived"),
+                            )),
                         )
                     }
                     Recipient::InternalAccount { .. } => OutputOfSentTx::from_parts(

@@ -459,7 +459,7 @@ where
 
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -467,7 +467,7 @@ where
     );
     let internal_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, true)
+        .get_transparent_receivers(account_uuid, true, false)
         .unwrap();
     assert_eq!(
         u32::try_from(internal_taddrs.len()).unwrap(),
@@ -495,7 +495,7 @@ where
     // updates the gap limit by the index of the default Sapling receiver
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -506,7 +506,7 @@ where
     // Pick an address half way through the set of external taddrs
     let external_taddrs_sorted = external_taddrs
         .into_iter()
-        .filter_map(|(addr, meta)| meta.map(|m| (m.address_index(), addr)))
+        .filter_map(|(addr, meta)| meta.and_then(|m| m.address_index().map(|i| (i, addr))))
         .collect::<BTreeMap<_, _>>();
     let to = Address::from(
         *external_taddrs_sorted
@@ -529,7 +529,7 @@ where
     // never be inspected on wallet recovery.
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -547,7 +547,7 @@ where
     // Now that the transaction has been mined, the gap limit should have increased.
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
