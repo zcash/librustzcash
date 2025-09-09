@@ -472,7 +472,7 @@ impl<A: Authorization> TransactionData<A> {
                         any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
                         feature = "zip-233"
                     ))]
-                    -self.zip233_amount,
+                    -ZatBalance::from(self.zip233_amount),
                 ];
 
                 let overall_balance = value_balances
