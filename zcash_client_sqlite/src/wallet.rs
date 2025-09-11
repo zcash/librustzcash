@@ -654,7 +654,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             conn,
             params,
             account_id,
-            KeyScope::EXTERNAL,
+            TransparentKeyScope::EXTERNAL,
             UnifiedAddressRequest::ALLOW_ALL,
             NonHardenedChildIndex::const_from_index(0)..default_addr_idx,
             false,
@@ -664,7 +664,11 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Pre-generate transparent addresses up to the gap limits for the external, internal,
     // and ephemeral key scopes.
     #[cfg(feature = "transparent-inputs")]
-    for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL, KeyScope::Ephemeral] {
+    for key_scope in [
+        TransparentKeyScope::EXTERNAL,
+        TransparentKeyScope::INTERNAL,
+        TransparentKeyScope::EPHEMERAL,
+    ] {
         use ReceiverRequirement::*;
         transparent::generate_gap_addresses(
             conn,
@@ -753,7 +757,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 conn,
                 params,
                 account.internal_id(),
-                KeyScope::EXTERNAL,
+                TransparentKeyScope::EXTERNAL,
                 gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 true,
@@ -765,7 +769,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 conn,
                 params,
                 account.internal_id(),
-                KeyScope::EXTERNAL,
+                TransparentKeyScope::EXTERNAL,
                 gap_limits.external(),
                 gap_limits
                     .external()
@@ -3839,16 +3843,18 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in receiving_accounts {
-        use ReceiverRequirement::*;
-        transparent::generate_gap_addresses(
-            conn,
-            params,
-            account_id,
-            key_scope,
-            gap_limits,
-            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-            false,
-        )?;
+        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+            use ReceiverRequirement::*;
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                account_id,
+                t_key_scope,
+                gap_limits,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                false,
+            )?;
+        }
     }
 
     // For each transaction that spends a transparent output of this transaction and does not

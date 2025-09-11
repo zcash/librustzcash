@@ -110,6 +110,8 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
         ":key_scope_external": KeyScope::EXTERNAL.encode()
     ])?;
     while let Some(row) = min_addr_rows.next()? {
+        use transparent::keys::TransparentKeyScope;
+
         let account_id = AccountRef(row.get("account_id")?);
         let uivk = decode_uivk(params, row.get("uivk")?)?;
         let ufvk = decode_ufvk(params, row.get::<_, Option<String>>("ufvk")?)?;
@@ -148,7 +150,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
             account_id,
             &uivk,
             ufvk.as_ref(),
-            KeyScope::EXTERNAL,
+            TransparentKeyScope::EXTERNAL,
             UnifiedAddressRequest::ALLOW_ALL,
             start..end,
             false,
@@ -739,12 +741,14 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
         // account id in each iteration of the loop.
         #[cfg(feature = "transparent-inputs")]
         for (account_id, (uivk, ufvk)) in account_ids {
-            for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL] {
+            use transparent::keys::TransparentKeyScope;
+
+            for key_scope in [TransparentKeyScope::EXTERNAL, TransparentKeyScope::INTERNAL] {
                 use ReceiverRequirement::*;
                 let gap_limit = match key_scope {
-                    KeyScope::Zip32(zip32::Scope::External) => GapLimits::default().external(),
-                    KeyScope::Zip32(zip32::Scope::Internal) => GapLimits::default().internal(),
-                    KeyScope::Ephemeral | KeyScope::Foreign => {
+                    TransparentKeyScope::EXTERNAL => GapLimits::default().external(),
+                    TransparentKeyScope::INTERNAL => GapLimits::default().internal(),
+                    _ => {
                         unreachable!(
                             "Ephemeral and Foreign keys are omitted by the enclosing context."
                         )

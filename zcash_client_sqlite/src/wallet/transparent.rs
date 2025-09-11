@@ -262,7 +262,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
 pub(crate) fn find_gap_start(
     conn: &rusqlite::Connection,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
 ) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
     match conn
@@ -295,7 +295,7 @@ pub(crate) fn find_gap_start(
             "#,
             named_params![
                 ":account_id": account_id.0,
-                ":key_scope": key_scope.encode(),
+                ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                 ":gap_limit": gap_limit
             ],
             |row| row.get::<_, u32>(0),
@@ -336,7 +336,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
     n: usize,
 ) -> Result<
@@ -366,7 +366,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
         .query_and_then(
             named_params! {
                 ":account_id": account_id.0,
-                ":key_scope": key_scope.encode(),
+                ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                 ":gap_start": gap_start.index(),
                 // NOTE: this approach means that the address at index 2^31 - 1 will never be
                 // allocated. I think that's fine.
@@ -426,7 +426,7 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
     n: usize,
 ) -> Result<Vec<(AddressRef, TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
@@ -512,7 +512,7 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     request: UnifiedAddressRequest,
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
@@ -540,15 +540,11 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     account_id: AccountRef,
     account_uivk: &UnifiedIncomingViewingKey,
     account_ufvk: Option<&UnifiedFullViewingKey>,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     request: UnifiedAddressRequest,
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    if key_scope == KeyScope::Foreign {
-        return Ok(());
-    }
-
     if !account_uivk.has_transparent() {
         if require_key {
             return Err(SqliteClientError::AddressGeneration(
@@ -559,29 +555,27 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
         }
     }
 
-    let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
-        Ok::<_, SqliteClientError>(match key_scope {
-            KeyScope::Zip32(zip32::Scope::External) => {
-                generate_external_address(account_uivk, request, index)?
-            }
-            KeyScope::Zip32(zip32::Scope::Internal) => {
-                let internal_address = account_ufvk
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_internal_ivk()?
-                    .derive_address(index)?;
-                (Address::from(internal_address), internal_address)
-            }
-            KeyScope::Ephemeral => {
-                let ephemeral_address = account_ufvk
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_ephemeral_ivk()?
-                    .derive_ephemeral_address(index)?;
-                (Address::from(ephemeral_address), ephemeral_address)
-            }
-            KeyScope::Foreign => unreachable!(),
-        })
+    let gen_addrs = |key_scope: TransparentKeyScope, index: NonHardenedChildIndex| match key_scope {
+        TransparentKeyScope::EXTERNAL => generate_external_address(account_uivk, request, index),
+        TransparentKeyScope::INTERNAL => {
+            let internal_address = account_ufvk
+                .and_then(|k| k.transparent())
+                .expect("presence of transparent key was checked above.")
+                .derive_internal_ivk()?
+                .derive_address(index)?;
+            Ok((Address::from(internal_address), internal_address))
+        }
+        TransparentKeyScope::EPHEMERAL => {
+            let ephemeral_address = account_ufvk
+                .and_then(|k| k.transparent())
+                .expect("presence of transparent key was checked above.")
+                .derive_ephemeral_ivk()?
+                .derive_ephemeral_address(index)?;
+            Ok((Address::from(ephemeral_address), ephemeral_address))
+        }
+        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+            key_scope,
+        )),
     };
 
     // exposed_at_height is initially NULL
@@ -610,7 +604,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
         stmt_insert_address.execute(named_params![
             ":account_id": account_id.0,
             ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
-            ":key_scope": key_scope.encode(),
+            ":key_scope": KeyScope::try_from(key_scope)?.encode(),
             ":address": zcash_address.encode(),
             ":transparent_child_index": transparent_child_index.index(),
             ":transparent_address": transparent_address.encode(params),
@@ -638,20 +632,19 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limits: &GapLimits,
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
     let gap_limit = match key_scope {
-        KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
-        KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
-        KeyScope::Ephemeral => gap_limits.ephemeral(),
-        KeyScope::Foreign => {
-            // nothing to be done here
-            return Ok(());
-        }
-    };
+        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
+        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
+        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
+        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+            key_scope,
+        )),
+    }?;
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
         generate_address_range(
@@ -727,12 +720,12 @@ pub(crate) fn utxo_query_height(
          AND au.transparent_child_index >= :transparent_child_index",
     )?;
 
-    let mut get_height = |key_scope: KeyScope, gap_limit: u32| {
+    let mut get_height = |key_scope: TransparentKeyScope, gap_limit: u32| {
         if let Some(gap_start) = find_gap_start(conn, account_ref, key_scope, gap_limit)? {
             stmt.query_row(
                 named_params! {
                     ":account_id": account_ref.0,
-                    ":key_scope": key_scope.encode(),
+                    ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                     ":transparent_child_index": gap_start.index().saturating_sub(gap_limit + 1)
                 },
                 |row| {
@@ -748,8 +741,8 @@ pub(crate) fn utxo_query_height(
         }
     };
 
-    let h_external = get_height(KeyScope::EXTERNAL, gap_limits.external())?;
-    let h_internal = get_height(KeyScope::INTERNAL, gap_limits.internal())?;
+    let h_external = get_height(TransparentKeyScope::EXTERNAL, gap_limits.external())?;
+    let h_internal = get_height(TransparentKeyScope::INTERNAL, gap_limits.internal())?;
 
     match (h_external, h_internal) {
         (Some(ext), Some(int)) => Ok(std::cmp::min(ext, int)),
@@ -1794,7 +1787,7 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use secrecy::Secret;
-    use transparent::keys::NonHardenedChildIndex;
+    use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
     use zcash_client_backend::{
         data_api::{testing::TestBuilder, Account as _, WalletWrite},
         wallet::TransparentAddressMetadata,
@@ -1807,7 +1800,6 @@ mod tests {
         wallet::{
             get_account_ref,
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
-            KeyScope,
         },
         GapLimits, WalletDb,
     };
@@ -1865,8 +1857,14 @@ mod tests {
 
         let check = |db: &WalletDb<_, _, _, _>, account_id| {
             eprintln!("checking {account_id:?}");
+            let gap_start = find_gap_start(
+                &db.conn,
+                account_id,
+                TransparentKeyScope::EPHEMERAL,
+                db.gap_limits.ephemeral(),
+            );
             assert_matches!(
-                find_gap_start(&db.conn, account_id, KeyScope::Ephemeral, db.gap_limits.ephemeral()), Ok(addr_index)
+                gap_start, Ok(addr_index)
                     if addr_index == Some(NonHardenedChildIndex::ZERO)
             );
             //assert_matches!(ephemeral::first_unstored_index(&db.conn, account_id), Ok(addr_index) if addr_index == GAP_LIMIT);
@@ -1888,7 +1886,7 @@ mod tests {
                 transaction,
                 &db.params,
                 account_id,
-                KeyScope::Ephemeral,
+                TransparentKeyScope::EPHEMERAL,
                 db.gap_limits.ephemeral(),
                 (db.gap_limits.ephemeral() / 2) as usize,
             )
@@ -1903,7 +1901,7 @@ mod tests {
                     transaction,
                     &db.params,
                     account_id,
-                    KeyScope::Ephemeral,
+                    TransparentKeyScope::EPHEMERAL,
                     db.gap_limits.ephemeral(),
                     db.gap_limits.ephemeral() as usize
                 ),

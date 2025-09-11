@@ -52,7 +52,7 @@ use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::Balance;
+use {transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::Balance};
 
 use zcash_client_backend::{
     data_api::{
@@ -1600,16 +1600,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
 
             #[cfg(feature = "transparent-inputs")]
             for (account_id, key_scope) in wallet::involved_accounts(wdb.conn.0, tx_refs)? {
-                use ReceiverRequirement::*;
-                wallet::transparent::generate_gap_addresses(
-                    wdb.conn.0,
-                    &wdb.params,
-                    account_id,
-                    key_scope,
-                    &wdb.gap_limits,
-                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                    false,
-                )?;
+                if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+                    use ReceiverRequirement::*;
+                    wallet::transparent::generate_gap_addresses(
+                        wdb.conn.0,
+                        &wdb.params,
+                        account_id,
+                        t_key_scope,
+                        &wdb.gap_limits,
+                        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                        false,
+                    )?;
+                }
             }
 
             // Prune the nullifier map of entries we no longer need.
@@ -1874,16 +1876,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                     _output,
                 )?;
 
-            use ReceiverRequirement::*;
-            wallet::transparent::generate_gap_addresses(
-                wdb.conn.0,
-                &wdb.params,
-                account_id,
-                key_scope,
-                &wdb.gap_limits,
-                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                true,
-            )?;
+            if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+                use ReceiverRequirement::*;
+                wallet::transparent::generate_gap_addresses(
+                    wdb.conn.0,
+                    &wdb.params,
+                    account_id,
+                    t_key_scope,
+                    &wdb.gap_limits,
+                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                    true,
+                )?;
+            }
 
             Ok(utxo_id)
         });
@@ -1945,7 +1949,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 wdb.conn.0,
                 &wdb.params,
                 account_id,
-                KeyScope::Ephemeral,
+                TransparentKeyScope::EPHEMERAL,
                 wdb.gap_limits.ephemeral(),
                 n,
             )?;

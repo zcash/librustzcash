@@ -8,6 +8,8 @@ use zcash_address::{
     ConversionError, TryFromAddress,
 };
 use zcash_client_backend::data_api::AccountSource;
+#[cfg(feature = "transparent-inputs")]
+use zcash_keys::keys::AddressGenerationError;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
@@ -150,6 +152,21 @@ impl From<KeyScope> for Option<TransparentKeyScope> {
             KeyScope::Zip32(scope) => Some(scope.into()),
             KeyScope::Ephemeral => Some(TransparentKeyScope::custom(2).expect("valid scope")),
             KeyScope::Foreign => None,
+        }
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TryFrom<TransparentKeyScope> for KeyScope {
+    type Error = AddressGenerationError;
+    fn try_from(value: TransparentKeyScope) -> Result<Self, Self::Error> {
+        match value {
+            TransparentKeyScope::EXTERNAL => Ok(KeyScope::EXTERNAL),
+            TransparentKeyScope::INTERNAL => Ok(KeyScope::INTERNAL),
+            TransparentKeyScope::EPHEMERAL => Ok(KeyScope::Ephemeral),
+            _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+                value,
+            )),
         }
     }
 }
