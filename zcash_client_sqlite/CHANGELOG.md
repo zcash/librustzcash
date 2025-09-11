@@ -26,6 +26,10 @@ workspace.
     `spendable_notes` is called with `TargetValue::MaxSpendable`
     and there are funds that haven't been confirmed and all spendable notes
     can't be selected.
+  - A `PubkeyImportConflict` variant has been added. It is produced when
+    a call to `WalletWrite::import_standalone_transparent_pubkey` attempts
+    to import a transparent pubkey to an account when that pubkey is already
+    managed by a different account.
 
 ## [0.17.3] - 2025-08-29
 

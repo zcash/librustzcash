@@ -245,6 +245,10 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::NotificationMismatch { .. } => {
             unreachable!("we don't service transaction data requests in migrations")
         }
+        #[cfg(feature = "transparent-key-import")]
+        SqliteClientError::PubkeyImportConflict(_) => {
+            unreachable!("we do not import pubkeys in migrations")
+        }
     }
 }
 

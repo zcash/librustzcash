@@ -693,6 +693,28 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     use ::transparent::address::TransparentAddress;
 
+    let existing_import_account = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey",
+            named_params![
+                ":imported_transparent_receiver_pubkey": pubkey.serialize()
+            ],
+            |row| row.get::<_, Uuid>("account_uuid"),
+        )
+        .optional()?;
+
+    if let Some(current) = existing_import_account {
+        if current == account_uuid.expose_uuid() {
+            // The key has already been imported; nothing to do.
+            return Ok(());
+        } else {
+            return Err(SqliteClientError::PubkeyImportConflict(current));
+        }
+    }
+
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
     conn.execute(
         r#"

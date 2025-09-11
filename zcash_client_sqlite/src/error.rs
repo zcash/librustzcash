@@ -6,6 +6,8 @@ use std::fmt;
 use nonempty::NonEmpty;
 use shardtree::error::ShardTreeError;
 
+#[cfg(feature = "transparent-key-import")]
+use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::address::UnifiedAddress;
@@ -146,6 +148,7 @@ pub enum SqliteClientError {
     /// The wallet found one or more notes that given a certain context would be
     /// ineligible and shouldn't be considered in the involved db operation.
     IneligibleNotes,
+
     /// The wallet encountered an error when attempting to schedule wallet operations.
     #[cfg(feature = "transparent-inputs")]
     Scheduling(SchedulingError),
@@ -160,6 +163,11 @@ pub enum SqliteClientError {
         expected: BlockHeight,
         actual: BlockHeight,
     },
+
+    /// An attempt to import a transparent pubkey failed because that pubkey had already been
+    /// imported to a different account.
+    #[cfg(feature = "transparent-key-import")]
+    PubkeyImportConflict(Uuid),
 }
 
 impl error::Error for SqliteClientError {
@@ -246,6 +254,10 @@ impl fmt::Display for SqliteClientError {
             }
             SqliteClientError::IneligibleNotes => {
                 write!(f, "Query found notes that are considered ineligible in its context")
+            }
+            #[cfg(feature = "transparent-key-import")]
+            SqliteClientError::PubkeyImportConflict(uuid) => {
+                write!(f, "The given transparent pubkey is already managed by account {uuid}")
             }
         }
     }
