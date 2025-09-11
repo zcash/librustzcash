@@ -316,6 +316,7 @@ pub const V_0_17_3: &[Uuid] = &[
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
+    tx_retrieval_queue_expiry::MIGRATION_ID,
     fix_v_transactions_expired_unmined::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
 ];
