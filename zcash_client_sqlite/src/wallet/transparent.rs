@@ -14,7 +14,7 @@ use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
 use tracing::debug;
 
-use transparent::keys::NonHardenedChildRange;
+use transparent::keys::{NonHardenedChildRange, TransparentKeyScope};
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
@@ -45,6 +45,9 @@ use zcash_protocol::{
     TxId,
 };
 use zip32::{DiversifierIndex, Scope};
+
+#[cfg(feature = "transparent-key-import")]
+use bip32::{PublicKey, PublicKeyBytes};
 
 use super::encoding::{decode_epoch_seconds, ReceiverFlags};
 use super::{
@@ -89,15 +92,17 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
 /// given as bytes in big-endian order (the reverse of the usual order).
 fn address_index_from_diversifier_index_be(
-    diversifier_index_be: &[u8],
-) -> Result<NonHardenedChildIndex, SqliteClientError> {
-    let di = decode_diversifier_index_be(diversifier_index_be)?;
-
-    NonHardenedChildIndex::try_from(di).map_err(|_| {
-        SqliteClientError::CorruptedData(
-            "Unexpected hardened index for transparent address.".to_string(),
-        )
-    })
+    diversifier_index_be: Option<Vec<u8>>,
+) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
+    decode_diversifier_index_be(diversifier_index_be)?
+        .map(|di| {
+            NonHardenedChildIndex::try_from(di).map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "Unexpected hardened index for transparent address.".to_string(),
+                )
+            })
+        })
+        .transpose()
 }
 
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
@@ -110,7 +115,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
-        "SELECT cached_transparent_receiver_address, transparent_child_index, key_scope
+        "SELECT
+            cached_transparent_receiver_address,
+            key_scope,
+            transparent_child_index,
+            imported_transparent_receiver_pubkey
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
@@ -127,13 +136,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
-        let address_index: u32 = row.get(1)?;
-        let address_index = NonHardenedChildIndex::from_index(address_index).ok_or(
-            SqliteClientError::CorruptedData(format!(
-                "{address_index} is not a valid transparent child index"
-            )),
-        )?;
-        let scope = KeyScope::decode(row.get(2)?)?;
+        let key_scope = KeyScope::decode(row.get(1)?)?;
 
         let taddr = Address::decode(params, &addr_str)
             .ok_or_else(|| {
@@ -142,7 +145,53 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .to_transparent_address();
 
         if let Some(taddr) = taddr {
-            let metadata = TransparentAddressMetadata::new(scope.into(), address_index);
+            let metadata = match key_scope {
+                #[cfg(feature = "transparent-key-import")]
+                KeyScope::Foreign => {
+                    let pubkey_bytes = row
+                        .get::<_, Option<Vec<u8>>>(3)?
+                        .ok_or_else(|| {
+                            SqliteClientError::CorruptedData(
+                            "Pubkey bytes must be present for all imported transparent addresses."
+                                .to_owned(),
+                        )
+                        })
+                        .and_then(|b| {
+                            <[u8; 33]>::try_from(&b[..]).map_err(|_| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Invalid public key byte length; must be 33 bytes, got {}.",
+                                    b.len()
+                                ))
+                            })
+                        })?;
+                    let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
+                        SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
+                    })?;
+                    TransparentAddressMetadata::Standalone(pubkey)
+                }
+                derived => {
+                    let scope_opt = <Option<TransparentKeyScope>>::from(derived);
+                    let address_index_opt = row.get::<_, Option<u32>>(2)?;
+                    let (scope, address_index) =
+                        scope_opt.zip(address_index_opt).ok_or_else(|| {
+                            SqliteClientError::CorruptedData(
+                                "Derived addresses must have derivation metadata present."
+                                    .to_owned(),
+                            )
+                        })?;
+
+                    TransparentAddressMetadata::Derived {
+                        scope,
+                        address_index: NonHardenedChildIndex::from_index(address_index).ok_or(
+                            SqliteClientError::CorruptedData(format!(
+                                "{} is not a valid transparent child index",
+                                address_index
+                            )),
+                        )?,
+                    }
+                }
+            };
+
             ret.insert(taddr, Some(metadata));
         }
     }
@@ -213,7 +262,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
 pub(crate) fn find_gap_start(
     conn: &rusqlite::Connection,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
 ) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
     match conn
@@ -246,7 +295,7 @@ pub(crate) fn find_gap_start(
             "#,
             named_params![
                 ":account_id": account_id.0,
-                ":key_scope": key_scope.encode(),
+                ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                 ":gap_limit": gap_limit
             ],
             |row| row.get::<_, u32>(0),
@@ -287,7 +336,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
     n: usize,
 ) -> Result<
@@ -317,7 +366,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
         .query_and_then(
             named_params! {
                 ":account_id": account_id.0,
-                ":key_scope": key_scope.encode(),
+                ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                 ":gap_start": gap_start.index(),
                 // NOTE: this approach means that the address at index 2^31 - 1 will never be
                 // allocated. I think that's fine.
@@ -339,7 +388,15 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                     (
                         address_id,
                         a,
-                        TransparentAddressMetadata::new(key_scope.into(), i),
+                        match <Option<TransparentKeyScope>>::from(key_scope) {
+                            Some(scope) => TransparentAddressMetadata::Derived {
+                                scope,
+                                address_index: i,
+                            },
+                            None => {
+                                todo!("Use the standalone pubkey associated with the address")
+                            }
+                        },
                     )
                 }))
             },
@@ -369,7 +426,7 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limit: u32,
     n: usize,
 ) -> Result<Vec<(AddressRef, TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
@@ -382,7 +439,8 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
 
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
-            key_scope.into(),
+            <Option<TransparentKeyScope>>::from(key_scope)
+                .expect("reservation relies on key derivation"),
             gap_start.index() + gap_limit,
         ));
     }
@@ -454,7 +512,7 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     request: UnifiedAddressRequest,
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
@@ -482,7 +540,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     account_id: AccountRef,
     account_uivk: &UnifiedIncomingViewingKey,
     account_ufvk: Option<&UnifiedFullViewingKey>,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     request: UnifiedAddressRequest,
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
@@ -497,28 +555,27 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
         }
     }
 
-    let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
-        Ok::<_, SqliteClientError>(match key_scope {
-            KeyScope::Zip32(zip32::Scope::External) => {
-                generate_external_address(account_uivk, request, index)?
-            }
-            KeyScope::Zip32(zip32::Scope::Internal) => {
-                let internal_address = account_ufvk
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_internal_ivk()?
-                    .derive_address(index)?;
-                (Address::from(internal_address), internal_address)
-            }
-            KeyScope::Ephemeral => {
-                let ephemeral_address = account_ufvk
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_ephemeral_ivk()?
-                    .derive_ephemeral_address(index)?;
-                (Address::from(ephemeral_address), ephemeral_address)
-            }
-        })
+    let gen_addrs = |key_scope: TransparentKeyScope, index: NonHardenedChildIndex| match key_scope {
+        TransparentKeyScope::EXTERNAL => generate_external_address(account_uivk, request, index),
+        TransparentKeyScope::INTERNAL => {
+            let internal_address = account_ufvk
+                .and_then(|k| k.transparent())
+                .expect("presence of transparent key was checked above.")
+                .derive_internal_ivk()?
+                .derive_address(index)?;
+            Ok((Address::from(internal_address), internal_address))
+        }
+        TransparentKeyScope::EPHEMERAL => {
+            let ephemeral_address = account_ufvk
+                .and_then(|k| k.transparent())
+                .expect("presence of transparent key was checked above.")
+                .derive_ephemeral_ivk()?
+                .derive_ephemeral_address(index)?;
+            Ok((Address::from(ephemeral_address), ephemeral_address))
+        }
+        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+            key_scope,
+        )),
     };
 
     // exposed_at_height is initially NULL
@@ -547,7 +604,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
         stmt_insert_address.execute(named_params![
             ":account_id": account_id.0,
             ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
-            ":key_scope": key_scope.encode(),
+            ":key_scope": KeyScope::try_from(key_scope)?.encode(),
             ":address": zcash_address.encode(),
             ":transparent_child_index": transparent_child_index.index(),
             ":transparent_address": transparent_address.encode(params),
@@ -575,16 +632,19 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
-    key_scope: KeyScope,
+    key_scope: TransparentKeyScope,
     gap_limits: &GapLimits,
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
     let gap_limit = match key_scope {
-        KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
-        KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
-        KeyScope::Ephemeral => gap_limits.ephemeral(),
-    };
+        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
+        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
+        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
+        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+            key_scope,
+        )),
+    }?;
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
         generate_address_range(
@@ -660,12 +720,12 @@ pub(crate) fn utxo_query_height(
          AND au.transparent_child_index >= :transparent_child_index",
     )?;
 
-    let mut get_height = |key_scope: KeyScope, gap_limit: u32| {
+    let mut get_height = |key_scope: TransparentKeyScope, gap_limit: u32| {
         if let Some(gap_start) = find_gap_start(conn, account_ref, key_scope, gap_limit)? {
             stmt.query_row(
                 named_params! {
                     ":account_id": account_ref.0,
-                    ":key_scope": key_scope.encode(),
+                    ":key_scope": KeyScope::try_from(key_scope)?.encode(),
                     ":transparent_child_index": gap_start.index().saturating_sub(gap_limit + 1)
                 },
                 |row| {
@@ -681,8 +741,8 @@ pub(crate) fn utxo_query_height(
         }
     };
 
-    let h_external = get_height(KeyScope::EXTERNAL, gap_limits.external())?;
-    let h_internal = get_height(KeyScope::INTERNAL, gap_limits.internal())?;
+    let h_external = get_height(TransparentKeyScope::EXTERNAL, gap_limits.external())?;
+    let h_internal = get_height(TransparentKeyScope::INTERNAL, gap_limits.internal())?;
 
     match (h_external, h_internal) {
         (Some(ext), Some(int)) => Ok(std::cmp::min(ext, int)),
@@ -1417,19 +1477,47 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let address_str = address.encode(params);
     let addr_meta = conn
         .query_row(
-            "SELECT diversifier_index_be, key_scope
+            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
              AND cached_transparent_receiver_address = :address",
             named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| {
-                let di_be: Vec<u8> = row.get(0)?;
-                let scope_code = row.get(1)?;
+                let scope_code = row.get("key_scope")?;
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
-                    address_index_from_diversifier_index_be(&di_be).map(|address_index| {
-                        TransparentAddressMetadata::new(key_scope.into(), address_index)
-                    })
+                    let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
+                    match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
+                        Some((scope, address_index)) => {
+                            Ok(TransparentAddressMetadata::Derived {
+                                scope,
+                                address_index,
+                            })
+                        }
+                        None => {
+                            if let Some(_pubkey_bytes) = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")? {
+                                #[cfg(not(feature = "transparent-key-import"))]
+                                let addr_meta = Err(SqliteClientError::CorruptedData(
+                                    "standalone imported transparent addresses are not supported by this build of `zcash_client_sqlite`".to_string()
+                                ));
+
+                                #[cfg(feature = "transparent-key-import")]
+                                let addr_meta = {
+                                    let pubkey_bytes = PublicKeyBytes::try_from(_pubkey_bytes).map_err(|_| {
+                                        SqliteClientError::CorruptedData(
+                                            "imported_transparent_receiver_pubkey must be 33 bytes in length".to_string()
+                                        )
+                                    })?;
+                                    let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
+                                    Ok(TransparentAddressMetadata::Standalone(pubkey))
+                                };
+
+                                addr_meta
+                            } else {
+                                Err(SqliteClientError::CorruptedData("imported_transparent_receiver_pubkey must be set for \"standalone\" transparent addresses".to_string()))
+                            }
+                        }
+                    }
                 }))
             },
         )
@@ -1699,7 +1787,7 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use secrecy::Secret;
-    use transparent::keys::NonHardenedChildIndex;
+    use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
     use zcash_client_backend::{
         data_api::{testing::TestBuilder, Account as _, WalletWrite},
         wallet::TransparentAddressMetadata,
@@ -1712,7 +1800,6 @@ mod tests {
         wallet::{
             get_account_ref,
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
-            KeyScope,
         },
         GapLimits, WalletDb,
     };
@@ -1770,8 +1857,14 @@ mod tests {
 
         let check = |db: &WalletDb<_, _, _, _>, account_id| {
             eprintln!("checking {account_id:?}");
+            let gap_start = find_gap_start(
+                &db.conn,
+                account_id,
+                TransparentKeyScope::EPHEMERAL,
+                db.gap_limits.ephemeral(),
+            );
             assert_matches!(
-                find_gap_start(&db.conn, account_id, KeyScope::Ephemeral, db.gap_limits.ephemeral()), Ok(addr_index)
+                gap_start, Ok(addr_index)
                     if addr_index == Some(NonHardenedChildIndex::ZERO)
             );
             //assert_matches!(ephemeral::first_unstored_index(&db.conn, account_id), Ok(addr_index) if addr_index == GAP_LIMIT);
@@ -1793,7 +1886,7 @@ mod tests {
                 transaction,
                 &db.params,
                 account_id,
-                KeyScope::Ephemeral,
+                TransparentKeyScope::EPHEMERAL,
                 db.gap_limits.ephemeral(),
                 (db.gap_limits.ephemeral() / 2) as usize,
             )
@@ -1808,7 +1901,7 @@ mod tests {
                     transaction,
                     &db.params,
                     account_id,
-                    KeyScope::Ephemeral,
+                    TransparentKeyScope::EPHEMERAL,
                     db.gap_limits.ephemeral(),
                     db.gap_limits.ephemeral() as usize
                 ),

@@ -90,7 +90,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
+        AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
         SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
         Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
@@ -654,7 +654,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             conn,
             params,
             account_id,
-            KeyScope::EXTERNAL,
+            TransparentKeyScope::EXTERNAL,
             UnifiedAddressRequest::ALLOW_ALL,
             NonHardenedChildIndex::const_from_index(0)..default_addr_idx,
             false,
@@ -664,7 +664,11 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Pre-generate transparent addresses up to the gap limits for the external, internal,
     // and ephemeral key scopes.
     #[cfg(feature = "transparent-inputs")]
-    for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL, KeyScope::Ephemeral] {
+    for key_scope in [
+        TransparentKeyScope::EXTERNAL,
+        TransparentKeyScope::INTERNAL,
+        TransparentKeyScope::EPHEMERAL,
+    ] {
         use ReceiverRequirement::*;
         transparent::generate_gap_addresses(
             conn,
@@ -678,6 +682,63 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     Ok(account)
+}
+
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    pubkey: secp256k1::PublicKey,
+) -> Result<(), SqliteClientError> {
+    use ::transparent::address::TransparentAddress;
+
+    let existing_import_account = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey",
+            named_params![
+                ":imported_transparent_receiver_pubkey": pubkey.serialize()
+            ],
+            |row| row.get::<_, Uuid>("account_uuid"),
+        )
+        .optional()?;
+
+    if let Some(current) = existing_import_account {
+        if current == account_uuid.expose_uuid() {
+            // The key has already been imported; nothing to do.
+            return Ok(());
+        } else {
+            return Err(SqliteClientError::PubkeyImportConflict(current));
+        }
+    }
+
+    let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
+    conn.execute(
+        r#"
+        INSERT INTO addresses (
+          account_id, key_scope, address, cached_transparent_receiver_address,
+          receiver_flags, imported_transparent_receiver_pubkey
+        )
+        SELECT
+          id, :key_scope, :address, :address,
+          :receiver_flags, :imported_transparent_receiver_pubkey
+          FROM accounts
+          WHERE accounts.uuid = :account_uuid
+        ON CONFLICT (imported_transparent_receiver_pubkey) DO NOTHING
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+            ":key_scope": KeyScope::Foreign.encode(),
+            ":address": addr_str,
+            ":receiver_flags": ReceiverFlags::P2PKH.bits(),
+            ":imported_transparent_receiver_pubkey": pubkey.serialize()
+        ],
+    )?;
+
+    Ok(())
 }
 
 pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
@@ -718,7 +779,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 conn,
                 params,
                 account.internal_id(),
-                KeyScope::EXTERNAL,
+                TransparentKeyScope::EXTERNAL,
                 gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 true,
@@ -730,7 +791,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 conn,
                 params,
                 account.internal_id(),
-                KeyScope::EXTERNAL,
+                TransparentKeyScope::EXTERNAL,
                 gap_limits.external(),
                 gap_limits
                     .external()
@@ -742,8 +803,9 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
             addrs
                 .iter()
                 .find_map(|(_, _, meta)| {
-                    let j = DiversifierIndex::from(meta.address_index());
-                    account.uivk().address(j, request).ok().map(|ua| (ua, j))
+                    meta.address_index()
+                        .map(DiversifierIndex::from)
+                        .and_then(|j| account.uivk().address(j, request).ok().map(|ua| (ua, j)))
                 })
                 .ok_or(SqliteClientError::ReachedGapLimit(
                     TransparentKeyScope::EXTERNAL,
@@ -833,27 +895,38 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
-        let di_vec: Vec<u8> = row.get(1)?;
+        let di_vec: Option<Vec<u8>> = row.get(1)?;
         let _scope = KeyScope::decode(row.get(2)?)?;
 
         let addr = Address::decode(params, &addr_str).ok_or_else(|| {
             SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
         })?;
-        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
+
         // Sapling and Unified addresses always have external scope.
         #[cfg(feature = "transparent-inputs")]
-        let transparent_scope =
-            matches!(addr, Address::Transparent(_) | Address::Tex(_)).then(|| _scope.into());
+        let transparent_key_scope = matches!(addr, Address::Transparent(_) | Address::Tex(_))
+            .then(|| _scope.into())
+            .flatten();
 
-        addrs.push(
-            AddressInfo::from_parts(
-                addr,
-                diversifier_index,
+        let addr_source = match decode_diversifier_index_be(di_vec)? {
+            Some(di) => Ok::<_, SqliteClientError>(AddressSource::Derived {
+                diversifier_index: di,
                 #[cfg(feature = "transparent-inputs")]
-                transparent_scope,
-            )
-            .expect("valid"),
-        );
+                transparent_key_scope,
+            }),
+            #[cfg(feature = "transparent-key-import")]
+            None => Ok::<_, SqliteClientError>(AddressSource::Standalone),
+            #[cfg(not(feature = "transparent-key-import"))]
+            None => Err(SqliteClientError::CorruptedData(
+                "diversifier index may not be null".to_string(),
+            )),
+        }?;
+
+        addrs.push(AddressInfo::from_parts(addr, addr_source).ok_or(
+            SqliteClientError::CorruptedData(
+                "transparent key scope information present for shielded address".to_string(),
+            ),
+        )?);
     }
 
     Ok(addrs)
@@ -881,7 +954,7 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     // This returns the most recently exposed external-scope address (the address that was exposed
     // at the greatest block height, using the largest diversifier index to break ties)
     // that conforms to the specified requirements.
-    let addr: Option<(String, Vec<u8>)> = conn
+    let addr: Option<(String, Option<Vec<u8>>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
              FROM addresses
@@ -903,7 +976,11 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
         .optional()?;
 
     addr.map(|(addr_str, di_vec)| {
-        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
+        let diversifier_index = decode_diversifier_index_be(di_vec)?.ok_or_else(|| {
+            SqliteClientError::CorruptedData(
+                "Addresses in EXTERNAL scope must be HD-derived".to_owned(),
+            )
+        })?;
         Address::decode(params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -3384,7 +3461,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                 }
             } else {
                 warn!(
-                    "Unable to determine recipient address for tx {:?} output {}",
+                    "Unable to determine recipient address for tx {} output {}",
                     d_tx.tx().txid(),
                     output_index
                 );
@@ -3788,16 +3865,18 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in receiving_accounts {
-        use ReceiverRequirement::*;
-        transparent::generate_gap_addresses(
-            conn,
-            params,
-            account_id,
-            key_scope,
-            gap_limits,
-            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-            false,
-        )?;
+        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+            use ReceiverRequirement::*;
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                account_id,
+                t_key_scope,
+                gap_limits,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                false,
+            )?;
+        }
     }
 
     // For each transaction that spends a transparent output of this transaction and does not
@@ -4782,5 +4861,29 @@ mod tests {
             account_birthday(st.wallet().conn(), account_id),
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey() {
+        use rand::SeedableRng;
+        use rand_chacha::ChaChaRng;
+        use secp256k1::{Secp256k1, SecretKey};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+
+        let mut rng = ChaChaRng::from_seed([0u8; 32]);
+        let secp = Secp256k1::new();
+        let pubkey = SecretKey::new(&mut rng).public_key(&secp);
+        assert_matches!(
+            st.wallet_mut()
+                .import_standalone_transparent_pubkey(account_id, pubkey),
+            Ok(_)
+        );
     }
 }

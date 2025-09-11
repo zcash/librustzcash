@@ -645,10 +645,9 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .unwrap_or_else(|| Ok(vec![]))?
             .into_iter()
             .filter(|(_addr, meta)| {
-                index_range
-                    .as_ref()
-                    .map(|range| range.contains(&meta.address_index()))
-                    .unwrap_or(true)
+                index_range.as_ref().map_or(true, |range| {
+                    meta.address_index().is_some_and(|i| range.contains(&i))
+                })
             })
             .collect::<Vec<_>>())
     }
@@ -658,10 +657,18 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         account_id: Self::AccountId,
         _include_change: bool,
+        _include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         let account = self
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
+
+        if _include_change {
+            unimplemented!("include_change is not yet supported");
+        }
+        if _include_standalone {
+            unimplemented!("include_standalone is not yet supported");
+        }
 
         let t_addresses = account
             .addresses()

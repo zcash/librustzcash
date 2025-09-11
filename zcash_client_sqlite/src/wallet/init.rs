@@ -245,6 +245,10 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::NotificationMismatch { .. } => {
             unreachable!("we don't service transaction data requests in migrations")
         }
+        #[cfg(feature = "transparent-key-import")]
+        SqliteClientError::PubkeyImportConflict(_) => {
+            unreachable!("we do not import pubkeys in migrations")
+        }
     }
 }
 
@@ -813,6 +817,7 @@ mod tests {
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
             db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_PUBKEYS,
             db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,

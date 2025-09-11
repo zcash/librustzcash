@@ -73,6 +73,9 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Transparent protocol
+secp256k1 = { workspace = true, optional = true }
+
 # - Sync engine
 async-trait = { version = "0.1", optional = true }
 futures-util = { version = "0.3", optional = true }
@@ -176,10 +179,17 @@ lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = [
     "dep:bip32",
+    "dep:secp256k1",
     "transparent/transparent-inputs",
     "zcash_keys/transparent-inputs",
     "zcash_primitives/transparent-inputs",
 ]
+
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature must
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = ["transparent-inputs"]
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
