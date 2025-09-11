@@ -156,10 +156,9 @@ workspace.
   now returns `Option<NonHardenedChildIndex>` instead of `NonHardenedChildIndex`.
 
 ### Removed
-- `zcash_client_backend::data_api::AddressInfo::diversifier_index`
-
-### Removed
-- `zcash_client_backend::data_api::SpendableNotes` (renamed to `ReceivedNotes`)
+- `zcash_client_backend::data_api`:
+  - `AddressInfo::diversifier_index` (use `AddressInfo::source` instead)
+  - `SpendableNotes` (renamed to `ReceivedNotes`)
 
 ## [0.18.1, 0.19.1] - 2025-07-19
 

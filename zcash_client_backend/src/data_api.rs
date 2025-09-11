@@ -637,6 +637,8 @@ pub enum AddressSource {
 }
 
 impl AddressSource {
+    /// Returns the transparent key scope at which the address was derived, if this source metadata
+    /// is for a transparent address derived from a UIVK in the wallet.
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent_key_scope(&self) -> Option<&TransparentKeyScope> {
         match self {

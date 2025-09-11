@@ -314,6 +314,12 @@ pub const V_0_17_3: &[Uuid] = &[
     fix_v_transactions_expired_unmined::MIGRATION_ID,
 ];
 
+/// Leaf migrations as of the current repository state.
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
+    fix_v_transactions_expired_unmined::MIGRATION_ID,
+    support_zcashd_wallet_import::MIGRATION_ID,
+];
+
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
