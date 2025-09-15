@@ -44,6 +44,7 @@ mod v_transactions_net;
 mod v_transactions_note_uniqueness;
 mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
+mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
@@ -115,8 +116,9 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
-    //                                        /                         \
-    //                   support_zcashd_wallet_import              fix_v_transactions_expired_unmined
+    //                                        /            |            \
+    //             support_zcashd_wallet_import            |            fix_v_transactions_expired_unmined
+    //                                         v_tx_outputs_return_addrs
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -194,6 +196,7 @@ pub(super) fn all_migrations<
         Box::new(fix_transparent_received_outputs::Migration),
         Box::new(support_zcashd_wallet_import::Migration),
         Box::new(fix_v_transactions_expired_unmined::Migration),
+        Box::new(v_tx_outputs_return_addrs::Migration),
     ]
 }
 
@@ -319,6 +322,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     fix_v_transactions_expired_unmined::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
+    v_tx_outputs_return_addrs::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

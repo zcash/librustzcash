@@ -1018,9 +1018,36 @@ GROUP BY notes.account_id, notes.txid";
 ///   both outputs received as a consequence of wallet-internal transfers
 ///   and as change.
 ///
-/// The `to_address` column will only contain an address when the recipient is
-/// external. In all other cases, the recipient account id indicates the account
-/// that controls the output.
+/// # Columns
+/// - `txid`: The id of the transaction in which the output was sent or received.
+/// - `output_pool`: The value pool for the transaction; valid values for this are:
+///   - 0: Transparent
+///   - 2: Sapling
+///   - 3: Orchard
+/// - `output_index`: The index of the output within the transaction bundle associated with
+///   the `output_pool` value; that is, within `vout` for transparent, the vector of
+///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+/// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
+///   spent notes in creating the transaction. Note that if multiple accounts in the wallet
+///   contributed funds in creating the associated transaction, redundant rows will exist in the
+///   output of this view, one for each such account.
+/// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
+///   outgoing transaction outputs this will be `NULL`.
+/// - `address`: The address to which the output was sent; for received outputs, this is the
+///   address at which the output was received, or `NULL` for wallet-internal outputs.
+/// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
+///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
+///   address. This will be `NULL` for outgoing transaction outputs.
+/// - `value`: The value of the output, in zatoshis.
+/// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
+///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
+///   for whether or not the output should be considered change, and may not be correct for
+///   cross-account internal transactions, shielding transactions, or outputs explicitly sent from
+///   the wallet to itself. The determination of what counts as change is somewhat subjective and
+///   the value of this column should be used with caution.
+/// - `memo`: The binary content of the memo associated with the output, if the output is a
+///   shielded output and the memo was received by the wallet, sent by the wallet or was able to be
+///   decrypted with the wallet's outgoing viewing key.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
 WITH unioned AS (
@@ -1030,13 +1057,15 @@ WITH unioned AS (
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
            to_account.uuid              AS to_account_uuid,
-           NULL                         AS to_address,
+           a.address                    AS to_address,
+           a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
            ro.memo                      AS memo
     FROM v_received_outputs ro
     JOIN transactions
         ON transactions.id_tx = ro.transaction_id
+    LEFT JOIN addresses a ON a.id = ro.address_id
     -- join to the sent_notes table to obtain `from_account_id`
     LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
     -- join on the accounts table to obtain account UUIDs
@@ -1050,6 +1079,7 @@ WITH unioned AS (
            from_account.uuid            AS from_account_uuid,
            NULL                         AS to_account_uuid,
            sent_notes.to_address        AS to_address,
+           NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
            sent_notes.memo              AS memo
