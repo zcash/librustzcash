@@ -2404,7 +2404,7 @@ pub(crate) fn get_transaction<P: Parameters>(
     txid: TxId,
 ) -> Result<Option<(BlockHeight, Transaction)>, SqliteClientError> {
     conn.query_row(
-        "SELECT raw, block, expiry_height FROM transactions
+        "SELECT raw, mined_height, expiry_height FROM transactions
         WHERE txid = ?",
         [txid.as_ref()],
         |row| {
@@ -3877,7 +3877,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // For each transaction that spends a transparent output of this transaction and does not
     // already have a known fee value, set the fee if possible.
     let mut spending_txs_stmt = conn.prepare(
-        "SELECT DISTINCT t.id_tx, t.raw, t.block, t.expiry_height
+        "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
          -- find transactions that spend transparent outputs of the decrypted tx
          LEFT OUTER JOIN transparent_received_output_spends ts
