@@ -2804,14 +2804,19 @@ pub(crate) fn block_max_scanned<P: consensus::Parameters>(
 pub(crate) fn get_tx_height(
     conn: &rusqlite::Connection,
     txid: TxId,
-) -> Result<Option<BlockHeight>, rusqlite::Error> {
-    conn.query_row(
-        "SELECT block FROM transactions WHERE txid = ?",
-        [txid.as_ref()],
-        |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
-    )
-    .optional()
-    .map(|opt| opt.flatten())
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    let tx_height = conn
+        .query_row(
+            "SELECT mined_height FROM transactions WHERE txid = ?",
+            [txid.as_ref()],
+            |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
+        )
+        .optional()
+        .map(|opt| opt.flatten())?;
+
+    Ok(tx_height.filter(|h| h <= &chain_tip_height))
 }
 
 /// Returns the block hash for the block at the specified height,
