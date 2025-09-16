@@ -94,7 +94,7 @@ use {
     crate::data_api::error::PcztError,
     ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
-    orchard::domain::OrchardDomain,
+    orchard::primitives::OrchardDomain,
     pczt::roles::{
         creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
         tx_extractor::TransactionExtractor, updater::Updater,

@@ -35,7 +35,7 @@ use nonempty::NonEmpty;
 #[cfg(zcash_unstable = "nu7")]
 use orchard::{
     issuance::compute_asset_desc_hash,
-    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
+    issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
     note::{RandomSeed, Rho},
     orchard_flavor::OrchardZSA,
     value::NoteValue,
@@ -45,6 +45,7 @@ use orchard::{
 use zcash_protocol::consensus::Network::RegtestNetwork;
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
+#[cfg(zcash_unstable = "nu7")]
 static ORCHARD_ZSA_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
@@ -495,8 +496,8 @@ fn zsa_to_zsa() {
         note
     };
 
-    let isk = IssuanceAuthorizingKey::from_bytes([1; 32]).unwrap();
-    let ik = IssuanceValidatingKey::from(&isk);
+    let isk = IssueAuthKey::<ZSASchnorr>::from_bytes(&[1; 32]).unwrap();
+    let ik = IssueValidatingKey::from(&isk);
     let value = orchard::value::NoteValue::from_raw(1_000_000);
     let asset = AssetBase::derive(
         &ik,

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::{Global, Zip32Derivation},
+    common::{Global, VerSpendAuthSig, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -116,8 +116,7 @@ pub struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
-    #[serde_as(as = "Option<[_; 64]>")]
-    pub(crate) spend_auth_sig: Option<[u8; 64]>,
+    pub(crate) spend_auth_sig: Option<VerSpendAuthSig>,
 
     /// The [raw encoding] of the Orchard payment address that received the note being spent.
     ///
@@ -448,7 +447,13 @@ impl Bundle {
                 let spend = orchard::pczt::Spend::parse(
                     action.spend.nullifier,
                     action.spend.rk,
-                    action.spend.spend_auth_sig,
+                    action
+                        .spend
+                        .spend_auth_sig
+                        .map(|z| {
+                            orchard::pczt::parse_ver_spend_auth_sig(z.sighash_info, z.signature)
+                        })
+                        .transpose()?,
                     action.spend.recipient,
                     action.spend.value,
                     action.spend.asset,
@@ -526,7 +531,10 @@ impl Bundle {
                     spend: Spend {
                         nullifier: spend.nullifier().to_bytes(),
                         rk: spend.rk().into(),
-                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| s.into()),
+                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| VerSpendAuthSig {
+                            sighash_info: s.version().to_bytes().to_vec(),
+                            signature: s.sig().into(),
+                        }),
                         recipient: action
                             .spend()
                             .recipient()

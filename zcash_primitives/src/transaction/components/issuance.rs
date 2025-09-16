@@ -1,12 +1,13 @@
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use core2::io::{self, Error, ErrorKind, Read, Write};
 use nonempty::NonEmpty;
-use orchard::issuance::{IssueAction, IssueAuth, IssueBundle, Signed};
-use orchard::keys::IssuanceValidatingKey;
+use orchard::issuance::{IssueAction, IssueAuth, IssueBundle, Signed, VerBIP340IssueAuthSig};
+use orchard::issuance_auth::{IssueAuthSig, IssueValidatingKey, ZSASchnorr};
 use orchard::note::{AssetBase, RandomSeed, Rho};
 use orchard::value::NoteValue;
 use orchard::{Address, Note};
 use zcash_encoding::{CompactSize, Vector};
+use zcash_spec::sighash_versioning::SighashVersion;
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
 pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
@@ -26,24 +27,30 @@ pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<S
     }
 }
 
-fn read_ik<R: Read>(mut reader: R) -> io::Result<IssuanceValidatingKey> {
-    let mut bytes = [0u8; 32];
-    reader.read_exact(&mut bytes)?;
-    IssuanceValidatingKey::from_bytes(&bytes).ok_or(Error::new(
-        ErrorKind::InvalidData,
-        "Invalid Pallas point for IssuanceValidatingKey",
-    ))
+fn read_ik<R: Read>(mut reader: R) -> io::Result<IssueValidatingKey<ZSASchnorr>> {
+    let ik_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    IssueValidatingKey::decode(&ik_bytes).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "Invalid IssueValidatingKey encoding",
+        )
+    })
 }
 
 fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
-    let mut bytes = [0u8; 64];
-    reader.read_exact(&mut bytes).map_err(|_| {
+    let sighash_info_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    let sighash_info = SighashVersion::from_bytes(&sighash_info_bytes).ok_or(Error::new(
+        ErrorKind::InvalidData,
+        "Invalid SighashInfo encoding",
+    ))?;
+    let sig_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    let sig = IssueAuthSig::decode(&sig_bytes).map_err(|_| {
         Error::new(
             ErrorKind::InvalidData,
             "Invalid signature for IssuanceAuthorization",
         )
     })?;
-    Ok(Signed::from_data(bytes))
+    Ok(Signed::new(VerBIP340IssueAuthSig::new(sighash_info, sig)))
 }
 
 fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
@@ -125,8 +132,17 @@ pub fn write_v6_bundle<W: Write>(
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), write_action)?;
-        writer.write_all(&bundle.ik().to_bytes())?;
-        writer.write_all(&<[u8; 64]>::from(bundle.authorization().signature()))?;
+        Vector::write(&mut writer, &bundle.ik().encode(), |w, b| w.write_u8(*b))?;
+        Vector::write(
+            &mut writer,
+            &bundle.authorization().signature().version().to_bytes(),
+            |w, b| w.write_u8(*b),
+        )?;
+        Vector::write(
+            &mut writer,
+            &bundle.authorization().signature().sig().encode(),
+            |w, b| w.write_u8(*b),
+        )?;
     } else {
         CompactSize::write(&mut writer, 0)?;
     }

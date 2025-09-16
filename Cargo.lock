@@ -1896,7 +1896,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.3.1"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1933,7 +1933,7 @@ dependencies = [
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
 dependencies = [
  "bitvec",
  "ff",
@@ -1943,13 +1943,14 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
+version = "0.3.1"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
  "halo2_legacy_pdqsort",
+ "indexmap 1.9.3",
  "maybe-rayon",
  "pasta_curves",
  "rand_core",
@@ -2848,7 +2849,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/QED-it/orchard?rev=0982ff66e15e3e1e0566e4c9cd688d9d0e5d4f81#0982ff66e15e3e1e0566e4c9cd688d9d0e5d4f81"
+source = "git+https://github.com/QED-it/orchard?rev=cc68804fe01fdfa090b5f92b82469da117036e90#cc68804fe01fdfa090b5f92b82469da117036e90"
 dependencies = [
  "aes",
  "bitvec",
@@ -6623,8 +6624,7 @@ dependencies = [
 [[package]]
 name = "zcash_spec"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ded3f58b93486aa79b85acba1001f5298f27a46489859934954d262533ee2915"
+source = "git+https://github.com/QED-it/zcash_spec?rev=842d697048a8960348adcde704c24438fc5b4544#842d697048a8960348adcde704c24438fc5b4544"
 dependencies = [
  "blake2b_simd",
 ]

@@ -68,7 +68,7 @@ use orchard::{
     bundle::Authorization,
     issuance,
     issuance::{IssueBundle, IssueInfo},
-    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
+    issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
     note::Nullifier,
     orchard_flavor::OrchardZSA,
 };
@@ -380,7 +380,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     #[cfg(zcash_unstable = "nu7")]
     issuance_builder: Option<IssueBundle<issuance::AwaitingNullifier>>,
     #[cfg(zcash_unstable = "nu7")]
-    issuance_isk: Option<orchard::keys::IssuanceAuthorizingKey>,
+    issuance_isk: Option<orchard::issuance_auth::IssueAuthKey<ZSASchnorr>>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -508,7 +508,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     #[cfg(zcash_unstable = "nu7")]
     pub fn init_issuance_bundle<FE>(
         &mut self,
-        ik: IssuanceAuthorizingKey,
+        ik: IssueAuthKey<ZSASchnorr>,
         asset_desc_hash: [u8; 32],
         issue_info: Option<IssueInfo>,
         first_issuance: bool,
@@ -522,7 +522,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         }
 
         let (bundle, _) = IssueBundle::new(
-            IssuanceValidatingKey::from(&ik),
+            IssueValidatingKey::<ZSASchnorr>::from(&ik),
             asset_desc_hash,
             issue_info,
             first_issuance,
