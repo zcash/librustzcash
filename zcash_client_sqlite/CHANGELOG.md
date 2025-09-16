@@ -30,6 +30,13 @@ workspace.
     a call to `WalletWrite::import_standalone_transparent_pubkey` attempts
     to import a transparent pubkey to an account when that pubkey is already
     managed by a different account.
+- The `v_tx_outputs` view now includes an additional `diversifier_index_be`
+  column, containing the diversifier index (or transparent change-level BIP 44
+  index) of the receiving address as a BLOB in big-endian order for received
+  outputs. In addition, the `to_address` field is now populated both for sent
+  and received outputs; for received outputs, it corresponds to the wallet
+  address at which the output was received. For wallet-internal outputs,
+  `to_address` and `diversifier_index_be` will be `NULL`.
 
 ## [0.17.3] - 2025-08-29
 
