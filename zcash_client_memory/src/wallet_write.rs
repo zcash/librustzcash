@@ -934,6 +934,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         Ok(())
     }
 
+    fn mark_tx_trusted(&mut self, _txid: TxId) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     /// Truncates the database to the given height.
     ///
     /// If the requested height is greater than or equal to the height of the last scanned

@@ -285,6 +285,7 @@ CREATE TABLE "transactions" (
     target_height INTEGER,
     min_observed_height INTEGER NOT NULL,
     confirmed_unmined_at_height INTEGER,
+    trust_status INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block
@@ -1074,7 +1075,10 @@ WITH unioned AS (
            a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
-           ro.memo                      AS memo
+           ro.memo                      AS memo,
+           IFNULL(t.trust_status, 0)    AS is_trusted,
+           tt.mined_height              AS t_input_mined_height,
+           IFNULL(tt.trust_status, 0)   AS t_input_trust_status
     FROM v_received_outputs ro
     JOIN transactions
         ON transactions.id_tx = ro.transaction_id
@@ -1084,6 +1088,12 @@ WITH unioned AS (
     -- join on the accounts table to obtain account UUIDs
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
     LEFT JOIN accounts to_account ON to_account.id = ro.account_id
+    -- join to transparent_received_output_spends to gather data about transaction inputs
+    LEFT OUTER JOIN transparent_received_output_spends ros
+       ON ros.transaction_id = t.id_tx
+    LEFT OUTER JOIN transparent_received_outputs tro
+       ON tro.id = ros.transparent_received_output_id
+    LEFT OUTER JOIN transactions tt ON tt.id_tx = tro.transaction_id
     UNION ALL
     -- select all outputs sent from the wallet to external recipients
     SELECT transactions.txid            AS txid,
@@ -1095,7 +1105,10 @@ WITH unioned AS (
            NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
-           sent_notes.memo              AS memo
+           sent_notes.memo              AS memo,
+           1                            AS is_trusted,
+           NULL                         AS t_input_mined_height,
+           1                            AS t_input_trust_status
     FROM sent_notes
     JOIN transactions
         ON transactions.id_tx = sent_notes.tx
@@ -1113,7 +1126,9 @@ SELECT
     max(to_address) AS to_address,
     max(value) AS value,
     max(is_change) AS is_change,
-    max(memo) AS memo
+    max(memo) AS memo,
+    max(t_input_mined_height) AS max_shielding_input_height,
+    min(t_input_trust_status) AS min_shielding_input_trust
 FROM unioned
 GROUP BY txid, output_pool, output_index";
 
