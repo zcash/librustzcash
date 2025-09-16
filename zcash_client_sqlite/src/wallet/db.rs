@@ -271,6 +271,9 @@ CREATE TABLE blocks (
 /// - `confirmed_unmined_at_height`: the maximum block height at which the wallet has observed
 ///   positive proof that the transaction has not been mined in a block. Must be NULL if
 ///   `mined_height` is not null.
+/// - `trust_status`: A flag indicating whether the transaction should be considered "trusted".
+///   When set to `1`, outputs of this transaction will be considered spendable with `trusted`
+///   confirmations instead of `untrusted` confirmations.
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -285,6 +288,7 @@ CREATE TABLE "transactions" (
     target_height INTEGER,
     min_observed_height INTEGER NOT NULL,
     confirmed_unmined_at_height INTEGER,
+    trust_status INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block
@@ -1015,7 +1019,8 @@ SELECT accounts.uuid                AS account_uuid,
             AND (SUM(notes.received_count) + SUM(notes.change_note_count)) > 0
             -- We do not know about any external outputs of the transaction.
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
-       ) AS is_shielding
+       ) AS is_shielding,
+       transactions.trust_status
 FROM notes
 LEFT JOIN accounts ON accounts.id = notes.account_id
 LEFT JOIN transactions
