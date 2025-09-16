@@ -123,7 +123,7 @@ where
             "SELECT rn.id, t.txid, rn.{output_index_col},
                 rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
                 accounts.ufvk, rn.recipient_key_scope, t.mined_height,
-                MAX(tt.block) AS max_shielding_input_height
+                MAX(tt.mined_height) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
@@ -288,7 +288,7 @@ where
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
              scan_state.max_priority,
-             MAX(tt.block) AS max_shielding_input_height
+             MAX(tt.mined_height) AS max_shielding_input_height
          FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.tx
@@ -467,7 +467,7 @@ where
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
-                 MAX(tt.block) AS max_shielding_input_height
+                 MAX(tt.mined_height) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
