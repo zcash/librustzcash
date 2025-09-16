@@ -93,7 +93,10 @@ use {
 
 #[cfg(feature = "pczt")]
 use {
-    crate::data_api::error::PcztError,
+    crate::{
+        data_api::error::PcztError,
+        proposal::{ZSAProposal, ZSAStep},
+    },
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -1544,6 +1547,57 @@ where
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+#[cfg(feature = "pczt")]
+fn build_proposed_zsa_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+    _wallet_db: &mut DbT,
+    params: &ParamsT,
+    _ufvk: &UnifiedFullViewingKey,
+    _account_id: <DbT as WalletRead>::AccountId,
+    _ovk_policy: OvkPolicy,
+    min_target_height: TargetHeight,
+    prior_step_results: &[(&ZSAStep, StepResult<<DbT as WalletRead>::AccountId>)],
+    _proposal_step: &ZSAStep,
+    #[cfg(feature = "transparent-inputs")] _unused_transparent_outputs: &mut HashMap<
+        StepOutput,
+        (TransparentAddress, OutPoint),
+    >,
+) -> Result<
+    BuildState<'static, ParamsT, DbT::AccountId>,
+    CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
+>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+{
+    let step_index = prior_step_results.len();
+
+    let builder = Builder::new(
+        params.clone(),
+        BlockHeight::from(min_target_height),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+        },
+    );
+
+    Ok(BuildState {
+        #[cfg(feature = "transparent-inputs")]
+        step_index,
+        builder,
+        #[cfg(feature = "transparent-inputs")]
+        transparent_input_addresses: HashMap::new(),
+        #[cfg(feature = "orchard")]
+        orchard_output_meta: vec![],
+        sapling_output_meta: vec![],
+        transparent_output_meta: vec![],
+        #[cfg(feature = "transparent-inputs")]
+        utxos_spent: vec![],
+    })
+}
+
 // `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
 // that have not been consumed so far, to the corresponding pair of
 // `TransparentAddress` and `Outpoint`.
@@ -2032,6 +2086,145 @@ where
                 })?;
             }
 
+            Ok(())
+        })?
+        .finish();
+
+    Ok(pczt)
+}
+
+/// Constructs a transaction using the inputs supplied by the given ZSA proposal.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+#[cfg(all(feature = "orchard", feature = "pczt"))]
+pub fn create_pczt_from_zsa_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    account_id: <DbT as WalletRead>::AccountId,
+    ovk_policy: OvkPolicy,
+    proposal: &ZSAProposal<FeeRuleT>,
+) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+    DbT::AccountId: serde::Serialize,
+{
+    use std::collections::HashSet;
+
+    let account = wallet_db
+        .get_account(account_id)
+        .map_err(Error::DataSource)?
+        .ok_or(Error::AccountIdNotRecognized)?;
+    let ufvk = account.ufvk().ok_or(Error::AccountCannotSpend)?;
+    let account_derivation = account.source().key_derivation();
+
+    // For now we only support turning single-step proposals into PCZTs.
+    if proposal.steps().len() > 1 {
+        return Err(Error::ProposalNotSupported);
+    }
+    let fee_rule = proposal.fee_rule();
+    let min_target_height = proposal.min_target_height();
+    let prior_step_results = &[];
+    let proposal_step = proposal.steps().first();
+    let unused_transparent_outputs = &mut HashMap::new();
+
+    let build_state = build_proposed_zsa_transaction::<_, _, _, FeeRuleT, _, _>(
+        wallet_db,
+        params,
+        ufvk,
+        account_id,
+        ovk_policy,
+        min_target_height,
+        prior_step_results,
+        proposal_step,
+        #[cfg(feature = "transparent-inputs")]
+        unused_transparent_outputs,
+    )?;
+
+    // Build the transaction with the specified fee rule
+    let build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+
+    let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
+
+    let io_finalized = IoFinalizer::new(created).finalize_io()?;
+
+    let orchard_outputs = build_state
+        .orchard_output_meta
+        .into_iter()
+        .enumerate()
+        .map(|(i, (recipient, _, _))| {
+            let output_index = build_result
+                .orchard_meta
+                .output_action_index(i)
+                .expect("An action should exist in the transaction for each Orchard output.");
+
+            (output_index, PcztRecipient::from_recipient(recipient))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let orchard_spends = (0..)
+        .map(|i| build_result.orchard_meta.spend_action_index(i))
+        .take_while(|item| item.is_some())
+        .flatten()
+        .collect::<HashSet<_>>();
+
+
+    let pczt = Updater::new(io_finalized)
+        .update_global_with(|mut updater| {
+            updater.set_proprietary(
+                PROPRIETARY_PROPOSAL_INFO.into(),
+                postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
+                    from_account: account_id,
+                    target_height: proposal.min_target_height(),
+                })
+                .expect("postcard encoding of PCZT proposal metadata should not fail"),
+            )
+        })
+        .update_orchard_with(|mut updater| {
+            for index in 0..updater.bundle().actions().len() {
+                updater.update_action_with(index, |mut action_updater| {
+                    // If the account has a known derivation, add the Orchard key path to the PCZT.
+                    if let Some(derivation) = account_derivation {
+                        // orchard_spends will only contain action indices for the real spends, and
+                        // not the dummy inputs
+                        if orchard_spends.contains(&index) {
+                            // All spent notes are from the same account.
+                            action_updater.set_spend_zip32_derivation(
+                                orchard::pczt::Zip32Derivation::parse(
+                                    derivation.seed_fingerprint().to_bytes(),
+                                    vec![
+                                        zip32::ChildIndex::hardened(32).index(),
+                                        zip32::ChildIndex::hardened(
+                                            params.network_type().coin_type(),
+                                        )
+                                        .index(),
+                                        zip32::ChildIndex::hardened(u32::from(
+                                            derivation.account_index(),
+                                        ))
+                                        .index(),
+                                    ],
+                                )
+                                .expect("valid"),
+                            );
+                        }
+                    }
+
+                    if let Some((pczt_recipient, external_address)) = orchard_outputs.get(&index) {
+                        if let Some(user_address) = external_address {
+                            action_updater.set_output_user_address(user_address.encode());
+                        }
+                        action_updater.set_output_proprietary(
+                            PROPRIETARY_OUTPUT_INFO.into(),
+                            postcard::to_allocvec(pczt_recipient).expect(
+                                "postcard encoding of PCZT recipient metadata should not fail",
+                            ),
+                        );
+                    }
+
+                    Ok(())
+                })?;
+            }
             Ok(())
         })?
         .finish();

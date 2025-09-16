@@ -329,6 +329,26 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
     }
 }
 
+pub struct ZSAProposal<FeeRuleT> {
+    fee_rule: FeeRuleT,
+    min_target_height: TargetHeight,
+    steps: NonEmpty<ZSAStep>,
+}
+
+impl<FeeRuleT> ZSAProposal<FeeRuleT> {
+    pub fn fee_rule(&self) -> &FeeRuleT {
+        &self.fee_rule
+    }
+
+    pub fn min_target_height(&self) -> TargetHeight {
+        self.min_target_height
+    }
+
+    pub fn steps(&self) -> &NonEmpty<ZSAStep> {
+        &self.steps
+    }
+}
+
 /// A reference to either a payment or change output within a step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StepOutputIndex {
@@ -580,4 +600,12 @@ impl<NoteRef> Debug for Step<NoteRef> {
             .field("is_shielding", &self.is_shielding)
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ZSAStep {
+    // For issuance we need: `orchard::IssueBundle`, `orchard::IssueAction`, `orchard::IssueInfo`.
+    // `IssueActions` has a `notes` field of type `Vec<Note>`, where `Note` has a type `AssetBase` field.
+    // `IssueActions` also has a `asset_desc_hash` for asset verification.
+    is_issuance: bool,
 }
