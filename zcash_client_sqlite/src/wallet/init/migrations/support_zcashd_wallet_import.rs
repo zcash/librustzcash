@@ -35,7 +35,11 @@ impl RusqliteMigration for Migration {
         let foreign_key_scope = KeyScope::Foreign.encode();
         transaction.execute_batch(&format!(
             r#"
-            ALTER TABLE accounts ADD COLUMN zcashd_legacy_address_index INTEGER;
+            ALTER TABLE accounts ADD COLUMN zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1;
+
+            -- Alter the hd_account index to incorporate the new column.
+            DROP INDEX hd_account;
+            CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index);
 
             CREATE TABLE addresses_new (
                 id INTEGER NOT NULL PRIMARY KEY,

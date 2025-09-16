@@ -25,6 +25,9 @@ use {
     transparent::keys::TransparentKeyScope,
 };
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes
     // for unified addresses, but this is exclusively an internal
@@ -317,4 +320,29 @@ impl TryFromAddress for ReceiverFlags {
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(ReceiverFlags::P2PKH)
     }
+}
+
+#[cfg(feature = "zcashd-compat")]
+pub(crate) fn decode_legacy_account_index(
+    legacy_account_index: i64,
+) -> Result<Option<zcashd::LegacyAddressIndex>, SqliteClientError> {
+    match legacy_account_index {
+        -1 => Ok(None),
+        _ => u32::try_from(legacy_account_index)
+            .map_err(|_| ())
+            .and_then(zcashd::LegacyAddressIndex::try_from)
+            .map(Some)
+            .map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "Legacy zcashd address index is out of range.".to_string(),
+                )
+            }),
+    }
+}
+
+#[cfg(feature = "zcashd-compat")]
+pub(crate) fn encode_legacy_account_index(
+    legacy_account_index: Option<zcashd::LegacyAddressIndex>,
+) -> i64 {
+    legacy_account_index.map(u32::from).map_or(-1, i64::from)
 }
