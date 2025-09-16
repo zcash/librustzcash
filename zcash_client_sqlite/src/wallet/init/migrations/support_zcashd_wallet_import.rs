@@ -4,7 +4,10 @@ use std::collections::HashSet;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use crate::wallet::{encoding::KeyScope, init::WalletMigrationError};
+use crate::wallet::{
+    encoding::{KeyScope, LEGACY_ADDRESS_INDEX_NULL},
+    init::WalletMigrationError,
+};
 
 use super::fix_transparent_received_outputs;
 
@@ -35,7 +38,7 @@ impl RusqliteMigration for Migration {
         let foreign_key_scope = KeyScope::Foreign.encode();
         transaction.execute_batch(&format!(
             r#"
-            ALTER TABLE accounts ADD COLUMN zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1;
+            ALTER TABLE accounts ADD COLUMN zcashd_legacy_address_index INTEGER NOT NULL DEFAULT {LEGACY_ADDRESS_INDEX_NULL};
 
             -- Alter the hd_account index to incorporate the new column.
             DROP INDEX hd_account;

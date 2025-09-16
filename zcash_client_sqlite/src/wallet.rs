@@ -125,7 +125,10 @@ use self::{
 use crate::{
     error::SqliteClientError,
     util::Clock,
-    wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
+    wallet::{
+        commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
+        encoding::LEGACY_ADDRESS_INDEX_NULL,
+    },
     AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
@@ -453,7 +456,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     let zcashd_legacy_address_index =
         encode_legacy_account_index(derivation.and_then(|d| d.legacy_address_index()));
     #[cfg(not(feature = "zcashd-compat"))]
-    let zcashd_legacy_address_index: i64 = -1;
+    let zcashd_legacy_address_index: i64 = LEGACY_ADDRESS_INDEX_NULL;
 
     let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
     let account_id = conn
@@ -1350,19 +1353,19 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     account_index: zip32::AccountId,
     #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
 ) -> Result<Option<Account>, SqliteClientError> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT id, name, key_source, uuid, ufvk, birthday_height, zcashd_legacy_address_index
          FROM accounts
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
          AND hd_account_index = :hd_account_index
          AND (
-             :zcashd_legacy_address_index = -1
+             :zcashd_legacy_address_index = {LEGACY_ADDRESS_INDEX_NULL}
              OR zcashd_legacy_address_index = :zcashd_legacy_address_index
          )",
-    )?;
+    ))?;
 
     #[cfg(not(feature = "zcashd-compat"))]
-    let legacy_address_index: i64 = -1;
+    let legacy_address_index: i64 = LEGACY_ADDRESS_INDEX_NULL;
     #[cfg(feature = "zcashd-compat")]
     let legacy_address_index = encode_legacy_account_index(legacy_address_index);
 

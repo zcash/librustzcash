@@ -28,6 +28,9 @@ use {
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;
 
+/// The sentinel value representing an unset `zcashd_legacy_address_index` column.
+pub(crate) const LEGACY_ADDRESS_INDEX_NULL: i64 = -1;
+
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes
     // for unified addresses, but this is exclusively an internal
@@ -327,7 +330,7 @@ pub(crate) fn decode_legacy_account_index(
     legacy_account_index: i64,
 ) -> Result<Option<zcashd::LegacyAddressIndex>, SqliteClientError> {
     match legacy_account_index {
-        -1 => Ok(None),
+        LEGACY_ADDRESS_INDEX_NULL => Ok(None),
         _ => u32::try_from(legacy_account_index)
             .map_err(|_| ())
             .and_then(zcashd::LegacyAddressIndex::try_from)
@@ -344,5 +347,7 @@ pub(crate) fn decode_legacy_account_index(
 pub(crate) fn encode_legacy_account_index(
     legacy_account_index: Option<zcashd::LegacyAddressIndex>,
 ) -> i64 {
-    legacy_account_index.map(u32::from).map_or(-1, i64::from)
+    legacy_account_index
+        .map(u32::from)
+        .map_or(LEGACY_ADDRESS_INDEX_NULL, i64::from)
 }
