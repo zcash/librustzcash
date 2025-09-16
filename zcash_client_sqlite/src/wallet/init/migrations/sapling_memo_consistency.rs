@@ -4,18 +4,22 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use rusqlite::named_params;
+use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use zcash_client_backend::decrypt_transaction;
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_protocol::{consensus, TxId};
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
+    consensus::{self, BlockHeight},
+    TxId,
+};
 use zip32::AccountId;
 
 use crate::{
     error::SqliteClientError,
-    wallet::{get_transaction, init::WalletMigrationError, memo_repr},
+    wallet::{init::WalletMigrationError, memo_repr, parse_tx},
 };
 
 use super::received_notes_nullable_nf;
@@ -221,6 +225,36 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     fn down(&self, _: &rusqlite::Transaction) -> Result<(), Self::Error> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
+}
+
+/// Looks up a transaction by its [`TxId`].
+///
+/// Returns the decoded transaction, along with the block height that was used in its decoding.
+/// This is either the block height at which the transaction was mined, or the expiry height if the
+/// wallet created the transaction but the transaction has not yet been mined from the perspective
+/// of the wallet.
+fn get_transaction<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    txid: TxId,
+) -> Result<Option<(BlockHeight, Transaction)>, SqliteClientError> {
+    conn.query_row(
+        "SELECT raw, block, expiry_height FROM transactions
+        WHERE txid = ?",
+        [txid.as_ref()],
+        |row| {
+            let h: Option<u32> = row.get(1)?;
+            let expiry: Option<u32> = row.get(2)?;
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                h.map(BlockHeight::from),
+                expiry.map(BlockHeight::from),
+            ))
+        },
+    )
+    .optional()?
+    .map(|(t, b, e)| parse_tx(params, &t, b, e))
+    .transpose()
 }
 
 #[cfg(test)]

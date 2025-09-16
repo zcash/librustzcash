@@ -37,6 +37,9 @@ workspace.
   and received outputs; for received outputs, it corresponds to the wallet
   address at which the output was received. For wallet-internal outputs,
   `to_address` and `diversifier_index_be` will be `NULL`.
+- `WalletDb::get_tx_height` will now return heights for transactions detected
+  via UTXOs, before their corresponding block has been scanned for shielded
+  details.
 
 ## [0.17.3] - 2025-08-29
 
