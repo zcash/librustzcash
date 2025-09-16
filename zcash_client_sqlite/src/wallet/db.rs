@@ -69,7 +69,7 @@ use crate::wallet::scanning::priority_code;
 /// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported
 ///   from a `zcashd` `wallet.dat` file, for "standalone" Sapling addresses (each of which
 ///   corresponds to an independent account) derived after the introduction of mnemonic seed
-///   derivation in the `4.7.0` `zcashd` release. This column will only be non-null in
+///   derivation in the `4.7.0` `zcashd` release. This column will only be non-negative in
 ///   the case that the `hd_account_index` column has the value `0x7FFFFFFF`, in accordance with
 ///   how post-v4.7.0 Sapling addresses were produced by the `z_getnewaddress` RPC method.
 ///   This relationship is not currently enforced by a CHECK constraint; such a constraint should
@@ -94,7 +94,7 @@ CREATE TABLE "accounts" (
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
-    zcashd_legacy_address_index INTEGER,
+    zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1,
     CHECK (
       (
         account_kind = 0
@@ -115,8 +115,7 @@ pub(super) const INDEX_ACCOUNTS_UFVK: &str =
     r#"CREATE UNIQUE INDEX accounts_ufvk ON accounts (ufvk)"#;
 pub(super) const INDEX_ACCOUNTS_UIVK: &str =
     r#"CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk)"#;
-pub(super) const INDEX_HD_ACCOUNT: &str =
-    r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index)"#;
+pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index)"#;
 
 /// Stores addresses that have been generated from accounts in the wallet.
 ///

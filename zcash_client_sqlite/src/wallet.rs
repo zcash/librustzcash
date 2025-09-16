@@ -146,7 +146,10 @@ use {
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(feature = "zcashd-compat")]
-use zcash_keys::keys::zcashd;
+use {
+    crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
+    zcash_keys::keys::zcashd,
+};
 
 pub mod commitment_tree;
 pub(crate) mod common;
@@ -175,7 +178,7 @@ fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
-    #[cfg(feature = "zcashd-compat")] legacy_account_index: Option<u32>,
+    #[cfg(feature = "zcashd-compat")] legacy_account_index: i64,
     spending_key_available: bool,
     key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
@@ -193,14 +196,7 @@ fn parse_account_source(
                         SeedFingerprint::from_bytes(seed_fp),
                         idx,
                         #[cfg(feature = "zcashd-compat")]
-                        legacy_account_index
-                            .map(zcashd::LegacyAddressIndex::try_from)
-                            .transpose()
-                            .map_err(|_| {
-                                SqliteClientError::CorruptedData(
-                                    "Legacy zcashd address index is out of range.".to_string(),
-                                )
-                            })?,
+                        decode_legacy_account_index(legacy_account_index)?,
                     ))
                 },
             )
@@ -455,9 +451,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     #[cfg(feature = "zcashd-compat")]
     let zcashd_legacy_address_index =
-        derivation.and_then(|d| d.legacy_address_index().map(u32::from));
+        encode_legacy_account_index(derivation.and_then(|d| d.legacy_address_index()));
     #[cfg(not(feature = "zcashd-compat"))]
-    let zcashd_legacy_address_index: Option<u32> = None;
+    let zcashd_legacy_address_index: i64 = -1;
 
     let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
     let account_id = conn
@@ -1360,15 +1356,15 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
          AND hd_account_index = :hd_account_index
          AND (
-             :zcashd_legacy_address_index IS NULL
+             :zcashd_legacy_address_index = -1
              OR zcashd_legacy_address_index = :zcashd_legacy_address_index
          )",
     )?;
 
     #[cfg(not(feature = "zcashd-compat"))]
-    let legacy_address_index: Option<u32> = None;
+    let legacy_address_index: i64 = -1;
     #[cfg(feature = "zcashd-compat")]
-    let legacy_address_index = legacy_address_index.map(u32::from);
+    let legacy_address_index = encode_legacy_account_index(legacy_address_index);
 
     let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![
@@ -1395,16 +1391,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
             }?;
             let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
             #[cfg(feature = "zcashd-compat")]
-            let legacy_idx = row
-                .get::<_, Option<u32>>("zcashd_legacy_address_index")?
-                .map(|idx| {
-                    zcashd::LegacyAddressIndex::try_from(idx).map_err(|_| {
-                        SqliteClientError::CorruptedData(format!(
-                            "Invalid legacy zcashd address index {idx}"
-                        ))
-                    })
-                })
-                .transpose()?;
+            let legacy_idx = decode_legacy_account_index(row.get("zcashd_legacy_address_index")?)?;
 
             Ok(Account {
                 id: account_id,
