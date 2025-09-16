@@ -9,6 +9,7 @@
 
 mod add_account_birthdays;
 mod add_account_uuids;
+mod add_transaction_trust_marker;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
@@ -120,6 +121,8 @@ pub(super) fn all_migrations<
     //                     support_zcashd_wallet_import          fix_v_transactions_expired_unmined
     //                                                                           |
     //                                                                v_tx_outputs_return_addrs
+    //                                                                           |
+    //                                                              add_transaction_trust_marker
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -198,6 +201,7 @@ pub(super) fn all_migrations<
         Box::new(support_zcashd_wallet_import::Migration),
         Box::new(fix_v_transactions_expired_unmined::Migration),
         Box::new(v_tx_outputs_return_addrs::Migration),
+        Box::new(add_transaction_trust_marker::Migration),
     ]
 }
 
@@ -323,6 +327,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
     v_tx_outputs_return_addrs::MIGRATION_ID,
+    add_transaction_trust_marker::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

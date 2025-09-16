@@ -2859,6 +2859,10 @@ impl WalletWrite for MockWalletDb {
         Ok(())
     }
 
+    fn mark_tx_trusted(&mut self, _txid: TxId) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     fn store_transactions_to_be_sent(
         &mut self,
         _transactions: &[SentTransaction<Self::AccountId>],
