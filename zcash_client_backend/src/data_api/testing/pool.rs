@@ -38,8 +38,8 @@ use crate::{
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
         testing::{
-            AddressType, CachedBlock, FakeCompactOutput, InitialChainState, TestBuilder,
-            single_output_change_strategy,
+            AddressType, CacheInsertionResult, CachedBlock, FakeCompactOutput, InitialChainState,
+            TestBuilder, single_output_change_strategy,
         },
         wallet::{
             ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
@@ -363,6 +363,18 @@ struct ConfirmationStep {
     total_balance: Zatoshis,
 }
 
+/// An enumeration of mechanisms for generating transaction inputs for confirmations policy
+/// testing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputTrust {
+    /// Generate a wallet-internal output.
+    Internal,
+    /// Generate an output as if it was sent to the wallet by an untrusted counterparty.
+    ExternalUntrusted,
+    /// Generate an output as if it was sent to the wallet by a trusted counterparty.
+    ExternalTrusted,
+}
+
 /// Tests that inputs from a source can be spent according to the default
 /// `ConfirmationsPolicy`.
 ///
@@ -373,7 +385,7 @@ struct ConfirmationStep {
 pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
-    input_is_trusted: bool,
+    input_trust: InputTrust,
 ) {
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
@@ -383,15 +395,25 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
     let starting_balance = Zatoshis::const_from_u64(60_000);
-    // Add funds to the wallet in a single note, owned by the internal spending key,
-    // this is the first confirmation
-    let address_type = if input_is_trusted {
-        AddressType::Internal
-    } else {
-        AddressType::DefaultExternal
-    };
 
-    let (h, _, _) = st.generate_next_block(&dfvk, address_type, starting_balance);
+    // Add funds to the wallet in a single note, owned by the internal spending key,
+    // which will have one confirmation.
+    let confirmations_policy = ConfirmationsPolicy::default();
+    let (address_type, min_confirmations) = match input_trust {
+        InputTrust::Internal => (AddressType::Internal, confirmations_policy.trusted()),
+        InputTrust::ExternalUntrusted => (
+            AddressType::DefaultExternal,
+            confirmations_policy.untrusted(),
+        ),
+        InputTrust::ExternalTrusted => {
+            (AddressType::DefaultExternal, confirmations_policy.trusted())
+        }
+    };
+    let min_confirmations = u32::from(min_confirmations);
+
+    // Generate a block to create the inputs that we will spend.
+    let (h, r, _) = st.generate_next_block(&dfvk, address_type, starting_balance);
+    let txid = r.txids()[0];
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -401,27 +423,27 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         starting_balance
     );
 
-    // Generate N confirmations by mining blocks
-    let confirmations_policy = ConfirmationsPolicy::default();
-    let min_confirmations = u32::from(if input_is_trusted {
-        confirmations_policy.trusted()
-    } else {
-        confirmations_policy.untrusted()
-    });
+    // Mark the external input as explicitly trusted, if so requested
+    if input_trust == InputTrust::ExternalTrusted {
+        st.wallet_mut().set_tx_trust(txid, true).unwrap();
+    }
+
+    let add_confirmation = |i: u32| {
+        let (h, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h, 1);
+        ConfirmationStep {
+            i,
+            confirmation_requirement: min_confirmations,
+            number_of_confirmations: 1 + i,
+            pending_balance: st.get_pending_shielded_balance(account.id(), confirmations_policy),
+            spendable_balance: st.get_spendable_balance(account.id(), confirmations_policy),
+            total_balance: st.get_total_balance(account.id()),
+        }
+    };
+
+    // Generate `min_confirmations` confirmations by mining blocks
     let steps = (1u32..min_confirmations)
-        .map(|i| {
-            let (h, _) = st.generate_empty_block();
-            st.scan_cached_blocks(h, 1);
-            ConfirmationStep {
-                i,
-                confirmation_requirement: min_confirmations,
-                number_of_confirmations: 1 + i,
-                pending_balance: st
-                    .get_pending_shielded_balance(account.id(), confirmations_policy),
-                spendable_balance: st.get_spendable_balance(account.id(), confirmations_policy),
-                total_balance: st.get_total_balance(account.id()),
-            }
-        })
+        .map(add_confirmation)
         .collect::<Vec<_>>();
 
     assert!(
@@ -446,13 +468,8 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     );
     assert!(
         proposed.is_ok(),
-        "Could not spend funds by confirmation policy ({}): {proposed:#?}\n\
+        "Could not spend funds by confirmation policy ({input_trust:?}): {proposed:#?}\n\
         steps: {steps:#?}",
-        if input_is_trusted {
-            "trusted"
-        } else {
-            "untrusted"
-        }
     );
 }
 

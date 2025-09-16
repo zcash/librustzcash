@@ -1,6 +1,7 @@
 use std::convert::{Infallible, identity};
 use std::fmt::Debug;
 
+use zcash_client_backend::data_api::testing::CacheInsertionResult;
 use zcash_client_backend::{
     data_api::{
         OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletTest,
@@ -59,17 +60,30 @@ impl DataStoreFactory for TestMemDbFactory {
     }
 }
 
+#[derive(Debug)]
+pub struct MemBlockCacheInsertionResult {
+    txids: Vec<TxId>,
+}
+
+impl CacheInsertionResult for MemBlockCacheInsertionResult {
+    fn txids(&self) -> &[TxId] {
+        &self.txids[..]
+    }
+}
+
 impl TestCache for MemBlockCache {
     type BsError = Infallible;
     type BlockSource = MemBlockCache;
-    type InsertResult = ();
+    type InsertResult = MemBlockCacheInsertionResult;
 
     fn block_source(&self) -> &Self::BlockSource {
         self
     }
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
+        let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
         self.0.write().unwrap().insert(cb.height(), cb.clone());
+        MemBlockCacheInsertionResult { txids }
     }
 
     fn truncate_to_height(&mut self, height: BlockHeight) {

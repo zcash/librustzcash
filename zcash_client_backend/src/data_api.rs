@@ -2975,6 +2975,12 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
+    /// Sets the trust status of the given transaction to either trusted or untrusted.
+    ///
+    /// The outputs of a trusted transaction will be available for spending with
+    /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
+    fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
+
     /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.
     ///

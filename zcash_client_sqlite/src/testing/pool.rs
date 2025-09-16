@@ -7,7 +7,8 @@ use crate::{
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::testing::{
-    pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    pool::{InputTrust, ShieldedPoolTester},
+    sapling::SaplingPoolTester,
 };
 
 #[cfg(feature = "orchard")]
@@ -370,11 +371,15 @@ pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
 }
 
 pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
-    for is_trusted in [false, true] {
+    for trust in [
+        InputTrust::Internal,
+        InputTrust::ExternalUntrusted,
+        InputTrust::ExternalTrusted,
+    ] {
         zcash_client_backend::data_api::testing::pool::zip_315_confirmations_test_steps::<T>(
             TestDbFactory::default(),
             BlockCache::new(),
-            is_trusted,
+            trust,
         );
     }
 }
