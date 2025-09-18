@@ -896,7 +896,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
+        wallet::get_tx_height(self.conn.borrow(), txid)
     }
 
     fn get_unified_full_viewing_keys(
@@ -1911,6 +1911,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.gap_limits,
             )
         })
+    }
+
+    fn mark_tx_trusted(&mut self, txid: TxId) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wallet::mark_tx_trusted(wdb.conn.0, txid))
     }
 
     fn store_transactions_to_be_sent(

@@ -278,6 +278,7 @@ CREATE TABLE "transactions" (
     raw BLOB,
     fee INTEGER,
     target_height INTEGER,
+    trust_status INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
 )"#;
