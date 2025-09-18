@@ -125,7 +125,7 @@ impl ReceivedTransparentOutput {
 /// transparent inputs.
 ///
 /// Output may be attempted to be spent in multiple transactions, even though only one will ever be mined
-/// which is why can cannot just rely on TransparentReceivedOutputSpends or implement this as as map
+/// which is why can cannot just rely on TransparentReceivedOutputSpends or implement this as a map
 #[derive(Debug, Default, PartialEq)]
 pub struct TransparentSpendCache(pub(crate) BTreeSet<(TxId, OutPoint)>);
 
