@@ -1976,6 +1976,7 @@ where
                                     scope,
                                     address_index,
                                 } => Some((index, *scope, *address_index)),
+                                #[cfg(feature = "transparent-key-import")]
                                 TransparentAddressMetadata::Standalone(_) => None,
                             })
                     })
