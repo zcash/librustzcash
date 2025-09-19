@@ -72,6 +72,39 @@ pub struct CompactTx {
     pub outputs: ::prost::alloc::vec::Vec<CompactSaplingOutput>,
     #[prost(message, repeated, tag = "6")]
     pub actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
+    #[prost(message, repeated, tag = "7")]
+    pub vin: ::prost::alloc::vec::Vec<CompactTxIn>,
+    #[prost(message, repeated, tag = "8")]
+    pub vout: ::prost::alloc::vec::Vec<TxOut>,
+}
+/// The unique identifier for a transparent transaction output.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OutPoint {
+    /// The txid of the transaction that generated this output.
+    #[prost(bytes = "vec", tag = "1")]
+    pub txid: ::prost::alloc::vec::Vec<u8>,
+    /// The index of the output in the `vout` array of the transaction.
+    #[prost(uint32, tag = "2")]
+    pub index: u32,
+}
+/// A compact representation of a transparent UTXO being spent.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CompactTxIn {
+    #[prost(message, optional, tag = "1")]
+    pub prevout: ::core::option::Option<OutPoint>,
+}
+/// A transparent output being created by the transaction.
+///
+/// This contains identical data to the `TxOut` type in the transaction itself, and
+/// thus it is not "compact."
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TxOut {
+    /// The value of the output, in Zatoshis.
+    #[prost(uint32, tag = "1")]
+    pub value: u32,
+    /// The script pubkey that must be satisfied in order to spend this output.
+    #[prost(bytes = "vec", tag = "2")]
+    pub script_pub_key: ::prost::alloc::vec::Vec<u8>,
 }
 /// A compact representation of a [Sapling Spend](<https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus>).
 ///

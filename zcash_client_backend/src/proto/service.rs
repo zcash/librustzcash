@@ -10,12 +10,19 @@ pub struct BlockId {
 }
 /// BlockRange specifies a series of blocks from start to end inclusive.
 /// Both BlockIDs must be heights; specification by hash is not yet supported.
+///
+/// A server may optionally prune `CompactBlocks` returned to include only data
+/// relevant to the requested pool types. If no pool types are specified, the
+/// server should default to the legacy behavior of returning only data relevant
+/// to the shielded (Sapling and Orchard) pools.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockRange {
     #[prost(message, optional, tag = "1")]
     pub start: ::core::option::Option<BlockId>,
     #[prost(message, optional, tag = "2")]
     pub end: ::core::option::Option<BlockId>,
+    #[prost(enumeration = "PoolType", repeated, tag = "3")]
+    pub pool_types: ::prost::alloc::vec::Vec<i32>,
 }
 /// A TxFilter contains the information needed to identify a particular
 /// transaction: either a block and an index, or a direct transaction hash.
@@ -252,6 +259,39 @@ pub struct GetAddressUtxosReply {
 pub struct GetAddressUtxosReplyList {
     #[prost(message, repeated, tag = "1")]
     pub address_utxos: ::prost::alloc::vec::Vec<GetAddressUtxosReply>,
+}
+/// An identifier for a Zcash value pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PoolType {
+    Unknown = 0,
+    Transparent = 1,
+    Sapling = 2,
+    Orchard = 3,
+}
+impl PoolType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unknown => "POOL_TYPE_UNKNOWN",
+            Self::Transparent => "TRANSPARENT",
+            Self::Sapling => "SAPLING",
+            Self::Orchard => "ORCHARD",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POOL_TYPE_UNKNOWN" => Some(Self::Unknown),
+            "TRANSPARENT" => Some(Self::Transparent),
+            "SAPLING" => Some(Self::Sapling),
+            "ORCHARD" => Some(Self::Orchard),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
