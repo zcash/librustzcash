@@ -152,8 +152,9 @@ impl Deref for TransparentSpendCache {
 mod serialization {
     use super::*;
     use crate::{proto::memwallet as proto, read_optional};
+    use transparent::address::Script;
     use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::{consensus::Network::MainNetwork as EncodingParams, legacy::Script};
+    use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
     use zcash_protocol::value::Zatoshis;
 
     impl From<ReceivedTransparentOutput> for proto::ReceivedTransparentOutput {

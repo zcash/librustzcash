@@ -1150,7 +1150,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                     } => {
                         let txo = WalletTransparentOutput::from_parts(
                             outpoint.clone(),
-                            TxOut::new(output.value(), ephemeral_address.script()),
+                            TxOut::new(output.value(), ephemeral_address.script().into()),
                             None,
                         )
                         .unwrap();

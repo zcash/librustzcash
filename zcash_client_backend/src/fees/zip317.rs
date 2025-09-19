@@ -675,7 +675,7 @@ mod tests {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
                     Zatoshis::const_from_u64(50000),
-                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
                 ),
             }],
             &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
@@ -718,7 +718,7 @@ mod tests {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
                     Zatoshis::const_from_u64(63000),
-                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
                 ),
             }],
             &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
@@ -767,7 +767,7 @@ mod tests {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
                     Zatoshis::const_from_u64(56000),
-                    TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                    TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
                 ),
             }],
             &[TxOut::new(Zatoshis::const_from_u64(40000), Script(vec![]))],
