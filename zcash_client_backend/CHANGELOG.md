@@ -120,6 +120,21 @@ workspace.
     - `Zip321(Zip321Error)`
   - `WalletTest` (available only under the `test-dependencies` feature) has
     added method `finally`
+  - The following methods have had their default (or absent) implementations
+    replaced by invocations of the `unimplemented!()` macro, so that
+    applications that inadvertently use these default impls will panic instead
+    of returning incorrect results and so that transitively enabling a feature
+    flag of an upstream dependency does not result in an unbuildable state.
+    - `InputSource::get_unspent_transparent_output`
+    - `InputSource::get_spendable_transparent_outputs`
+    - `WalletRead::get_orchard_nullifiers`
+    - `WalletRead::get_transparent_receivers`
+    - `WalletRead::get_transparent_balances`
+    - `WalletRead::utxo_query_height`
+    - `WalletRead::get_known_ephemeral_addresses`
+    - `WalletRead::get_transparent_output`
+    - `WalletWrite::reserve_next_n_ephemeral_addresses`
+    - `WalletWrite::notify_address_checked`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed; it now takes
     a `TargetHeight` instead of a `BlockHeight`. Also, the type of the
