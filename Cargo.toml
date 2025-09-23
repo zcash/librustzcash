@@ -226,4 +226,4 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "2827ece4edc7ba9e144106da777a8e6cc23ea7a9" }
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "9527357baea19d88d8e34735acb5abf24f3ae189" }
