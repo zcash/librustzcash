@@ -1896,18 +1896,18 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.3.1"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+source = "git+https://github.com/zcash/halo2?rev=2308caf68c48c02468b66cfc452dad54e355e32f#2308caf68c48c02468b66cfc452dad54e355e32f"
 dependencies = [
  "arrayvec",
  "bitvec",
  "ff",
  "group",
- "halo2_poseidon 0.1.0 (git+https://github.com/QED-it/halo2?branch=zsa1)",
+ "halo2_poseidon 0.1.0 (git+https://github.com/zcash/halo2?rev=2308caf68c48c02468b66cfc452dad54e355e32f)",
  "halo2_proofs",
  "lazy_static",
  "pasta_curves",
  "rand",
- "sinsemilla 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sinsemilla",
  "subtle",
  "uint",
 ]
@@ -1933,7 +1933,7 @@ dependencies = [
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+source = "git+https://github.com/zcash/halo2?rev=2308caf68c48c02468b66cfc452dad54e355e32f#2308caf68c48c02468b66cfc452dad54e355e32f"
 dependencies = [
  "bitvec",
  "ff",
@@ -1944,7 +1944,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.1"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+source = "git+https://github.com/zcash/halo2?rev=2308caf68c48c02468b66cfc452dad54e355e32f#2308caf68c48c02468b66cfc452dad54e355e32f"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2849,7 +2849,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/QED-it/orchard?rev=cc68804fe01fdfa090b5f92b82469da117036e90#cc68804fe01fdfa090b5f92b82469da117036e90"
+source = "git+https://github.com/QED-it/orchard?rev=78b6f7696bcc24b3493f404811221fc4d728a92f#78b6f7696bcc24b3493f404811221fc4d728a92f"
 dependencies = [
  "aes",
  "bitvec",
@@ -2874,7 +2874,7 @@ dependencies = [
  "rand_core",
  "reddsa",
  "serde",
- "sinsemilla 0.1.0 (git+https://github.com/zcash/sinsemilla?rev=aabb707e862bc3d7b803c77d14e5a771bcee3e8c)",
+ "sinsemilla",
  "subtle",
  "tracing",
  "visibility",
@@ -3900,7 +3900,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "git+https://github.com/QED-it/sapling-crypto?rev=b0d2e4c1139f23fb7e9e410f2e5d986d5662ee03#b0d2e4c1139f23fb7e9e410f2e5d986d5662ee03"
+source = "git+https://github.com/QED-it/sapling-crypto?rev=9393f93fe547d1b3738c9f4618c0f8a2fffed29f#9393f93fe547d1b3738c9f4618c0f8a2fffed29f"
 dependencies = [
  "aes",
  "bellman",
@@ -4208,17 +4208,6 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core",
-]
-
-[[package]]
-name = "sinsemilla"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d268ae0ea06faafe1662e9967cd4f9022014f5eeb798e0c302c876df8b7af9c"
-dependencies = [
- "group",
- "pasta_curves",
- "subtle",
 ]
 
 [[package]]
@@ -6529,7 +6518,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.1"
-source = "git+https://github.com/zcash/zcash_note_encryption?rev=668ea44cf59a226715a5f3cb1bf88710a8c188a3#668ea44cf59a226715a5f3cb1bf88710a8c188a3"
+source = "git+https://github.com/zcash/zcash_note_encryption?rev=9f7e93d42cef839d02b9d75918117941d453f8cb#9f7e93d42cef839d02b9d75918117941d453f8cb"
 dependencies = [
  "chacha20",
  "chacha20poly1305",

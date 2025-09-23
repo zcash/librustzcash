@@ -9,32 +9,40 @@ use orchard::{Address, Note};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_spec::sighash_versioning::SighashVersion;
 
-/// Reads an [`orchard::Bundle`] from a v6 transaction format.
-pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
-    let actions = Vector::read(&mut reader, |r| read_action(r))?;
-
-    if actions.is_empty() {
-        Ok(None)
+/// Reads an [`IssueBundle`] from a v6 transaction format.
+pub fn read_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
+    let issuer_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    if issuer_bytes.is_empty() {
+        let n_actions = CompactSize::read(&mut reader)?;
+        if n_actions != 0 {
+            Err(Error::new(
+                ErrorKind::InvalidData,
+                "Invalid IssueBundle: empty issuer with non-empty IssueActions",
+            ))
+        } else {
+            Ok(None)
+        }
     } else {
-        let ik = read_ik(&mut reader)?;
-        let authorization = read_authorization(&mut reader)?;
+        let issuer = IssueValidatingKey::<ZSASchnorr>::decode(&issuer_bytes)
+            .map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid issuer encoding"))?;
 
-        Ok(Some(IssueBundle::from_parts(
-            ik,
-            NonEmpty::from_vec(actions).unwrap(),
-            authorization,
-        )))
+        let actions = Vector::read(&mut reader, |r| read_action(r, &issuer))?;
+
+        if actions.is_empty() {
+            Err(Error::new(
+                ErrorKind::InvalidData,
+                "Invalid IssueBundle: no IssueActions with non-empty issuer",
+            ))
+        } else {
+            let authorization = read_authorization(&mut reader)?;
+
+            Ok(Some(IssueBundle::from_parts(
+                issuer,
+                NonEmpty::from_vec(actions).unwrap(),
+                authorization,
+            )))
+        }
     }
-}
-
-fn read_ik<R: Read>(mut reader: R) -> io::Result<IssueValidatingKey<ZSASchnorr>> {
-    let ik_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
-    IssueValidatingKey::decode(&ik_bytes).map_err(|_| {
-        Error::new(
-            ErrorKind::InvalidData,
-            "Invalid IssueValidatingKey encoding",
-        )
-    })
 }
 
 fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
@@ -53,7 +61,10 @@ fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
     Ok(Signed::new(VerBIP340IssueAuthSig::new(sighash_info, sig)))
 }
 
-fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
+fn read_action<R: Read>(
+    mut reader: R,
+    ik: &IssueValidatingKey<ZSASchnorr>,
+) -> io::Result<IssueAction> {
     let mut asset_desc_hash = [0u8; 32];
     reader.read_exact(&mut asset_desc_hash).map_err(|_| {
         Error::new(
@@ -61,7 +72,8 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
             "Invalid Asset Description Hash in IssueAction",
         )
     })?;
-    let notes = Vector::read(&mut reader, |r| read_note(r))?;
+    let asset = AssetBase::derive(ik, &asset_desc_hash);
+    let notes = Vector::read(&mut reader, |r| read_note(r, asset))?;
     let finalize = match reader.read_u8()? {
         0 => false,
         1 => true,
@@ -75,14 +87,14 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
     Ok(IssueAction::from_parts(asset_desc_hash, notes, finalize))
 }
 
-pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
+pub fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
     let mut tmp = [0; 8];
     reader.read_exact(&mut tmp)?;
     let value = u64::from_le_bytes(tmp);
-    let asset = read_asset(&mut reader)?;
     let rho = read_rho(&mut reader)?;
     let rseed = read_rseed(&mut reader, &rho)?;
+
     Option::from(Note::from_parts(
         recipient,
         NoteValue::from_raw(value),
@@ -126,13 +138,13 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed>
 }
 
 /// Writes an [`IssueBundle`] in the v6 transaction format.
-pub fn write_v6_bundle<W: Write>(
+pub fn write_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
-        Vector::write_nonempty(&mut writer, bundle.actions(), write_action)?;
         Vector::write(&mut writer, &bundle.ik().encode(), |w, b| w.write_u8(*b))?;
+        Vector::write_nonempty(&mut writer, bundle.actions(), write_action)?;
         Vector::write(
             &mut writer,
             &bundle.authorization().signature().version().to_bytes(),
@@ -144,6 +156,9 @@ pub fn write_v6_bundle<W: Write>(
             |w, b| w.write_u8(*b),
         )?;
     } else {
+        // Empty issuer
+        CompactSize::write(&mut writer, 0)?;
+        // Empty vIssueActions
         CompactSize::write(&mut writer, 0)?;
     }
     Ok(())
@@ -159,7 +174,6 @@ fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Resul
 pub fn write_note<W: Write>(writer: &mut W, note: &Note) -> io::Result<()> {
     writer.write_all(&note.recipient().to_raw_address_bytes())?;
     writer.write_all(&note.value().to_bytes())?;
-    writer.write_all(&note.asset().to_bytes())?;
     writer.write_all(&note.rho().to_bytes())?;
     writer.write_all(note.rseed().as_bytes())?;
     Ok(())
