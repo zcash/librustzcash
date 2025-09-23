@@ -152,8 +152,9 @@ impl Deref for TransparentSpendCache {
 mod serialization {
     use super::*;
     use crate::{proto::memwallet as proto, read_optional};
+    use transparent::address::Script;
     use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::{consensus::Network::MainNetwork as EncodingParams, legacy::Script};
+    use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
     use zcash_protocol::value::Zatoshis;
 
     impl From<ReceivedTransparentOutput> for proto::ReceivedTransparentOutput {
@@ -185,7 +186,7 @@ mod serialization {
     impl From<TxOut> for proto::TxOut {
         fn from(txout: TxOut) -> Self {
             Self {
-                script: txout.script_pubkey().0.clone(),
+                script: txout.script_pubkey().0 .0.clone(),
                 value: u64::from(txout.value()),
             }
         }
@@ -197,7 +198,7 @@ mod serialization {
         fn try_from(txout: proto::TxOut) -> Result<Self, Self::Error> {
             Ok(Self::new(
                 Zatoshis::try_from(txout.value)?,
-                Script(txout.script),
+                Script(zcash_script::script::Code(txout.script)),
             ))
         }
     }

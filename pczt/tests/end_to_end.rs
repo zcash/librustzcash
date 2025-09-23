@@ -67,7 +67,7 @@ fn transparent_to_orchard() {
     let utxo = transparent::OutPoint::fake();
     let coin = transparent::TxOut::new(
         Zatoshis::const_from_u64(1_000_000),
-        transparent_addr.script(),
+        transparent_addr.script().into(),
     );
 
     // Create the transaction's I/O.

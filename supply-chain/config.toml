@@ -67,6 +67,9 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
+[policy.zcash_script]
+audit-as-crates-io = true
+
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
@@ -219,6 +222,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bls12_381]]
 version = "0.8.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.bounded-vec]]
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bounded-vec-deque]]
@@ -1153,6 +1160,10 @@ criteria = "safe-to-deploy"
 version = "3.8.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.sha-1]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.sha2]]
 version = "0.11.0-pre.4"
 criteria = "safe-to-deploy"
@@ -1575,6 +1586,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xz2]]
 version = "0.1.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.zcash_script]]
+version = "0.3.2@git:9527357baea19d88d8e34735acb5abf24f3ae189"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]

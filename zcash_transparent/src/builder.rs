@@ -6,14 +6,14 @@ use core::fmt;
 
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
+use zcash_script::{op, script};
+
 use crate::{
     address::{Script, TransparentAddress},
     bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
-
-use crate::address::OpCode;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -22,10 +22,16 @@ use {
         sighash::{SighashType, SIGHASH_ALL},
     },
     sha2::Digest,
+    zcash_script::pv::push_value,
 };
+
+#[cfg(not(feature = "transparent-inputs"))]
+use zcash_script::Opcode;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
+    /// The provided script contains unsupported opcodes.
+    UnsupportedScript,
     InvalidAddress,
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
@@ -54,6 +60,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Error::UnsupportedScript => write!(f, "Script contains unsupported opcodes"),
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
@@ -111,10 +118,13 @@ impl TransparentSigningSet {
 fn construct_script_sig(
     signature: &secp256k1::ecdsa::Signature,
     pubkey: &secp256k1::PublicKey,
-) -> Script {
+) -> script::Sig {
     let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
     sig_bytes.push(SIGHASH_ALL);
-    Script::default() << &sig_bytes[..] << &pubkey.serialize()[..]
+    script::Component(vec![
+        push_value(&sig_bytes).expect("short enough"),
+        push_value(&pubkey.serialize()).expect("short enough"),
+    ])
 }
 
 // TODO: This feature gate can be removed.
@@ -165,7 +175,7 @@ pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k
     secp_ctx: &'a secp256k1::Secp256k1<V>,
 
     // Mutable state: accumulated script signatures for inputs
-    final_script_sigs: Vec<Option<Script>>,
+    final_script_sigs: Vec<Option<script::Sig>>,
 }
 
 impl TransparentBuilder {
@@ -198,10 +208,13 @@ impl TransparentBuilder {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
+        let script_pubkey =
+            script::PubKey::parse(&coin.script_pubkey().0).map_err(|_| Error::UnsupportedScript)?;
+
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
-        match coin.script_pubkey().address() {
+        match TransparentAddress::from_script_pubkey(&script_pubkey) {
             Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
@@ -220,7 +233,7 @@ impl TransparentBuilder {
     }
 
     pub fn add_output(&mut self, to: &TransparentAddress, value: Zatoshis) -> Result<(), Error> {
-        self.vout.push(TxOut::new(value, to.script()));
+        self.vout.push(TxOut::new(value, to.script().into()));
 
         Ok(())
     }
@@ -286,7 +299,8 @@ impl TransparentBuilder {
                 required_height_lock_time: None,
                 script_sig: None,
                 value: i.coin.value(),
-                script_pubkey: i.coin.script_pubkey().clone(),
+                script_pubkey: script::FromChain::parse(&i.coin.script_pubkey().0)
+                    .expect("checked by builder when input was added"),
                 // We don't currently support spending P2SH coins.
                 redeem_script: None,
                 partial_signatures: BTreeMap::new(),
@@ -308,10 +322,11 @@ impl TransparentBuilder {
         } else {
             let outputs = self
                 .vout
-                .into_iter()
+                .iter()
                 .map(|o| pczt::Output {
                     value: o.value(),
-                    script_pubkey: o.script_pubkey().clone(),
+                    script_pubkey: script::PubKey::parse(&o.script_pubkey().0)
+                        .expect("builder doesn't produce output scripts with unknown opcodes"),
                     // We don't currently support spending P2SH coins, so we only ever see
                     // external P2SH recipients here, for which we never know the redeem
                     // script.
@@ -337,9 +352,12 @@ impl TransparentBuilder {
             });
         }
 
-        let script = Script::default() << OpCode::Return << data;
+        let script = script::Component(vec![
+            op::RETURN,
+            op::push_value(data).expect("length checked"),
+        ]);
 
-        self.vout.push(TxOut::new(Zatoshis::ZERO, script));
+        self.vout.push(TxOut::new(Zatoshis::ZERO, script.into()));
         Ok(())
     }
 }
@@ -416,11 +434,14 @@ impl Bundle<Unauthorized> {
                 sig_bytes.extend([SIGHASH_ALL]);
 
                 // P2PKH scriptSig
-                Ok(Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..])
+                Ok(script::Component(vec![
+                    op::push_value(&sig_bytes).expect("length checked"),
+                    op::push_value(&info.pubkey.serialize()).expect("length checked"),
+                ]))
             });
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = core::iter::empty::<Result<Script, Error>>();
+        let script_sigs = core::iter::empty::<Result<script::Component<Opcode>, Error>>();
 
         Ok(Bundle {
             vin: self
@@ -430,7 +451,7 @@ impl Bundle<Unauthorized> {
                 .map(|(txin, sig)| {
                     Ok(TxIn::from_parts(
                         txin.prevout().clone(),
-                        sig?,
+                        sig?.into(),
                         txin.sequence(),
                     ))
                 })
@@ -586,7 +607,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
                 .map(|(txin_unauth, sig_script)| {
                     TxIn::from_parts(
                         txin_unauth.prevout().clone(),
-                        sig_script,
+                        sig_script.into(),
                         txin_unauth.sequence(),
                     )
                 })
@@ -619,7 +640,7 @@ mod tests {
         let pk_hash_bytes: [u8; 20] = pk_hash_generic_array.into();
         let taddr = TransparentAddress::PublicKeyHash(pk_hash_bytes);
 
-        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script());
+        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
 
         let txid = [0u8; 32]; // Dummy txid
         let outpoint = OutPoint::new(txid, 0);

@@ -2967,7 +2967,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     &params,
                     &WalletTransparentOutput::from_parts(
                         outpoint.clone(),
-                        TxOut::new(output.value(), ephemeral_address.script()),
+                        TxOut::new(output.value(), ephemeral_address.script().into()),
                         None,
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),

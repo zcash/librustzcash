@@ -1,5 +1,6 @@
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
+use zcash_script::script::Evaluable;
 
 use crate::address::TransparentAddress;
 
@@ -8,7 +9,7 @@ impl super::Input {
     ///
     /// If the `redeem_script` field is set, its validity will be checked.
     pub fn verify(&self) -> Result<(), VerifyError> {
-        match self.script_pubkey().address() {
+        match TransparentAddress::from_script_from_chain(self.script_pubkey()) {
             Some(TransparentAddress::PublicKeyHash(_)) => {
                 if self.redeem_script().is_some() {
                     return Err(VerifyError::NotP2sh);
@@ -16,7 +17,7 @@ impl super::Input {
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
                 if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != Ripemd160::digest(Sha256::digest(&redeem_script.0))[..] {
+                    if hash[..] != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
                         return Err(VerifyError::WrongRedeemScript);
                     }
                 }
@@ -33,7 +34,7 @@ impl super::Output {
     ///
     /// If the `redeem_script` field is set, its validity will be checked.
     pub fn verify(&self) -> Result<(), VerifyError> {
-        match self.script_pubkey().address() {
+        match TransparentAddress::from_script_pubkey(self.script_pubkey()) {
             Some(TransparentAddress::PublicKeyHash(_)) => {
                 if self.redeem_script().is_some() {
                     return Err(VerifyError::NotP2sh);
@@ -41,7 +42,7 @@ impl super::Output {
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
                 if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != Ripemd160::digest(Sha256::digest(&redeem_script.0))[..] {
+                    if hash[..] != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
                         return Err(VerifyError::WrongRedeemScript);
                     }
                 }

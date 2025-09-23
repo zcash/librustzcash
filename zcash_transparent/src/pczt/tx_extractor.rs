@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use zcash_protocol::value::Zatoshis;
+use zcash_script::script;
 
 use crate::{
     address::Script,
@@ -66,7 +67,7 @@ impl super::Bundle {
         let vout = self
             .outputs
             .iter()
-            .map(|output| TxOut::new(output.value, output.script_pubkey.clone()))
+            .map(|output| TxOut::new(output.value, Script::from(&output.script_pubkey)))
             .collect::<Vec<_>>();
 
         Ok(if vin.is_empty() && vout.is_empty() {
@@ -93,7 +94,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
     let inputs = bundle
         .inputs
         .iter()
-        .map(|input| TxOut::new(input.value, input.script_pubkey.clone()))
+        .map(|input| TxOut::new(input.value, Script::from(&input.script_pubkey)))
         .collect();
 
     EffectsOnly { inputs }
@@ -105,7 +106,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
 pub struct Unbound(EffectsOnly);
 
 impl Authorization for Unbound {
-    type ScriptSig = Script;
+    type ScriptSig = script::Sig;
 }
 
 impl TransparentAuthorizingContext for Unbound {

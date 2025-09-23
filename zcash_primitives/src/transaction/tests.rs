@@ -14,6 +14,7 @@ use {
     blake2b_simd::Hash as Blake2bHash,
     core::ops::Deref,
     zcash_protocol::{consensus::BranchId, value::Zatoshis},
+    zcash_script::script,
 };
 
 #[cfg(all(test, zcash_unstable = "zfuture"))]
@@ -243,7 +244,9 @@ fn zip_0244() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .map(|s| Script(s.clone()))
+            .cloned()
+            .map(script::Code)
+            .map(Script)
             .collect();
 
         let test_bundle = txdata

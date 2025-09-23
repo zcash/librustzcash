@@ -84,6 +84,7 @@ rand_chacha.workspace = true
 rand_core.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_script.workspace = true
 
 [features]
 default = ["std"]

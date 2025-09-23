@@ -44,6 +44,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     TxId,
 };
+use zcash_script::script;
 use zip32::{DiversifierIndex, Scope};
 
 #[cfg(feature = "transparent-key-import")]
@@ -757,7 +758,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     txid_bytes.copy_from_slice(&txid);
 
     let index: u32 = row.get("output_index")?;
-    let script_pubkey = Script(row.get("script")?);
+    let script_pubkey = Script(script::Code(row.get("script")?));
     let raw_value: i64 = row.get("value_zat")?;
     let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
@@ -1718,7 +1719,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         ":account_id": account_id.0,
         ":address_id": address_id.0,
         ":address": output.recipient_address().encode(params),
-        ":script": &output.txout().script_pubkey().0,
+        ":script": &output.txout().script_pubkey().0.0,
         ":value_zat": &i64::from(ZatBalance::from(output.txout().value())),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
