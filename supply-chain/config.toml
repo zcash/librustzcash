@@ -1160,10 +1160,6 @@ criteria = "safe-to-deploy"
 version = "3.8.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.sha-1]]
-version = "0.10.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.sha2]]
 version = "0.11.0-pre.4"
 criteria = "safe-to-deploy"
@@ -1589,7 +1585,7 @@ version = "0.1.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_script]]
-version = "0.3.2@git:9527357baea19d88d8e34735acb5abf24f3ae189"
+version = "0.3.2@git:68dd382a1753101db1e2a27935ada572fc42b5cb"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]
