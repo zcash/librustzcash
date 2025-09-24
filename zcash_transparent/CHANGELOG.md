@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`
 - `zcash_transparent::builder`:
   - `TransparentBuilder::add_p2sh_input` (only for use in combination with
     `TransparentBuilder::build_for_pczt`).
