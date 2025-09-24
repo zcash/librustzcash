@@ -21,7 +21,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
-zcash_script.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:
@@ -47,6 +46,7 @@ proptest = { workspace = true, optional = true }
 bip32.workspace = true
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
+zcash_script = { workspace = true, features = ["descriptor"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)

@@ -16,6 +16,7 @@ workspace.
   - `TransparentBuilder::add_p2sh_input` (only for use in combination with
     `TransparentBuilder::build_for_pczt`).
   - `TransparentInputInfo::serialized_len`
+- `zcash_transparent::zip48` module.
 
 ### Changed
 - `zcash_transparent::pczt`:
