@@ -116,9 +116,10 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
-    //                                        /            |            \
-    //             support_zcashd_wallet_import            |            fix_v_transactions_expired_unmined
-    //                                         v_tx_outputs_return_addrs
+    //                                        /                         \
+    //                     support_zcashd_wallet_import          fix_v_transactions_expired_unmined
+    //                                                                           |
+    //                                                                v_tx_outputs_return_addrs
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -320,7 +321,6 @@ pub const V_0_17_3: &[Uuid] = &[
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
-    fix_v_transactions_expired_unmined::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
     v_tx_outputs_return_addrs::MIGRATION_ID,
 ];

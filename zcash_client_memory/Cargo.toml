@@ -109,7 +109,10 @@ transparent-inputs = [
 # with an account in the wallet. Applications that rely on this feature must
 # maintain spending keys corresponding to all imported pubkeys for any account
 # from which it permits spending.
-transparent-key-import = ["transparent-inputs"]
+transparent-key-import = [
+  "transparent-inputs",
+  "zcash_client_backend/transparent-key-import"
+]
 
 #! ### Experimental features
 
