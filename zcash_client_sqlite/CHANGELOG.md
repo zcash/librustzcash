@@ -18,7 +18,7 @@ workspace.
 ### Changed
 - Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
   `zcash_transparent 0.5`, `zcash_primitives 0.25`, `zcash_proofs 0.25`,
-  `zcash_client_backend 0.20`.
+  `zcash_keys 0.11`, `zcash_client_backend 0.20`.
 - Added dependency `secp256k1` when the `transparent-inputs` feature flag
   is enabled.
 - `zcash_client_sqlite::error::SqliteClientError`:
