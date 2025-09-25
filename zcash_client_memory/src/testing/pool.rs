@@ -215,3 +215,10 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
         _,
     >(TestMemDbFactory::new(), MemBlockCache::new())
 }
+
+pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::receive_two_notes_with_same_value::<T>(
+        TestMemDbFactory::new(),
+        MemBlockCache::new(),
+    )
+}

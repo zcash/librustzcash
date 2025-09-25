@@ -2061,7 +2061,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT accounts.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
+            "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
                     t.block AS mined_height,
                     MAX(tt.block) AS max_shielding_input_height
@@ -2092,8 +2092,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                OR stx.expiry_height IS NULL -- the spending tx will not expire
                OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )
-             GROUP BY accounts.uuid, rn.value, rn.is_change, rn.recipient_key_scope,
-                      scan_state.max_priority, t.block"
+             GROUP BY rn.id"
         ))?;
 
         let mut rows =

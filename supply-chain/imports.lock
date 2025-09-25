@@ -1,38 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.pczt]]
-version = "0.4.0"
-audited_as = "0.3.0"
-
-[[unpublished.zcash_client_backend]]
-version = "0.20.0"
-audited_as = "0.19.1"
-
-[[unpublished.zcash_client_sqlite]]
-version = "0.18.0"
-audited_as = "0.17.3"
-
-[[unpublished.zcash_keys]]
-version = "0.11.0"
-audited_as = "0.10.1"
-
-[[unpublished.zcash_primitives]]
-version = "0.25.0"
-audited_as = "0.24.1"
-
-[[unpublished.zcash_proofs]]
-version = "0.25.0"
-audited_as = "0.24.0"
-
-[[unpublished.zcash_protocol]]
-version = "0.6.2"
-audited_as = "0.6.1"
-
-[[unpublished.zcash_transparent]]
-version = "0.5.0"
-audited_as = "0.4.0"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -117,11 +85,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.3.0"
-when = "2025-06-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.4.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.sapling-crypto]]
 version = "0.5.0"
@@ -327,15 +295,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.19.1"
-when = "2025-07-21"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.20.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.17.3"
-when = "2025-08-29"
+version = "0.18.1"
+when = "2025-09-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -362,32 +330,32 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.10.1"
-when = "2025-08-14"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.11.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_primitives]]
-version = "0.24.0"
-when = "2025-07-31"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.25.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_proofs]]
-version = "0.24.0"
-when = "2025-07-31"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.25.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_protocol]]
-version = "0.6.1"
-when = "2025-08-06"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.6.2"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_script]]
 version = "0.4.0"
@@ -404,11 +372,11 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.4.0"
-when = "2025-07-31"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.5.0"
+when = "2025-09-25"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zip32]]
 version = "0.2.0"

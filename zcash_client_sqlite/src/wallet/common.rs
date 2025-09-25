@@ -148,9 +148,7 @@ where
                WHERE stx.block IS NOT NULL -- the spending tx is mined
                OR stx.expiry_height IS NULL -- the spending tx will not expire
              )
-             GROUP BY rn.id, t.txid, rn.{output_index_col},
-                      rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
-                      accounts.ufvk, rn.recipient_key_scope, t.mined_height"
+             GROUP BY rn.id"
         ),
         named_params![
            ":txid": txid.as_ref(),
@@ -321,11 +319,7 @@ where
            OR stx.expiry_height IS NULL -- the spending tx will not expire
            OR stx.expiry_height >= :target_height -- the spending tx is unexpired
          )
-         GROUP BY
-            rn.id, t.txid, rn.{output_index_col},
-            rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
-            ufvk, rn.recipient_key_scope, 
-            t.block, scan_state.max_priority"
+         GROUP BY rn.id"
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -500,10 +494,7 @@ where
                OR stx.expiry_height IS NULL -- the spending tx will not expire
                OR stx.expiry_height >= :target_height -- the spending tx is unexpired
              )
-             GROUP BY
-                rn.id, t.txid, rn.{output_index_col},
-                rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
-                ufvk, rn.recipient_key_scope, t.block
+             GROUP BY rn.id
          )
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,

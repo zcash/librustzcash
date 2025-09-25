@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api`:
+  - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
+    `select_unspent_notes`.
+
 ## [0.20.0] - 2025-09-25
 
 ### Added

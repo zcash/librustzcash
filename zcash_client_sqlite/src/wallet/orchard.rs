@@ -682,4 +682,9 @@ pub(crate) mod tests {
     fn zip315_can_spend_inputs_by_confirmations_policy() {
         testing::pool::can_spend_inputs_by_confirmations_policy::<OrchardPoolTester>();
     }
+
+    #[test]
+    fn receive_two_notes_with_same_value() {
+        testing::pool::receive_two_notes_with_same_value::<OrchardPoolTester>();
+    }
 }
