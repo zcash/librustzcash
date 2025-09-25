@@ -2849,7 +2849,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/QED-it/orchard?rev=78b6f7696bcc24b3493f404811221fc4d728a92f#78b6f7696bcc24b3493f404811221fc4d728a92f"
+source = "git+https://github.com/QED-it/orchard?rev=cf6d3b6f6c674505b97cd16f5630ff7349139ed4#cf6d3b6f6c674505b97cd16f5630ff7349139ed4"
 dependencies = [
  "aes",
  "bitvec",
@@ -6549,6 +6549,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "jubjub",
+ "lazy_static",
  "memuse",
  "nonempty",
  "orchard",
@@ -6568,7 +6569,6 @@ dependencies = [
  "zcash_encoding",
  "zcash_note_encryption",
  "zcash_protocol",
- "zcash_spec",
  "zcash_transparent",
  "zip32",
 ]
@@ -6613,7 +6613,8 @@ dependencies = [
 [[package]]
 name = "zcash_spec"
 version = "0.2.1"
-source = "git+https://github.com/QED-it/zcash_spec?rev=842d697048a8960348adcde704c24438fc5b4544#842d697048a8960348adcde704c24438fc5b4544"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ded3f58b93486aa79b85acba1001f5298f27a46489859934954d262533ee2915"
 dependencies = [
  "blake2b_simd",
 ]

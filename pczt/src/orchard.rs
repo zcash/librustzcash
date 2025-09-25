@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::{Global, VerSpendAuthSig, Zip32Derivation},
+    common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -116,7 +116,8 @@ pub struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
-    pub(crate) spend_auth_sig: Option<VerSpendAuthSig>,
+    #[serde_as(as = "Option<(_, [_; 64])>")]
+    pub(crate) spend_auth_sig: Option<(u8, [u8; 64])>,
 
     /// The [raw encoding] of the Orchard payment address that received the note being spent.
     ///
@@ -447,13 +448,7 @@ impl Bundle {
                 let spend = orchard::pczt::Spend::parse(
                     action.spend.nullifier,
                     action.spend.rk,
-                    action
-                        .spend
-                        .spend_auth_sig
-                        .map(|z| {
-                            orchard::pczt::parse_ver_spend_auth_sig(z.sighash_info, z.signature)
-                        })
-                        .transpose()?,
+                    action.spend.spend_auth_sig,
                     action.spend.recipient,
                     action.spend.value,
                     action.spend.asset,
@@ -531,9 +526,10 @@ impl Bundle {
                     spend: Spend {
                         nullifier: spend.nullifier().to_bytes(),
                         rk: spend.rk().into(),
-                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| VerSpendAuthSig {
-                            sighash_info: s.version().to_bytes().to_vec(),
-                            signature: s.sig().into(),
+                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| {
+                            let version = s.version().clone() as u8;
+                            let sig = s.sig().into();
+                            (version, sig)
                         }),
                         recipient: action
                             .spend()

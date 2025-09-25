@@ -24,6 +24,7 @@ zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
+lazy_static.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -49,7 +50,6 @@ jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
 sapling.workspace = true
-zcash_spec.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
