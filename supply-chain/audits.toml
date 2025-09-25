@@ -1282,6 +1282,12 @@ end = "2026-06-02"
 
 [[trusted.zcash_script]]
 criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2025-09-25"
+end = "2026-09-25"
+
+[[trusted.zcash_script]]
+criteria = "safe-to-deploy"
 user-id = 159631
 start = "2022-08-31"
 end = "2026-09-19"

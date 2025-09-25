@@ -68,7 +68,6 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.zcash_script]
-audit-as-crates-io = true
 
 [policy.zcash_transparent]
 audit-as-crates-io = true
@@ -1582,10 +1581,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xz2]]
 version = "0.1.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.zcash_script]]
-version = "0.3.2@git:68dd382a1753101db1e2a27935ada572fc42b5cb"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]
