@@ -11,6 +11,7 @@ use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Tra
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
+    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::Scope;
@@ -89,6 +90,10 @@ impl ShieldedPoolTester for SaplingPoolTester {
         s.next_sapling_subtree_index()
     }
 
+    fn note_value(note: &Self::Note) -> Zatoshis {
+        Zatoshis::const_from_u64(note.value().inner())
+    }
+
     fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
@@ -104,6 +109,22 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 &[ShieldedProtocol::Sapling],
                 target_height,
                 confirmations_policy,
+                exclude,
+            )
+            .map(|n| n.take_sapling())
+    }
+
+    fn select_unspent_notes<Cache, DbT: InputSource + WalletTest, P>(
+        st: &TestState<Cache, DbT, P>,
+        account: <DbT as InputSource>::AccountId,
+        target_height: TargetHeight,
+        exclude: &[DbT::NoteRef],
+    ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
+        st.wallet()
+            .select_unspent_notes(
+                account,
+                &[ShieldedProtocol::Sapling],
+                target_height,
                 exclude,
             )
             .map(|n| n.take_sapling())

@@ -378,3 +378,10 @@ pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() 
         );
     }
 }
+
+pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::receive_two_notes_with_same_value::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
