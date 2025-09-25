@@ -13,6 +13,7 @@ workspace.
 - `zcash_keys::address::UnifiedAddress::to_zcash_address`
 
 ### Changed
+- Migrated to `zcash_transparent 0.5`.
 - `zcash_keys::keys::AddressGenerationError` has added variants `UnsupportedTransparentKeyScope`
   and `Bip32DerivationError` when the `transparent-inputs` feature flag is enabled.
 
