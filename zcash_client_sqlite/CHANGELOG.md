@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
-## [0.18.0] - 2025-09-25
+## [0.18.1] - 2025-09-25
+
+### Fixed
+- This fixes a bug in zcash_client_sqlite-0.18.0 that could result in
+  underreporting of wallet balance.
+
+## [0.18.0] - YANKED
 
 ### Added
 - A `zcashd-compat` feature flag has been added in service of being able to
