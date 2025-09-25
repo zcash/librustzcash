@@ -42,6 +42,7 @@ graph TB
     zcash_client_backend --> zcash_primitives
     zcash_client_backend --> zip321
     zcash_client_backend --> zcash_keys
+    zcash_client_backend --> pczt
     pczt --> zcash_primitives
     zcash_proofs --> zcash_primitives
     zcash_primitives --> zcash_protocol

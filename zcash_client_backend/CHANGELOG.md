@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.20.0] - PLANNED
+## [0.20.0] - 2025-09-25
 
 ### Added
 - `zcash_client_backend::data_api`:
@@ -60,7 +60,8 @@ workspace.
 
 ### Changed
 - Migrated to `zcash_protocol 0.6.2`, `zcash_address 0.9`, `zip321 0.5`,
-  `zcash_transparent 0.4`, `zcash_primitives 0.24`, `zcash_proofs 0.24`
+  `zcash_transparent 0.5`, `zcash_primitives 0.25`, `zcash_proofs 0.25`,
+  `pczt 0.4`, `zcash_keys 0.11`.
 - `zcash_client_backend::data_api`:
   - `WalletWrite` has added method `notify_address_checked` when the
     `transparent-inputs` feature flag is enabled.

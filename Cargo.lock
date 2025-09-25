@@ -897,9 +897,9 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.12"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab3db02a9c5b5121e1e42fbdb1aeb65f5e02624cc58c43f2884c6ccac0b82f95"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -3026,7 +3026,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -6368,7 +6368,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.19.1"
+version = "0.20.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -6488,7 +6488,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.17.3"
+version = "0.18.0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -6580,7 +6580,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -6632,7 +6632,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "assert_matches",
  "bip32",
@@ -6679,7 +6679,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6703,7 +6703,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "core2",
  "document-features",
@@ -6716,8 +6716,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.3.2"
-source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=68dd382a1753101db1e2a27935ada572fc42b5cb#68dd382a1753101db1e2a27935ada572fc42b5cb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c1d06ec5990ad2c51c3052fd41f87aa5ccab92d02d1ab5173712c2e37c24658"
 dependencies = [
  "bitflags 2.9.0",
  "bounded-vec",
@@ -6738,7 +6739,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bip32",
  "blake2b_simd",
