@@ -1,6 +1,10 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_protocol]]
+version = "0.6.2"
+audited_as = "0.6.1"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -330,8 +334,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.9.0"
-when = "2025-06-02"
+version = "0.10.0"
+when = "2025-08-06"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -351,8 +355,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.6.0"
-when = "2025-07-31"
+version = "0.6.1"
+when = "2025-08-06"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -390,7 +394,7 @@ who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2019-03-16"
-end = "2025-07-30"
+end = "2026-08-21"
 
 [[audits.bytecode-alliance.audits.adler]]
 who = "Alex Crichton <alex@alexcrichton.com>"
