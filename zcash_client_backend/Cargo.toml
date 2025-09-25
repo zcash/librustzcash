@@ -208,7 +208,6 @@ pczt = [
   "pczt/signer",
   "pczt/spend-finalizer",
   "pczt/tx-extractor",
-  "pczt/zcp-builder",
   "dep:postcard",
   "dep:serde",
 ]
