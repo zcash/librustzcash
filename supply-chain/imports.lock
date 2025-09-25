@@ -5,6 +5,10 @@
 version = "0.25.0"
 audited_as = "0.24.1"
 
+[[unpublished.zcash_proofs]]
+version = "0.25.0"
+audited_as = "0.24.0"
+
 [[unpublished.zcash_protocol]]
 version = "0.6.2"
 audited_as = "0.6.1"
