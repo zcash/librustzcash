@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.25.0] - 2025-09-25
+
+### Added
+- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
+
 ### Changed
 - Migrated to `zcash_transparent 0.5`.
 
@@ -18,7 +23,6 @@ workspace.
 ### Added
 - `zcash_primitives::transaction::tests::data` has been exposed under the
   `test-dependencies` feature to provide access to test vectors.
-- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
 
 ### Changed
 - This release provides pre-release support for some planned Network Upgrade 7

@@ -1,6 +1,10 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_primitives]]
+version = "0.25.0"
+audited_as = "0.24.1"
+
 [[unpublished.zcash_protocol]]
 version = "0.6.2"
 audited_as = "0.6.1"
