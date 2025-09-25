@@ -318,6 +318,13 @@ pub const V_0_17_3: &[Uuid] = &[
     fix_v_transactions_expired_unmined::MIGRATION_ID,
 ];
 
+/// Leaf migrations in the 0.18.0 release.
+pub const V_0_18_0: &[Uuid] = &[
+    tx_retrieval_queue_expiry::MIGRATION_ID,
+    support_zcashd_wallet_import::MIGRATION_ID,
+    v_tx_outputs_return_addrs::MIGRATION_ID,
+];
+
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,

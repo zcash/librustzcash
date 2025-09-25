@@ -9,6 +9,10 @@ audited_as = "0.3.0"
 version = "0.20.0"
 audited_as = "0.19.1"
 
+[[unpublished.zcash_client_sqlite]]
+version = "0.18.0"
+audited_as = "0.17.3"
+
 [[unpublished.zcash_keys]]
 version = "0.11.0"
 audited_as = "0.10.1"
