@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.20.0] - PLANNED
+## [0.20.0] - 2025-09-25
 
 ### Added
 - `zcash_client_backend::data_api`:
