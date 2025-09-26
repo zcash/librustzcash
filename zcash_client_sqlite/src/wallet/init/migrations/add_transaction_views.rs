@@ -1,14 +1,14 @@
 //! Migration that adds transaction summary views & add fee information to transactions.
 use std::collections::HashSet;
 
-use rusqlite::{self, types::ToSql, OptionalExtension};
+use rusqlite::{self, params, types::ToSql, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     consensus::BranchId,
-    value::{BalanceError, ZatBalance},
+    value::{BalanceError, Zatoshis},
 };
 
 use super::{add_utxo_account, sent_notes_to_internal};
@@ -43,7 +43,6 @@ impl RusqliteMigration for Migration {
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         enum FeeError {
             Db(rusqlite::Error),
-            UtxoNotFound,
             Balance(BalanceError),
             CorruptedData(String),
         }
@@ -96,26 +95,24 @@ impl RusqliteMigration for Migration {
                         .query_row([op.hash().to_sql()?, op.n().to_sql()?], |row| {
                             row.get::<_, i64>(0)
                         })
-                        .optional()
-                        .map_err(FeeError::Db)?;
+                        .optional()?;
 
-                    op_amount.map_or_else(
-                        || Err(FeeError::UtxoNotFound),
-                        |i| {
-                            ZatBalance::from_i64(i).map_err(|_| {
+                    op_amount
+                        .map(|i| {
+                            Zatoshis::from_nonnegative_i64(i).map_err(|_| {
                                 FeeError::CorruptedData(format!(
                                     "UTXO amount out of range in outpoint {op:?}"
                                 ))
                             })
-                        },
-                    )
+                        })
+                        .transpose()
                 });
 
                 match fee_paid {
-                    Ok(fee_paid) => {
-                        stmt_set_fee.execute([i64::from(fee_paid), id_tx])?;
+                    Ok(Some(fee_paid)) => {
+                        stmt_set_fee.execute(params![u64::from(fee_paid), id_tx])?;
                     }
-                    Err(FeeError::UtxoNotFound) => {
+                    Ok(None) => {
                         // The fee and net value will end up being null in the transactions view.
                     }
                     Err(FeeError::Db(e)) => {
@@ -285,7 +282,6 @@ mod tests {
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
         ::transparent::{
-            address::Script,
             bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
             keys::IncomingViewingKey,
         },
@@ -397,7 +393,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::keys::NonHardenedChildIndex;
+        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
         use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_keys::keys::ReceiverRequirement::*;
         use zcash_protocol::value::Zatoshis;
@@ -422,16 +418,17 @@ mod tests {
             BranchId::Canopy,
             0,
             BlockHeight::from(3),
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            Zatoshis::ZERO,
             Some(transparent::Bundle {
-                vin: vec![TxIn {
-                    prevout: OutPoint::fake(),
-                    script_sig: Script(vec![]),
-                    sequence: 0,
-                }],
-                vout: vec![TxOut {
-                    value: Zatoshis::const_from_u64(1100000000),
-                    script_pubkey: Script(vec![]),
-                }],
+                vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(1100000000),
+                    Script::default(),
+                )],
                 authorization: Authorized,
             }),
             None,

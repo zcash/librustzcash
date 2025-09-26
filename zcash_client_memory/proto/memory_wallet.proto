@@ -1,0 +1,186 @@
+syntax = "proto3";
+
+package memwallet;
+
+import "notes.proto";
+import "primitives.proto";
+import "shardtree.proto";
+import "transparent.proto";
+
+// A serialized zcash wallet state
+message MemoryWallet {
+  // the version of the wallet serialization format
+  uint32 version = 1;
+  // the accounts in this wallet
+  Accounts accounts = 2;
+
+  // map from block height to block data
+  repeated WalletBlock blocks = 3;
+  // map from transaction id to transaction data
+  repeated TransactionTableRecord tx_table = 4;
+  // the notes received by this wallet
+  repeated ReceivedNote received_note_table = 5;
+  // the notes spent by this wallet
+  repeated ReceivedNoteSpendRecord received_note_spends = 6;
+  // the nullifiers for notes spent by this wallet
+  repeated NullifierRecord nullifiers = 7;
+  // the notes sent by this wallet
+  repeated SentNoteRecord sent_notes = 8;
+
+  // map between txIds and their inclusion in blocks
+  repeated TxLocatorRecord tx_locator = 9;
+  // the scan queue (which blocks the wallet should scan next and with what priority)
+  repeated ScanQueueRecord scan_queue = 10;
+
+  // Sapling shielded pool shard tree
+  ShardTree sapling_tree = 11;
+  // the block heights corresponding to the last note commitment for each shard in the sapling tree
+  repeated TreeEndHeightsRecord sapling_tree_shard_end_heights = 12;
+
+  // Orchard shielded pool shard tree
+  ShardTree orchard_tree = 13;
+  // the block heights corresponding to the last note commitment for each shard in the orchard tree
+  repeated TreeEndHeightsRecord orchard_tree_shard_end_heights = 14;
+
+  // UTXOs known to this wallet
+  repeated TransparentReceivedOutputRecord transparent_received_outputs = 15;
+  // UTXOs spent by this wallet
+  repeated TransparentReceivedOutputSpendRecord transparent_received_output_spends = 16;
+  // Map from spends to their location in the blockchain
+  repeated TransparentSpendCacheRecord transparent_spend_map = 17;
+  // Queue of transaction data requests the wallet should make to the lightwalletd provided to obtain more complete information
+  repeated TransactionDataRequest transaction_data_requests = 18;
+}
+
+message Accounts {
+  repeated Account accounts = 1; // map from account index to account data
+  uint32 account_nonce = 2; // the nonce for the next account
+}
+
+message Account {
+  uint32 account_id = 1; // the index of this account
+  AccountKind kind = 2; // derived or imported
+
+  optional bytes seed_fingerprint = 3;
+  optional uint32 account_index = 4; // HD index to derive account from seed
+
+  optional AccountPurpose purpose = 5; // spending or view-only
+
+  string viewing_key = 6; // the viewing key for this account
+  AccountBirthday birthday = 7; // the block height at which this account was created
+  repeated Address addresses = 8; // account addresses
+
+  repeated EphemeralAddressRecord ephemeral_addresses = 9; // map from index to encoded unified address
+  string account_name = 10; // human readable name for the account
+  optional string key_source = 11; // key source metadata
+}
+
+enum AccountKind {
+  Derived = 0;
+  Imported = 1;
+}
+
+enum AccountPurpose {
+  Spending = 0;
+  ViewOnly = 1;
+}
+
+message AccountBirthday {
+  ChainState prior_chain_state = 1; // the chain state at the block height before the account was created
+  optional uint32 recover_until = 2; // the block height until which the account should stop being in recovery mode
+}
+
+// A record storing transaction data in the transaction table
+message TransactionTableRecord {
+  TxId tx_id = 1;
+  TransactionEntry tx_entry = 2;
+}
+
+// Maps a block height and transaction index to a transaction ID.
+message TxLocatorRecord {
+  uint32 block_height = 1;
+  uint32 tx_index = 2;
+  TxId tx_id = 3;
+}
+
+message EphemeralAddress {
+  string address = 1;
+  optional bytes used_in_tx = 2;
+  optional bytes seen_in_tx = 3;
+}
+
+message EphemeralAddressRecord {
+  uint32 index = 1;
+  EphemeralAddress ephemeral_address = 2;
+}
+
+message ChainState {
+  uint32 block_height = 1; // the height of this block
+  bytes block_hash = 2;
+  bytes final_sapling_tree = 3;
+  bytes final_orchard_tree = 4;
+}
+
+message WalletBlock {
+  uint32 height = 1; // the height of this block
+  bytes hash = 2; // the ID (hash) of this block, same as in block explorers
+  uint32 block_time = 3; // Unix epoch time when the block was mined
+  repeated bytes transactions = 4; // the txids of transactions in this block
+  repeated Memo memos = 5; // map from note id to memo
+  optional uint32 sapling_commitment_tree_size = 6; // the size of the Sapling note commitment tree as of the end of this block
+  optional uint32 sapling_output_count = 7; // the number of Sapling outputs in this block
+  optional uint32 orchard_commitment_tree_size = 8; // the size of the Orchard note commitment tree as of the end of this block
+  optional uint32 orchard_action_count = 9; // the number of Orchard actions in this block
+}
+
+message TransactionEntry {
+  TransactionStatus tx_status = 1;
+  optional uint32 block = 2;
+  optional uint32 tx_index = 3;
+  optional uint32 expiry_height = 4;
+  optional bytes raw_tx = 5;
+  optional uint64 fee = 6;
+  optional uint32 target_height = 7;
+  optional uint32 mined_height = 8;
+}
+
+message TransactionDataRequest {
+  TransactionDataRequestType request_type = 1;
+  // for the GetStatus and Enhancement variants
+  optional TxId tx_id = 2;
+
+  // for the SpendsFromAddress variant
+  optional bytes address = 3;
+  optional uint32 block_range_start = 4;
+  optional uint32 block_range_end = 5;
+}
+
+enum TransactionDataRequestType {
+  GetStatus = 0;
+  Enhancement = 1;
+  SpendsFromAddress = 2;
+}
+
+message ScanQueueRecord {
+  uint32 start_height = 1;
+  uint32 end_height = 2;
+  ScanPriority priority = 3;
+}
+
+enum ScanPriority {
+  /// Block ranges that are ignored have lowest priority.
+  Ignored = 0;
+  /// Block ranges that have already been scanned will not be re-scanned.
+  Scanned = 1;
+  /// Block ranges to be scanned to advance the fully-scanned height.
+  Historic = 2;
+  /// Block ranges adjacent to heights at which the user opened the wallet.
+  OpenAdjacent = 3;
+  /// Blocks that must be scanned to complete note commitment tree shards adjacent to found notes.
+  FoundNote = 4;
+  /// Blocks that must be scanned to complete the latest note commitment tree shard.
+  ChainTip = 5;
+  /// A previously scanned range that must be verified to check it is still in the
+  /// main chain, has highest priority.
+  Verify = 6;
+}

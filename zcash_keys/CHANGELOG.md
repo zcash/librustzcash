@@ -9,6 +9,37 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0] - 2025-09-25
+
+### Added
+- `zcash_keys::address::UnifiedAddress::to_zcash_address`
+
+### Changed
+- Migrated to `zcash_transparent 0.5`.
+- `zcash_keys::keys::AddressGenerationError` has added variants `UnsupportedTransparentKeyScope`
+  and `Bip32DerivationError` when the `transparent-inputs` feature flag is enabled.
+
+## [0.10.1] - 2025-08-06
+
+### Fixed
+- Use of an incorrect prefix for transparent secret key Base58 encoding
+  (available under the `transparent-key-encoding` feature) has been fixed.
+
+## [0.10.0] - 2025-08-06
+
+### Added
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
+- `zcash_keys::keys::transparent`, a module providing zcashd-flavored DER
+  encoding for transparent keys under a new `transparent-key-encoding` feature
+  flag.
+- `zcash_keys::address::UnifiedAddress::receivers`
+- `zcash_keys::address::Address::receivers`
+
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zcash_transparent 0.4`
+
 ## [0.9.0] - 2025-05-30
 
 ### Added
@@ -17,6 +48,12 @@ workspace.
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`.
+
+## [0.8.2] - 2025-07-18
+
+### Added
+- `zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey}::default_transparent_address`
+  have been added under the `test-dependencies` feature.
 
 ## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-09
 

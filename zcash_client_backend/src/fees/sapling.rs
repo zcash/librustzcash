@@ -111,3 +111,9 @@ impl OutputView for Infallible {
         unreachable!()
     }
 }
+
+impl OutputView for Zatoshis {
+    fn value(&self) -> Zatoshis {
+        *self
+    }
+}

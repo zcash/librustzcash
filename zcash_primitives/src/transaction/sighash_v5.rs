@@ -19,7 +19,7 @@ use crate::{
             transparent_prevout_hash, transparent_sequence_hash,
             ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
         },
-        Authorization, TransactionData, TransparentDigests, TxDigests,
+        Authorization, TransactionData, TransparentDigests, TxDigests, TxVersion,
     },
 };
 
@@ -31,6 +31,9 @@ use {
     },
     zcash_encoding::{CompactSize, Vector},
 };
+
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use crate::transaction::sighash_v6::v6_signature_hash;
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
@@ -44,7 +47,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
-fn transparent_sig_digest<A: TransparentAuthorizingContext>(
+pub(crate) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
@@ -121,10 +124,10 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
             let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
             if let SignableInput::Transparent(input) = input {
                 let txin = &bundle.vin[*input.index()];
-                txin.prevout.write(&mut ch).unwrap();
+                txin.prevout().write(&mut ch).unwrap();
                 ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
                 input.script_pubkey().write(&mut ch).unwrap();
-                ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
+                ch.write_all(&txin.sequence().to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();
 
@@ -142,7 +145,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
 }
 
 #[cfg(zcash_unstable = "zfuture")]
-fn tze_input_sigdigests<A: tze::Authorization>(
+pub(crate) fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
     txid_digests: &TzeDigests<Blake2bHash>,
@@ -171,7 +174,7 @@ fn tze_input_sigdigests<A: tze::Authorization>(
 }
 
 /// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)
-pub fn v5_v6_signature_hash<
+pub fn v5_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
 >(
@@ -199,7 +202,7 @@ pub fn v5_v6_signature_hash<
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(zcash_unstable = "nu7")]
-        txid_parts.issue_digest,
+        None,
         #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle
             .as_ref()
@@ -207,4 +210,22 @@ pub fn v5_v6_signature_hash<
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
             .as_ref(),
     )
+}
+
+pub fn v5_v6_signature_hash<
+    TA: TransparentAuthorizingContext,
+    A: Authorization<TransparentAuth = TA>,
+>(
+    tx: &TransactionData<A>,
+    signable_input: &SignableInput<'_>,
+    txid_parts: &TxDigests<Blake2bHash>,
+) -> Blake2bHash {
+    match tx.version {
+        TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
+        #[cfg(zcash_unstable = "zfuture")]
+        TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
+        _ => panic!("v5_v6_signature_hash called with non-v5/v6 transaction"),
+    }
 }

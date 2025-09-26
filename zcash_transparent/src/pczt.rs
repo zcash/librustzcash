@@ -7,9 +7,9 @@ use alloc::vec::Vec;
 use bip32::ChildNumber;
 use getset::Getters;
 use zcash_protocol::{value::Zatoshis, TxId};
+use zcash_script::script;
 
 use crate::{
-    address::Script,
     keys::{NonHardenedChildIndex, TransparentKeyScope},
     sighash::SighashType,
 };
@@ -107,7 +107,7 @@ pub struct Input {
     /// A satisfying witness for the `script_pubkey` of the input being spent.
     ///
     /// This is set by the Spend Finalizer.
-    pub(crate) script_sig: Option<Script>,
+    pub(crate) script_sig: Option<script::Sig>,
 
     /// The value of the input being spent.
     ///
@@ -121,12 +121,12 @@ pub struct Input {
     /// - This is set by the Constructor.
     /// - This is required by the IO Finalizer and Transaction Extractor, to derive the
     ///   shielded sighash needed for computing the binding signatures.
-    pub(crate) script_pubkey: Script,
+    pub(crate) script_pubkey: script::FromChain,
 
     /// The script required to spend this output, if it is P2SH.
     ///
     /// Set to `None` if this is a P2PKH output.
-    pub(crate) redeem_script: Option<Script>,
+    pub(crate) redeem_script: Option<script::FromChain>,
 
     /// A map from a pubkey to a signature created by it.
     ///
@@ -196,12 +196,12 @@ pub struct Output {
     pub(crate) value: Zatoshis,
 
     /// The script constraining how spending of this output must be authorized.
-    pub(crate) script_pubkey: Script,
+    pub(crate) script_pubkey: script::PubKey,
 
     /// The script required to spend this output, if it is P2SH.
     ///
     /// Set to `None` if this is a P2PKH output, or a P2SH with an unknown redeem script.
-    pub(crate) redeem_script: Option<Script>,
+    pub(crate) redeem_script: Option<script::Redeem>,
 
     /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
     /// spending key can be found.

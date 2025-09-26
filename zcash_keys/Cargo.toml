@@ -1,7 +1,7 @@
 [package]
 name = "zcash_keys"
 description = "Zcash key and address management"
-version = "0.9.0"
+version = "0.11.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -34,10 +34,13 @@ rand_core.workspace = true
 bech32.workspace = true
 bs58.workspace = true
 core2.workspace = true
+regex = { workspace = true, optional = true }
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true, default-features = false }
 transparent.workspace = true
+zeroize = { workspace = true, optional = true }
 
 # - Logging and metrics
 memuse.workspace = true
@@ -67,13 +70,21 @@ byteorder = { workspace = true, optional = true }
 # - Digests
 blake2b_simd = { workspace = true }
 
+# - Zcashd compatibility
+bip0039 = { workspace = true, optional = true }
+
 [dev-dependencies]
+assert_matches.workspace = true
 hex.workspace = true
 jubjub.workspace = true
-proptest.workspace = true
-rand_core.workspace = true
 orchard = { workspace = true, features = ["circuit"] }
+proptest.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+rand_core.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_script.workspace = true
 
 [features]
 default = ["std"]
@@ -81,8 +92,13 @@ std = ["dep:document-features"]
 
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
-  "dep:bip32", 
-  "transparent/transparent-inputs", 
+  "dep:bip32",
+  "transparent/transparent-inputs",
+]
+
+## Enables use of zcashd-derived secp256k1 secret key encodings.
+transparent-key-encoding = [
+  "transparent-inputs", "dep:secp256k1", "dep:zeroize"
 ]
 
 ## Enables use of Orchard key parts and addresses
@@ -106,6 +122,9 @@ unstable-frost = ["orchard"]
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]
+
+## Exposes APIs that are useful for interacting with legacy zcashd key material
+zcashd-compat = ["dep:bip0039", "dep:regex"]
 
 [badges]
 maintenance = { status = "actively-developed" }

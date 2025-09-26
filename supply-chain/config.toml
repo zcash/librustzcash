@@ -67,6 +67,8 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
+[policy.zcash_script]
+
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
@@ -119,10 +121,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.arti-client]]
 version = "0.23.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ascii]]
-version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.asn1-rs]]
@@ -193,6 +191,10 @@ criteria = "safe-to-deploy"
 version = "0.14.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bip0039]]
+version = "0.12.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.bip32]]
 version = "0.6.0-pre.1"
 criteria = "safe-to-deploy"
@@ -219,6 +221,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bls12_381]]
 version = "0.8.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.bounded-vec]]
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bounded-vec-deque]]
@@ -845,12 +851,20 @@ criteria = "safe-to-deploy"
 version = "0.9.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.password-hash]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.pasta_curves]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.paste]]
 version = "1.0.15"
+criteria = "safe-to-deploy"
+
+[[exemptions.pbkdf2]]
+version = "0.12.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.pem-rfc7468]]
@@ -1503,6 +1517,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro]]
 version = "0.2.88"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm_sync]]
+version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.weak-table]]

@@ -1,11 +1,11 @@
 //! Test vectors for ZIP 246 Digests for the Version 6 Transaction Format
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(test, zcash_unstable = "nu7"))]
 use {crate::transaction::tests::data::zip_0244::TestVector, std::prelude::v1::Vec};
 
 // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_zsa_digests.py
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(test, zcash_unstable = "nu7"))]
 pub fn make_test_vectors() -> Vec<TestVector> {
     vec![
         TestVector {

@@ -59,7 +59,7 @@ impl MapAuth<Authorized, Authorized> for () {
 }
 
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
-pub fn read_orchard_bundle<R: Read>(
+pub fn read_v5_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<Bundle<Authorized, ZatBalance, OrchardVanilla>>> {
     #[allow(clippy::redundant_closure)]
@@ -96,8 +96,8 @@ pub fn read_orchard_bundle<R: Read>(
 }
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
-#[cfg(zcash_unstable = "nu7")]
-pub fn read_orchard_zsa_bundle<R: Read>(
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn read_v6_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance, OrchardZSA>>> {
     let num_action_groups: u32 = CompactSize::read_t::<_, u32>(&mut reader)?;
@@ -311,7 +311,7 @@ pub fn write_versioned_signature<W: Write, T: SigType>(
 }
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
-pub fn write_orchard_vanilla_bundle<W: Write>(
+pub fn write_v5_bundle<W: Write>(
     bundle: &Bundle<Authorized, ZatBalance, OrchardVanilla>,
     mut writer: W,
 ) -> io::Result<()> {
@@ -364,9 +364,9 @@ pub fn write_orchard_bundle<W: Write>(
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
         match bundle {
-            OrchardBundle::OrchardVanilla(b) => write_orchard_vanilla_bundle(b, writer)?,
+            OrchardBundle::OrchardVanilla(b) => write_v5_bundle(b, writer)?,
             #[cfg(zcash_unstable = "nu7")]
-            OrchardBundle::OrchardZSA(b) => write_orchard_zsa_bundle(writer, b)?,
+            OrchardBundle::OrchardZSA(b) => write_v6_bundle(writer, b)?,
         }
     } else {
         CompactSize::write(&mut writer, 0)?;
@@ -376,8 +376,8 @@ pub fn write_orchard_bundle<W: Write>(
 }
 
 /// Writes an [`orchard::Bundle`] in the appropriate transaction format.
-#[cfg(zcash_unstable = "nu7")]
-pub fn write_orchard_zsa_bundle<W: Write>(
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn write_v6_bundle<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance, OrchardZSA>,
 ) -> io::Result<()> {

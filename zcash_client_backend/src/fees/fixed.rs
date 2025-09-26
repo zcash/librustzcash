@@ -4,13 +4,13 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     ShieldedProtocol,
 };
 
-use crate::data_api::InputSource;
+use crate::data_api::{wallet::TargetHeight, InputSource};
 
 use super::{
     common::{single_pool_output_balance, SinglePoolBalanceConfig},
@@ -77,12 +77,12 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        ephemeral_balance: Option<&EphemeralBalance>,
+        ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
@@ -151,7 +151,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -191,7 +192,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(

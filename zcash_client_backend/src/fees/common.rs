@@ -11,7 +11,7 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
-use crate::data_api::AccountMeta;
+use crate::data_api::{wallet::TargetHeight, AccountMeta};
 
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
@@ -52,7 +52,7 @@ pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -61,7 +61,7 @@ where
 
     let t_in = transparent_inputs
         .iter()
-        .map(|t_in| t_in.coin().value)
+        .map(|t_in| t_in.coin().value())
         .chain(ephemeral_balance.and_then(|b| b.ephemeral_input_amount()))
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
@@ -204,13 +204,13 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
     wallet_meta: Option<&AccountMeta>,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     change_memo: Option<&MemoBytes>,
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -372,7 +372,7 @@ where
         .fee_rule
         .fee_required(
             cfg.params,
-            target_height,
+            BlockHeight::from(target_height),
             transparent_input_sizes.clone(),
             transparent_output_sizes.clone(),
             sapling_input_count,
@@ -404,7 +404,7 @@ where
                 cfg.fee_rule
                     .fee_required(
                         cfg.params,
-                        target_height,
+                        BlockHeight::from(target_height),
                         transparent_input_sizes.clone(),
                         transparent_output_sizes.clone(),
                         sapling_input_count,
@@ -435,7 +435,7 @@ where
                 cfg.fee_rule
                     .fee_required(
                         cfg.params,
-                        target_height,
+                        BlockHeight::from(target_height),
                         transparent_input_sizes,
                         transparent_output_sizes,
                         sapling_input_count,
@@ -579,14 +579,14 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<(), ChangeError<E, NoteRefT>> {
     let mut t_dust: Vec<_> = transparent_inputs
         .iter()
         .filter_map(|i| {
             // For now, we're just assuming P2PKH inputs, so we don't check the
             // size of the input script.
-            if i.coin().value <= marginal_fee {
+            if i.coin().value() <= marginal_fee {
                 Some(i.outpoint().clone())
             } else {
                 None

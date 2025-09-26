@@ -1,4 +1,4 @@
-use crate::sighash::SignableInput;
+use crate::{address::Script, sighash::SignableInput};
 use alloc::vec::Vec;
 
 impl super::Input {
@@ -27,12 +27,12 @@ impl super::Input {
             hash_type: self.sighash_type,
             index,
             // for p2pkh, always the same as script_pubkey
-            script_code: self.redeem_script.as_ref().unwrap_or(&self.script_pubkey),
-            script_pubkey: &self.script_pubkey,
+            script_code: &Script::from(self.redeem_script.as_ref().unwrap_or(&self.script_pubkey)),
+            script_pubkey: &Script::from(&self.script_pubkey),
             value: self.value,
         });
 
-        let msg = secp256k1::Message::from_digest_slice(&sighash).expect("32 bytes");
+        let msg = secp256k1::Message::from_digest(sighash);
         let sig = secp.sign_ecdsa(&msg, sk);
 
         // Signature has to have the SighashType appended to it.

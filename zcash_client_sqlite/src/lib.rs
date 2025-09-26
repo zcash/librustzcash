@@ -51,17 +51,20 @@ use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
+#[cfg(feature = "transparent-inputs")]
+use {transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::Balance};
 
 use zcash_client_backend::{
     data_api::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
-        SeedRelevance, SentTransaction, SpendableNotes, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
-        SAPLING_SHARD_HEIGHT,
+        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+        ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -80,6 +83,7 @@ use zcash_protocol::{
     memo::Memo,
     ShieldedProtocol,
 };
+
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
@@ -101,9 +105,10 @@ use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     std::collections::BTreeSet,
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_client_backend::{
+        data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
+    },
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -380,6 +385,13 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    /// Returns the network parameters that this walletdb instance is bound to.
+    pub fn params(&self) -> &P {
+        &self.params
+    }
+}
+
 impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
@@ -565,17 +577,19 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
-    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
-        Ok(SpendableNotes::new(
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedProtocol::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
                     &self.params,
                     account,
                     target_value,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     exclude,
                 )?
             } else {
@@ -588,8 +602,51 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     &self.params,
                     account,
                     target_value,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     exclude,
+                )?
+            } else {
+                vec![]
+            },
+        ))
+    }
+
+    fn select_unspent_notes(
+        &self,
+        account: Self::AccountId,
+        sources: &[ShieldedProtocol],
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::new(
+            if sources.contains(&ShieldedProtocol::Sapling) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedProtocol::Sapling,
+                    wallet::sapling::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedProtocol::Orchard) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedProtocol::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
                 )?
             } else {
                 vec![]
@@ -609,15 +666,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_spendable_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        target_height: BlockHeight,
-        min_confirmations: u32,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
             address,
             target_height,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
@@ -676,10 +733,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
+        derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
+        wallet::get_derived_account(
+            self.conn.borrow(),
+            &self.params,
+            derivation.seed_fingerprint(),
+            derivation.account_index(),
+            #[cfg(feature = "zcashd-compat")]
+            derivation.legacy_address_index(),
+        )
     }
 
     fn validate_seed(
@@ -785,14 +848,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
         wallet::get_wallet_summary(
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
-            min_confirmations,
+            confirmations_policy,
             &SubtreeProgressEstimator,
         )
     }
@@ -828,7 +891,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
     }
 
@@ -876,18 +939,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         &self,
         account: Self::AccountId,
         include_change: bool,
+        include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        let key_scopes: &[KeyScope] = if include_change {
-            &[KeyScope::EXTERNAL, KeyScope::INTERNAL]
-        } else {
-            &[KeyScope::EXTERNAL]
-        };
+        let key_scopes = Some(KeyScope::EXTERNAL)
+            .into_iter()
+            .chain(include_change.then_some(KeyScope::INTERNAL))
+            .chain(
+                (include_standalone && cfg!(feature = "transparent-key-import"))
+                    .then_some(KeyScope::Foreign),
+            )
+            .collect::<Vec<_>>();
 
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
             account,
-            key_scopes,
+            &key_scopes[..],
         )
     }
 
@@ -895,13 +962,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_transparent_balances(
         &self,
         account: Self::AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
             account,
-            max_height,
+            target_height,
+            confirmations_policy,
         )
     }
 
@@ -1028,22 +1097,43 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
                 ],
                 |row| {
                     let v = row.get(0)?;
-                    let to_address = row
-                        .get::<_, Option<String>>(1)?
-                        .and_then(|s| Address::decode(&self.params, &s));
-                    let ephemeral_address = row
-                        .get::<_, Option<String>>(2)?
-                        .and_then(|s| Address::decode(&self.params, &s));
-                    let address_index: Option<u32> = row.get(3)?;
+                    let to_address = row.get::<_, Option<String>>(1)?;
+                    let ephemeral_address = row.get::<_, Option<String>>(2)?;
+                    let address_index = row.get::<_, Option<u32>>(3)?;
                     Ok((v, to_address, ephemeral_address.zip(address_index)))
                 },
             )?
             .map(|res| {
-                let (amount, external_recipient, ephemeral_address) = res?;
-                Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
+                let (amount, external_recipient, _ephemeral_address) = res?;
+                Ok::<_, SqliteClientError>(OutputOfSentTx::from_parts(
                     Zatoshis::from_u64(amount)?,
-                    external_recipient,
-                    ephemeral_address,
+                    external_recipient
+                        .map(|s| {
+                            Address::decode(&self.params, &s).ok_or_else(|| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "invalid transparent address: {s}"
+                                ))
+                            })
+                        })
+                        .transpose()?,
+                    #[cfg(feature = "transparent-inputs")]
+                    _ephemeral_address
+                        .map(|(addr_str, idx)| {
+                            let addr =
+                                Address::decode(&self.params, &addr_str).ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(format!(
+                                        "invalid transparent address: {addr_str}"
+                                    ))
+                                })?;
+                            let i = NonHardenedChildIndex::from_index(idx).ok_or_else(|| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "invalid non-hardened child index: {idx}"
+                                ))
+                            })?;
+
+                            Ok::<_, SqliteClientError>((addr, i))
+                        })
+                        .transpose()?,
                 ))
             })
             .collect::<Result<_, _>>()?;
@@ -1150,7 +1240,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1189,7 +1284,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1224,6 +1324,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 #[cfg(feature = "transparent-inputs")]
                 &wdb.gap_limits,
             )
+        })
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::import_standalone_transparent_pubkey(wdb.conn.0, wdb.params, account, pubkey)
         })
     }
 
@@ -1489,16 +1600,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
 
             #[cfg(feature = "transparent-inputs")]
             for (account_id, key_scope) in wallet::involved_accounts(wdb.conn.0, tx_refs)? {
-                use ReceiverRequirement::*;
-                wallet::transparent::generate_gap_addresses(
-                    wdb.conn.0,
-                    &wdb.params,
-                    account_id,
-                    key_scope,
-                    &wdb.gap_limits,
-                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                    false,
-                )?;
+                if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+                    use ReceiverRequirement::*;
+                    wallet::transparent::generate_gap_addresses(
+                        wdb.conn.0,
+                        &wdb.params,
+                        account_id,
+                        t_key_scope,
+                        &wdb.gap_limits,
+                        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                        false,
+                    )?;
+                }
             }
 
             // Prune the nullifier map of entries we no longer need.
@@ -1763,16 +1876,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                     _output,
                 )?;
 
-            use ReceiverRequirement::*;
-            wallet::transparent::generate_gap_addresses(
-                wdb.conn.0,
-                &wdb.params,
-                account_id,
-                key_scope,
-                &wdb.gap_limits,
-                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                true,
-            )?;
+            if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+                use ReceiverRequirement::*;
+                wallet::transparent::generate_gap_addresses(
+                    wdb.conn.0,
+                    &wdb.params,
+                    account_id,
+                    t_key_scope,
+                    &wdb.gap_limits,
+                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                    true,
+                )?;
+            }
 
             Ok(utxo_id)
         });
@@ -1834,7 +1949,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 wdb.conn.0,
                 &wdb.params,
                 account_id,
-                KeyScope::Ephemeral,
+                TransparentKeyScope::EPHEMERAL,
                 wdb.gap_limits.ephemeral(),
                 n,
             )?;
@@ -1849,6 +1964,32 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        request: TransactionsInvolvingAddress,
+        as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        if let Some(requested_end) = request.block_range_end() {
+            // block_end_height is end-exclusive
+            if as_of_height != requested_end - 1 {
+                return Err(SqliteClientError::NotificationMismatch {
+                    expected: requested_end - 1,
+                    actual: as_of_height,
+                });
+            }
+        }
+
+        self.transactionally(|wdb| {
+            wallet::transparent::update_observed_unspent_heights(
+                wdb.conn.0,
+                &wdb.params,
+                request.address(),
+                as_of_height,
+            )
+        })
     }
 }
 
@@ -2722,7 +2863,7 @@ mod tests {
 
         let receivers = st
             .wallet()
-            .get_transparent_receivers(account.id(), false)
+            .get_transparent_receivers(account.id(), false, true)
             .unwrap();
 
         // The receiver for the default UA should be in the set.
@@ -2763,19 +2904,19 @@ mod tests {
         let mut check_times = BTreeSet::new();
         for (addr, _) in ephemeral_addrs {
             let has_valid_request = data_requests.iter().any(|req| match req {
-                TransactionDataRequest::TransactionsInvolvingAddress {
-                    address,
-                    request_at: Some(t),
-                    ..
-                } => {
-                    *address == addr && *t > base_time && {
-                        let t_delta = t.duration_since(base_time).unwrap();
-                        // This is an imprecise check; the objective of the randomized time
-                        // selection is that all ephemeral address checks be performed within a
-                        // day, and that their check times be distinct.
-                        let result = t_delta < day && !check_times.contains(t);
-                        check_times.insert(*t);
-                        result
+                TransactionDataRequest::TransactionsInvolvingAddress(req) => {
+                    if let Some(t) = req.request_at() {
+                        req.address() == addr && t > base_time && {
+                            let t_delta = t.duration_since(base_time).unwrap();
+                            // This is an imprecise check; the objective of the randomized time
+                            // selection is that all ephemeral address checks be performed within a
+                            // day, and that their check times be distinct.
+                            let result = t_delta < day && !check_times.contains(&t);
+                            check_times.insert(t);
+                            result
+                        }
+                    } else {
+                        false
                     }
                 }
                 _ => false,

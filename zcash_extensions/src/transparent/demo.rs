@@ -513,7 +513,8 @@ mod tests {
                 NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
                 NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
-                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
+                NetworkUpgrade::Nu6_1 => Some(BlockHeight::from_u32(1_400_000)),
+                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_500_000)),
             }
         }
 
@@ -676,6 +677,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
@@ -707,6 +710,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
@@ -734,6 +739,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,

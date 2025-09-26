@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package memwallet;
+
+import "primitives.proto";
+
+message ReceivedTransparentOutput {
+  bytes transaction_id = 1;
+  uint32 account_id = 2;
+  string address = 3;
+  TxOut txout = 4;
+  optional uint32 max_observed_unspent_height = 5;
+}
+
+message TxOut {
+  uint64 value = 1;
+  bytes script = 2;
+}
+
+message TransparentReceivedOutputRecord {
+  OutPoint outpoint = 1;
+  ReceivedTransparentOutput output = 2;
+}
+
+message TransparentReceivedOutputSpendRecord {
+  OutPoint outpoint = 1;
+  TxId tx_id = 2;
+}
+
+message TransparentSpendCacheRecord {
+  TxId tx_id = 1;
+  OutPoint outpoint = 2;
+}

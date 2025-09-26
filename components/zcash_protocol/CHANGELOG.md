@@ -10,6 +10,36 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.2] - 2025-09-25
+
+### Added
+- `impl Hash for zcash_protocol::ShieldedProtocol`
+
+## [0.6.1] - 2025-08-06
+
+### Added
+- `zcash_protocol::constants::`
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+- `impl Neg<Output = ZatBalance> for Zatoshis`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` is now a sealed trait, and may
+  no longer be implemented by third parties. In addition, it has added method
+  `b58_secret_key_prefix`.
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_1` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_1` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_1`.
+- The testnet activation height has been set for `consensus::BranchId::Nu6_1`
+
+## [0.6.0] - YANKED
+
+## [0.5.4] - 2025-07-15
+
+### Added
+- `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance>}`
+
 ## [0.5.3] - 2025-06-12
 ### Added
   - `zcash_protocol::txid::TxId::is_null`

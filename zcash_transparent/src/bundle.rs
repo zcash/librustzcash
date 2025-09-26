@@ -3,9 +3,10 @@
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
+use zcash_script::script;
 
 use zcash_protocol::{
-    value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
+    value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
 
@@ -30,14 +31,14 @@ impl Authorization for EffectsOnly {
 }
 
 impl TransparentAuthorizingContext for EffectsOnly {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
-        self.inputs.iter().map(|input| input.value).collect()
+    fn input_amounts(&self) -> Vec<Zatoshis> {
+        self.inputs.iter().map(|input| input.value()).collect()
     }
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
         self.inputs
             .iter()
-            .map(|input| input.script_pubkey.clone())
+            .map(|input| input.script_pubkey().clone())
             .collect()
     }
 }
@@ -85,18 +86,21 @@ impl<A: Authorization> Bundle<A> {
     pub fn is_coinbase(&self) -> bool {
         // From `CTransaction::IsCoinBase()` in zcashd:
         //   return (vin.size() == 1 && vin[0].prevout.IsNull());
-        matches!(&self.vin[..], [input] if input.prevout.is_null())
+        matches!(&self.vin[..], [input] if input.prevout().is_null())
     }
 
+    #[allow(deprecated)]
     pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
         Bundle {
             vin: self
                 .vin
                 .into_iter()
-                .map(|txin| TxIn {
-                    prevout: txin.prevout,
-                    script_sig: f.map_script_sig(txin.script_sig),
-                    sequence: txin.sequence,
+                .map(|txin| {
+                    TxIn::from_parts(
+                        txin.prevout,
+                        f.map_script_sig(txin.script_sig),
+                        txin.sequence,
+                    )
                 })
                 .collect(),
             vout: self.vout,
@@ -109,24 +113,29 @@ impl<A: Authorization> Bundle<A> {
     /// transferred out of the transparent pool into shielded pools or to fees; a negative value
     /// means that the containing transaction has funds being transferred into the transparent pool
     /// from the shielded pools.
-    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Amount, E>
+    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Option<ZatBalance>, E>
     where
         E: From<BalanceError>,
-        F: FnMut(&OutPoint) -> Result<Amount, E>,
+        F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
     {
-        let input_sum = self.vin.iter().try_fold(Amount::zero(), |total, txin| {
-            get_prevout_value(&txin.prevout)
-                .and_then(|v| (total + v).ok_or_else(|| BalanceError::Overflow.into()))
-        })?;
+        let mut input_sum = Zatoshis::ZERO;
+        for txin in &self.vin {
+            if let Some(v) = get_prevout_value(txin.prevout())? {
+                input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
+            } else {
+                return Ok(None);
+            }
+        }
 
         let output_sum = self
             .vout
             .iter()
-            .map(|p| Amount::from(p.value))
-            .sum::<Option<Amount>>()
+            .map(|p| ZatBalance::from(p.value()))
+            .sum::<Option<ZatBalance>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (input_sum - output_sum).ok_or_else(|| BalanceError::Underflow.into())
+        let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
+        Ok(Some(balance))
     }
 }
 
@@ -194,9 +203,39 @@ impl OutPoint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TxIn<A: Authorization> {
+    #[deprecated(since = "0.4.1", note = "use the prevout() accessor instead.")]
     pub prevout: OutPoint,
+    #[deprecated(since = "0.4.1", note = "use the script_sig() accessor instead.")]
     pub script_sig: A::ScriptSig,
+    #[deprecated(since = "0.4.1", note = "use the sequence() accessor instead.")]
     pub sequence: u32,
+}
+
+#[allow(deprecated)]
+impl<A: Authorization> TxIn<A> {
+    /// Constructs a new [`TxIn`] from its constituent parts.
+    pub fn from_parts(prevout: OutPoint, script_sig: A::ScriptSig, sequence: u32) -> Self {
+        Self {
+            prevout,
+            script_sig,
+            sequence,
+        }
+    }
+
+    /// Accessor for the previous transparent output that this input spends.
+    pub fn prevout(&self) -> &OutPoint {
+        &self.prevout
+    }
+
+    /// The signature being used to spend the input.
+    pub fn script_sig(&self) -> &A::ScriptSig {
+        &self.script_sig
+    }
+
+    /// The sequence number of the input (no Zcash protocol use as of NU6).
+    pub fn sequence(&self) -> u32 {
+        self.sequence
+    }
 }
 
 impl TxIn<Authorized> {
@@ -209,32 +248,39 @@ impl TxIn<Authorized> {
             u32::from_le_bytes(sequence)
         };
 
-        Ok(TxIn {
-            prevout,
-            script_sig,
-            sequence,
-        })
+        Ok(TxIn::from_parts(prevout, script_sig, sequence))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout.write(&mut writer)?;
-        self.script_sig.write(&mut writer)?;
-        writer.write_all(&self.sequence.to_le_bytes())
+        self.prevout().write(&mut writer)?;
+        self.script_sig().write(&mut writer)?;
+        writer.write_all(&self.sequence().to_le_bytes())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
-    pub value: NonNegativeAmount,
+    #[deprecated(since = "0.4.1", note = "use the value() accessor instead.")]
+    pub value: Zatoshis,
+    #[deprecated(since = "0.4.1", note = "use the script_pubkey() accessor instead.")]
     pub script_pubkey: Script,
 }
 
+#[allow(deprecated)]
 impl TxOut {
+    // Constructs a new `TxOut` from its constituent parts.
+    pub fn new(value: Zatoshis, script_pubkey: Script) -> Self {
+        Self {
+            value,
+            script_pubkey,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            NonNegativeAmount::from_nonnegative_i64_le_bytes(tmp)
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;
@@ -252,7 +298,18 @@ impl TxOut {
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
     pub fn recipient_address(&self) -> Option<TransparentAddress> {
-        self.script_pubkey.address()
+        script::PubKey::parse(&self.script_pubkey.0)
+            .ok()
+            .as_ref()
+            .and_then(TransparentAddress::from_script_pubkey)
+    }
+
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    pub fn script_pubkey(&self) -> &Script {
+        &self.script_pubkey
     }
 }
 
@@ -262,13 +319,14 @@ pub mod testing {
     use proptest::prelude::*;
     use proptest::sample::select;
     use zcash_protocol::value::testing::arb_zatoshis;
+    use zcash_script::script;
 
     use crate::address::Script;
 
     use super::{Authorized, Bundle, OutPoint, TxIn, TxOut};
 
     pub const VALID_OPCODES: [u8; 8] = [
-        0x00, // OP_FALSE,
+        0x00, // OP_0,
         0x51, // OP_1,
         0x52, // OP_2,
         0x53, // OP_3,
@@ -285,24 +343,30 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
-            Script(v)
+        pub fn arb_script_sig()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
+            Script(script::Code(v))
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_script_pubkey()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
+            Script(script::Code(v))
         }
     }
 
     prop_compose! {
         pub fn arb_txin()(
             prevout in arb_outpoint(),
-            script_sig in arb_script(),
+            script_sig in arb_script_sig(),
             sequence in any::<u32>()
         ) -> TxIn<Authorized> {
-            TxIn { prevout, script_sig, sequence }
+            TxIn::from_parts(prevout, script_sig, sequence)
         }
     }
 
     prop_compose! {
-        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
-            TxOut { value, script_pubkey }
+        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script_pubkey()) -> TxOut {
+            TxOut::new(value, script_pubkey)
         }
     }
 

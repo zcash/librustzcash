@@ -1,7 +1,8 @@
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
+use zcash_script::{pv::push_value, script};
 
-use crate::address::{Script, TransparentAddress};
+use crate::address::TransparentAddress;
 
 impl super::Bundle {
     /// Finalizes the spends for this bundle.
@@ -11,30 +12,34 @@ impl super::Bundle {
         // into the PCZT input. If `script_sig` is empty for an input, the field should
         // remain unset rather than assigned an empty array.
         for input in &mut self.inputs {
-            match input.script_pubkey.address() {
-                Some(TransparentAddress::PublicKeyHash(hash)) => {
-                    let (pubkey, sig_bytes) = {
+            TransparentAddress::from_script_from_chain(&input.script_pubkey)
+                .ok_or(SpendFinalizerError::UnsupportedScriptPubkey)
+                .and_then(|address| match address {
+                    TransparentAddress::PublicKeyHash(hash) => {
                         let mut iter = input.partial_signatures.iter();
                         match (iter.next(), iter.next()) {
                             (Some(entry), None) => Ok(entry),
                             (None, _) => Err(SpendFinalizerError::MissingSignature),
                             (Some(_), Some(_)) => Err(SpendFinalizerError::UnexpectedSignatures),
                         }
-                    }?;
-
-                    // Check that the signature is for this input.
-                    if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
-                        return Err(SpendFinalizerError::UnexpectedSignatures);
+                        .and_then(|(pubkey, sig_bytes)| {
+                            // Check that the signature is for this input.
+                            if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
+                                Err(SpendFinalizerError::UnexpectedSignatures)
+                            } else {
+                                // P2PKH scriptSig
+                                input.script_sig = Some(script::Component(vec![
+                                    push_value(sig_bytes).expect("short enough"),
+                                    push_value(pubkey).expect("short enough"),
+                                ]));
+                                Ok(())
+                            }
+                        })
                     }
-
-                    // P2PKH scriptSig
-                    input.script_sig = Some(Script::default() << &sig_bytes[..] << &pubkey[..]);
-                }
-                Some(TransparentAddress::ScriptHash(_)) => {
-                    return Err(SpendFinalizerError::UnsupportedScriptPubkey)
-                }
-                None => return Err(SpendFinalizerError::UnsupportedScriptPubkey),
-            }
+                    TransparentAddress::ScriptHash(_) => {
+                        Err(SpendFinalizerError::UnsupportedScriptPubkey)
+                    }
+                })?
         }
 
         // All other data except the UTXO and proprietary fields in the input should be
