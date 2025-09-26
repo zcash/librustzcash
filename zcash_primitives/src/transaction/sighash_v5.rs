@@ -19,7 +19,7 @@ use crate::{
             transparent_prevout_hash, transparent_sequence_hash,
             ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
         },
-        Authorization, TransactionData, TransparentDigests, TxDigests, TxVersion,
+        Authorization, TransactionData, TransparentDigests, TxDigests,
     },
 };
 
@@ -210,22 +210,4 @@ pub fn v5_signature_hash<
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
             .as_ref(),
     )
-}
-
-pub fn v5_v6_signature_hash<
-    TA: TransparentAuthorizingContext,
-    A: Authorization<TransparentAuth = TA>,
->(
-    tx: &TransactionData<A>,
-    signable_input: &SignableInput<'_>,
-    txid_parts: &TxDigests<Blake2bHash>,
-) -> Blake2bHash {
-    match tx.version {
-        TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
-        #[cfg(zcash_unstable = "nu7")]
-        TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
-        #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
-        _ => panic!("v5_v6_signature_hash called with non-v5/v6 transaction"),
-    }
 }

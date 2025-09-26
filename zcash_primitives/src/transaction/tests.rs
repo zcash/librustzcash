@@ -3,7 +3,7 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_v6_signature_hash,
+        sighash::signature_hash, sighash::SignableInput, sighash_v4::v4_signature_hash,
         testing::arb_tx, transparent, txid::TxIdDigester, Authorization,
         OrchardBundle::OrchardVanilla, Transaction, TransactionData, TxDigests, TxIn,
     },
@@ -359,25 +359,19 @@ fn zip_0244() {
             };
 
             assert_eq!(
-                v5_v6_signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts)
-                    .as_ref(),
+                signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts).as_ref(),
                 &tv.sighash_all.unwrap()
             );
 
             assert_eq!(
-                v5_v6_signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts)
-                    .as_ref(),
+                signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts).as_ref(),
                 &tv.sighash_none.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_v6_signature_hash(
-                        &txdata,
-                        &signable_input(SighashType::SINGLE),
-                        &txid_parts
-                    )
-                    .as_ref(),
+                    signature_hash(&txdata, &signable_input(SighashType::SINGLE), &txid_parts)
+                        .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
             } else {
@@ -385,7 +379,7 @@ fn zip_0244() {
             }
 
             assert_eq!(
-                v5_v6_signature_hash(
+                signature_hash(
                     &txdata,
                     &signable_input(SighashType::ALL_ANYONECANPAY),
                     &txid_parts,
@@ -395,7 +389,7 @@ fn zip_0244() {
             );
 
             assert_eq!(
-                v5_v6_signature_hash(
+                signature_hash(
                     &txdata,
                     &signable_input(SighashType::NONE_ANYONECANPAY),
                     &txid_parts,
@@ -406,7 +400,7 @@ fn zip_0244() {
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_v6_signature_hash(
+                    signature_hash(
                         &txdata,
                         &signable_input(SighashType::SINGLE_ANYONECANPAY),
                         &txid_parts,
@@ -420,8 +414,8 @@ fn zip_0244() {
         };
 
         assert_eq!(
-            v5_v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
-            tv.sighash_shielded
+            signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            &tv.sighash_shielded
         );
     }
 }

@@ -18,7 +18,7 @@ use rand_core::OsRng;
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    sighash::SignableInput, sighash_v5::v5_v6_signature_hash, txid::TxIdDigester, Authorization,
+    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
     OrchardBundle, TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
@@ -39,7 +39,10 @@ use crate::{
 use crate::common::determine_lock_time;
 
 #[cfg(zcash_unstable = "nu7")]
-use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+use {
+    zcash_primitives::transaction::sighash_v6::v6_signature_hash,
+    zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
+};
 
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
@@ -74,20 +77,24 @@ impl Signer {
         let txid_parts = tx_data.digest(TxIdDigester);
 
         // TODO: Pick sighash based on tx version.
-        match (global.tx_version, global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
+        let shielded_sighash = match (global.tx_version, global.version_group_id) {
+            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => {
+                v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+            }
             #[cfg(zcash_unstable = "nu7")]
-            (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(()),
-            (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
-                version,
-                version_group_id,
-            })),
-        }?;
-        let shielded_sighash =
-            v5_v6_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-                .as_ref()
-                .try_into()
-                .expect("correct length");
+            (V6_TX_VERSION, V6_VERSION_GROUP_ID) => {
+                v6_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+            }
+            (version, version_group_id) => {
+                return Err(Error::Global(GlobalError::UnsupportedTxVersion {
+                    version,
+                    version_group_id,
+                }))
+            }
+        }
+        .as_ref()
+        .try_into()
+        .expect("correct length");
 
         Ok(Self {
             global,
@@ -124,11 +131,20 @@ impl Signer {
             .sign(
                 index,
                 |input| {
-                    v5_v6_signature_hash(
-                        &self.tx_data,
-                        &SignableInput::Transparent(input),
-                        &self.txid_parts,
-                    )
+                    match self.tx_data.version() {
+                        TxVersion::V5 => v5_signature_hash(
+                            &self.tx_data,
+                            &SignableInput::Transparent(input),
+                            &self.txid_parts,
+                        ),
+                        #[cfg(zcash_unstable = "nu7")]
+                        TxVersion::V6 => v6_signature_hash(
+                            &self.tx_data,
+                            &SignableInput::Transparent(input),
+                            &self.txid_parts,
+                        ),
+                        _ => panic!("unsupported tx version"),
+                    }
                     .as_ref()
                     .try_into()
                     .unwrap()
