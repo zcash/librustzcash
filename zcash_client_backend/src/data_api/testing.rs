@@ -2440,11 +2440,17 @@ fn fake_compact_block_from_compact_tx(
     cb
 }
 
+// A trait that must be implemented for all test caches, for returning metadata about inserted
+// values.
+pub trait CacheInsertionResult {
+    fn txids(&self) -> &[TxId];
+}
+
 /// Trait used by tests that require a block cache.
 pub trait TestCache {
     type BsError: core::fmt::Debug;
     type BlockSource: BlockSource<Error = Self::BsError>;
-    type InsertResult;
+    type InsertResult: CacheInsertionResult;
 
     /// Exposes the block cache as a [`BlockSource`].
     fn block_source(&self) -> &Self::BlockSource;
@@ -2856,6 +2862,10 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn mark_tx_trusted(&mut self, _txid: TxId) -> Result<(), Self::Error> {
         Ok(())
     }
 
