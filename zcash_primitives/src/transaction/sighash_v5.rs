@@ -32,7 +32,7 @@ use {
     zcash_encoding::{CompactSize, Vector},
 };
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 use crate::transaction::sighash_v6::v6_signature_hash;
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
@@ -225,7 +225,7 @@ pub fn v5_v6_signature_hash<
         #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
         #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
         _ => panic!("v5_v6_signature_hash called with non-v5/v6 transaction"),
     }
 }

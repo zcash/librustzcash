@@ -5,7 +5,7 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub mod sighash_v6;
 
 pub mod txid;
@@ -40,8 +40,6 @@ use self::{
 #[cfg(feature = "circuits")]
 use {::sapling::builder as sapling_builder, orchard::builder::Unproven};
 
-#[cfg(zcash_unstable = "zfuture")]
-use self::components::tze::{self, TzeIn, TzeOut};
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::components::issuance;
 use orchard::orchard_flavor::OrchardVanilla;
@@ -759,7 +757,7 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
@@ -832,7 +830,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
+            TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
         }
     }
 
@@ -957,6 +955,13 @@ impl Transaction {
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
 
+        #[cfg(zcash_unstable = "zfuture")]
+        let tze_bundle = version
+            .has_tze()
+            .then(|| Self::read_tze(&mut reader))
+            .transpose()?
+            .flatten();
+
         let data = TransactionData {
             version,
             consensus_branch_id,
@@ -974,7 +979,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             issue_bundle: None,
             #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: None,
+            tze_bundle,
         };
 
         Ok(Self::from_data_v5(data))
@@ -1036,7 +1041,7 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1088,7 +1093,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => self.write_v6(writer),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => self.write_v6(writer),
+            TxVersion::ZFuture => self.write_v5(writer),
         }
     }
 
@@ -1160,7 +1165,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(

@@ -96,7 +96,7 @@ pub fn read_v5_bundle<R: Read>(
 }
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_v6_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance, OrchardZSA>>> {
@@ -376,7 +376,7 @@ pub fn write_orchard_bundle<W: Write>(
 }
 
 /// Writes an [`orchard::Bundle`] in the appropriate transaction format.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn write_v6_bundle<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance, OrchardZSA>,
