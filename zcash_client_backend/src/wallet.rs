@@ -624,10 +624,83 @@ impl OvkPolicy {
     }
 }
 
+/// Metadata describing whether and when a transparent address was exposed by the wallet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub enum ExposedAt {
+    Height(BlockHeight),
+    Unexposed,
+    Unknown,
+}
+
+/// Information about a transparent address controlled by the wallet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub struct TransparentAddressMetadata {
+    source: TransparentAddressSource,
+    exposed_at: ExposedAt,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentAddressMetadata {
+    /// Constructs a new [`TransparentAddressMetadata`] value from its constitutent parts.
+    pub fn new(source: TransparentAddressSource, exposed_at: ExposedAt) -> Self {
+        Self { source, exposed_at }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Derived`] source
+    /// information and the specified exposure height.
+    pub fn derived(
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+        exposed_at: ExposedAt,
+    ) -> Self {
+        Self {
+            source: TransparentAddressSource::Derived {
+                scope,
+                address_index,
+            },
+            exposed_at,
+        }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
+    /// information and the specified exposure height.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn standalone(pubkey: secp256k1::PublicKey, exposed_at: ExposedAt) -> Self {
+        Self {
+            source: TransparentAddressSource::Standalone(pubkey),
+            exposed_at,
+        }
+    }
+
+    /// Returns the source metadata for the address.
+    pub fn source(&self) -> &TransparentAddressSource {
+        &self.source
+    }
+
+    /// Returns the block height at which the address was exposed.
+    pub fn exposed_at(&self) -> ExposedAt {
+        self.exposed_at
+    }
+
+    /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
+    /// if known. Returns `None` for standalone addresses in the wallet.
+    pub fn scope(&self) -> Option<TransparentKeyScope> {
+        self.source.scope()
+    }
+
+    /// Returns the BIP 44 [`NonHardenedChildIndex`] at which the address was derived, if known.
+    /// Returns `None` for standalone addresses in the wallet.
+    pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
+        self.source.address_index()
+    }
+}
+
 /// Source information for a transparent address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
-pub enum TransparentAddressMetadata {
+pub enum TransparentAddressSource {
     /// BIP 44 path derivation information for the address below account pubkey level, i.e. the
     /// `change` and `index` elements of the path.
     Derived {
@@ -642,23 +715,14 @@ pub enum TransparentAddressMetadata {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentAddressMetadata {
-    /// Returns a `TransparentAddressMetadata` in the given scope for the
-    /// given address index.
-    pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
-        Self::Derived {
-            scope,
-            address_index,
-        }
-    }
-
+impl TransparentAddressSource {
     /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
     /// if known. Returns `None` for standalone addresses in the wallet.
     pub fn scope(&self) -> Option<TransparentKeyScope> {
         match self {
-            TransparentAddressMetadata::Derived { scope, .. } => Some(*scope),
+            TransparentAddressSource::Derived { scope, .. } => Some(*scope),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => None,
+            TransparentAddressSource::Standalone(_) => None,
         }
     }
 
@@ -666,9 +730,9 @@ impl TransparentAddressMetadata {
     /// Returns `None` for standalone addresses in the wallet.
     pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
         match self {
-            TransparentAddressMetadata::Derived { address_index, .. } => Some(*address_index),
+            TransparentAddressSource::Derived { address_index, .. } => Some(*address_index),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => None,
+            TransparentAddressSource::Standalone(_) => None,
         }
     }
 }

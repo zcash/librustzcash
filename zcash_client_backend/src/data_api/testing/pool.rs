@@ -65,7 +65,7 @@ use {
         data_api::TransactionDataRequest,
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
-        wallet::{TransparentAddressMetadata, WalletTransparentOutput},
+        wallet::WalletTransparentOutput,
     },
     nonempty::NonEmpty,
     rand_core::OsRng,
@@ -1840,7 +1840,10 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 {
     use transparent::builder::TransparentSigningSet;
 
-    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
+    use crate::{
+        data_api::{testing::transparent::GapLimits, OutputOfSentTx},
+        wallet::TransparentAddressSource,
+    };
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
@@ -2069,11 +2072,11 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     // Check that the metadata is as expected.
     for (i, (_, meta)) in known_addrs.iter().enumerate() {
         assert_eq!(
-            meta,
-            &TransparentAddressMetadata::new(
-                TransparentKeyScope::EPHEMERAL,
-                NonHardenedChildIndex::from_index(i.try_into().unwrap()).unwrap()
-            )
+            meta.source(),
+            &TransparentAddressSource::Derived {
+                scope: TransparentKeyScope::EPHEMERAL,
+                address_index: NonHardenedChildIndex::from_index(i.try_into().unwrap()).unwrap(),
+            }
         );
     }
 
