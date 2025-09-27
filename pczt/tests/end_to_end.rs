@@ -66,6 +66,7 @@ fn transparent_to_orchard() {
         .unwrap();
     let secp = secp256k1::Secp256k1::signing_only();
     let transparent_pubkey = transparent_sk.public_key(&secp);
+    let p2pkh_addr = TransparentAddress::from_pubkey(&transparent_pubkey);
 
     // Create an Orchard account to receive funds.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -90,7 +91,7 @@ fn transparent_to_orchard() {
         },
     );
     builder
-        .add_transparent_input(transparent_pubkey, utxo, coin)
+        .add_transparent_input(transparent_pubkey, utxo, coin.clone())
         .unwrap();
     builder
         .add_orchard_output::<zip317::FeeRule>(
@@ -137,12 +138,65 @@ fn transparent_to_orchard() {
     let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
     check_round_trip(&pczt);
 
+    // Grab the transaction's effects here, as it's easier.
+    let tx_effects = pczt.clone().into_effects().unwrap();
+
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
+    let tx_digests = tx.digest(TxIdDigester);
 
     assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
 
-    // TODO: Validate the transaction.
+    // Validate the transaction.
+    let bundle = tx.transparent_bundle().unwrap();
+    assert_eq!(bundle.vin.len(), 1);
+    let txin = bundle.vin.first().unwrap();
+    let sighasher = |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
+        Some(
+            v5_signature_hash(
+                &tx_effects,
+                &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+                    match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                        (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
+                        (zcash_script::signature::SignedOutputs::All, true) => {
+                            SighashType::ALL_ANYONECANPAY
+                        }
+                        (zcash_script::signature::SignedOutputs::Single, false) => {
+                            SighashType::SINGLE
+                        }
+                        (zcash_script::signature::SignedOutputs::Single, true) => {
+                            SighashType::SINGLE_ANYONECANPAY
+                        }
+                        (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
+                        (zcash_script::signature::SignedOutputs::None, true) => {
+                            SighashType::NONE_ANYONECANPAY
+                        }
+                    },
+                    0,
+                    &Script(script_code.clone()),
+                    coin.script_pubkey(),
+                    coin.value(),
+                )),
+                &tx_digests,
+            )
+            .as_ref()
+            .try_into()
+            .unwrap(),
+        )
+    };
+    let checker = zcash_script::interpreter::CallbackTransactionSignatureChecker {
+        sighash: &sighasher,
+        lock_time: tx.lock_time().into(),
+        is_final: txin.sequence() == 0xFFFFFFFF,
+    };
+    assert_eq!(
+        script::Raw::from_raw_parts(
+            txin.script_sig().0.to_bytes(),
+            p2pkh_addr.script().to_bytes()
+        )
+        .eval(zcash_script::interpreter::Flags::all(), &checker),
+        Ok(true)
+    );
 }
 
 #[test]
