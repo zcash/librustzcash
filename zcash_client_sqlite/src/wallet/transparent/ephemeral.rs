@@ -1,5 +1,5 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-use std::ops::Range;
+use std::{ops::Range, time::SystemTime};
 
 use rand::{seq::SliceRandom, RngCore};
 use rusqlite::{named_params, OptionalExtension};
@@ -8,9 +8,9 @@ use ::transparent::{
     address::TransparentAddress,
     keys::{NonHardenedChildIndex, TransparentKeyScope},
 };
-use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_client_backend::wallet::{ExposedAt, TransparentAddressMetadata};
 use zcash_keys::encoding::AddressCodec;
-use zcash_protocol::consensus;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     error::SqliteClientError,
@@ -26,8 +26,17 @@ use super::next_check_time;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
-pub(crate) fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddressMetadata {
-    TransparentAddressMetadata::new(TransparentKeyScope::EPHEMERAL, address_index)
+pub(crate) fn metadata(
+    address_index: NonHardenedChildIndex,
+    exposed_at: ExposedAt,
+    next_check_time: Option<SystemTime>,
+) -> TransparentAddressMetadata {
+    TransparentAddressMetadata::derived(
+        TransparentKeyScope::EPHEMERAL,
+        address_index,
+        exposed_at,
+        next_check_time,
+    )
 }
 
 /// Returns a vector of ephemeral transparent addresses associated with the given account
@@ -43,10 +52,14 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT cached_transparent_receiver_address, transparent_child_index 
+        "SELECT
+            cached_transparent_receiver_address,
+            transparent_child_index,
+            exposed_at_height,
+            transparent_receiver_next_check_time
          FROM addresses
          WHERE account_id = :account_id
-         AND transparent_child_index >= :start 
+         AND transparent_child_index >= :start
          AND transparent_child_index < :end
          AND key_scope = :key_scope
          ORDER BY transparent_child_index",
@@ -54,20 +67,32 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 
     let results = stmt
         .query_and_then(
-            named_params![
+            named_params! {
                 ":account_id": account_id.0,
                 ":start": index_range.as_ref().map_or(NonHardenedChildIndex::ZERO, |i| i.start).index(),
                 ":end": index_range.as_ref().map_or(NonHardenedChildIndex::MAX, |i| i.end).index(),
                 ":key_scope": KeyScope::Ephemeral.encode()
-            ],
+            },
             |row| {
-                let addr_str: String = row.get(0)?;
-                let raw_index: u32 = row.get(1)?;
+                let addr_str: String = row.get("cached_transparent_receiver_address")?;
+
+                let raw_index: u32 = row.get("transparent_child_index")?;
                 let address_index = NonHardenedChildIndex::from_index(raw_index)
                     .expect("where clause ensures this is in range");
+
+                let exposed_at = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
+                    ExposedAt::Unexposed,
+                    |h| ExposedAt::Height(BlockHeight::from(h))
+                );
+
+                let next_check_time = row
+                    .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+                    .map(decode_epoch_seconds)
+                    .transpose()?;
+
                 Ok::<_, SqliteClientError>((
                     TransparentAddress::decode(params, &addr_str)?,
-                    metadata(address_index)
+                    metadata(address_index, exposed_at, next_check_time)
                 ))
             },
         )?
@@ -83,7 +108,7 @@ pub(crate) fn find_account_for_ephemeral_address_str(
 ) -> Result<Option<AccountUuid>, SqliteClientError> {
     Ok(conn
         .query_row(
-            "SELECT accounts.uuid 
+            "SELECT accounts.uuid
              FROM addresses
              JOIN accounts ON accounts.id = account_id
              WHERE cached_transparent_receiver_address = :address
@@ -125,9 +150,14 @@ pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: RngCore>(
         .collect::<Result<Vec<_>, _>>()?;
 
     if let Some((_, max_check_time)) = rows.last().as_ref() {
+        // Updating the next check time should not result in an already-scheduled check being
+        // further deferred.
         let mut set_check_time = conn.prepare(
             "UPDATE addresses
-             SET transparent_receiver_next_check_time = :next_check
+             SET transparent_receiver_next_check_time = MIN(
+                :next_check, 
+                MAX(:next_check, transparent_receiver_next_check_time)
+             )
              WHERE id = :address_id",
         )?;
 

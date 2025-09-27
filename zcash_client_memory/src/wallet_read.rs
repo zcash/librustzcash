@@ -35,7 +35,7 @@ use zip32::fingerprint::SeedFingerprint;
 #[cfg(feature = "transparent-inputs")]
 use {
     core::ops::Range,
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_client_backend::wallet::{ExposedAt, TransparentAddressMetadata},
     zcash_primitives::legacy::{keys::NonHardenedChildIndex, TransparentAddress},
     zip32::Scope,
 };
@@ -679,7 +679,14 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                         zcash_primitives::legacy::keys::NonHardenedChildIndex::from_index(
                             (*diversifier_index).try_into().unwrap(),
                         )
-                        .map(|i| TransparentAddressMetadata::new(Scope::External.into(), i));
+                        .map(|i| {
+                            TransparentAddressMetadata::derived(
+                                Scope::External.into(),
+                                i,
+                                ExposedAt::Unknown,
+                                None,
+                            )
+                        });
                     (*ta, metadata)
                 })
             })
