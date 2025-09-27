@@ -970,6 +970,25 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             &self.params,
             account,
             &key_scopes[..],
+            None,
+            false,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_ephemeral_transparent_receivers(
+        &self,
+        account: Self::AccountId,
+        exposure_depth: u32,
+        exclude_used: bool,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        wallet::transparent::get_transparent_receivers(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            &[KeyScope::Ephemeral],
+            Some(exposure_depth),
+            exclude_used,
         )
     }
 

@@ -116,8 +116,18 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     scopes: &[KeyScope],
+    exposure_depth: Option<u32>,
+    exclude_used: bool,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
+
+    let min_exposure_height = exposure_depth
+        .map(|d| {
+            Ok::<_, SqliteClientError>(
+                chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)? - d,
+            )
+        })
+        .transpose()?;
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
@@ -131,14 +141,29 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
          AND cached_transparent_receiver_address IS NOT NULL
-         AND key_scope IN rarray(:scopes_ptr)",
+         AND key_scope IN rarray(:scopes_ptr)
+         AND (
+             :min_exposure_height IS NULL
+             OR exposed_at_height >= :min_exposure_height
+         )
+         AND (
+             NOT(:exclude_used)
+             -- if we're only retrieving unused addresses, do not return those for which we have
+             -- observed an output.
+             OR NOT EXISTS(
+                 SELECT 1 FROM transparent_received_outputs tro
+                 WHERE tro.address_id = addresses.id
+             )
+         )",
     )?;
 
     let scope_values: Vec<Value> = scopes.iter().map(|s| Value::Integer(s.encode())).collect();
     let scopes_ptr = Rc::new(scope_values);
     let mut rows = addr_query.query(named_params![
         ":account_uuid": account_uuid.0,
-        ":scopes_ptr": &scopes_ptr
+        ":scopes_ptr": &scopes_ptr,
+        ":min_exposure_height": min_exposure_height.map(u32::from),
+        ":exclude_used": exclude_used
     ])?;
 
     while let Some(row) = rows.next()? {
