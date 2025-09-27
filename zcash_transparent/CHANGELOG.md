@@ -10,6 +10,24 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::builder`:
+  - `TransparentBuilder::add_p2sh_input` (only for use in combination with
+    `TransparentBuilder::build_for_pczt`).
+  - `TransparentInputInfo::serialized_len`
+
+### Changed
+- `zcash_transparent::pczt`:
+  - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
+    signing key is not involved with the input in any way we can detect.
+  - `Bundle::finalize_spends` can now finalize P2MS inputs.
+  - `SpendFinalizerError` has added variants:
+    - `MissingRedeemScript`
+    - `RedeemScriptTooLong`
+    - `InvalidSignature`
+    - `UncompressedPubkeyInScript`
+    - `UnsupportedRedeemScript`
+
 ## [0.5.0] - 2025-09-25
 
 ### Added

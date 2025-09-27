@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
+  (only for use in combination with `Builder::build_for_pczt`).
+
+### Changed
+- `zcash_primitives::transaction::fees::zip317`:
+  - `FeeError::NonP2pkhInputs` has been renamed to `UnknownP2shInputs`.
+
 ## [0.25.0] - 2025-09-25
 
 ### Added

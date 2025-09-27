@@ -55,7 +55,9 @@ document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+sha2.workspace = true
 shardtree.workspace = true
 zcash_primitives = { workspace = true, features = [
     "test-dependencies",
@@ -126,9 +128,18 @@ tx-extractor = [
     "transparent",
 ]
 
+# Undocumented internal feature flag for enabling features needed for tests.
+internal-tests = [
+    "io-finalizer",
+    "prover",
+    "signer",
+    "tx-extractor",
+    "zcash_script/signature-validation",
+]
+
 [[test]]
 name = "end_to_end"
-required-features = ["io-finalizer", "prover", "signer", "tx-extractor"]
+required-features = ["internal-tests"]
 
 [lints]
 workspace = true
