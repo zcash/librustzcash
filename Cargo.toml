@@ -71,7 +71,7 @@ orchard = { version = "0.11", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
-bip32 = { version = "=0.6.0-pre.1", default-features = false }
+bip32 = { version = "=0.6.0-pre.1", default-features = false, features = ["alloc"] }
 block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
 crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
@@ -224,3 +224,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "782b588cb2b961fc16c0ef90dd4f5a683e78bdc6" }
