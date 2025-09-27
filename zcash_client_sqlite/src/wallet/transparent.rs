@@ -55,13 +55,13 @@ use super::{
     account_birthday_internal, chain_tip_height,
     encoding::{
         decode_diversifier_index_be, decode_epoch_seconds, encode_diversifier_index_be,
-        ReceiverFlags,
+        epoch_seconds, ReceiverFlags,
     },
     get_account_ids, get_account_internal, KeyScope,
 };
 use crate::{
-    error::SqliteClientError, wallet::common::tx_unexpired_condition, AccountRef, AccountUuid,
-    AddressRef, GapLimits, TxRef, UtxoId,
+    error::SqliteClientError, util::Clock, wallet::common::tx_unexpired_condition, AccountRef,
+    AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
 };
 
 pub(crate) mod ephemeral;
@@ -1360,6 +1360,42 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     let event_delay = dist.sample(rng.deref_mut()).round() as u64;
 
     Ok(from_event + Duration::new(event_delay, 0))
+}
+
+pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    clock: C,
+    mut rng: R,
+    address: &TransparentAddress,
+    offset_seconds: u32,
+) -> Result<Option<SystemTime>, SqliteClientError> {
+    let addr_str = address.encode(params);
+    let now = clock.now();
+    let next_check = next_check_time(&mut rng, now, offset_seconds)?;
+    let scheduled_next_check = conn
+        .query_row(
+            "UPDATE addresses
+             SET transparent_receiver_next_check_time = CASE
+                WHEN transparent_receiver_next_check_time < :current_time THEN :next_check
+                WHEN :next_check <= IFNULL(transparent_receiver_next_check_time, :next_check) THEN :next_check
+                ELSE IFNULL(transparent_receiver_next_check_time, :next_check)
+             END
+             WHERE cached_transparent_receiver_address = :addr_str
+             RETURNING transparent_receiver_next_check_time",
+            named_params! {
+                ":current_time": epoch_seconds(now)?,
+                ":addr_str": addr_str,
+                ":next_check": epoch_seconds(next_check)?
+            },
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    scheduled_next_check
+        .map(decode_epoch_seconds)
+        .transpose()
+        .map_err(SqliteClientError::from)
 }
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the

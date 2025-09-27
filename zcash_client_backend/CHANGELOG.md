@@ -29,11 +29,11 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
-<<<<<<< HEAD
   - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}` 
     each now take an additional `target_height` argument; spendability isn't a
     well-defined property in absence of target height information.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - `WalletWrite` has added method `schedule_next_check`.
   - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
     instead of an `allow_unspendable` flag. See the method documentation for
     details.

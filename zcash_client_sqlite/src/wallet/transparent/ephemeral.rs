@@ -150,9 +150,15 @@ pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: RngCore>(
         .collect::<Result<Vec<_>, _>>()?;
 
     if let Some((_, max_check_time)) = rows.last().as_ref() {
+        // Updating the next check time should not result in an already-scheduled check being
+        // further deferred.
         let mut set_check_time = conn.prepare(
             "UPDATE addresses
-             SET transparent_receiver_next_check_time = :next_check
+             SET transparent_receiver_next_check_time = CASE
+                WHEN transparent_receiver_next_check_time < :current_time THEN :next_check
+                WHEN :next_check <= IFNULL(transparent_receiver_next_check_time, :next_check) THEN :next_check
+                ELSE IFNULL(transparent_receiver_next_check_time, :next_check)
+             END
              WHERE id = :address_id",
         )?;
 
@@ -160,16 +166,17 @@ pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: RngCore>(
         // checked once per day.
         let check_interval =
             (24 * 60 * 60) / u32::try_from(rows.len()).expect("number of addresses fits in a u32");
-        let start_time = clock.now();
-        let mut check_time = max_check_time.map_or(start_time, |t| std::cmp::max(t, start_time));
+        let now = clock.now();
+        let mut check_time = max_check_time.map_or(now, |t| std::cmp::max(t, now));
 
         // Shuffle the addresses so that we don't always check them in the same order.
         rows.shuffle(&mut rng);
         for (address_id, addr_check_time) in rows {
             // if the check time for this address is absent or in the past, schedule a check.
-            if addr_check_time.iter().all(|t| *t < start_time) {
+            if addr_check_time.iter().all(|t| *t < now) {
                 check_time = next_check_time(&mut rng, check_time, check_interval)?;
                 set_check_time.execute(named_params! {
+                    ":current_time": epoch_seconds(now)?,
                     ":next_check": epoch_seconds(check_time)?,
                     ":address_id": address_id
                 })?;

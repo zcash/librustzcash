@@ -34,6 +34,7 @@
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
+use rand::RngCore;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -52,7 +53,10 @@ use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
 #[cfg(feature = "transparent-inputs")]
-use {transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::Balance};
+use {
+    std::time::SystemTime, transparent::keys::TransparentKeyScope,
+    zcash_client_backend::data_api::Balance,
+};
 
 use zcash_client_backend::{
     data_api::{
@@ -1249,8 +1253,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R> WalletWrite
-    for WalletDb<C, P, CL, R>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    WalletWrite for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -2014,6 +2018,24 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn schedule_next_check(
+        &mut self,
+        address: &TransparentAddress,
+        offset_seconds: u32,
+    ) -> Result<Option<SystemTime>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::transparent::schedule_next_check(
+                wdb.conn.0,
+                &wdb.params,
+                wdb.clock,
+                &mut wdb.rng,
+                address,
+                offset_seconds,
+            )
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]

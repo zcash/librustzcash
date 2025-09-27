@@ -2953,6 +2953,17 @@ pub trait WalletWrite: WalletRead {
         _status: TransactionStatus,
     ) -> Result<(), Self::Error>;
 
+    /// Schedules a UTXO check for the given address at a random time that has an expected value of
+    /// `offset_seconds` from the current system time.
+    #[cfg(feature = "transparent-inputs")]
+    fn schedule_next_check(
+        &mut self,
+        _address: &TransparentAddress,
+        _offset_seconds: u32,
+    ) -> Result<Option<SystemTime>, Self::Error> {
+        unimplemented!("WalletWrite::schedule_next_check must be overridden for wallets to use the `transparent-inputs` feature")
+    }
+
     /// Notifies the wallet backend that the given query for transactions involving a particular
     /// address has completed evaluation.
     ///
