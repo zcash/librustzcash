@@ -1,6 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
-use std::fmt::Debug;
+use std::{fmt::Debug, time::SystemTime};
 
 use incrementalmerkletree::Position;
 
@@ -645,13 +645,22 @@ pub enum Exposure {
 pub struct TransparentAddressMetadata {
     source: TransparentAddressSource,
     exposure: Exposure,
+    next_check_time: Option<SystemTime>,
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
     /// Constructs a new [`TransparentAddressMetadata`] value from its constitutent parts.
-    pub fn new(source: TransparentAddressSource, exposure: Exposure) -> Self {
-        Self { source, exposure }
+    pub fn new(
+        source: TransparentAddressSource,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source,
+            exposure,
+            next_check_time,
+        }
     }
 
     /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Derived`] source
@@ -660,6 +669,7 @@ impl TransparentAddressMetadata {
         scope: TransparentKeyScope,
         address_index: NonHardenedChildIndex,
         exposure: Exposure,
+        next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
             source: TransparentAddressSource::Derived {
@@ -667,16 +677,22 @@ impl TransparentAddressMetadata {
                 address_index,
             },
             exposure,
+            next_check_time,
         }
     }
 
     /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
     /// information and the specified exposure height.
     #[cfg(feature = "transparent-key-import")]
-    pub fn standalone(pubkey: secp256k1::PublicKey, exposure: Exposure) -> Self {
+    pub fn standalone(
+        pubkey: secp256k1::PublicKey,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
         Self {
             source: TransparentAddressSource::Standalone(pubkey),
             exposure,
+            next_check_time,
         }
     }
 
@@ -688,6 +704,12 @@ impl TransparentAddressMetadata {
     /// Returns the exposure metadata for this transparent address.
     pub fn exposure(&self) -> Exposure {
         self.exposure
+    }
+
+    /// Returns the timestamp of the next time that the light wallet server should be queried for
+    /// UTXOs associated with this address.
+    pub fn next_check_time(&self) -> Option<SystemTime> {
+        self.next_check_time
     }
 
     /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,

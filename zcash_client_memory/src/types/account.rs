@@ -387,6 +387,7 @@ impl Account {
                         TransparentKeyScope::EPHEMERAL,
                         NonHardenedChildIndex::from_index(*idx).unwrap(),
                         Exposure::Unknown,
+                        None,
                     ),
                 )
             })
@@ -452,6 +453,7 @@ impl Account {
                                             TransparentKeyScope::EPHEMERAL,
                                             address_index,
                                             Exposure::Unknown,
+                                            None,
                                         ),
                                     )
                                 })

@@ -181,6 +181,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
                     TransparentKeyScope::from(Scope::External),
                     index,
                     Exposure::Unknown,
+                    None,
                 )),
             );
         }
@@ -193,6 +194,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
                 TransparentKeyScope::from(Scope::External),
                 address_index,
                 Exposure::Unknown,
+                None,
             )),
         );
     }

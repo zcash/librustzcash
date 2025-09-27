@@ -136,7 +136,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             key_scope,
             transparent_child_index,
             imported_transparent_receiver_pubkey,
-            exposed_at_height
+            exposed_at_height,
+            transparent_receiver_next_check_time
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
@@ -182,6 +183,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     at_height: BlockHeight::from(h),
                 });
 
+        let next_check_time = row
+            .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+            .map(decode_epoch_seconds)
+            .transpose()?;
+
         if let Some(taddr) = taddr {
             let metadata = match key_scope {
                 #[cfg(feature = "transparent-key-import")]
@@ -205,7 +211,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
                         SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
                     })?;
-                    TransparentAddressMetadata::standalone(pubkey, exposure)
+                    TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time)
                 }
                 derived => {
                     let scope_opt = <Option<TransparentKeyScope>>::from(derived);
@@ -227,6 +233,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                             )),
                         )?,
                         exposure,
+                        next_check_time,
                     )
                 }
             };
@@ -436,6 +443,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                                         scope,
                                         i,
                                         Exposure::Unexposed,
+                                        None,
                                     ))
                                 },
                             )?,
@@ -1497,7 +1505,12 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let address_str = address.encode(params);
     let addr_meta = conn
         .query_row(
-            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey, exposed_at_height
+            "SELECT
+                diversifier_index_be,
+                key_scope,
+                imported_transparent_receiver_pubkey,
+                exposed_at_height,
+                transparent_receiver_next_check_time
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
@@ -1510,6 +1523,12 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                     |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
                 );
 
+                let next_check_time = row
+                    .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+                    .map(decode_epoch_seconds)
+                    .transpose()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
                     match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
@@ -1517,7 +1536,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             Ok(TransparentAddressMetadata::derived(
                                 scope,
                                 address_index,
-                                exposure
+                                exposure,
+                                next_check_time
                             ))
                         }
                         None => {
@@ -1535,7 +1555,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                         )
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
-                                    Ok(TransparentAddressMetadata::standalone(pubkey, exposure))
+                                    Ok(TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time))
                                 };
 
                                 addr_meta
@@ -1562,6 +1582,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                 Scope::External.into(),
                 address_index,
                 Exposure::Unknown,
+                None,
             );
             return Ok(Some(metadata));
         }
@@ -1918,6 +1939,7 @@ mod tests {
                     ephemeral::metadata(
                         NonHardenedChildIndex::from_index(i).unwrap(),
                         Exposure::Unexposed,
+                        None,
                     )
                 })
                 .collect();

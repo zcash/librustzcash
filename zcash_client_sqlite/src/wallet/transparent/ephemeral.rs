@@ -1,5 +1,5 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-use std::ops::Range;
+use std::{ops::Range, time::SystemTime};
 
 use rand::{seq::SliceRandom, RngCore};
 use rusqlite::{named_params, OptionalExtension};
@@ -29,8 +29,14 @@ use super::next_check_time;
 pub(crate) fn metadata(
     address_index: NonHardenedChildIndex,
     exposure: Exposure,
+    next_check_time: Option<SystemTime>,
 ) -> TransparentAddressMetadata {
-    TransparentAddressMetadata::derived(TransparentKeyScope::EPHEMERAL, address_index, exposure)
+    TransparentAddressMetadata::derived(
+        TransparentKeyScope::EPHEMERAL,
+        address_index,
+        exposure,
+        next_check_time,
+    )
 }
 
 /// Returns a vector of ephemeral transparent addresses associated with the given account
@@ -46,7 +52,11 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT cached_transparent_receiver_address, transparent_child_index, exposed_at_height
+        "SELECT
+            cached_transparent_receiver_address,
+            transparent_child_index,
+            exposed_at_height,
+            transparent_receiver_next_check_time
          FROM addresses
          WHERE account_id = :account_id
          AND transparent_child_index >= :start
@@ -57,12 +67,12 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 
     let results = stmt
         .query_and_then(
-            named_params![
+            named_params! {
                 ":account_id": account_id.0,
                 ":start": index_range.as_ref().map_or(NonHardenedChildIndex::ZERO, |i| i.start).index(),
                 ":end": index_range.as_ref().map_or(NonHardenedChildIndex::MAX, |i| i.end).index(),
                 ":key_scope": KeyScope::Ephemeral.encode()
-            ],
+            },
             |row| {
                 let addr_str: String = row.get("cached_transparent_receiver_address")?;
 
@@ -75,9 +85,14 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                     |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
                 );
 
+                let next_check_time = row
+                    .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+                    .map(decode_epoch_seconds)
+                    .transpose()?;
+
                 Ok::<_, SqliteClientError>((
                     TransparentAddress::decode(params, &addr_str)?,
-                    metadata(address_index, exposure)
+                    metadata(address_index, exposure, next_check_time)
                 ))
             },
         )?

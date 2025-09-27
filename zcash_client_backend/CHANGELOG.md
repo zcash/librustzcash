@@ -17,8 +17,11 @@ workspace.
     - `exchanges::{CoinEx, DigiFinex, Kraken, Xt}`
 - `zcash_client_backend::wallet::Exposure`
 - `zcash_client_backend::wallet::TransparentAddressSource`
-- `zcash_client_backend::wallet::TransparentAddressMetadata::derived`
-- `zcash_client_backend::wallet::TransparentAddressMetadata::exposure`
+- `zcash_client_backend::wallet::TransparentAddressMetadata::`
+    - `derived`
+    - `standalone`
+    - `exposure`
+    - `next_check_time`
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
