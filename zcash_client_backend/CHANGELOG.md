@@ -13,8 +13,11 @@ workspace.
 ### Added
 - `zcash_client_backend::wallet::ExposedAt`
 - `zcash_client_backend::wallet::TransparentAddressSource`
-- `zcash_client_backend::wallet::TransparentAddressMetadata::derived`
-- `zcash_client_backend::wallet::TransparentAddressMetadata::exposed_at`
+- `zcash_client_backend::wallet::TransparentAddressMetadata::`
+    - `derived`
+    - `standalone`
+    - `exposed_at`
+    - `next_check_time`
 
 ### Changed
 - `zcash_client_backend::data_api`:
