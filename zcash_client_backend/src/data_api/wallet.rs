@@ -83,7 +83,11 @@ use zip321::Payment;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    crate::{
+        fees::ChangeValue,
+        proposal::StepOutput,
+        wallet::{TransparentAddressMetadata, TransparentAddressSource},
+    },
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
@@ -1203,17 +1207,17 @@ where
              outpoint: OutPoint,
              txout: TxOut|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                let pubkey = match metadata_from_address(recipient_address)? {
-                    TransparentAddressMetadata::Derived {
+                let pubkey = match metadata_from_address(recipient_address)?.source() {
+                    TransparentAddressSource::Derived {
                         scope,
                         address_index,
                     } => ufvk
                         .transparent()
                         .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                        .derive_address_pubkey(scope, address_index)
+                        .derive_address_pubkey(*scope, *address_index)
                         .expect("spending key derivation should not fail"),
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressMetadata::Standalone(pubkey) => pubkey,
+                    TransparentAddressSource::Standalone(pubkey) => *pubkey,
                 };
 
                 utxos_spent.push(outpoint.clone());
@@ -1510,7 +1514,7 @@ where
             .map_err(Error::DataSource)?;
         assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
 
-        // We don't need the TransparentAddressMetadata here; we can look it up from the data source later.
+        // We don't need the TransparentAddressSource here; we can look it up from the data source later.
         for ((change_index, change_value), (ephemeral_address, _)) in
             ephemeral_outputs.iter().zip(addresses_and_metadata)
         {
@@ -1592,17 +1596,17 @@ where
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
     for (_address, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(match address_metadata {
-            TransparentAddressMetadata::Derived {
+        transparent_signing_set.add_key(match address_metadata.source() {
+            TransparentAddressSource::Derived {
                 scope,
                 address_index,
             } => spending_keys
                 .usk
                 .transparent()
-                .derive_secret_key(scope, address_index)
+                .derive_secret_key(*scope, *address_index)
                 .expect("spending key derivation should not fail"),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => *spending_keys
+            TransparentAddressSource::Standalone(_) => *spending_keys
                 .standalone_transparent_keys
                 .get(&_address)
                 .ok_or(Error::AddressNotRecognized(_address))?,
@@ -1969,13 +1973,13 @@ where
                                 &TransparentAddress::from_script_from_chain(input.script_pubkey())
                                     .expect("we created this with a supported transparent address"),
                             )
-                            .and_then(|address_metadata| match address_metadata {
-                                TransparentAddressMetadata::Derived {
+                            .and_then(|address_metadata| match address_metadata.source() {
+                                TransparentAddressSource::Derived {
                                     scope,
                                     address_index,
                                 } => Some((index, *scope, *address_index)),
                                 #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressMetadata::Standalone(_) => None,
+                                TransparentAddressSource::Standalone(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();

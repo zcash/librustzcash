@@ -21,6 +21,7 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_client_backend::wallet::Exposure;
 use zcash_client_backend::{
     data_api::{
         wallet::{ConfirmationsPolicy, TargetHeight},
@@ -124,7 +125,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             cached_transparent_receiver_address,
             key_scope,
             transparent_child_index,
-            imported_transparent_receiver_pubkey
+            imported_transparent_receiver_pubkey,
+            exposed_at_height
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
@@ -149,6 +151,12 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             })?
             .to_transparent_address();
 
+        let exposure =
+            row.get::<_, Option<u32>>("exposed_at_height")?
+                .map_or(Exposure::Unexposed, |h| Exposure::Exposed {
+                    at_height: BlockHeight::from(h),
+                });
+
         if let Some(taddr) = taddr {
             let metadata = match key_scope {
                 #[cfg(feature = "transparent-key-import")]
@@ -172,7 +180,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
                         SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
                     })?;
-                    TransparentAddressMetadata::Standalone(pubkey)
+                    TransparentAddressMetadata::standalone(pubkey, exposure)
                 }
                 derived => {
                     let scope_opt = <Option<TransparentKeyScope>>::from(derived);
@@ -185,15 +193,16 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                             )
                         })?;
 
-                    TransparentAddressMetadata::Derived {
+                    TransparentAddressMetadata::derived(
                         scope,
-                        address_index: NonHardenedChildIndex::from_index(address_index).ok_or(
+                        NonHardenedChildIndex::from_index(address_index).ok_or(
                             SqliteClientError::CorruptedData(format!(
                                 "{} is not a valid transparent child index",
                                 address_index
                             )),
                         )?,
-                    }
+                        exposure,
+                    )
                 }
             };
 
@@ -389,21 +398,25 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                     .map(|addr_str| TransparentAddress::decode(params, &addr_str))
                     .transpose()?;
 
-                Ok::<_, SqliteClientError>(transparent_child_index.zip(address).map(|(i, a)| {
-                    (
-                        address_id,
-                        a,
-                        match <Option<TransparentKeyScope>>::from(key_scope) {
-                            Some(scope) => TransparentAddressMetadata::Derived {
-                                scope,
-                                address_index: i,
-                            },
-                            None => {
-                                todo!("Use the standalone pubkey associated with the address")
-                            }
-                        },
-                    )
-                }))
+                transparent_child_index
+                    .zip(address)
+                    .map(|(i, a)| {
+                        Ok::<_, SqliteClientError>((
+                            address_id,
+                            a,
+                            <Option<TransparentKeyScope>>::from(key_scope).map_or(
+                                Err(SqliteClientError::UnknownZip32Derivation),
+                                |scope| {
+                                    Ok(TransparentAddressMetadata::derived(
+                                        scope,
+                                        i,
+                                        Exposure::Unexposed,
+                                    ))
+                                },
+                            )?,
+                        ))
+                    })
+                    .transpose()
             },
         )?
         .filter_map(|r| r.transpose())
@@ -1459,7 +1472,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let address_str = address.encode(params);
     let addr_meta = conn
         .query_row(
-            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey
+            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey, exposed_at_height
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
@@ -1467,14 +1480,20 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
             named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| {
                 let scope_code = row.get("key_scope")?;
+                let exposure = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
+                    Exposure::Unexposed,
+                    |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
+                );
+
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
                     match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
                         Some((scope, address_index)) => {
-                            Ok(TransparentAddressMetadata::Derived {
+                            Ok(TransparentAddressMetadata::derived(
                                 scope,
                                 address_index,
-                            })
+                                exposure
+                            ))
                         }
                         None => {
                             if let Some(_pubkey_bytes) = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")? {
@@ -1491,7 +1510,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                         )
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
-                                    Ok(TransparentAddressMetadata::Standalone(pubkey))
+                                    Ok(TransparentAddressMetadata::standalone(pubkey, exposure))
                                 };
 
                                 addr_meta
@@ -1514,7 +1533,11 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
         get_legacy_transparent_address(params, conn, account_uuid)?
     {
         if &legacy_taddr == address {
-            let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+            let metadata = TransparentAddressMetadata::derived(
+                Scope::External.into(),
+                address_index,
+                Exposure::Unknown,
+            );
             return Ok(Some(metadata));
         }
     }
@@ -1782,7 +1805,7 @@ mod tests {
     use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
     use zcash_client_backend::{
         data_api::{testing::TestBuilder, Account as _, WalletWrite},
-        wallet::TransparentAddressMetadata,
+        wallet::{Exposure, TransparentAddressMetadata},
     };
     use zcash_primitives::block::BlockHash;
 
@@ -1866,7 +1889,12 @@ mod tests {
                     .unwrap();
 
             let expected_metadata: Vec<TransparentAddressMetadata> = (0..db.gap_limits.ephemeral())
-                .map(|i| ephemeral::metadata(NonHardenedChildIndex::from_index(i).unwrap()))
+                .map(|i| {
+                    ephemeral::metadata(
+                        NonHardenedChildIndex::from_index(i).unwrap(),
+                        Exposure::Unexposed,
+                    )
+                })
                 .collect();
             let actual_metadata: Vec<TransparentAddressMetadata> =
                 known_addrs.into_iter().map(|(_, meta)| meta).collect();

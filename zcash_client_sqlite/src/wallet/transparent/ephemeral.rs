@@ -8,9 +8,9 @@ use ::transparent::{
     address::TransparentAddress,
     keys::{NonHardenedChildIndex, TransparentKeyScope},
 };
-use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
 use zcash_keys::encoding::AddressCodec;
-use zcash_protocol::consensus;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     error::SqliteClientError,
@@ -26,8 +26,11 @@ use super::next_check_time;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
-pub(crate) fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddressMetadata {
-    TransparentAddressMetadata::new(TransparentKeyScope::EPHEMERAL, address_index)
+pub(crate) fn metadata(
+    address_index: NonHardenedChildIndex,
+    exposure: Exposure,
+) -> TransparentAddressMetadata {
+    TransparentAddressMetadata::derived(TransparentKeyScope::EPHEMERAL, address_index, exposure)
 }
 
 /// Returns a vector of ephemeral transparent addresses associated with the given account
@@ -43,10 +46,10 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT cached_transparent_receiver_address, transparent_child_index 
+        "SELECT cached_transparent_receiver_address, transparent_child_index, exposed_at_height
          FROM addresses
          WHERE account_id = :account_id
-         AND transparent_child_index >= :start 
+         AND transparent_child_index >= :start
          AND transparent_child_index < :end
          AND key_scope = :key_scope
          ORDER BY transparent_child_index",
@@ -61,13 +64,20 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                 ":key_scope": KeyScope::Ephemeral.encode()
             ],
             |row| {
-                let addr_str: String = row.get(0)?;
-                let raw_index: u32 = row.get(1)?;
+                let addr_str: String = row.get("cached_transparent_receiver_address")?;
+
+                let raw_index: u32 = row.get("transparent_child_index")?;
                 let address_index = NonHardenedChildIndex::from_index(raw_index)
                     .expect("where clause ensures this is in range");
+
+                let exposure = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
+                    Exposure::Unexposed,
+                    |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
+                );
+
                 Ok::<_, SqliteClientError>((
                     TransparentAddress::decode(params, &addr_str)?,
-                    metadata(address_index)
+                    metadata(address_index, exposure)
                 ))
             },
         )?
@@ -83,7 +93,7 @@ pub(crate) fn find_account_for_ephemeral_address_str(
 ) -> Result<Option<AccountUuid>, SqliteClientError> {
     Ok(conn
         .query_row(
-            "SELECT accounts.uuid 
+            "SELECT accounts.uuid
              FROM addresses
              JOIN accounts ON accounts.id = account_id
              WHERE cached_transparent_receiver_address = :address
