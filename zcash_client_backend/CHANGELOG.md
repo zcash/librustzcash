@@ -30,6 +30,7 @@ workspace.
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - `WalletWrite` has added method `schedule_next_check`.
 - `zcash_client_backend::wallet`:
   - `TransparentAddressMetadata` has been converted from an enum to a struct
     that contains both source metadata and information about when the address
