@@ -150,9 +150,14 @@ pub(crate) fn schedule_ephemeral_address_checks<C: Clock, R: RngCore>(
         .collect::<Result<Vec<_>, _>>()?;
 
     if let Some((_, max_check_time)) = rows.last().as_ref() {
+        // Updating the next check time should not result in an already-scheduled check being
+        // further deferred.
         let mut set_check_time = conn.prepare(
             "UPDATE addresses
-             SET transparent_receiver_next_check_time = :next_check
+             SET transparent_receiver_next_check_time = MIN(
+                :next_check, 
+                MAX(:next_check, transparent_receiver_next_check_time)
+             )
              WHERE id = :address_id",
         )?;
 

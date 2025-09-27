@@ -51,12 +51,13 @@ use zip32::{DiversifierIndex, Scope};
 #[cfg(feature = "transparent-key-import")]
 use bip32::{PublicKey, PublicKeyBytes};
 
-use super::encoding::{decode_epoch_seconds, ReceiverFlags};
+use super::encoding::{decode_epoch_seconds, epoch_seconds, ReceiverFlags};
 use super::{
     account_birthday_internal, chain_tip_height,
     encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
     get_account_ids, get_account_internal, KeyScope,
 };
+use crate::util::Clock;
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
 
@@ -1367,6 +1368,40 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     let event_delay = dist.sample(rng.deref_mut()).round() as u64;
 
     Ok(from_event + Duration::new(event_delay, 0))
+}
+
+pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    clock: C,
+    mut rng: R,
+    address: &TransparentAddress,
+    offset_seconds: u32,
+) -> Result<Option<SystemTime>, SqliteClientError> {
+    let addr_str = address.encode(params);
+    let start_time = clock.now();
+    let next_check = next_check_time(&mut rng, start_time, offset_seconds)?;
+    let scheduled_next_check = conn
+        .query_row(
+            "UPDATE addresses
+             SET transparent_receiver_next_check_time = MIN(
+                :next_check, 
+                MAX(:next_check, transparent_receiver_next_check_time)
+             )
+             WHERE cached_transparent_receiver_address = :addr_str
+             RETURNING transparent_receiver_next_check_time",
+            named_params! {
+                ":addr_str": addr_str,
+                ":next_check": epoch_seconds(next_check)?
+            },
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    scheduled_next_check
+        .map(decode_epoch_seconds)
+        .transpose()
+        .map_err(SqliteClientError::from)
 }
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
