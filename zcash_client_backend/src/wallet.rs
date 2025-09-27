@@ -1,6 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
-use std::fmt::Debug;
+use std::{fmt::Debug, time::SystemTime};
 
 use incrementalmerkletree::Position;
 
@@ -639,13 +639,22 @@ pub enum ExposedAt {
 pub struct TransparentAddressMetadata {
     source: TransparentAddressSource,
     exposed_at: ExposedAt,
+    next_check_time: Option<SystemTime>,
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
     /// Constructs a new [`TransparentAddressMetadata`] value from its constitutent parts.
-    pub fn new(source: TransparentAddressSource, exposed_at: ExposedAt) -> Self {
-        Self { source, exposed_at }
+    pub fn new(
+        source: TransparentAddressSource,
+        exposed_at: ExposedAt,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source,
+            exposed_at,
+            next_check_time,
+        }
     }
 
     /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Derived`] source
@@ -654,6 +663,7 @@ impl TransparentAddressMetadata {
         scope: TransparentKeyScope,
         address_index: NonHardenedChildIndex,
         exposed_at: ExposedAt,
+        next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
             source: TransparentAddressSource::Derived {
@@ -661,16 +671,22 @@ impl TransparentAddressMetadata {
                 address_index,
             },
             exposed_at,
+            next_check_time,
         }
     }
 
     /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
     /// information and the specified exposure height.
     #[cfg(feature = "transparent-key-import")]
-    pub fn standalone(pubkey: secp256k1::PublicKey, exposed_at: ExposedAt) -> Self {
+    pub fn standalone(
+        pubkey: secp256k1::PublicKey,
+        exposed_at: ExposedAt,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
         Self {
             source: TransparentAddressSource::Standalone(pubkey),
             exposed_at,
+            next_check_time,
         }
     }
 
@@ -682,6 +698,12 @@ impl TransparentAddressMetadata {
     /// Returns the block height at which the address was exposed.
     pub fn exposed_at(&self) -> ExposedAt {
         self.exposed_at
+    }
+
+    /// Returns the timestamp of the next time that the light wallet server should be queried for
+    /// UTXOs associated with this address.
+    pub fn next_check_time(&self) -> Option<SystemTime> {
+        self.next_check_time
     }
 
     /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
