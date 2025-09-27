@@ -131,6 +131,9 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+    use transparent::keys::TransparentKeyScope;
+    use zcash_client_backend::wallet::Exposure;
+
     use crate::wallet::encoding::decode_diversifier_index_be;
 
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
@@ -174,9 +177,10 @@ fn get_transparent_receivers<P: consensus::Parameters>(
 
             ret.insert(
                 *taddr,
-                Some(TransparentAddressMetadata::new(
-                    Scope::External.into(),
+                Some(TransparentAddressMetadata::derived(
+                    TransparentKeyScope::from(Scope::External),
                     index,
+                    Exposure::Unknown,
                 )),
             );
         }
@@ -185,9 +189,10 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
         ret.insert(
             taddr,
-            Some(TransparentAddressMetadata::new(
-                Scope::External.into(),
+            Some(TransparentAddressMetadata::derived(
+                TransparentKeyScope::from(Scope::External),
                 address_index,
+                Exposure::Unknown,
             )),
         );
     }
