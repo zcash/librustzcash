@@ -681,6 +681,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                                     Scope::External.into(),
                                     i,
                                     Exposure::Unknown,
+                                    None,
                                 )
                             });
                     (*ta, metadata)
