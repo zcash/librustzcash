@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.2] - PLANNED
+
+### Changed
+- The `zcash_client_sqlite` implementation of `InputSource::get_unspent_transparent_output`
+  now correctly selects transparent UTXOs with zero confirmations.
+
 ## [0.18.1] - 2025-09-25
 
 ### Fixed
