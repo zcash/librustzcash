@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.18.2] - PLANNED
+## [0.18.2] - 2025-09-28
 
 ### Changed
 - The `zcash_client_sqlite` implementation of `InputSource::get_unspent_transparent_output`
