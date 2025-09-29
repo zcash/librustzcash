@@ -53,6 +53,7 @@ type Result<T, E = Error> = core::result::Result<T, E>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Memo {
     pub bytes: Box<[u8; 512]>,
+    pub index: Option<usize>,
 }
 
 impl Memo {
@@ -79,6 +80,7 @@ impl Memo {
         memo[..bytes.len()].copy_from_slice(&bytes);
         Ok(Self {
             bytes: Box::new(memo),
+            index: None,
         })
     }
 }
@@ -142,18 +144,6 @@ pub fn lead_addr(input: &str) -> IResult<&str, Option<IndexedParam>> {
     if addr_str.is_empty() {
         Ok((i, None)) // no address is ok
     } else {
-        // TODO: add ZcashAddress parsing of the string later, in zip321
-
-        // `try_from_encoded(..).ok()` returns `None` on error, which we want to then
-        // cause `map_opt` to fail.
-        // ZcashAddress::try_from_encoded(addr_str)
-        //     .map(|a| {
-        //         Some(IndexedParam {
-        //             param: Param::Addr(Box::new(a)),
-        //             payment_index: 0,
-        //         })
-        //     })
-        //     .ok()
         Ok((
             i,
             Some(IndexedParam {
@@ -233,14 +223,6 @@ pub fn parse_amount(input: &str) -> IResult<&str, (u64, u64)> {
                 None => 0,
             };
             Ok::<_, String>((coins, zatoshis))
-
-            // TODO:
-            // coins
-            //     .checked_mul(COIN)
-            //     .and_then(|coin_zats| coin_zats.checked_add(zats))
-            //     .ok_or(BalanceError::Overflow)
-            //     .and_then(Zatoshis::from_u64)
-            //     .map_err(|_| format!("Not a valid zat amount: {coins}.{zats}"))
         },
     )(input)
 }
@@ -248,13 +230,13 @@ pub fn parse_amount(input: &str) -> IResult<&str, (u64, u64)> {
 fn to_indexed_param(
     ((name, iopt), value): ((&str, Option<&str>), &str),
 ) -> Result<IndexedParam, String> {
+    let payment_index = match iopt {
+        Some(istr) => istr.parse::<usize>().map(Some).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }?;
+
     let param = match name {
         "address" => Ok(Param::Addr(value.to_owned())),
-        // TODO(schell): add back in later
-        // ZcashAddress::try_from_encoded(value)
-        //     .map(Box::new)
-        //     .map(Param::Addr)
-        //     .map_err(|err| format!("Could not interpret {value} as a valid Zcash address: {err}")),
         "amount" => parse_amount(value)
             .map_err(|e| e.to_string())
             .map(|(_, (coins, zatoshis))| Param::Amount { coins, zatoshis }),
@@ -270,7 +252,13 @@ fn to_indexed_param(
             .map_err(|e| e.to_string()),
 
         "memo" => Memo::try_from_base64(value)
-            .map(Param::Memo)
+            .map(|mut m| {
+                // Set the index here so that we can access the info
+                // later from `Payment`, for error reporting during
+                // the "last mile" of parsing domain specefic payments.
+                m.index = payment_index;
+                Param::Memo(m)
+            })
             .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
         other if other.starts_with("req-") => {
             Err(format!("Required parameter {other} not recognized"))
@@ -280,11 +268,6 @@ fn to_indexed_param(
             .decode_utf8()
             .map(|s| Param::Other(other.to_string(), s.into_owned()))
             .map_err(|e| e.to_string()),
-    }?;
-
-    let payment_index = match iopt {
-        Some(istr) => istr.parse::<usize>().map(Some).map_err(|e| e.to_string()),
-        None => Ok(None),
     }?;
 
     Ok(IndexedParam {
@@ -324,12 +307,6 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
                 payment.amount_zatoshis = zatoshis;
             }
             Param::Memo(m) => {
-                // TODO(schell): add this check to main crate
-                // if payment.recipient_address.can_receive_memo() {
-                //     payment.memo = Some(*m);
-                // } else {
-                //     return Err(Zip321Error::TransparentMemo(i));
-                // }
                 payment.memo = Some(m);
             }
             Param::Label(m) => payment.label = Some(m),
@@ -367,6 +344,18 @@ pub struct Payment {
     message: Option<String>,
     /// A list of other arbitrary key/value pairs associated with this payment.
     other_params: Vec<(String, String)>,
+}
+
+impl AsRef<Payment> for Payment {
+    fn as_ref(&self) -> &Payment {
+        self
+    }
+}
+
+impl AsMut<Payment> for Payment {
+    fn as_mut(&mut self) -> &mut Payment {
+        self
+    }
 }
 
 impl Payment {
@@ -435,8 +424,8 @@ impl Payment {
     // }
 
     /// Returns the memo that, if included, must be provided with the payment.
-    pub fn memo_bytes(&self) -> Option<&[u8; 512]> {
-        self.memo.as_ref().map(|m| m.bytes.as_ref())
+    pub fn memo(&self) -> Option<&Memo> {
+        self.memo.as_ref()
     }
 
     /// A human-readable label for this payment within the larger structure
@@ -458,7 +447,7 @@ impl Payment {
 
     /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
-    pub(crate) fn normalize(&mut self) {
+    pub fn normalize(&mut self) {
         self.other_params.sort();
     }
 }
@@ -470,38 +459,51 @@ impl Payment {
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransactionRequest {
-    payments: BTreeMap<usize, Payment>,
+pub struct TransactionRequest<P: AsRef<Payment> + AsMut<Payment> = Payment> {
+    payments: BTreeMap<usize, P>,
 }
 
 impl TransactionRequest {
-    /// Constructs a new empty transaction request.
-    pub fn empty() -> Self {
-        Self {
-            payments: BTreeMap::new(),
-        }
-    }
-
     /// Constructs a new transaction request that obeys the ZIP-321 invariants.
     pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest> {
+        Self::new_with_constructor(payments, |p| Ok(p))
+    }
+}
+
+impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
+    /// Constructs a new transaction request that obeys the ZIP-321 invariants.
+    pub fn new_with_constructor<E>(
+        payments: Vec<P>,
+        constructor: impl Fn(Payment) -> Result<P, E>,
+    ) -> Result<Self, E>
+    where
+        E: From<Error>,
+    {
         // Payment indices are limited to 4 digits
-        if payments.len() > 9999 {
-            return TooManyPaymentsSnafu {
+        snafu::ensure!(
+            payments.len() <= 9999,
+            TooManyPaymentsSnafu {
                 count: payments.len(),
             }
-            .fail();
-        }
+        );
 
         let request = TransactionRequest {
             payments: payments.into_iter().enumerate().collect(),
         };
 
-        // Enforce validity requirements.
+        // Enforce validity requirements by roundtripping.
         if !request.payments.is_empty() {
-            TransactionRequest::from_uri(&request.to_uri())?;
+            Self::from_uri_with_constructor(&request.to_uri(), constructor)?;
         }
 
         Ok(request)
+    }
+
+    /// Constructs a new empty transaction request.
+    pub fn empty() -> Self {
+        Self {
+            payments: BTreeMap::new(),
+        }
     }
 
     /// Constructs a new transaction request from the provided map from payment
@@ -521,22 +523,22 @@ impl TransactionRequest {
     ///
     /// This is a map from payment index to payment. Payment index `0` is used to denote
     /// the empty payment index in the returned values.
-    pub fn payments(&self) -> &BTreeMap<usize, Payment> {
+    pub fn payments(&self) -> &BTreeMap<usize, P> {
         &self.payments
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
-    pub(crate) fn normalize(&mut self) {
+    pub fn normalize(&mut self) {
         for p in &mut self.payments.values_mut() {
-            p.normalize();
+            p.as_mut().normalize();
         }
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
     /// by comparing a two transaction requests for equality after normalization.
     #[cfg(test)]
-    pub(crate) fn normalize_and_eq(a: &mut TransactionRequest, b: &mut TransactionRequest) -> bool {
+    pub fn normalize_and_eq(a: &mut TransactionRequest, b: &mut TransactionRequest) -> bool {
         a.normalize();
         b.normalize();
 
@@ -586,6 +588,7 @@ impl TransactionRequest {
             0 => "zcash:".to_string(),
             1 if *self.payments.iter().next().unwrap().0 == 0 => {
                 let (_, payment) = self.payments.iter().next().unwrap();
+                let payment = payment.as_ref();
                 let query_params = payment_params(payment, None)
                     .into_iter()
                     .collect::<Vec<String>>();
@@ -605,11 +608,11 @@ impl TransactionRequest {
                     .iter()
                     .flat_map(|(i, payment)| {
                         let idx = if *i == 0 { None } else { Some(*i) };
-                        let primary_address = payment.recipient_address.clone();
+                        let primary_address = payment.as_ref().recipient_address.clone();
                         std::iter::empty()
                             // TODO(schell): mention changed
                             .chain(Some(render::addr_param_encoded(&primary_address, idx)))
-                            .chain(payment_params(payment, idx))
+                            .chain(payment_params(payment.as_ref(), idx))
                     })
                     .collect::<Vec<String>>();
 
@@ -618,8 +621,14 @@ impl TransactionRequest {
         }
     }
 
-    /// Parse the provided URI to a payment request value.
-    pub fn from_uri(uri: &str) -> Result<Self> {
+    /// Parse the provided URI to a payment request value using a domain-specific constructor.
+    pub fn from_uri_with_constructor<E>(
+        uri: &str,
+        construct: impl Fn(Payment) -> Result<P, E>,
+    ) -> Result<Self, E>
+    where
+        E: From<Error>,
+    {
         // Parse the leading zcash:<address>
         let (rest, primary_addr_param) = lead_addr(uri)
             .map_err(|e| e.to_owned())
@@ -651,11 +660,12 @@ impl TransactionRequest {
 
                 Some(current) => {
                     if has_duplicate_param(current, &p.param) {
-                        return DuplicateParameterSnafu {
+                        return Err(DuplicateParameterSnafu {
                             param: p.param.clone(),
                             idx: p.payment_index,
                         }
-                        .fail();
+                        .build()
+                        .into());
                     } else {
                         current.push(p.param);
                     }
@@ -666,8 +676,12 @@ impl TransactionRequest {
         // Build the actual payment values from the index.
         params_by_index
             .into_iter()
-            .map(|(i, params)| to_payment(params, i).map(|payment| (i, payment)))
-            .collect::<Result<BTreeMap<usize, Payment>, _>>()
+            .map(|(i, params)| {
+                let (i, payment) = to_payment(params, i).map(|payment| (i, payment))?;
+                let domain_payment = construct(payment)?;
+                Ok((i, domain_payment))
+            })
+            .collect::<Result<BTreeMap<usize, P>, _>>()
             .map(|payments| TransactionRequest { payments })
     }
 }
