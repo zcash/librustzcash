@@ -5,7 +5,7 @@ members = [
     "components/zcash_address",
     "components/zcash_encoding",
     "components/zcash_protocol",
-    "components/zip321",
+    "components/zip321", "components/zip321-parse",
     "pczt",
     "zcash",
     "zcash_client_backend",
@@ -42,6 +42,7 @@ zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-
 zcash_keys = { version = "0.11", path = "zcash_keys" }
 zcash_protocol = { version = "0.6.1", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.5", path = "components/zip321" }
+zip321-parse = { version = "0.1", path = "components/zip321-parse" }
 
 zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.25", path = "zcash_primitives", default-features = false }

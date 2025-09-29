@@ -1,0 +1,27 @@
+[package]
+name = "zip321-parse"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[features]
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = ["dep:proptest"]
+
+[dependencies]
+# - Error handling
+snafu = "0.8"
+
+# - Parsing and Encoding
+nom = "7"
+base64.workspace = true
+percent-encoding.workspace = true
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -16,6 +16,7 @@ categories.workspace = true
 [dependencies]
 zcash_address.workspace = true
 zcash_protocol = { workspace = true, features = ["std"] }
+zip321-parse.workspace = true
 
 # - Parsing and Encoding
 nom = "7"
