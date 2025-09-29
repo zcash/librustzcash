@@ -39,8 +39,13 @@ pub enum Error {
         source: nom::Err<nom::error::Error<String>>,
     },
 
+    /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     #[snafu(display("There is a duplicate {} parameter at index {idx}", param.name()))]
     DuplicateParameter { param: Param, idx: usize },
+
+    /// The payment at the wrapped index did not include a recipient address.
+    #[snafu(display("Payment {idx} is missing its recipient address"))]
+    RecipientMissing { idx: usize },
 }
 
 type Result<T, E = Error> = core::result::Result<T, E>;
@@ -294,14 +299,18 @@ fn to_indexed_param(
 /// valid; for example, a request for memo contents may not be associated with a
 /// transparent payment address.
 pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
-    let addr = vs.iter().find_map(|v| match v {
-        Param::Addr(a) => Some(a.clone()),
-        _otherwise => None,
-    });
+    let recipient_address = vs
+        .iter()
+        .find_map(|v| match v {
+            Param::Addr(a) => Some(a.clone()),
+            _otherwise => None,
+        })
+        .context(RecipientMissingSnafu { idx: i })?;
 
     let mut payment = Payment {
-        recipient_address: *addr.ok_or(Zip321Error::RecipientMissing(i))?,
-        amount: Zatoshis::ZERO,
+        recipient_address,
+        amount_coins: 0,
+        amount_zatoshis: 0,
         memo: None,
         label: None,
         message: None,
@@ -310,13 +319,18 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
 
     for v in vs {
         match v {
-            Param::Amount(a) => payment.amount = a,
+            Param::Amount { coins, zatoshis } => {
+                payment.amount_coins = coins;
+                payment.amount_zatoshis = zatoshis;
+            }
             Param::Memo(m) => {
-                if payment.recipient_address.can_receive_memo() {
-                    payment.memo = Some(*m);
-                } else {
-                    return Err(Zip321Error::TransparentMemo(i));
-                }
+                // TODO(schell): add this check to main crate
+                // if payment.recipient_address.can_receive_memo() {
+                //     payment.memo = Some(*m);
+                // } else {
+                //     return Err(Zip321Error::TransparentMemo(i));
+                // }
+                payment.memo = Some(m);
             }
             Param::Label(m) => payment.label = Some(m),
             Param::Message(m) => payment.message = Some(m),
@@ -344,7 +358,7 @@ pub struct Payment {
     /// address, the wallet should report an error.
     ///
     /// [`recipient_address`]: #structfield.recipient_address
-    memo: Option<String>,
+    memo: Option<Memo>,
     /// A human-readable label for this payment within the larger structure
     /// of the transaction request.
     label: Option<String>,
@@ -363,7 +377,7 @@ impl Payment {
     pub fn new(
         recipient_address: String,
         amount: (u64, u64),
-        memo: Option<String>,
+        memo: Option<Memo>,
         label: Option<String>,
         message: Option<String>,
         other_params: Vec<(String, String)>,
@@ -412,9 +426,17 @@ impl Payment {
         self.amount_zatoshis
     }
 
+    // TODO(schell): add pub fn amount(&self) -> Zatoshis in the main crate
+
+    // TODO(schell): add in the main crate
+    // /// Returns the memo that, if included, must be provided with the payment.
+    // pub fn memo_string(&self) -> Option<&str> {
+    //     self.memo.as_deref()
+    // }
+
     /// Returns the memo that, if included, must be provided with the payment.
-    pub fn memo_string(&self) -> Option<&str> {
-        self.memo.as_deref()
+    pub fn memo_bytes(&self) -> Option<&[u8; 512]> {
+        self.memo.as_ref().map(|m| m.bytes.as_ref())
     }
 
     /// A human-readable label for this payment within the larger structure
@@ -585,7 +607,8 @@ impl TransactionRequest {
                         let idx = if *i == 0 { None } else { Some(*i) };
                         let primary_address = payment.recipient_address.clone();
                         std::iter::empty()
-                            .chain(Some(render::addr_param(&primary_address, idx)))
+                            // TODO(schell): mention changed
+                            .chain(Some(render::addr_param_encoded(&primary_address, idx)))
                             .chain(payment_params(payment, idx))
                     })
                     .collect::<Vec<String>>();
@@ -650,6 +673,7 @@ impl TransactionRequest {
 }
 
 mod render {
+    use super::*;
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
     /// The set of ASCII characters that must be percent-encoded according
@@ -688,10 +712,17 @@ mod render {
         }
     }
 
+    // TODO(schell): add in the main crate
+    // /// Constructs an "address" key/value pair containing the encoded recipient address
+    // /// at the specified parameter index.
+    // pub fn addr_param(addr: &ZcashAddress, idx: Option<usize>) -> String {
+    //     format!("address{}={}", param_index(idx), addr.encode())
+    // }
+
     /// Constructs an "address" key/value pair containing the encoded recipient address
     /// at the specified parameter index.
-    pub fn addr_param(addr: &ZcashAddress, idx: Option<usize>) -> String {
-        format!("address{}={}", param_index(idx), addr.encode())
+    pub fn addr_param_encoded(encoded_addr: &str, idx: Option<usize>) -> String {
+        format!("address{}={}", param_index(idx), encoded_addr)
     }
 
     // TODO(schell):
@@ -727,8 +758,8 @@ mod render {
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
     /// at the specified parameter index.
-    pub fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
-        format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value))
+    pub fn memo_param(value: &Memo, idx: Option<usize>) -> String {
+        format!("{}{}={}", "memo", param_index(idx), value.to_base64())
     }
 
     /// Utility function for an arbitrary string key/value pair for inclusion in
