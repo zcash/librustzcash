@@ -6,6 +6,7 @@ use nom::{
     bytes::complete::{tag, take_till},
     character::complete::{alpha1, char, digit0, digit1, one_of},
     combinator::{all_consuming, map_opt, map_res, opt, recognize},
+    multi::separated_list0,
     sequence::{preceded, separated_pair, tuple},
     AsChar, IResult, InputTakeAtPosition,
 };
@@ -27,6 +28,19 @@ pub enum Error {
     /// A memo byte array was too long.
     #[snafu(display("Memo length {count} is larger than maximum of 512"))]
     MemoBytesTooLong { count: usize },
+
+    #[snafu(display("Error parsing lead address: {source}"))]
+    LeadAddress {
+        source: nom::Err<nom::error::Error<String>>,
+    },
+
+    #[snafu(display("Error parsing query parameters: {source}"))]
+    QueryParams {
+        source: nom::Err<nom::error::Error<String>>,
+    },
+
+    #[snafu(display("There is a duplicate {} parameter at index {idx}", param.name()))]
+    DuplicateParameter { param: Param, idx: usize },
 }
 
 type Result<T, E = Error> = core::result::Result<T, E>;
@@ -274,14 +288,57 @@ fn to_indexed_param(
     })
 }
 
+/// Converts an vector of [`Param`] values to a [`Payment`].
+///
+/// This function performs checks to ensure that the resulting [`Payment`] is structurally
+/// valid; for example, a request for memo contents may not be associated with a
+/// transparent payment address.
+pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
+    let addr = vs.iter().find_map(|v| match v {
+        Param::Addr(a) => Some(a.clone()),
+        _otherwise => None,
+    });
+
+    let mut payment = Payment {
+        recipient_address: *addr.ok_or(Zip321Error::RecipientMissing(i))?,
+        amount: Zatoshis::ZERO,
+        memo: None,
+        label: None,
+        message: None,
+        other_params: vec![],
+    };
+
+    for v in vs {
+        match v {
+            Param::Amount(a) => payment.amount = a,
+            Param::Memo(m) => {
+                if payment.recipient_address.can_receive_memo() {
+                    payment.memo = Some(*m);
+                } else {
+                    return Err(Zip321Error::TransparentMemo(i));
+                }
+            }
+            Param::Label(m) => payment.label = Some(m),
+            Param::Message(m) => payment.message = Some(m),
+            Param::Other(n, m) => payment.other_params.push((n, m)),
+            _otherwise => {}
+        }
+    }
+
+    Ok(payment)
+}
+
 /// A single payment being requested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
+    // TODO(schell): changed
     /// The address to which the payment should be sent.
     recipient_address: String,
+    // TODO(schell): changed, make separate types for whole and fractional
     /// The amount of the payment that is being requested.
     amount_coins: u64,
     amount_zatoshis: u64,
+    // TODO(schell): changed
     /// A memo that, if included, must be provided with the payment.
     /// If a memo is present and [`recipient_address`] is not a shielded
     /// address, the wallet should report an error.
@@ -513,7 +570,9 @@ impl TransactionRequest {
 
                 format!(
                     "zcash:{}{}{}",
-                    payment.recipient_address.encode(),
+                    // TODO(schell):
+                    // payment.recipient_address.encode(),
+                    payment.recipient_address,
                     if query_params.is_empty() { "" } else { "?" },
                     query_params.join("&")
                 )
@@ -537,24 +596,23 @@ impl TransactionRequest {
     }
 
     /// Parse the provided URI to a payment request value.
-    pub fn from_uri(uri: &str) -> Result<Self, Zip321Error> {
+    pub fn from_uri(uri: &str) -> Result<Self> {
         // Parse the leading zcash:<address>
-        let (rest, primary_addr_param) = parse::lead_addr(uri)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {e}")))?;
+        let (rest, primary_addr_param) = lead_addr(uri)
+            .map_err(|e| e.to_owned())
+            .context(LeadAddressSnafu)?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = if rest.is_empty() {
             ("", vec![])
         } else {
-            all_consuming(preceded(
-                char('?'),
-                separated_list0(char('&'), parse::zcashparam),
-            ))(rest)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing query parameters: {e}")))?
+            all_consuming(preceded(char('?'), separated_list0(char('&'), zcashparam)))(rest)
+                .map_err(|e| e.to_owned())
+                .context(QueryParamsSnafu)?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.
-        let mut params_by_index: BTreeMap<usize, Vec<parse::Param>> = BTreeMap::new();
+        let mut params_by_index: BTreeMap<usize, Vec<Param>> = BTreeMap::new();
 
         // Add the primary address, if any, to the index.
         if let Some(p) = primary_addr_param {
@@ -569,8 +627,12 @@ impl TransactionRequest {
                 }
 
                 Some(current) => {
-                    if parse::has_duplicate_param(current, &p.param) {
-                        return Err(Zip321Error::DuplicateParameter(p.param, p.payment_index));
+                    if has_duplicate_param(current, &p.param) {
+                        return DuplicateParameterSnafu {
+                            param: p.param.clone(),
+                            idx: p.payment_index,
+                        }
+                        .fail();
                     } else {
                         current.push(p.param);
                     }
@@ -581,7 +643,7 @@ impl TransactionRequest {
         // Build the actual payment values from the index.
         params_by_index
             .into_iter()
-            .map(|(i, params)| parse::to_payment(params, i).map(|payment| (i, payment)))
+            .map(|(i, params)| to_payment(params, i).map(|payment| (i, payment)))
             .collect::<Result<BTreeMap<usize, Payment>, _>>()
             .map(|payments| TransactionRequest { payments })
     }

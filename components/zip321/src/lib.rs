@@ -515,46 +515,6 @@ mod render {
 
 mod parse {
     use zip321_parse::Param;
-
-    /// Converts an vector of [`Param`] values to a [`Payment`].
-    ///
-    /// This function performs checks to ensure that the resulting [`Payment`] is structurally
-    /// valid; for example, a request for memo contents may not be associated with a
-    /// transparent payment address.
-    pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment, Zip321Error> {
-        let addr = vs.iter().find_map(|v| match v {
-            Param::Addr(a) => Some(a.clone()),
-            _otherwise => None,
-        });
-
-        let mut payment = Payment {
-            recipient_address: *addr.ok_or(Zip321Error::RecipientMissing(i))?,
-            amount: Zatoshis::ZERO,
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        };
-
-        for v in vs {
-            match v {
-                Param::Amount(a) => payment.amount = a,
-                Param::Memo(m) => {
-                    if payment.recipient_address.can_receive_memo() {
-                        payment.memo = Some(*m);
-                    } else {
-                        return Err(Zip321Error::TransparentMemo(i));
-                    }
-                }
-                Param::Label(m) => payment.label = Some(m),
-                Param::Message(m) => payment.message = Some(m),
-                Param::Other(n, m) => payment.other_params.push((n, m)),
-                _otherwise => {}
-            }
-        }
-
-        Ok(payment)
-    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
