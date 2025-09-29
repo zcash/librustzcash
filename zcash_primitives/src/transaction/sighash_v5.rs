@@ -32,9 +32,6 @@ use {
     zcash_encoding::{CompactSize, Vector},
 };
 
-#[cfg(zcash_unstable = "nu7")]
-use crate::transaction::sighash_v6::v6_signature_hash;
-
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrScriptsHash";

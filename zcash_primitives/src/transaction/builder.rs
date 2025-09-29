@@ -63,6 +63,8 @@ use crate::{
     },
 };
 use orchard::builder::BuildError::BundleTypeNotSatisfiable;
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use orchard::orchard_flavor::OrchardZSA;
 #[cfg(zcash_unstable = "nu7")]
 use orchard::{
     bundle::Authorization,
@@ -70,7 +72,6 @@ use orchard::{
     issuance::{IssueBundle, IssueInfo},
     issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
     note::Nullifier,
-    orchard_flavor::OrchardZSA,
 };
 #[cfg(zcash_unstable = "nu7")]
 use rand_core::OsRng;
@@ -1081,7 +1082,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 )?))
             }
 
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             Some(OrchardBundle::OrchardZSA(b)) => Some(OrchardBundle::OrchardZSA(prove_and_sign(
                 b,
                 &mut rng,

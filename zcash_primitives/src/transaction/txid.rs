@@ -28,6 +28,8 @@ use super::{
 };
 use crate::sighash_versioning::ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES;
 use crate::transaction::OrchardBundle::OrchardVanilla;
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use crate::transaction::OrchardBundle::OrchardZSA;
 use crate::transaction::{
     Authorization, Authorized, OrchardBundle, TransactionDigest, TransparentDigests, TxDigests,
     TxVersion,
@@ -35,7 +37,6 @@ use crate::transaction::{
 #[cfg(zcash_unstable = "nu7")]
 use {
     crate::sighash_versioning::ISSUE_SIGHASH_VERSION_TO_INFO_BYTES,
-    crate::transaction::OrchardBundle::OrchardZSA,
     orchard::issuance::{IssueBundle, Signed},
 };
 
@@ -381,7 +382,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| match b {
             OrchardVanilla(v) => v.commitment().0,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardZSA(z) => z.commitment().0,
         })
     }
@@ -582,7 +583,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
                         .authorizing_commitment(&ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES)
                         .0
                 }
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
                 OrchardZSA(bundle) => {
                     bundle
                         .authorizing_commitment(&ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES)

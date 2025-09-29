@@ -20,6 +20,9 @@ use {
 #[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
 
+#[cfg(all(test, zcash_unstable = "zfuture"))]
+use crate::transaction::OrchardBundle::OrchardZSA;
+
 #[cfg(all(test, zcash_unstable = "nu7"))]
 use crate::transaction::OrchardBundle::OrchardZSA;
 
@@ -61,12 +64,12 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     prop_assert_eq!(
         tx.orchard_bundle.as_ref().map(|v| match v {
             OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardZSA(b) => *b.value_balance(),
         }),
         txo.orchard_bundle.as_ref().map(|v| match v {
             OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardZSA(b) => *b.value_balance(),
         })
     );

@@ -1,9 +1,9 @@
 //! Functions for parsing & serialization of Orchard transaction components.
 use crate::encoding::ReadBytesExt;
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 use crate::encoding::WriteBytesExt;
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 use crate::sighash_versioning::{to_orchard_version, ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES};
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::components::issuance::read_asset;
@@ -13,6 +13,8 @@ use alloc::vec::Vec;
 use core::convert::TryFrom;
 use core2::io::{self, Read, Write};
 use nonempty::NonEmpty;
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use orchard::orchard_flavor::OrchardZSA;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
@@ -24,7 +26,7 @@ use orchard::{
     Action, Anchor, Bundle,
 };
 #[cfg(zcash_unstable = "nu7")]
-use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue};
+use orchard::{note::AssetBase, value::NoteValue};
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::note_bytes::NoteBytes;
 
@@ -96,7 +98,7 @@ pub fn read_v5_bundle<R: Read>(
 }
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn read_v6_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance, OrchardZSA>>> {
@@ -126,7 +128,10 @@ pub fn read_v6_bundle<R: Read>(
             "Timelimit field must be set to zero",
         ));
     }
+    #[cfg(zcash_unstable = "nu7")]
     let burn = read_burn(&mut reader)?;
+    #[cfg(not(zcash_unstable = "nu7"))]
+    let burn = vec![];
     let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let actions = NonEmpty::from_vec(
         actions_without_auth
@@ -276,7 +281,7 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<OrchardV
     ))
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn read_versioned_signature<R: Read, T: SigType>(
     mut reader: R,
 ) -> io::Result<OrchardVersionedSig<T>> {
@@ -293,7 +298,7 @@ pub fn read_versioned_signature<R: Read, T: SigType>(
     ))
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn write_versioned_signature<W: Write, T: SigType>(
     mut writer: W,
     versioned_sig: &OrchardVersionedSig<T>,
@@ -363,7 +368,7 @@ pub fn write_burn<W: Write>(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> 
 }
 
 /// Writes an [`orchard::Bundle`] in the appropriate transaction format.
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn write_v6_bundle<W: Write>(
     mut writer: W,
     bundle: Option<&OrchardBundle<Authorized>>,
@@ -383,6 +388,7 @@ pub fn write_v6_bundle<W: Write>(
         // Timelimit must be zero for NU7
         writer.write_u32_le(0)?;
 
+        #[cfg(zcash_unstable = "nu7")]
         write_burn(&mut writer, bundle.burn())?;
 
         Vector::write(

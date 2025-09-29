@@ -20,7 +20,7 @@ lazy_static! {
         BTreeMap::from([(OrchardSighashVersion::V0, ORCHARD_SIGHASH_INFO_V0.to_vec())]);
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub(crate) fn to_orchard_version(bytes: Vec<u8>) -> Option<OrchardSighashVersion> {
     ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES
         .iter()

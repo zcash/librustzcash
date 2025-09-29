@@ -5,7 +5,7 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub mod sighash_v6;
 
 pub mod txid;
@@ -42,10 +42,12 @@ use {::sapling::builder as sapling_builder, orchard::builder::Unproven};
 
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::components::issuance;
-use orchard::orchard_flavor::OrchardVanilla;
-use orchard::Bundle;
 #[cfg(zcash_unstable = "nu7")]
-use orchard::{issuance::IssueBundle, orchard_flavor::OrchardZSA};
+use orchard::issuance::IssueBundle;
+use orchard::orchard_flavor::OrchardVanilla;
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use orchard::orchard_flavor::OrchardZSA;
+use orchard::Bundle;
 use zcash_protocol::constants::{
     V3_TX_VERSION, V3_VERSION_GROUP_ID, V4_TX_VERSION, V4_VERSION_GROUP_ID, V5_TX_VERSION,
     V5_VERSION_GROUP_ID,
@@ -331,7 +333,7 @@ impl PartialEq for Transaction {
 #[derive(Debug, Clone)]
 pub enum OrchardBundle<A: orchard::bundle::Authorization> {
     OrchardVanilla(Bundle<A, ZatBalance, OrchardVanilla>),
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     OrchardZSA(Bundle<A, ZatBalance, OrchardZSA>),
 }
 
@@ -339,7 +341,7 @@ impl<A: orchard::bundle::Authorization> OrchardBundle<A> {
     pub fn value_balance(&self) -> &ZatBalance {
         match self {
             OrchardBundle::OrchardVanilla(b) => b.value_balance(),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardBundle::OrchardZSA(b) => b.value_balance(),
         }
     }
@@ -354,7 +356,7 @@ impl<A: orchard::bundle::Authorization> OrchardBundle<A> {
             OrchardBundle::OrchardVanilla(b) => {
                 OrchardBundle::OrchardVanilla(b.map_authorization(context, spend_auth, step))
             }
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardBundle::OrchardZSA(b) => {
                 OrchardBundle::OrchardZSA(b.map_authorization(context, spend_auth, step))
             }
@@ -364,12 +366,12 @@ impl<A: orchard::bundle::Authorization> OrchardBundle<A> {
     pub fn as_vanilla_bundle(&self) -> &Bundle<A, ZatBalance, OrchardVanilla> {
         match self {
             OrchardBundle::OrchardVanilla(b) => b,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             OrchardBundle::OrchardZSA(_) => panic!("Wrong bundle type"),
         }
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub fn as_zsa_bundle(&self) -> &Bundle<A, ZatBalance, OrchardZSA> {
         match self {
             OrchardBundle::OrchardVanilla(_) => panic!("Wrong bundle type"),
@@ -757,7 +759,7 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
@@ -830,7 +832,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
+            TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
         }
     }
 
@@ -945,22 +947,9 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        let zip233_amount = Zatoshis::ZERO;
-
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
-
-        #[cfg(zcash_unstable = "zfuture")]
-        let tze_bundle = version
-            .has_tze()
-            .then(|| Self::read_tze(&mut reader))
-            .transpose()?
-            .flatten();
 
         let data = TransactionData {
             version,
@@ -971,7 +960,7 @@ impl Transaction {
                 any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
                 feature = "zip-233"
             ))]
-            zip233_amount,
+            zip233_amount: Zatoshis::ZERO,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
@@ -979,19 +968,20 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             issue_bundle: None,
             #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle,
+            tze_bundle: None,
         };
 
         Ok(Self::from_data_v5(data))
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        #[cfg(zcash_unstable = "nu7")]
         let issue_bundle = issuance::read_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
@@ -1012,6 +1002,7 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle: orchard_bundle.map(OrchardBundle::OrchardZSA),
+            #[cfg(zcash_unstable = "nu7")]
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
@@ -1041,7 +1032,7 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1093,7 +1084,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => self.write_v6(writer),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => self.write_v5(writer),
+            TxVersion::ZFuture => self.write_v6(writer),
         }
     }
 
@@ -1165,7 +1156,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
@@ -1178,6 +1169,7 @@ impl Transaction {
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v6_bundle(&mut writer, self.orchard_bundle.as_ref())?;
+        #[cfg(zcash_unstable = "nu7")]
         issuance::write_bundle(self.issue_bundle.as_ref(), &mut writer)?;
 
         #[cfg(zcash_unstable = "zfuture")]
