@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The `zcash_client_sqlite` implementation of `WalletWrite::update_chain_tip`
+  now ensures that a transaction status request is queued for any transactions
+  for which we do not have mined-height information and which are known to be
+  unexpired. 
+- Transaction status requests are no longer deleted until the transaction in
+  question is positively known to be expired.
+
 ## [0.18.2] - 2025-09-28
 
 ### Changed
