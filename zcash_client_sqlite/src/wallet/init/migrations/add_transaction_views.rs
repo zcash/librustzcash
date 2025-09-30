@@ -434,7 +434,7 @@ mod tests {
             None,
             None,
             None,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             None,
         )
         .freeze()

@@ -683,6 +683,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(Bundle {
                 vin: vec![],
                 vout: vec![out_a],
@@ -716,6 +717,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(Bundle {
                 vin: vec![in_b],
                 vout: vec![out_b],
@@ -741,6 +743,7 @@ mod tests {
             0u32.into(),
             #[cfg(feature = "zip-233")]
             Zatoshis::ZERO,
+            None,
             None,
             None,
             None,

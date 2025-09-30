@@ -28,15 +28,14 @@ use super::{
 };
 use crate::sighash_versioning::ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES;
 use crate::transaction::OrchardBundle::OrchardVanilla;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-use crate::transaction::OrchardBundle::OrchardZSA;
 use crate::transaction::{
     Authorization, Authorized, OrchardBundle, TransactionDigest, TransparentDigests, TxDigests,
     TxVersion,
 };
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 use {
     crate::sighash_versioning::ISSUE_SIGHASH_VERSION_TO_INFO_BYTES,
+    crate::transaction::OrchardBundle::OrchardZSA,
     orchard::issuance::{IssueBundle, Signed},
 };
 
@@ -329,7 +328,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type TransparentDigest = Option<TransparentDigests<Blake2bHash>>;
     type SaplingDigest = Option<Blake2bHash>;
     type OrchardDigest = Option<Blake2bHash>;
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     type IssueDigest = Option<Blake2bHash>;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -387,7 +386,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         })
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<A::IssueAuth>>) -> Self::IssueDigest {
         issue_bundle.map(|b| b.commitment().0)
     }
@@ -404,7 +403,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         #[rustfmt::skip]
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digests: Self::TzeDigest,
     ) -> Self::Digest {
@@ -413,7 +412,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             transparent_digests,
             sapling_digest,
             orchard_digest,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             issue_digest,
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests,
@@ -430,7 +429,7 @@ pub(crate) fn to_hash(
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
     #[rustfmt::skip]
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     issue_digest: Option<Blake2bHash>,
     #[cfg(zcash_unstable = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
@@ -456,7 +455,7 @@ pub(crate) fn to_hash(
     )
     .unwrap();
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     if _txversion.has_orchard_zsa() {
         h.write_all(
             issue_digest
@@ -487,7 +486,7 @@ pub fn to_txid(
         hash_transparent_txid_data(digests.transparent_digests.as_ref()),
         digests.sapling_digest,
         digests.orchard_digest,
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         digests.issue_digest,
         #[cfg(zcash_unstable = "zfuture")]
         digests.tze_digests.as_ref(),
@@ -510,7 +509,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type SaplingDigest = Blake2bHash;
     type OrchardDigest = Blake2bHash;
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     type IssueDigest = Blake2bHash;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -593,7 +592,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         )
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<Signed>>) -> Self::IssueDigest {
         issue_bundle.map_or_else(
             orchard_bundle::commitments::hash_issue_bundle_auth_empty,
@@ -622,7 +621,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         #[rustfmt::skip]
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
@@ -639,7 +638,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
             h.write_all(digest.as_bytes()).unwrap();
         }
 
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         if TxVersion::suggested_for_branch(consensus_branch_id).has_orchard_zsa() {
             h.write_all(issue_digest.as_bytes()).unwrap();
         }

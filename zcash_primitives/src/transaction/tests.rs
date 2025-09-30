@@ -240,7 +240,7 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -332,6 +332,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            txdata.issue_bundle().cloned(),
             txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))

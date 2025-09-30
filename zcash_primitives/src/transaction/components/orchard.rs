@@ -2,19 +2,18 @@
 use crate::encoding::ReadBytesExt;
 
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-use crate::encoding::WriteBytesExt;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-use crate::sighash_versioning::{to_orchard_version, ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES};
-#[cfg(zcash_unstable = "nu7")]
-use crate::transaction::components::issuance::read_asset;
+use {
+    crate::encoding::WriteBytesExt,
+    crate::sighash_versioning::{to_orchard_version, ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES},
+    crate::transaction::components::issuance::read_asset,
+    orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue},
+};
 
 use crate::transaction::{OrchardBundle, Transaction};
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use core2::io::{self, Read, Write};
 use nonempty::NonEmpty;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-use orchard::orchard_flavor::OrchardZSA;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
@@ -25,8 +24,6 @@ use orchard::{
     value::ValueCommitment,
     Action, Anchor, Bundle,
 };
-#[cfg(zcash_unstable = "nu7")]
-use orchard::{note::AssetBase, value::NoteValue};
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::note_bytes::NoteBytes;
 
@@ -128,10 +125,7 @@ pub fn read_v6_bundle<R: Read>(
             "Timelimit field must be set to zero",
         ));
     }
-    #[cfg(zcash_unstable = "nu7")]
     let burn = read_burn(&mut reader)?;
-    #[cfg(not(zcash_unstable = "nu7"))]
-    let burn = vec![];
     let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let actions = NonEmpty::from_vec(
         actions_without_auth
@@ -163,12 +157,12 @@ pub fn read_v6_bundle<R: Read>(
 }
 
 /// Reads burn for OrchardZSA
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn read_burn<R: Read>(mut reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
     Vector::read(&mut reader, read_burn_item)
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 fn read_burn_item<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
     Ok((read_asset(reader)?, read_note_value(reader)?))
 }
@@ -349,7 +343,7 @@ pub fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
     let mut bytes = [0; 8];
     reader.read_exact(&mut bytes)?;
@@ -357,7 +351,7 @@ fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
 }
 
 /// Writes burn for OrchardZSA
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub fn write_burn<W: Write>(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
     Vector::write(writer, burn, |w, (asset, amount)| {
         w.write_all(&asset.to_bytes())?;
@@ -388,7 +382,6 @@ pub fn write_v6_bundle<W: Write>(
         // Timelimit must be zero for NU7
         writer.write_u32_le(0)?;
 
-        #[cfg(zcash_unstable = "nu7")]
         write_burn(&mut writer, bundle.burn())?;
 
         Vector::write(
@@ -495,7 +488,7 @@ pub mod testing {
     use orchard::bundle::{testing as t_orch, Authorized};
     use zcash_protocol::value::testing::arb_zat_balance;
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     use orchard::orchard_flavor::OrchardZSA;
 
     prop_compose! {
@@ -509,7 +502,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     prop_compose! {
         pub fn arb_zsa_bundle(n_actions: usize)(
             orchard_value_balance in arb_zat_balance(),
@@ -524,7 +517,7 @@ pub mod testing {
     pub fn arb_bundle_for_version(
         v: TxVersion,
     ) -> impl Strategy<Value = Option<OrchardBundle<Authorized>>> {
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         if v.has_orchard_zsa() {
             return Strategy::boxed(
                 (1usize..100).prop_flat_map(|n| prop::option::of(arb_zsa_bundle(n))),
