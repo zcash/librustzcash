@@ -13,6 +13,10 @@ repository.workspace = true
 license.workspace = true
 categories.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
