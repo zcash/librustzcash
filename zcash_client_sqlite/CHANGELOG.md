@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.3] - 2025-09-30
+
 ### Changed
 - The `zcash_client_sqlite` implementation of `WalletWrite::update_chain_tip`
   now ensures that a transaction status request is queued for any transactions
