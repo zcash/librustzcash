@@ -1707,7 +1707,7 @@ pub(crate) mod tests {
             // Add blocks up to the chain tip.
             let mut chain_tip_height = spanning_block_height;
             for _ in 0..110 {
-                let (h, res, _) = st.generate_next_block_multi(&vec![fake_output(false)]);
+                let (h, res, _) = st.generate_next_block_multi(&[fake_output(false)]);
                 for c in res.orchard() {
                     final_orchard_tree.append(*c);
                 }

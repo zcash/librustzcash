@@ -3109,7 +3109,8 @@ pub(crate) fn refresh_status_requests(
             } else {
                 conn.execute(
                     "INSERT INTO tx_retrieval_queue (txid, query_type, request_expiry)
-                     VALUES (:txid, :status_type, :new_expiry)",
+                     VALUES (:txid, :status_type, :new_expiry)
+                     ON CONFLICT (txid) DO NOTHING",
                     named_params! {
                         ":new_expiry": tx_retrieval_expiry(chain_tip, tx_expiry),
                         ":txid": &txid[..],
