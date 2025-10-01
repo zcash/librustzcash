@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.0] - PLANNED
+
 ### Added
 - `zcash_transparent::builder`:
   - `TransparentBuilder::add_p2sh_input` (only for use in combination with
@@ -17,6 +19,7 @@ workspace.
   - `TransparentInputInfo::serialized_len`
 
 ### Changed
+- Migrated to `zcash_protocol 0.7`
 - `zcash_transparent::pczt`:
   - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
     signing key is not involved with the input in any way we can detect.
