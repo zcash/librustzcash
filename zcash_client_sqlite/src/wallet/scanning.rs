@@ -15,6 +15,7 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
+use crate::wallet::refresh_status_requests;
 use crate::TableConstants;
 use crate::{
     error::SqliteClientError,
@@ -548,12 +549,16 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         None => tip_entry.block_range().clone(),
     };
 
+    // persist the updated scan queue entries
     replace_queue_entries::<SqliteClientError>(
         conn,
         &query_range,
         tip_shard_entry.into_iter().chain(Some(tip_entry)),
         false,
     )?;
+
+    // ensure that transaction status requests exist for any unmined, unexpired transactions
+    refresh_status_requests(conn)?;
 
     Ok(())
 }
@@ -1702,7 +1707,7 @@ pub(crate) mod tests {
             // Add blocks up to the chain tip.
             let mut chain_tip_height = spanning_block_height;
             for _ in 0..110 {
-                let (h, res, _) = st.generate_next_block_multi(&vec![fake_output(false)]);
+                let (h, res, _) = st.generate_next_block_multi(&[fake_output(false)]);
                 for c in res.orchard() {
                     final_orchard_tree.append(*c);
                 }
