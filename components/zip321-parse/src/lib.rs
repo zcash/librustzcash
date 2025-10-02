@@ -139,6 +139,8 @@ pub fn has_duplicate_param(v: &[Param], p: &Param) -> bool {
 }
 
 /// Parses and consumes the leading "zcash:\[address\]" from a ZIP 321 URI.
+///
+/// This is a shallow parsing and does **not** validate the address.
 pub fn lead_addr(input: &str) -> IResult<&str, Option<IndexedParam>> {
     let (i, addr_str) = preceded(tag("zcash:"), take_till(|c| c == '?'))(input)?;
     if addr_str.is_empty() {
@@ -510,7 +512,7 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     /// index to payment.
     ///
     /// Payment index 0 will be mapped to the empty payment index.
-    pub fn from_indexed(payments: BTreeMap<usize, Payment>) -> Result<TransactionRequest> {
+    pub fn from_indexed(payments: BTreeMap<usize, P>) -> Result<Self> {
         if let Some(k) = payments.keys().find(|k| **k > 9999) {
             // This is not quite the correct error, but close enough.
             return TooManyPaymentsSnafu { count: *k }.fail();
@@ -538,7 +540,10 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     /// A utility for use in tests to help check round-trip serialization properties.
     /// by comparing a two transaction requests for equality after normalization.
     #[cfg(test)]
-    pub fn normalize_and_eq(a: &mut TransactionRequest, b: &mut TransactionRequest) -> bool {
+    pub fn normalize_and_eq(a: &mut Self, b: &mut Self) -> bool
+    where
+        P: PartialEq,
+    {
         a.normalize();
         b.normalize();
 
@@ -789,7 +794,7 @@ pub mod testing {
     prop_compose! {
         pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> Memo {
             let mut array = [0u8; 512];
-            array.copy_from_slice(&bytes);
+            array[..bytes.len()].copy_from_slice(&bytes);
             Memo {
                 bytes: Box::new(array),
                 index: None
@@ -808,19 +813,21 @@ pub mod testing {
 
     prop_compose! {
         /// Constructs an arbitrary zip321_parse Payment
-        pub fn arb_zip321_payment(network: NetworkType)(
-            recipient_address in arb_address(network),
-            amount in arb_zatoshis(),
+        pub fn arb_zip321_payment()(
+            // address is just a 42 char ascii string, since this crate does
+            // a shallow parsing, and not validation
+            recipient_address in "[a-zA-Z0-9]{42}",
+            (amount_coins, amount_zatoshis) in arb_amount(),
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
             label in option::of(any::<String>()),
             // prevent duplicates by generating a set rather than a vec
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
         ) -> Payment {
-            let memo = memo.filter(|_| recipient_address.can_receive_memo());
             Payment {
                 recipient_address,
-                amount,
+                amount_coins,
+                amount_zatoshis,
                 memo,
                 label,
                 message,
@@ -830,8 +837,8 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_zip321_request(network: NetworkType)(
-            payments in btree_map(0usize..10000, arb_zip321_payment(network), 1..10)
+        pub fn arb_zip321_request()(
+            payments in btree_map(0usize..10000, arb_zip321_payment(), 1..10)
         ) -> TransactionRequest {
             let mut req = TransactionRequest::from_indexed(payments).unwrap();
             req.normalize(); // just to make test comparisons easier
@@ -840,8 +847,8 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_zip321_request_sequential(network: NetworkType)(
-            payments in vec(arb_zip321_payment(network), 1..10)
+        pub fn arb_zip321_request_sequential()(
+            payments in vec(arb_zip321_payment(), 1..10)
         ) -> TransactionRequest {
             let mut req = TransactionRequest::new(payments).unwrap();
             req.normalize(); // just to make test comparisons easier
@@ -850,16 +857,29 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_zip321_uri(network: NetworkType)(req in arb_zip321_request(network)) -> String {
+        pub fn arb_zip321_uri()(req in arb_zip321_request()) -> String {
             req.to_uri()
         }
     }
+}
 
-    prop_compose! {
-        pub fn arb_addr_str(network: NetworkType)(
-            recipient_address in arb_address(network)
-        ) -> String {
-            recipient_address.encode()
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+
+    use super::testing::*;
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn prop_zip321_roundtrip_uri(uri in arb_zip321_uri()) {
+            let mut parsed = TransactionRequest::from_uri_with_constructor(
+                &uri,
+                |p| Ok::<Payment, Error>(p)
+            ).unwrap();
+            parsed.normalize();
+            let serialized = parsed.to_uri();
+            assert_eq!(serialized, uri)
         }
     }
 }

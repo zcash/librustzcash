@@ -78,24 +78,6 @@ impl std::error::Error for Zip321Error {
     }
 }
 
-// TODO(schell): remove
-// /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
-// ///
-// /// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
-// pub fn memo_to_base64(memo: &MemoBytes) -> String {
-//     BASE64_URL_SAFE_NO_PAD.encode(memo.as_slice())
-// }
-
-// /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
-// ///
-// /// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
-// pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
-//     BASE64_URL_SAFE_NO_PAD
-//         .decode(s)
-//         .map_err(Zip321Error::InvalidBase64)
-//         .and_then(|b| MemoBytes::from_bytes(&b).map_err(Zip321Error::MemoBytesError))
-// }
-
 /// A single payment being requested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
@@ -293,6 +275,15 @@ impl TransactionRequest {
             })
     }
 
+    /// Constructs a new transaction request from the provided map from payment
+    /// index to payment.
+    ///
+    /// Payment index 0 will be mapped to the empty payment index.
+    pub fn from_indexed(payments: BTreeMap<usize, Payment>) -> Result<Self, Zip321Error> {
+        let inner = zip321_parse::TransactionRequest::from_indexed(payments)?;
+        Ok(Self { inner })
+    }
+
     /// Parse the provided URI to a payment request value.
     pub fn from_uri(uri: &str) -> Result<Self, Zip321Error> {
         Ok(Self {
@@ -369,14 +360,7 @@ pub mod testing {
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
         ) -> Payment {
             let memo = memo.filter(|_| recipient_address.can_receive_memo());
-            Payment {
-                recipient_address,
-                amount,
-                memo,
-                label,
-                message,
-                other_params: other_params.into_iter().collect(),
-            }
+            Payment::new(recipient_address, amount, memo, label, message, other_params.into_iter().collect()).unwrap()
         }
     }
 
@@ -417,6 +401,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
     use proptest::prelude::{any, proptest};
     use std::str::FromStr;
 
@@ -426,14 +411,30 @@ mod tests {
         memo::{Memo, MemoBytes},
         value::{testing::arb_zatoshis, Zatoshis},
     };
+    use zip321_parse::{parse_amount, str_param, zcashparam, Param};
 
     use super::{
-        memo_from_base64, memo_to_base64,
-        parse::{parse_amount, zcashparam, Param},
         render::{amount_str, memo_param, str_param},
         testing::{arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
-        Payment, TransactionRequest,
+        Payment, TransactionRequest, Zip321Error,
     };
+
+    /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
+    ///
+    /// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
+    pub fn memo_to_base64(memo: &MemoBytes) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(memo.as_slice())
+    }
+
+    /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
+    ///
+    /// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
+    pub fn memo_from_base64(s: &str) -> Result<MemoBytes, String> {
+        let bytes = BASE64_URL_SAFE_NO_PAD
+            .decode(s)
+            .map_err(|e| e.to_string())?;
+        MemoBytes::from_bytes(&bytes).map_err(|e| e.to_string())
+    }
 
     fn check_roundtrip(req: TransactionRequest) {
         let req_uri = req.to_uri();

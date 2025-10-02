@@ -23,5 +23,8 @@ percent-encoding.workspace = true
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
