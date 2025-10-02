@@ -899,6 +899,12 @@ criteria = "safe-to-deploy"
 delta = "0.15.1 -> 0.16.0"
 notes = "The primary change here is the switch from the `hdwallet` dependency to using `bip32`."
 
+[[audits.zcash_primitives]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.24.0 -> 0.24.1"
+notes = "No added unsafe code or dangerous methods."
+
 [[audits.zcash_proofs]]
 who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"
@@ -1168,6 +1174,12 @@ end = "2025-08-26"
 
 [[trusted.zcash_client_backend]]
 criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-03-26"
+end = "2026-09-25"
+
+[[trusted.zcash_client_backend]]
+criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
 end = "2026-06-02"
@@ -1222,6 +1234,12 @@ end = "2025-04-22"
 
 [[trusted.zcash_keys]]
 criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2024-03-01"
+end = "2026-09-25"
+
+[[trusted.zcash_keys]]
+criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
 end = "2026-05-12"
@@ -1231,6 +1249,12 @@ criteria = ["safe-to-deploy", "crypto-reviewed"]
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2023-03-22"
 end = "2025-04-22"
+
+[[trusted.zcash_primitives]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-03-26"
+end = "2026-09-25"
 
 [[trusted.zcash_primitives]]
 criteria = "safe-to-deploy"
@@ -1249,6 +1273,12 @@ criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-03-26"
 end = "2025-04-22"
+
+[[trusted.zcash_proofs]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-03-26"
+end = "2026-09-25"
 
 [[trusted.zcash_proofs]]
 criteria = "safe-to-deploy"
@@ -1273,6 +1303,18 @@ criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-27"
 end = "2026-06-02"
+
+[[trusted.zcash_script]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2025-09-25"
+end = "2026-09-25"
+
+[[trusted.zcash_script]]
+criteria = "safe-to-deploy"
+user-id = 159631
+start = "2022-08-31"
+end = "2026-09-19"
 
 [[trusted.zcash_spec]]
 criteria = "safe-to-deploy"
@@ -1314,4 +1356,4 @@ end = "2026-02-21"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2026-06-02"
+end = "2026-07-16"

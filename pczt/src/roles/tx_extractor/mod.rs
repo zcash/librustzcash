@@ -15,6 +15,8 @@ use zcash_primitives::transaction::{
 };
 #[cfg(zcash_unstable = "nu7")]
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+use zcash_protocol::value::Zatoshis;
 use zcash_protocol::{
     consensus::BranchId,
     constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
@@ -125,6 +127,8 @@ impl<'a> TransactionExtractor<'a> {
             consensus_branch_id,
             lock_time,
             pczt.global.expiry_height.into(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
             transparent_bundle,
             None,
             sapling_bundle,

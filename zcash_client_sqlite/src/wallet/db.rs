@@ -19,6 +19,62 @@ use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 use crate::wallet::scanning::priority_code;
 
 /// Stores information about the accounts that the wallet is tracking.
+///
+/// An account corresponds to a logical "bucket of funds" that has its own balance within the
+/// wallet and for which spending operations should treat received value as interchangeable,
+/// excepting situations where care must be taken to avoid publicly linking addresses within the
+/// account or where turnstile-crossings may have privacy implications.
+///
+/// ### Columns
+///
+/// - `id`: Internal primary key for the account record.
+/// - `name`: A human-readable reference for the account. This column is present merely as a
+///   convenience for front-ends and debugging; it has no stable semantics and values are not
+///   required to be unique.
+/// - `uuid`: A wallet-instance-specific identifier for the account. This identifier will remain
+///   stable for the lifetime of the wallet database, but is not expected or required to be
+///   stable across wallet restores and it should not be stored in external backup formats.
+/// - `account_kind`: 0 for accounts derived from a mnemonic seed, 1 for imported accounts
+///   for which derivation path information may not be available. This column may be removed in the
+///   future; the distinction between whether an account is derived or imported is better
+///   represented by the presence or absence of HD seed fingerprint and HD account index data.
+/// - `hd_seed_fingerprint`: If this account contains funds in keys obtained via HD derivation,
+///   the ZIP 32 fingerprint of the root HD seed. If this column is non-null, `hd_account_index`
+///   must also be non-null.
+/// - `hd_account_index`: If this account contains funds in keys obtained via HD derivation,
+///   the BIP 44 account-level component of the HD derivation path. If this column is non-null,
+///   `hd_seed_fingerprint` must also be non-null.
+/// - `ufvk`: The unified full viewing key for the account, if known.
+/// - `uivk`: The unified incoming viewing key for the account.
+/// - `orchard_fvk_item_cache`: The serialized representation of the Orchard item of the `ufvk`,
+///   if any.
+/// - `sapling_fvk_item_cache`: The serialized representation of the Sapling item of the `ufvk`,
+///   if any.
+/// - `p2pkh_fvk_item_cache`: The serialized representation of the P2PKH item of the `ufvk`,
+///   if any.
+/// - `birthday_height`: The minimum block height among blocks that may potentially contain
+///   shielded funds belonging to the account.
+/// - `birthday_sapling_tree_size`: A cache of the size of the Sapling note commitment tree
+///   as of the start of the birthday block.
+/// - `birthday_orchard_tree_size`: A cache of the size of the Orchard note commitment tree
+///   as of the start of the birthday block.
+/// - `recover_until_height`: The boundary between recovery and regular scanning for this account.
+///   Unscanned blocks up to and excluding this height are counted towards recovery progress. It
+///   is initially set via the `AccountBirthday` parameter of the `WalletWrite::import_account_*`
+///   methods (usually to the chain tip height at which account recovery was initiated), and may
+///   in future be automatically updated by the backend if the wallet is offline for an extended
+///   period (to keep the scan progress percentage accurate to what actually needs scanning).
+/// - `has_spend_key`: A boolean flag (0 or 1) indicating whether the application that embeds
+///   this wallet database has access to spending key(s) for the account.
+/// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported
+///   from a `zcashd` `wallet.dat` file, for "standalone" Sapling addresses (each of which
+///   corresponds to an independent account) derived after the introduction of mnemonic seed
+///   derivation in the `4.7.0` `zcashd` release. This column will only be non-negative in
+///   the case that the `hd_account_index` column has the value `0x7FFFFFFF`, in accordance with
+///   how post-v4.7.0 Sapling addresses were produced by the `z_getnewaddress` RPC method.
+///   This relationship is not currently enforced by a CHECK constraint; such a constraint should
+///   be added the next time that the `accounts` table is deleted and re-created to support a
+///   SQLite-breaking change to the columns of the table.
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +94,7 @@ CREATE TABLE "accounts" (
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
+    zcashd_legacy_address_index INTEGER NOT NULL DEFAULT -1,
     CHECK (
       (
         account_kind = 0
@@ -58,8 +115,7 @@ pub(super) const INDEX_ACCOUNTS_UFVK: &str =
     r#"CREATE UNIQUE INDEX accounts_ufvk ON accounts (ufvk)"#;
 pub(super) const INDEX_ACCOUNTS_UIVK: &str =
     r#"CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk)"#;
-pub(super) const INDEX_HD_ACCOUNT: &str =
-    r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index)"#;
+pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index)"#;
 
 /// Stores addresses that have been generated from accounts in the wallet.
 ///
@@ -67,7 +123,9 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 ///
 /// - `account_id`: the account whose IVK was used to derive this address.
 /// - `diversifier_index_be`: the diversifier index at which this address was derived.
-/// - `key_scope`: the key scope for which this address was derived.
+///   This may be null for imported standalone addresses.
+/// - `key_scope`: the BIP 44 change-level index at which this address was derived, or `-1`
+///   for imported transparent pubkeys.
 /// - `address`: The Unified, Sapling, or transparent address. For Unified and Sapling addresses,
 ///   only external-key scoped addresses should be stored in this table; for purely transparent
 ///   addresses, this may be an internal-scope (change) address, so that we can provide
@@ -104,6 +162,11 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 /// - `transparent_receiver_next_check_time`: The Unix epoch time at which a client should next
 ///   check to determine whether any new UTXOs have been received by the cached transparent receiver
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
+//  - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
+//    `cached_transparent_receiver_address` value, for imported transparent addresses that were not
+//    obtained via derivation from an HD seed associated with the account. In cases that
+//    `cached_transparent_receiver_address` is non-null, either this column or
+//    `transparent_child_index` must also be non-null.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -111,17 +174,33 @@ CREATE TABLE "addresses" (
     id INTEGER NOT NULL PRIMARY KEY,
     account_id INTEGER NOT NULL,
     key_scope INTEGER NOT NULL,
-    diversifier_index_be BLOB NOT NULL,
+    diversifier_index_be BLOB,
     address TEXT NOT NULL,
     transparent_child_index INTEGER,
     cached_transparent_receiver_address TEXT,
     exposed_at_height INTEGER,
     receiver_flags INTEGER NOT NULL,
     transparent_receiver_next_check_time INTEGER,
+    imported_transparent_receiver_pubkey BLOB,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
+    CONSTRAINT transparent_pubkey_unique UNIQUE (imported_transparent_receiver_pubkey),
     CONSTRAINT transparent_index_consistency CHECK (
-        (transparent_child_index IS NOT NULL) == (cached_transparent_receiver_address IS NOT NULL)
+        (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
+        AND (
+            (
+                cached_transparent_receiver_address IS NULL
+                AND transparent_child_index IS NULL
+                AND imported_transparent_receiver_pubkey IS NULL
+            )
+            OR (
+                cached_transparent_receiver_address IS NOT NULL
+                AND (transparent_child_index IS NULL) == (imported_transparent_receiver_pubkey IS NOT NULL)
+            )
+        )
+    ),
+    CONSTRAINT foreign_or_diversified CHECK (
+        (diversifier_index_be IS NULL) == (key_scope = -1)
     )
 )"#;
 pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
@@ -131,6 +210,10 @@ CREATE INDEX idx_addresses_accounts ON addresses (
 pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
 CREATE INDEX idx_addresses_indices ON addresses (
     diversifier_index_be ASC
+)"#;
+pub(super) const INDEX_ADDRESSES_PUBKEYS: &str = r#"
+CREATE INDEX idx_addresses_pubkeys ON addresses (
+    imported_transparent_receiver_pubkey ASC
 )"#;
 pub(super) const INDEX_ADDRESSES_T_INDICES: &str = r#"
 CREATE INDEX idx_addresses_t_indices ON addresses (
@@ -172,6 +255,12 @@ CREATE TABLE blocks (
 ///   foreign key constraint on `block` prevents that column from being populated prior to complete
 ///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
 ///   non-null.
+/// - `tx_index`: the index of the transaction within the block.
+/// - `expiry_height`: stores the maximum height at which the transaction may be mined, if known.
+/// - `raw`: the original serialized byte representation of the transaction, if it has been
+///   retrieved.
+/// - `fee`: the fee paid to send the transaction, if known. This should be present for all
+///   transactions constructed by this wallet.
 /// - `target_height`: stores the target height for which the transaction was constructed, if
 ///   known. This will ordinarily be null for transactions discovered via chain scanning; it
 ///   will only be set for transactions created using this wallet specifically, and not any
@@ -359,11 +448,8 @@ CREATE TABLE orchard_received_note_spends (
 ///   transaction.
 /// - `script`: The full txout script
 /// - `value_zat`: The value of the TXO in zatoshis
-/// - `max_observed_unspent_height`: The maximum block height at which this TXO was either
-///   observed to be a member of the UTXO set at the start of the block, or observed
-///   to be an output of a transaction mined in the block. This is intended to be used to
-///   determine when the TXO is no longer a part of the UTXO set, in the case that the
-///   transaction that spends it is not detected by the wallet.
+/// - `max_observed_unspent_height`: The maximum block height at which this TXO was observed to be
+///   a member of the UTXO set as of the end of the block.
 /// - `address_id`: a foreign key to the address that this note was sent to; non-null because
 ///   we can only find transparent outputs for known addresses (and therefore we must record
 ///   both internal and external addresses in the `addresses` table).
@@ -492,11 +578,15 @@ pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "s
 ///   about transparent inputs to a transaction, this is a reference to that transaction record.
 ///   NULL for transactions where the request for enhancement data is based on discovery due
 ///   to blockchain scanning.
+/// - `request_expiry`: The block height at which this transaction data request will be considered
+///   expired. This is used to ensure that permanently-unsatisfiable transaction data requests
+///   do not stay in the queue forever.
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE tx_retrieval_queue (
     txid BLOB NOT NULL UNIQUE,
     query_type INTEGER NOT NULL,
     dependent_transaction_id INTEGER,
+    request_expiry INTEGER,
     FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
 )"#;
 
@@ -891,7 +981,7 @@ SELECT accounts.uuid                AS account_uuid,
        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
        blocks.time                       AS block_time,
        (
-            blocks.height IS NULL
+            notes.mined_height IS NULL
             AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
        ) AS expired_unmined,
        SUM(notes.spent_note_count) AS spent_note_count,
@@ -910,7 +1000,7 @@ FROM notes
 LEFT JOIN accounts ON accounts.id = notes.account_id
 LEFT JOIN transactions
      ON notes.txid = transactions.txid
-JOIN blocks_max_height
+LEFT JOIN blocks_max_height
 LEFT JOIN blocks ON blocks.height = notes.mined_height
 LEFT JOIN sent_note_counts
      ON sent_note_counts.account_id = notes.account_id
@@ -927,9 +1017,36 @@ GROUP BY notes.account_id, notes.txid";
 ///   both outputs received as a consequence of wallet-internal transfers
 ///   and as change.
 ///
-/// The `to_address` column will only contain an address when the recipient is
-/// external. In all other cases, the recipient account id indicates the account
-/// that controls the output.
+/// # Columns
+/// - `txid`: The id of the transaction in which the output was sent or received.
+/// - `output_pool`: The value pool for the transaction; valid values for this are:
+///   - 0: Transparent
+///   - 2: Sapling
+///   - 3: Orchard
+/// - `output_index`: The index of the output within the transaction bundle associated with
+///   the `output_pool` value; that is, within `vout` for transparent, the vector of
+///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+/// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
+///   spent notes in creating the transaction. Note that if multiple accounts in the wallet
+///   contributed funds in creating the associated transaction, redundant rows will exist in the
+///   output of this view, one for each such account.
+/// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
+///   outgoing transaction outputs this will be `NULL`.
+/// - `address`: The address to which the output was sent; for received outputs, this is the
+///   address at which the output was received, or `NULL` for wallet-internal outputs.
+/// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
+///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
+///   address. This will be `NULL` for outgoing transaction outputs.
+/// - `value`: The value of the output, in zatoshis.
+/// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
+///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
+///   for whether or not the output should be considered change, and may not be correct for
+///   cross-account internal transactions, shielding transactions, or outputs explicitly sent from
+///   the wallet to itself. The determination of what counts as change is somewhat subjective and
+///   the value of this column should be used with caution.
+/// - `memo`: The binary content of the memo associated with the output, if the output is a
+///   shielded output and the memo was received by the wallet, sent by the wallet or was able to be
+///   decrypted with the wallet's outgoing viewing key.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
 WITH unioned AS (
@@ -939,13 +1056,15 @@ WITH unioned AS (
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
            to_account.uuid              AS to_account_uuid,
-           NULL                         AS to_address,
+           a.address                    AS to_address,
+           a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
            ro.memo                      AS memo
     FROM v_received_outputs ro
     JOIN transactions
         ON transactions.id_tx = ro.transaction_id
+    LEFT JOIN addresses a ON a.id = ro.address_id
     -- join to the sent_notes table to obtain `from_account_id`
     LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
     -- join on the accounts table to obtain account UUIDs
@@ -959,6 +1078,7 @@ WITH unioned AS (
            from_account.uuid            AS from_account_uuid,
            NULL                         AS to_account_uuid,
            sent_notes.to_address        AS to_address,
+           NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
            sent_notes.memo              AS memo

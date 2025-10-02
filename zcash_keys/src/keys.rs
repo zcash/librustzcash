@@ -1,4 +1,6 @@
 //! Helper functions for managing light client key material.
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::keys::TransparentKeyScope;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
@@ -14,15 +16,15 @@ use zcash_protocol::consensus::NetworkConstants;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
     core::convert::TryInto,
-    transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 
 #[cfg(all(
     feature = "transparent-inputs",
     any(test, feature = "test-dependencies")
 ))]
-use transparent::address::TransparentAddress;
+use ::transparent::address::TransparentAddress;
 
 #[cfg(feature = "unstable")]
 use {
@@ -78,6 +80,12 @@ pub mod sapling {
         )
     }
 }
+
+#[cfg(feature = "transparent-key-encoding")]
+pub mod transparent;
+
+#[cfg(feature = "zcashd-compat")]
+pub mod zcashd;
 
 #[cfg(feature = "transparent-inputs")]
 fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildIndex> {
@@ -203,7 +211,7 @@ impl Era {
 #[derive(Clone, Debug)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: transparent::keys::AccountPrivKey,
+    transparent: ::transparent::keys::AccountPrivKey,
     #[cfg(feature = "sapling")]
     sapling: sapling::ExtendedSpendingKey,
     #[cfg(feature = "orchard")]
@@ -222,7 +230,7 @@ impl UnifiedSpendingKey {
 
         UnifiedSpendingKey::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
-            transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
+            ::transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)?,
             #[cfg(feature = "sapling")]
             sapling::spending_key(seed, _params.coin_type(), _account),
@@ -235,7 +243,7 @@ impl UnifiedSpendingKey {
     /// Construct a USK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
-        #[cfg(feature = "transparent-inputs")] transparent: transparent::keys::AccountPrivKey,
+        #[cfg(feature = "transparent-inputs")] transparent: ::transparent::keys::AccountPrivKey,
         #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
         #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
     ) -> Result<UnifiedSpendingKey, DerivationError> {
@@ -269,7 +277,7 @@ impl UnifiedSpendingKey {
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &transparent::keys::AccountPrivKey {
+    pub fn transparent(&self) -> &::transparent::keys::AccountPrivKey {
         &self.transparent
     }
 
@@ -414,7 +422,7 @@ impl UnifiedSpendingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            transparent::keys::AccountPrivKey::from_bytes(&key)
+                            ::transparent::keys::AccountPrivKey::from_bytes(&key)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
                         );
                     }
@@ -453,6 +461,10 @@ impl UnifiedSpendingKey {
         }
     }
 
+    /// Returns the unified address corresponding to the smallest valid diversifier index,
+    /// along with that diversifier index.
+    ///
+    /// See [`UnifiedFullViewingKey::default_address`] for additional details.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn default_address(
         &self,
@@ -463,6 +475,11 @@ impl UnifiedSpendingKey {
             .unwrap()
     }
 
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -483,6 +500,12 @@ pub enum AddressGenerationError {
     /// child address indices.
     #[cfg(feature = "transparent-inputs")]
     InvalidTransparentChildIndex(DiversifierIndex),
+    /// The requested key scope is not supported for address derivation.
+    #[cfg(feature = "transparent-inputs")]
+    UnsupportedTransparentKeyScope(TransparentKeyScope),
+    /// An error occurred in [`bip32`] derivation of a transparent address.
+    #[cfg(feature = "transparent-inputs")]
+    Bip32DerivationError(bip32::Error),
     /// The diversifier index could not be mapped to a valid Sapling diversifier.
     #[cfg(feature = "sapling")]
     InvalidSaplingDiversifierIndex(DiversifierIndex),
@@ -508,6 +531,14 @@ impl fmt::Display for AddressGenerationError {
                     f,
                     "Child index {i:?} does not generate a valid transparent receiver"
                 )
+            }
+            #[cfg(feature = "transparent-inputs")]
+            AddressGenerationError::UnsupportedTransparentKeyScope(i) => {
+                write!(f, "Key scope {i:?} is not supported for key derivation")
+            }
+            #[cfg(feature = "transparent-inputs")]
+            AddressGenerationError::Bip32DerivationError(e) => {
+                write!(f, "{e}")
             }
             #[cfg(feature = "sapling")]
             AddressGenerationError::InvalidSaplingDiversifierIndex(i) => {
@@ -543,6 +574,13 @@ impl fmt::Display for AddressGenerationError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for AddressGenerationError {}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<bip32::Error> for AddressGenerationError {
+    fn from(value: bip32::Error) -> Self {
+        AddressGenerationError::Bip32DerivationError(value)
+    }
+}
 
 /// An enumeration of the ways in which a receiver may be requested to be present in a generated
 /// [`UnifiedAddress`].
@@ -721,7 +759,7 @@ impl From<bip32::Error> for DerivationError {
 #[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<transparent::keys::AccountPubKey>,
+    transparent: Option<::transparent::keys::AccountPubKey>,
     #[cfg(feature = "sapling")]
     sapling: Option<sapling::DiversifiableFullViewingKey>,
     #[cfg(feature = "orchard")]
@@ -738,7 +776,7 @@ impl UnifiedFullViewingKey {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
-            transparent::keys::AccountPubKey,
+            ::transparent::keys::AccountPubKey,
         >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
@@ -795,7 +833,7 @@ impl UnifiedFullViewingKey {
     /// succeed.
     fn from_checked_parts(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
-            transparent::keys::AccountPubKey,
+            ::transparent::keys::AccountPubKey,
         >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
@@ -881,7 +919,7 @@ impl UnifiedFullViewingKey {
                     data.to_vec(),
                 ))),
                 #[cfg(feature = "transparent-inputs")]
-                unified::Fvk::P2pkh(data) => transparent::keys::AccountPubKey::deserialize(data)
+                unified::Fvk::P2pkh(data) => ::transparent::keys::AccountPubKey::deserialize(data)
                     .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
                     .map(|tfvk| {
                         transparent = Some(tfvk);
@@ -967,7 +1005,7 @@ impl UnifiedFullViewingKey {
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> Option<&transparent::keys::AccountPubKey> {
+    pub fn transparent(&self) -> Option<&::transparent::keys::AccountPubKey> {
         self.transparent.as_ref()
     }
 
@@ -984,8 +1022,6 @@ impl UnifiedFullViewingKey {
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
-    /// If `request` is None, the address should be derived to contain a receiver for each item in
-    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     pub fn address(
@@ -998,8 +1034,7 @@ impl UnifiedFullViewingKey {
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will produce
     /// a valid diversifier, and return the Unified Address constructed using that diversifier
-    /// along with the index at which the valid diversifier was found. If `request` is None, the
-    /// address should be derived to contain a receiver for each item in this UFVK.
+    /// along with the index at which the valid diversifier was found.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -1013,8 +1048,7 @@ impl UnifiedFullViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index. If `request` is None, the address should be derived to contain a receiver for
-    /// each item in this UFVK.
+    /// that index.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -1024,13 +1058,32 @@ impl UnifiedFullViewingKey {
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
+
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(test, feature = "test-dependencies")
+    ))]
+    pub fn default_transparent_address(
+        &self,
+    ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
+        self.transparent().map(|k| {
+            k.derive_external_ivk()
+                .expect("ability to derive the external IVK was checked at construction")
+                .default_address()
+        })
+    }
 }
 
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified incoming viewing key.
 #[derive(Clone, Debug)]
 pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<transparent::keys::ExternalIvk>,
+    transparent: Option<::transparent::keys::ExternalIvk>,
     #[cfg(feature = "sapling")]
     sapling: Option<::sapling::zip32::IncomingViewingKey>,
     #[cfg(feature = "orchard")]
@@ -1047,7 +1100,9 @@ impl UnifiedIncomingViewingKey {
     /// be used instead.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
-        #[cfg(feature = "transparent-inputs")] transparent: Option<transparent::keys::ExternalIvk>,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<
+            ::transparent::keys::ExternalIvk,
+        >,
         #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
         // TODO: Implement construction of UIVKs with metadata items.
@@ -1123,7 +1178,7 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            transparent::keys::ExternalIvk::deserialize(data)
+                            ::transparent::keys::ExternalIvk::deserialize(data)
                                 .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
                         );
                     }
@@ -1199,7 +1254,7 @@ impl UnifiedIncomingViewingKey {
 
     /// Returns the Transparent external IVK, if present.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &Option<transparent::keys::ExternalIvk> {
+    pub fn transparent(&self) -> &Option<::transparent::keys::ExternalIvk> {
         &self.transparent
     }
 
@@ -1236,8 +1291,6 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
-    /// If `request` is None, the address will be derived to contain a receiver for each item in
-    /// this UFVK.
     ///
     /// Returns an error if the this key does not produce a valid receiver for a required receiver
     /// type at the given diversifier index.
@@ -1389,8 +1442,7 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index. If `request` is None, the address will be derived to contain a receiver for
-    /// each data item in this UFVK.
+    /// that index.
     ///
     /// Returns an error if the this key does not produce a valid receiver for a required receiver
     /// type at any diversifier index.
@@ -1466,6 +1518,21 @@ impl UnifiedIncomingViewingKey {
 
         ReceiverRequirements::new(orchard, sapling, p2pkh)
     }
+
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: ::transparent::keys::ExternalIvk::default_address
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(test, feature = "test-dependencies")
+    ))]
+    pub fn default_transparent_address(
+        &self,
+    ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
+        self.transparent.as_ref().map(|k| k.default_address())
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -1514,9 +1581,9 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{address::Address, encoding::AddressCodec},
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         alloc::string::ToString,
         alloc::vec::Vec,
-        transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_address::test_vectors,
         zip32::DiversifierIndex,
     };
@@ -1543,7 +1610,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        use transparent::keys::NonHardenedChildIndex;
+        use ::transparent::keys::NonHardenedChildIndex;
 
         let taddr = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
             .unwrap()

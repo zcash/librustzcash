@@ -10,6 +10,69 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.1] - 2025-09-25
+
+### Fixed
+- This fixes a bug in zcash_client_sqlite-0.18.0 that could result in
+  underreporting of wallet balance.
+
+## [0.18.0] - YANKED
+
+### Added
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. For additional information
+  refer to the `zcash_client_backend 0.20.0` release notes.
+- `zcash_client_sqlite::wallet::init::migrations::V_0_18_0`
+
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
+  `zcash_transparent 0.5`, `zcash_primitives 0.25`, `zcash_proofs 0.25`,
+  `zcash_keys 0.11`, `zcash_client_backend 0.20`.
+- Added dependency `secp256k1` when the `transparent-inputs` feature flag
+  is enabled.
+- `zcash_client_sqlite::error::SqliteClientError`:
+  - An `IneligibleNotes` variant has been added. It is produced when
+    `spendable_notes` is called with `TargetValue::MaxSpendable`
+    and there are funds that haven't been confirmed and all spendable notes
+    can't be selected.
+  - A `PubkeyImportConflict` variant has been added. It is produced when
+    a call to `WalletWrite::import_standalone_transparent_pubkey` attempts
+    to import a transparent pubkey to an account when that pubkey is already
+    managed by a different account.
+- The `v_tx_outputs` view now includes an additional `diversifier_index_be`
+  column, containing the diversifier index (or transparent change-level BIP 44
+  index) of the receiving address as a BLOB in big-endian order for received
+  outputs. In addition, the `to_address` field is now populated both for sent
+  and received outputs; for received outputs, it corresponds to the wallet
+  address at which the output was received. For wallet-internal outputs,
+  `to_address` and `diversifier_index_be` will be `NULL`.
+- `WalletDb::get_tx_height` will now return heights for transactions detected
+  via UTXOs, before their corresponding block has been scanned for shielded
+  details.
+
+## [0.17.3] - 2025-08-29
+
+### Fixed
+- This release fixes possible false positive in the way that the
+  `expired_unmined` column of the `v_transactions` view is computed. It now
+  checks against the `mined_height` field of the UTXO, instead of joining
+  against the `blocks` table to determine whether the UTXO has expired unmined;
+  after this change, the corresponding block need not have been scanned in
+  order to correctly determine whether the UTXO actually expired.
+
+## [0.16.4, 0.17.2] - 2025-08-19
+
+### Fixed
+- `TransactionDataRequest::GetStatus` requests for txids that do not
+  correspond to unexpired transactions in the transactions table are now
+  deleted from the status check queue when `set_transaction_status` is
+  called with a status of either `TxidNotRecognized` or `NotInMainChain`.
+- This release fixes a bug that caused transparent UTXO value to be
+  double_counted in the wallet summary, contributing to both spendable and
+  pending balance, when queried with `min_confirmations == 0`.
+- Transaction fees are now restored when possible by calls to
+  `WalletDb::store_decrypted_tx`.
+
 ## [0.16.3, 0.17.1] - 2025-06-17
 
 ### Fixed
@@ -21,6 +84,7 @@ workspace.
 ### Added
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
+- `zcash_client_sqlite::WalletDb::params`
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,

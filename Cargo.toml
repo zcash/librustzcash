@@ -9,6 +9,7 @@ members = [
     "pczt",
     "zcash",
     "zcash_client_backend",
+    "zcash_client_memory",
     "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
@@ -17,6 +18,8 @@ members = [
     "zcash_proofs",
     "zcash_transparent",
 ]
+
+resolver = "2"
 
 [workspace.package]
 edition = "2021"
@@ -33,18 +36,18 @@ categories = ["cryptography::cryptocurrencies"]
 [workspace.dependencies]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash", default-features = false }
-zcash_address = { version = "0.8", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.19", path = "zcash_client_backend" }
+zcash_address = { version = "0.9", path = "components/zcash_address", default-features = false }
+zcash_client_backend = { version = "0.20", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.9", path = "zcash_keys" }
-zcash_protocol = { version = "0.5.3", path = "components/zcash_protocol", default-features = false }
-zip321 = { version = "0.4", path = "components/zip321" }
+zcash_keys = { version = "0.11", path = "zcash_keys" }
+zcash_protocol = { version = "0.6.1", path = "components/zcash_protocol", default-features = false }
+zip321 = { version = "0.5", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
-zcash_primitives = { version = "0.23", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.23", path = "zcash_proofs", default-features = false }
+zcash_primitives = { version = "0.25", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "0.25", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.3", path = "pczt" }
+pczt = { version = "0.4", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
@@ -73,7 +76,9 @@ block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
 crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
-transparent = { package = "zcash_transparent", version = "0.3", path = "zcash_transparent", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.5", path = "zcash_transparent", default-features = false }
+zcash_script = { version = "0.4", default-features = false }
+zeroize = { version = "1.7", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
@@ -105,6 +110,7 @@ percent-encoding = "2.1.0"
 postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
+regex = { version = "1.11", default-features = false }
 
 # HTTP
 hyper = "1"
@@ -141,7 +147,7 @@ subtle = { version = "2.2.3", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 schemerz = "0.2"
 schemerz-rusqlite = "0.320"
-time = "0.3.22"
+time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
 # Static constants and assertions
@@ -170,6 +176,7 @@ trait-variant = "0.1"
 
 # ZIP 32
 aes = "0.8"
+bip0039 = { version = "0.12" }
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
 
@@ -214,7 +221,7 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))',
+  'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
 

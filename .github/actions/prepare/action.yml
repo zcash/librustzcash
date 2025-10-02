@@ -9,6 +9,10 @@ inputs:
     description: 'Enable all pool-specific feature flags'
     required: false
     default: true
+  all-features:
+    description: 'Enable all feature flags'
+    required: false
+    default: false
   test-dependencies:
     description: 'Include test dependencies'
     required: false
@@ -22,7 +26,7 @@ runs:
   steps:
     - id: pools
       shell: bash
-      run: echo "features=orchard transparent-inputs" >> $GITHUB_OUTPUT
+      run: echo "features=orchard transparent-inputs transparent-key-import transparent-key-encoding" >> $GITHUB_OUTPUT
       if: inputs.all-pools == 'true'
 
     - id: test
@@ -52,3 +56,9 @@ runs:
         '" >> $GITHUB_OUTPUT
       env:
         EXTRA_FEATURES: ${{ inputs.extra-features }}
+      if: inputs.all-features == 'false'
+
+    - id: prepare-all
+      shell: bash
+      run: echo "flags=--all-features" >> $GITHUB_OUTPUT
+      if: inputs.all-features == 'true'

@@ -1,6 +1,6 @@
 [package]
 name = "pczt"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Jack Grigg <jack@electriccoin.co>"]
 edition.workspace = true
 rust-version.workspace = true
@@ -31,6 +31,7 @@ serde_with = { version = "3", default-features = false, features = ["alloc", "ma
 # - Transparent
 secp256k1 = { workspace = true, optional = true }
 transparent = { workspace = true, optional = true }
+zcash_script = { workspace = true, optional = true }
 
 # - Sapling
 bls12_381 = { workspace = true, optional = true }
@@ -66,6 +67,7 @@ zip32.workspace = true
 [features]
 default = ["std"]
 std = ["document-features"]
+zip-233 = ["zcash_primitives/zip-233"]
 
 ## Enables functionality that requires Orchard protocol types.
 orchard = [
@@ -86,7 +88,7 @@ sapling = [
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.
-transparent = ["dep:secp256k1", "dep:transparent"]
+transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_script"]
 
 ## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
 zcp-builder = ["dep:zcash_primitives"]

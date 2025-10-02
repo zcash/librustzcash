@@ -12,11 +12,13 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
+
 use zcash_client_backend::{
     data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
+        wallet::{ConfirmationsPolicy, TargetHeight},
         TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -32,7 +34,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 
 use crate::{
     error::SqliteClientError, util::testing::FixedClock, wallet::init::WalletMigrator, AccountUuid,
@@ -45,7 +47,6 @@ use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
     testing::transparent::GapLimits,
-    zcash_protocol::value::Zatoshis,
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
@@ -196,9 +197,11 @@ impl DataStoreFactory for TestDbFactory {
         if let Some(migrations) = &self.target_migrations {
             migrator
                 .init_or_migrate_to(&mut db_data, migrations)
-                .unwrap();
+                .expect("wallet migration succeeds for test setup with target migrations");
         } else {
-            migrator.init_or_migrate(&mut db_data).unwrap();
+            migrator
+                .init_or_migrate(&mut db_data)
+                .expect("wallet migration succeeds for test setup with default migrations");
         }
         Ok(TestDb::from_parts(db_data, data_file))
     }

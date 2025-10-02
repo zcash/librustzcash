@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use zcash_protocol::value::Zatoshis;
+use zcash_script::script;
 
 use crate::{
     address::Script,
@@ -55,21 +56,18 @@ impl super::Bundle {
             .map(|input| {
                 let prevout = OutPoint::new(input.prevout_txid.into(), input.prevout_index);
 
-                Ok(TxIn {
+                Ok(TxIn::from_parts(
                     prevout,
-                    script_sig: script_sig(input)?,
-                    sequence: input.sequence.unwrap_or(u32::MAX),
-                })
+                    script_sig(input)?,
+                    input.sequence.unwrap_or(u32::MAX),
+                ))
             })
             .collect::<Result<Vec<_>, E>>()?;
 
         let vout = self
             .outputs
             .iter()
-            .map(|output| TxOut {
-                value: output.value,
-                script_pubkey: output.script_pubkey.clone(),
-            })
+            .map(|output| TxOut::new(output.value, Script::from(&output.script_pubkey)))
             .collect::<Vec<_>>();
 
         Ok(if vin.is_empty() && vout.is_empty() {
@@ -96,10 +94,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
     let inputs = bundle
         .inputs
         .iter()
-        .map(|input| TxOut {
-            value: input.value,
-            script_pubkey: input.script_pubkey.clone(),
-        })
+        .map(|input| TxOut::new(input.value, Script::from(&input.script_pubkey)))
         .collect();
 
     EffectsOnly { inputs }
@@ -111,7 +106,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
 pub struct Unbound(EffectsOnly);
 
 impl Authorization for Unbound {
-    type ScriptSig = Script;
+    type ScriptSig = script::Sig;
 }
 
 impl TransparentAuthorizingContext for Unbound {

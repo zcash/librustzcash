@@ -8,7 +8,10 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::{Account, NullifierQuery, TargetValue},
+    data_api::{
+        wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, NullifierQuery, TargetValue,
+    },
     wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
@@ -102,7 +105,7 @@ impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<sapling::Note, A
     }
 }
 
-fn to_spendable_note<P: consensus::Parameters>(
+pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
@@ -148,6 +151,13 @@ fn to_spendable_note<P: consensus::Parameters>(
 
     let ufvk_str: Option<String> = row.get("ufvk")?;
     let scope_code: Option<i64> = row.get("recipient_key_scope")?;
+    let mined_height = row
+        .get::<_, Option<u32>>("mined_height")?
+        .map(BlockHeight::from);
+
+    let max_shielding_input_height = row
+        .get::<_, Option<u32>>("max_shielding_input_height")?
+        .map(BlockHeight::from);
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an
@@ -188,6 +198,8 @@ fn to_spendable_note<P: consensus::Parameters>(
                 ),
                 spending_key_scope,
                 note_commitment_tree_position,
+                mined_height,
+                max_shielding_input_height,
             ))
         })
         .transpose()
@@ -209,7 +221,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         txid,
         index,
         ShieldedProtocol::Sapling,
-        to_spendable_note,
+        to_received_note,
     )
 }
 
@@ -223,7 +235,8 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
@@ -231,10 +244,11 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         params,
         account,
         target_value,
-        anchor_height,
+        target_height,
+        confirmations_policy,
         exclude,
         ShieldedProtocol::Sapling,
-        to_spendable_note,
+        to_received_note,
     )
 }
 
@@ -494,6 +508,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn spend_max_spendable_single_step_proposed_transfer() {
+        testing::pool::spend_max_spendable_single_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn spend_everything_single_step_proposed_transfer() {
+        testing::pool::spend_everything_single_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn fails_to_send_max_to_transparent_with_memo() {
+        testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn send_max_proposal_fails_when_unconfirmed_funds_present() {
+        testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_single_note_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_with_marginal_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_with_marginal_notes_proposed_transfer::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_everything_multi_step_many_notes_proposed_transfer() {
+        testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
     fn send_with_multiple_change_outputs() {
         testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
     }
@@ -502,6 +559,17 @@ pub(crate) mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn spend_all_funds_single_step_proposed_transfer() {
+        testing::pool::spend_all_funds_single_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn spend_all_funds_multi_step_proposed_transfer() {
+        testing::pool::spend_all_funds_multi_step_proposed_transfer::<SaplingPoolTester>()
     }
 
     #[test]
@@ -554,7 +622,6 @@ pub(crate) mod tests {
 
     #[test]
     #[ignore] // FIXME: #1316 This requires support for dust outputs.
-    #[cfg(not(feature = "expensive-tests"))]
     fn zip317_spend() {
         testing::pool::zip317_spend::<SaplingPoolTester>()
     }
@@ -621,9 +688,25 @@ pub(crate) mod tests {
         testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
     }
 
-    #[cfg(feature = "pczt-tests")]
+    #[cfg(all(feature = "orchard", feature = "pczt-tests"))]
     #[test]
     fn pczt_single_step_sapling_to_orchard() {
         testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn wallet_recovery_compute_fees() {
+        testing::pool::wallet_recovery_computes_fees::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn zip315_can_spend_inputs_by_confirmations_policy() {
+        testing::pool::can_spend_inputs_by_confirmations_policy::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn receive_two_notes_with_same_value() {
+        testing::pool::receive_two_notes_with_same_value::<SaplingPoolTester>();
     }
 }

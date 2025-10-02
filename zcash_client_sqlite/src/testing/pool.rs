@@ -36,6 +36,69 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_max_spendable_single_step_proposed_transfer::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_everything_single_step_proposed_transfer::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fails_to_send_max_spendable_to_transparent_with_memo::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_everything_proposal_fails_when_unconfirmed_funds_present::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_everything_multi_step_many_notes_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::spend_everything_multi_step_with_marginal_notes_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_everything_multi_step_single_note_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
         TestDbFactory::default(),
@@ -55,6 +118,21 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                 if bad_index == &expected_bad_index)
         },
     )
+}
+
+pub(crate) fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_all_funds_single_step_proposed_transfer::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_all_funds_multi_step_proposed_transfer::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -265,6 +343,44 @@ pub(crate) fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester>() {
 #[cfg(feature = "pczt-tests")]
 pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::pczt_single_step::<P0, P1, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
+    use rusqlite::named_params;
+
+    zcash_client_backend::data_api::testing::pool::wallet_recovery_computes_fees::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |db, txid| {
+            db.db_mut().conn.execute(
+                "UPDATE transactions
+                 SET fee = NULL
+                 WHERE txid = :txid",
+                named_params! {
+                     ":txid": txid.as_ref(),
+                },
+            )?;
+            Ok(())
+        },
+    )
+}
+
+pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
+    for is_trusted in [false, true] {
+        zcash_client_backend::data_api::testing::pool::zip_315_confirmations_test_steps::<T>(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            is_trusted,
+        );
+    }
+}
+
+pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::receive_two_notes_with_same_value::<T>(
         TestDbFactory::default(),
         BlockCache::new(),
     )

@@ -1,5 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
+use std::fmt::Debug;
 
 use incrementalmerkletree::Position;
 
@@ -26,7 +27,7 @@ use crate::fees::orchard as orchard_fees;
 use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
     txid: TxId,
     protocol: ShieldedProtocol,
@@ -67,7 +68,7 @@ impl NoteId {
 /// * for wallet-internal outputs, the internal account ID and metadata about the note.
 /// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
 ///   internal account ID and metadata about the outpoint;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
     External {
         recipient_address: ZcashAddress,
@@ -89,6 +90,7 @@ pub enum Recipient<AccountId> {
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
+#[derive(Clone)]
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: usize,
@@ -204,7 +206,7 @@ impl WalletTransparentOutput {
     }
 
     pub fn value(&self) -> Zatoshis {
-        self.txout.value
+        self.txout.value()
     }
 }
 
@@ -218,6 +220,7 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 }
 
 /// A reference to a spent note belonging to the wallet within a transaction.
+#[derive(Clone)]
 pub struct WalletSpend<Nf, AccountId> {
     index: usize,
     nf: Nf,
@@ -257,6 +260,7 @@ pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, Account
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 
 /// An output that was successfully decrypted in the process of wallet scanning.
+#[derive(Clone)]
 pub struct WalletOutput<Note, Nullifier, AccountId> {
     index: usize,
     ephemeral_key: EphemeralKeyBytes,
@@ -373,9 +377,9 @@ impl Note {
     }
 }
 
-/// Information about a note that is tracked by the wallet that is available for spending,
-/// with sufficient information for use in note selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A note that was received by the wallet, along with contextual information about the output that
+/// generated the note and the key that is required to spend it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ReceivedNote<NoteRef, NoteT> {
     note_id: NoteRef,
     txid: TxId,
@@ -383,9 +387,13 @@ pub struct ReceivedNote<NoteRef, NoteT> {
     note: NoteT,
     spending_key_scope: Scope,
     note_commitment_tree_position: Position,
+    mined_height: Option<BlockHeight>,
+    max_shielding_input_height: Option<BlockHeight>,
 }
 
 impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
+    /// Constructs a new [`ReceivedNote`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         note_id: NoteRef,
         txid: TxId,
@@ -393,6 +401,8 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
         note: NoteT,
         spending_key_scope: Scope,
         note_commitment_tree_position: Position,
+        mined_height: Option<BlockHeight>,
+        max_shielding_input_height: Option<BlockHeight>,
     ) -> Self {
         ReceivedNote {
             note_id,
@@ -401,26 +411,49 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note,
             spending_key_scope,
             note_commitment_tree_position,
+            mined_height,
+            max_shielding_input_height,
         }
     }
 
+    /// Returns the storage backend's internal identifier for the note.
     pub fn internal_note_id(&self) -> &NoteRef {
         &self.note_id
     }
+    /// Returns the txid of the transaction that constructed the note.
     pub fn txid(&self) -> &TxId {
         &self.txid
     }
+    /// Returns the output index of the note within the transaction, according to the note's
+    /// shielded protocol.
     pub fn output_index(&self) -> u16 {
         self.output_index
     }
+    /// Returns the note data.
     pub fn note(&self) -> &NoteT {
         &self.note
     }
+    /// Returns the [`Scope`] of the spending key required to make spend authorizing signatures for
+    /// the note.
     pub fn spending_key_scope(&self) -> Scope {
         self.spending_key_scope
     }
+    /// Returns the position of the note in the note commitment tree.
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
+    }
+    /// Returns the block height at which the transaction that produced the note was mined.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+    /// Returns the maximum block height among those at which transparent inputs to the transaction
+    /// that produced the note were created, considering only transparent inputs that belong to the
+    /// same wallet account as the note. This height is used in determining the effective number of
+    /// confirmations for externally-received value. See [`ZIP 315`] for additional information.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315
+    pub fn max_shielding_input_height(&self) -> Option<BlockHeight> {
+        self.max_shielding_input_height
     }
 
     /// Map over the `note` field of this data structure.
@@ -435,7 +468,44 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             note: f(self.note),
             spending_key_scope: self.spending_key_scope,
             note_commitment_tree_position: self.note_commitment_tree_position,
+            mined_height: self.mined_height,
+            max_shielding_input_height: self.max_shielding_input_height,
         }
+    }
+}
+
+impl<NoteRef: Debug> Debug for ReceivedNote<NoteRef, sapling::Note> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedNote")
+            .field("note_id", &self.note_id)
+            .field("txid", &self.txid)
+            .field("output_index", &self.output_index)
+            .field("note_value", &self.note_value())
+            .field("spending_key_scope", &self.spending_key_scope)
+            .field(
+                "note_commitment_tree_position",
+                &self.note_commitment_tree_position,
+            )
+            .field("mined_height", &self.mined_height)
+            .finish()
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef: Debug> Debug for ReceivedNote<NoteRef, orchard::note::Note> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedNote")
+            .field("note_id", &self.note_id)
+            .field("txid", &self.txid)
+            .field("output_index", &self.output_index)
+            .field("note_value", &self.note_value())
+            .field("spending_key_scope", &self.spending_key_scope)
+            .field(
+                "note_commitment_tree_position",
+                &self.note_commitment_tree_position,
+            )
+            .field("mined_height", &self.mined_height)
+            .finish()
     }
 }
 
@@ -554,13 +624,21 @@ impl OvkPolicy {
     }
 }
 
-/// Metadata related to the ZIP 32 derivation of a transparent address.
-/// This is implicitly scoped to an account.
+/// Source information for a transparent address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
-pub struct TransparentAddressMetadata {
-    scope: TransparentKeyScope,
-    address_index: NonHardenedChildIndex,
+pub enum TransparentAddressMetadata {
+    /// BIP 44 path derivation information for the address below account pubkey level, i.e. the
+    /// `change` and `index` elements of the path.
+    Derived {
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+    },
+    /// The address was derived from a secp256k1 public key for which derivation information is
+    /// unknown or for which the associated spending key was produced from system randomness.
+    /// This variant provides the public key directly.
+    #[cfg(feature = "transparent-key-import")]
+    Standalone(secp256k1::PublicKey),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -568,17 +646,29 @@ impl TransparentAddressMetadata {
     /// Returns a `TransparentAddressMetadata` in the given scope for the
     /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
-        Self {
+        Self::Derived {
             scope,
             address_index,
         }
     }
 
-    pub fn scope(&self) -> TransparentKeyScope {
-        self.scope
+    /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
+    /// if known. Returns `None` for standalone addresses in the wallet.
+    pub fn scope(&self) -> Option<TransparentKeyScope> {
+        match self {
+            TransparentAddressMetadata::Derived { scope, .. } => Some(*scope),
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 
-    pub fn address_index(&self) -> NonHardenedChildIndex {
-        self.address_index
+    /// Returns the BIP 44 [`NonHardenedChildIndex`] at which the address was derived, if known.
+    /// Returns `None` for standalone addresses in the wallet.
+    pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
+        match self {
+            TransparentAddressMetadata::Derived { address_index, .. } => Some(*address_index),
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 }

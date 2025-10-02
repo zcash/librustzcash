@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package memwallet;
+
+import "primitives.proto";
+
+message Note {
+  ShieldedProtocol protocol = 1;
+  bytes recipient = 2;
+  uint64 value = 3;
+  optional bytes rho = 4;
+  RSeed rseed = 5;
+}
+
+message RSeed {
+  optional RSeedType rseed_type = 1;
+  bytes payload = 2;
+}
+
+enum RSeedType {
+  BeforeZip212 = 0;
+  AfterZip212 = 1;
+}
+
+message ReceivedNote {
+  NoteId note_id = 1;
+  TxId tx_id = 2;
+  uint32 output_index = 3;
+  uint32 account_id = 4;
+  Note note = 5;
+  optional Nullifier nullifier = 6;
+  bool is_change = 7;
+  bytes memo = 8;
+  optional uint64 commitment_tree_position = 9;
+  optional Scope recipient_key_scope = 10;
+}
+
+enum Scope {
+  Internal = 0;
+  External = 1;
+}
+
+message SentNote {
+  uint32 from_account_id = 1;
+  Recipient to = 2;
+  uint64 value = 3;
+  bytes memo = 4;
+}
+
+message Recipient {
+  RecipientType recipient_type = 1;
+
+  optional string address = 2; // either the zcash address if external or transparent address if EphemeralTransparent
+  optional PoolType pool_type = 3; // the shielded protocol if External
+  optional uint32 account_id = 4; // the account id if EphemeralTransparent or InternalAccount
+  optional OutPoint outpoint = 5; // the outpoint metadata if InternalAccount
+  optional Note note = 6; // the note if InternalAccount
+}
+
+enum RecipientType {
+  ExternalRecipient = 0;
+  EphemeralTransparent = 1;
+  InternalAccount = 2;
+}
+
+// associates a note and a transaction where it was spent
+message ReceivedNoteSpendRecord {
+  NoteId note_id = 1;
+  TxId tx_id = 2;
+}
+
+// records where a nullifier was spent by block height and tx index in that block
+message NullifierRecord {
+  Nullifier nullifier = 1;
+  uint32 block_height = 2;
+  uint32 tx_index = 3;
+}
+
+// Record storing the sent information for a given note
+message SentNoteRecord {
+  NoteId sent_note_id = 1;
+  SentNote sent_note = 2;
+}

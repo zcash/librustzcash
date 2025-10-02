@@ -176,7 +176,8 @@ impl UnifiedAddress {
         &self.unknown
     }
 
-    fn to_address(&self, net: NetworkType) -> ZcashAddress {
+    /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
         let items = self
             .unknown
             .iter()
@@ -213,7 +214,7 @@ impl UnifiedAddress {
 
     /// Returns the string encoding of this `UnifiedAddress` for the given network.
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_address(params.network_type()).to_string()
+        self.to_zcash_address(params.network_type()).to_string()
     }
 
     /// Returns the set of receiver typecodes.
@@ -232,6 +233,17 @@ impl UnifiedAddress {
                 .iter()
                 .map(|(typecode, _)| Typecode::Unknown(*typecode)),
         );
+        result.collect()
+    }
+
+    /// Returns the set of receivers in the unified address, excluding unknown receiver types.
+    pub fn as_understood_receivers(&self) -> Vec<Receiver> {
+        let result = core::iter::empty();
+        #[cfg(feature = "orchard")]
+        let result = result.chain(self.orchard.map(Receiver::Orchard));
+        #[cfg(feature = "sapling")]
+        let result = result.chain(self.sapling.map(Receiver::Sapling));
+        let result = result.chain(self.transparent.map(Receiver::Transparent));
         result.collect()
     }
 }
@@ -408,7 +420,7 @@ impl Address {
                     ZcashAddress::from_transparent_p2sh(net, *data)
                 }
             },
-            Address::Unified(ua) => ua.to_address(net),
+            Address::Unified(ua) => ua.to_zcash_address(net),
             Address::Tex(data) => ZcashAddress::from_tex(net, *data),
         }
     }
@@ -457,6 +469,29 @@ impl Address {
             Address::Transparent(_) => None,
             Address::Unified(ua) => ua.sapling().copied(),
             Address::Tex(_) => None,
+        }
+    }
+
+    /// Returns the protocol-typed unified [`Receiver`]s of this address as a vector, ignoring the
+    /// original encoding of the address.
+    ///
+    /// In the case that the underlying address is the [`Address::Unified`] variant, this is
+    /// equivalent to [`UnifiedAddress::as_understood_receivers`] in that it does not return
+    /// unknown receiver data.
+    ///
+    /// Note that this method eliminates the distinction between transparent addresses and the
+    /// transparent receiving address for a TEX address; as such, it should only be used in cases
+    /// where address uses are being detected in inspection of chain data, and NOT in any situation
+    /// where a transaction sending to this address is being constructed.
+    pub fn as_understood_unified_receivers(&self) -> Vec<Receiver> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(addr) => vec![Receiver::Sapling(*addr)],
+            Address::Transparent(addr) => vec![Receiver::Transparent(*addr)],
+            Address::Unified(ua) => ua.as_understood_receivers(),
+            Address::Tex(addr) => vec![Receiver::Transparent(TransparentAddress::PublicKeyHash(
+                *addr,
+            ))],
         }
     }
 }

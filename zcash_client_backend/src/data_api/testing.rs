@@ -41,7 +41,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
@@ -51,16 +51,19 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
+        ConfirmationsPolicy, SpendingKeys,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+    ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TransactionDataRequest,
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
+    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
+#[cfg(feature = "transparent-inputs")]
+use crate::data_api::Balance;
 use crate::{
-    data_api::TargetValue,
+    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
     fees::{
         standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
@@ -74,7 +77,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::wallet::input_selection::ShieldingSelector,
+    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
     crate::wallet::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     std::ops::Range,
@@ -452,6 +455,12 @@ impl<Cache, DataStore: WalletTest, Network> TestState<Cache, DataStore, Network>
     /// Exposes the network in use.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+}
+
+impl<Cache, DataStore: WalletTest, Network> Drop for TestState<Cache, DataStore, Network> {
+    fn drop(&mut self) {
+        self.wallet_data.finally();
     }
 }
 
@@ -923,7 +932,7 @@ where
             from_account.usk(),
             request,
             OvkPolicy::Sender,
-            NonZeroU32::MIN,
+            ConfirmationsPolicy::MIN,
         )
     }
 
@@ -936,7 +945,7 @@ where
         usk: &UnifiedSpendingKey,
         request: zip321::TransactionRequest,
         ovk_policy: OvkPolicy,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::TransferErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: InputSelector<InputSource = DbT>,
@@ -958,7 +967,7 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
         )?;
 
         create_proposed_transactions(
@@ -966,7 +975,7 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
         )
@@ -980,7 +989,7 @@ where
         input_selector: &InputsT,
         change_strategy: &ChangeT,
         request: zip321::TransactionRequest,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -997,7 +1006,38 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments.
+    #[allow(clippy::type_complexity)]
+    pub fn propose_send_max_transfer<FeeRuleT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        fee_rule: &FeeRuleT,
+        to: ZcashAddress,
+        memo: Option<MemoBytes>,
+        mode: MaxSpendMode,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<
+        Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeSendMaxErrT<DbT, Infallible, FeeRuleT>,
+    >
+    where
+        FeeRuleT: FeeRule + Clone,
+    {
+        let network = self.network().clone();
+        propose_send_max_transfer::<_, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+            fee_rule,
+            to,
+            memo,
+            mode,
+            confirmations_policy,
         )
     }
 
@@ -1008,7 +1048,7 @@ where
         &mut self,
         spend_from_account: <DbT as InputSource>::AccountId,
         fee_rule: StandardFeeRule,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
         to: &Address,
         amount: Zatoshis,
         memo: Option<MemoBytes>,
@@ -1029,7 +1069,7 @@ where
             &network,
             fee_rule,
             spend_from_account,
-            min_confirmations,
+            confirmations_policy,
             to,
             amount,
             memo,
@@ -1057,7 +1097,7 @@ where
         shielding_threshold: Zatoshis,
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1077,21 +1117,18 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
     /// Invokes [`create_proposed_transactions`] with the given arguments.
     #[allow(clippy::type_complexity)]
-    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT>(
+    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT, N>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
-        proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
-    ) -> Result<
-        NonEmpty<TxId>,
-        super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
-    >
+        proposal: &Proposal<FeeRuleT, N>,
+    ) -> Result<NonEmpty<TxId>, super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
     where
         FeeRuleT: FeeRule,
     {
@@ -1102,7 +1139,7 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
         )
@@ -1178,7 +1215,7 @@ where
         usk: &UnifiedSpendingKey,
         from_addrs: &[TransparentAddress],
         to_account: <DbT as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::ShieldErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: ShieldingSelector<InputSource = DbT>,
@@ -1196,22 +1233,22 @@ where
             input_selector,
             change_strategy,
             shielding_threshold,
-            usk,
+            &SpendingKeys::from_unified_spending_key(usk.clone()),
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
     fn with_account_balance<T, F: FnOnce(&AccountBalance) -> T>(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
         f: F,
     ) -> T {
         let binding = self
             .wallet()
-            .get_wallet_summary(min_confirmations)
+            .get_wallet_summary(confirmations_policy)
             .unwrap()
             .unwrap();
         f(binding.account_balances().get(&account).unwrap())
@@ -1219,13 +1256,17 @@ where
 
     /// Returns the total balance in the given account at this point in the test.
     pub fn get_total_balance(&self, account: AccountIdT) -> Zatoshis {
-        self.with_account_balance(account, 0, |balance| balance.total())
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
     }
 
     /// Returns the balance in the given account that is spendable with the given number
     /// of confirmations at this point in the test.
-    pub fn get_spendable_balance(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_spendable_balance(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.spendable_value()
         })
     }
@@ -1235,9 +1276,9 @@ where
     pub fn get_pending_shielded_balance(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
         .unwrap()
@@ -1246,15 +1287,24 @@ where
     /// Returns the amount of change in the given account that is not yet spendable with
     /// the given number of confirmations at this point in the test.
     #[allow(dead_code)]
-    pub fn get_pending_change(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_pending_change(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.change_pending_confirmation()
         })
     }
 
     /// Returns a summary of the wallet at this point in the test.
-    pub fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary<AccountIdT>> {
-        self.wallet().get_wallet_summary(min_confirmations).unwrap()
+    pub fn get_wallet_summary(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Option<WalletSummary<AccountIdT>> {
+        self.wallet()
+            .get_wallet_summary(confirmations_policy)
+            .unwrap()
     }
 }
 
@@ -1398,7 +1448,6 @@ impl TestBuilder<(), ()> {
         canopy: Some(BlockHeight::from_u32(100_000)),
         nu5: Some(BlockHeight::from_u32(100_000)),
         nu6: None,
-        #[cfg(zcash_unstable = "nu6.1")]
         nu6_1: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
@@ -1702,13 +1751,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -2501,10 +2553,21 @@ impl InputSource for MockWalletDb {
         _account: Self::AccountId,
         _target_value: TargetValue,
         _sources: &[ShieldedProtocol],
-        _anchor_height: BlockHeight,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
-    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
-        Ok(SpendableNotes::empty())
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Ok(ReceivedNotes::empty())
+    }
+
+    fn select_unspent_notes(
+        &self,
+        _account: Self::AccountId,
+        _sources: &[ShieldedProtocol],
+        _target_height: TargetHeight,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        Err(())
     }
 
     fn get_account_metadata(
@@ -2535,8 +2598,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        _derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }
@@ -2585,7 +2647,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_wallet_summary(
         &self,
-        _min_confirmations: u32,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         Ok(None)
     }
@@ -2621,7 +2683,7 @@ impl WalletRead for MockWalletDb {
     fn get_target_and_anchor_heights(
         &self,
         _min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         Ok(None)
     }
 
@@ -2663,6 +2725,7 @@ impl WalletRead for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _include_change: bool,
+        _include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2671,8 +2734,9 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2750,6 +2814,15 @@ impl WalletWrite for MockWalletDb {
         todo!()
     }
 
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
@@ -2822,6 +2895,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        _request: TransactionsInvolvingAddress,
+        _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

@@ -8,9 +8,10 @@ use std::{
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
-use zip321::TransactionRequest;
+use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
+    data_api::wallet::TargetHeight,
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
 };
@@ -48,6 +49,8 @@ pub enum ProposalError {
     PaymentPoolsMismatch,
     /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
     SpendsChange(StepOutput),
+    /// The proposal results in an invalid payment request according to ZIP-321.
+    Zip321(Zip321Error),
     /// A proposal step created an ephemeral output that was not spent in any later step.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputLeftUnspent(StepOutput),
@@ -105,6 +108,10 @@ impl Display for ProposalError {
             ProposalError::SpendsChange(r) => write!(
                 f,
                 "The proposal attempts to spends the change output created at step {r:?}.",
+            ),
+            ProposalError::Zip321(r) => write!(
+                f,
+                "The proposal results in an invalid payment {r:?}.",
             ),
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputLeftUnspent(r) => write!(
@@ -166,7 +173,7 @@ impl<NoteRef> ShieldedInputs<NoteRef> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Proposal<FeeRuleT, NoteRef> {
     fee_rule: FeeRuleT,
-    min_target_height: BlockHeight,
+    min_target_height: TargetHeight,
     steps: NonEmpty<Step<NoteRef>>,
 }
 
@@ -183,7 +190,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `steps`: A vector of steps that make up the proposal.
     pub fn multi_step(
         fee_rule: FeeRuleT,
-        min_target_height: BlockHeight,
+        min_target_height: TargetHeight,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
         let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
@@ -273,7 +280,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
-        min_target_height: BlockHeight,
+        min_target_height: TargetHeight,
         is_shielding: bool,
     ) -> Result<Self, ProposalError> {
         Ok(Self {
@@ -301,7 +308,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// The chain must contain at least this many blocks in order for the proposal to
     /// be executed.
-    pub fn min_target_height(&self) -> BlockHeight {
+    pub fn min_target_height(&self) -> TargetHeight {
         self.min_target_height
     }
 
@@ -416,7 +423,7 @@ impl<NoteRef> Step<NoteRef> {
 
         let transparent_input_total = transparent_inputs
             .iter()
-            .map(|out| out.txout().value)
+            .map(|out| out.txout().value())
             .try_fold(Zatoshis::ZERO, |acc, a| {
                 (acc + a).ok_or(ProposalError::Overflow)
             })?;
@@ -425,7 +432,7 @@ impl<NoteRef> Step<NoteRef> {
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -451,7 +458,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)

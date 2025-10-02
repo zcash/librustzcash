@@ -17,7 +17,7 @@ use shardtree::{
 };
 
 use zcash_client_backend::{
-    data_api::chain::CommitmentTreeRoot,
+    data_api::{chain::CommitmentTreeRoot, wallet::TargetHeight},
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
@@ -770,12 +770,11 @@ pub(crate) fn get_checkpoint(
 pub(crate) fn get_max_checkpointed_height(
     conn: &rusqlite::Connection,
     protocol: ShieldedProtocol,
-    chain_tip_height: BlockHeight,
+    target_height: TargetHeight,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
-    let max_checkpoint_height =
-        u32::from(chain_tip_height).saturating_sub(u32::from(min_confirmations) - 1);
+    let max_checkpoint_height = target_height - u32::from(min_confirmations);
 
     // We exclude from consideration all checkpoints having heights greater than the maximum
     // checkpoint height. The checkpoint depth is the number of excluded checkpoints + 1.
@@ -787,7 +786,7 @@ pub(crate) fn get_max_checkpointed_height(
              ORDER BY checkpoint_id DESC
              LIMIT 1",
         ),
-        named_params![":max_checkpoint_height": max_checkpoint_height],
+        named_params![":max_checkpoint_height": u32::from(max_checkpoint_height)],
         |row| row.get::<_, u32>(0).map(BlockHeight::from),
     )
     .optional()

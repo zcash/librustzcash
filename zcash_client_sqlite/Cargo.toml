@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.17.1"
+version = "0.18.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -32,6 +32,7 @@ zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
+zcash_script.workspace = true
 zip32.workspace = true
 transparent.workspace = true
 
@@ -47,6 +48,7 @@ tracing.workspace = true
 # - Serialization
 bitflags.workspace = true
 byteorder.workspace = true
+hex.workspace = true
 nonempty.workspace = true
 prost.workspace = true
 group.workspace = true
@@ -63,6 +65,9 @@ static_assertions.workspace = true
 # - Shielded protocols
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
+
+# - Transparent protocol
+secp256k1 = { workspace = true, optional = true }
 
 # - Note commitment trees
 incrementalmerkletree.workspace = true
@@ -96,6 +101,7 @@ orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
@@ -108,11 +114,12 @@ zip321 = { workspace = true }
 
 [features]
 default = ["multicore"]
+zip-233 = ["zcash_primitives/zip-233"]
 
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 
-## Enables support for storing data related to the sending and receiving of 
+## Enables support for storing data related to the sending and receiving of
 ## Orchard funds.
 orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
@@ -121,15 +128,30 @@ test-dependencies = [
     "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",
-    "incrementalmerkletree/test-dependencies",
 ]
 
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
   "dep:bip32",
+  "dep:secp256k1",
   "transparent/transparent-inputs",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
+]
+
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature mut
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = [
+  "transparent-inputs",
+  "zcash_client_backend/transparent-key-import"
+]
+
+## Enables import from legacy zcashd wallet.dat wallets.
+zcashd-compat = [
+  "zcash_keys/zcashd-compat",
+  "zcash_client_backend/zcashd-compat"
 ]
 
 ## Enables `serde` derives for certain types.
