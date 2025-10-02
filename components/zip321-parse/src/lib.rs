@@ -95,7 +95,10 @@ impl Memo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Param {
     Addr(String),
-    Amount { coins: u64, zatoshis: u64 },
+    Amount {
+        coins: u64,
+        fractional_zatoshis: u64,
+    },
     Memo(Memo),
     Label(String),
     Message(String),
@@ -246,7 +249,10 @@ fn to_indexed_param(
         "address" => Ok(Param::Addr(value.to_owned())),
         "amount" => parse_amount(value)
             .map_err(|e| e.to_string())
-            .map(|(_, (coins, zatoshis))| Param::Amount { coins, zatoshis }),
+            .map(|(_, (coins, zatoshis))| Param::Amount {
+                coins,
+                fractional_zatoshis: zatoshis,
+            }),
 
         "label" => percent_decode(value.as_bytes())
             .decode_utf8()
@@ -294,7 +300,7 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
     let mut payment = Payment {
         recipient_address,
         amount_coins: 0,
-        amount_zatoshis: 0,
+        amount_fractional_zatoshis: 0,
         memo: None,
         label: None,
         message: None,
@@ -303,9 +309,12 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
 
     for v in vs {
         match v {
-            Param::Amount { coins, zatoshis } => {
+            Param::Amount {
+                coins,
+                fractional_zatoshis: zatoshis,
+            } => {
                 payment.amount_coins = coins;
-                payment.amount_zatoshis = zatoshis;
+                payment.amount_fractional_zatoshis = zatoshis;
             }
             Param::Memo(m) => {
                 payment.memo = Some(m);
@@ -323,19 +332,12 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
 /// A single payment being requested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
-    // TODO(schell): changed
-    /// The address to which the payment should be sent.
+    /// The encoded address to which the payment should be sent.
     recipient_address: String,
-    // TODO(schell): changed, make separate types for whole and fractional
     /// The amount of the payment that is being requested.
     amount_coins: u64,
-    amount_zatoshis: u64,
-    // TODO(schell): changed
+    amount_fractional_zatoshis: u64,
     /// A memo that, if included, must be provided with the payment.
-    /// If a memo is present and [`recipient_address`] is not a shielded
-    /// address, the wallet should report an error.
-    ///
-    /// [`recipient_address`]: #structfield.recipient_address
     memo: Option<Memo>,
     /// A human-readable label for this payment within the larger structure
     /// of the transaction request.
@@ -372,7 +374,7 @@ impl Payment {
         Self {
             recipient_address,
             amount_coins: amount.0,
-            amount_zatoshis: amount.1,
+            amount_fractional_zatoshis: amount.1,
             memo,
             label,
             message,
@@ -385,7 +387,7 @@ impl Payment {
         Self {
             recipient_address,
             amount_coins: amount.0,
-            amount_zatoshis: amount.0,
+            amount_fractional_zatoshis: amount.0,
             memo: None,
             label: None,
             message: None,
@@ -406,16 +408,8 @@ impl Payment {
     /// Returns the integer zatoshis value of the payment that is being requested, after
     /// subtracting the whole integer ZEC.
     pub fn amount_zatoshis_remainder(&self) -> u64 {
-        self.amount_zatoshis
+        self.amount_fractional_zatoshis
     }
-
-    // TODO(schell): add pub fn amount(&self) -> Zatoshis in the main crate
-
-    // TODO(schell): add in the main crate
-    // /// Returns the memo that, if included, must be provided with the payment.
-    // pub fn memo_string(&self) -> Option<&str> {
-    //     self.memo.as_deref()
-    // }
 
     /// Returns the memo that, if included, must be provided with the payment.
     pub fn memo(&self) -> Option<&Memo> {
@@ -475,7 +469,8 @@ impl TransactionRequest {
 impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     /// Constructs a new transaction request that obeys the ZIP-321 invariants.
     ///
-    /// TODO(schell): write about the constructor
+    /// `constructor` is a function that takes the index of the payment and the
+    /// `Payment` and conditionally constructs a domain specific payment.
     pub fn new_with_constructor<E>(
         payments: Vec<P>,
         constructor: impl Fn(usize, Payment) -> Result<P, E>,
@@ -562,7 +557,7 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
         ) -> impl IntoIterator<Item = String> + '_ {
             std::iter::empty()
                 .chain(Some(render::amount_coins_zats_param(
-                    (payment.amount_coins, payment.amount_zatoshis),
+                    (payment.amount_coins, payment.amount_fractional_zatoshis),
                     payment_index,
                 )))
                 .chain(
@@ -602,8 +597,6 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
 
                 format!(
                     "zcash:{}{}{}",
-                    // TODO(schell):
-                    // payment.recipient_address.encode(),
                     payment.recipient_address,
                     if query_params.is_empty() { "" } else { "?" },
                     query_params.join("&")
@@ -818,7 +811,7 @@ pub mod testing {
             // address is just a 42 char ascii string, since this crate does
             // a shallow parsing, and not validation
             recipient_address in "[a-zA-Z0-9]{42}",
-            (amount_coins, amount_zatoshis) in arb_amount(),
+            (amount_coins, amount_fractional_zatoshis) in arb_amount(),
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
             label in option::of(any::<String>()),
@@ -828,7 +821,7 @@ pub mod testing {
             Payment {
                 recipient_address,
                 amount_coins,
-                amount_zatoshis,
+                amount_fractional_zatoshis,
                 memo,
                 label,
                 message,
@@ -881,7 +874,7 @@ mod test {
                 Payment {
                     recipient_address: "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k".to_owned(),
                     amount_coins: 3768769,
-                    amount_zatoshis: 2796286,
+                    amount_fractional_zatoshis: 2796286,
                     memo: None,
                     label: None,
                     message: Some(String::new()),
