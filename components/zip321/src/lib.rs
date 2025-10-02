@@ -291,37 +291,6 @@ impl TransactionRequest {
     }
 }
 
-mod render {
-    use zcash_address::ZcashAddress;
-    use zcash_protocol::{memo::MemoBytes, value::Zatoshis};
-
-    /// Constructs an "address" key/value pair containing the encoded recipient address
-    /// at the specified parameter index.
-    pub fn addr_param(addr: &ZcashAddress, idx: Option<usize>) -> String {
-        zip321_parse::render::addr_param_encoded(&addr.encode(), idx)
-    }
-
-    /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
-    /// value for inclusion in a ZIP 321 URI.
-    pub fn amount_str(amount: Zatoshis) -> String {
-        let (coins, zats) = super::split_zatoshis(amount);
-        zip321_parse::render::amount_coins_zats_str(coins, zats)
-    }
-
-    /// Constructs an "amount" key/value pair containing the encoded ZEC amount
-    /// at the specified parameter index.
-    pub fn amount_param(amount: Zatoshis, idx: Option<usize>) -> String {
-        zip321_parse::render::amount_coins_zats_param(super::split_zatoshis(amount), idx)
-    }
-
-    /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
-    /// at the specified parameter index.
-    pub fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
-        use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
-        zip321_parse::render::memo_param(&BASE64_URL_SAFE_NO_PAD.encode(value.as_slice()), idx)
-    }
-}
-
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::btree_map;
@@ -409,7 +378,6 @@ mod tests {
     use crate::combine_zatoshis;
 
     use super::{
-        render::{amount_str, memo_param},
         testing::{arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
         Payment, TransactionRequest,
     };
@@ -440,6 +408,20 @@ mod tests {
     fn parse_amount(i: &str) -> Zatoshis {
         let (_, zec_rem) = zip321_parse::parse_amount(&i).unwrap();
         combine_zatoshis(zec_rem).unwrap()
+    }
+
+    /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
+    /// value for inclusion in a ZIP 321 URI.
+    fn amount_str(amount: Zatoshis) -> String {
+        let (coins, zats) = super::split_zatoshis(amount);
+        zip321_parse::render::amount_coins_zats_str(coins, zats)
+    }
+
+    /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
+    /// at the specified parameter index.
+    fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
+        use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+        zip321_parse::render::memo_param(&BASE64_URL_SAFE_NO_PAD.encode(value.as_slice()), idx)
     }
 
     #[test]
