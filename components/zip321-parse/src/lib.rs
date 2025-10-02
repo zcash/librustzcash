@@ -447,7 +447,7 @@ impl Payment {
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransactionRequest<P: AsRef<Payment> + AsMut<Payment> = Payment> {
+pub struct TransactionRequest<P = Payment> {
     payments: BTreeMap<usize, P>,
 }
 
@@ -496,13 +496,6 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
         }
 
         Ok(request)
-    }
-
-    /// Constructs a new empty transaction request.
-    pub fn empty() -> Self {
-        Self {
-            payments: BTreeMap::new(),
-        }
     }
 
     /// Constructs a new transaction request from the provided map from payment

@@ -18,7 +18,7 @@ use zcash_protocol::{
 };
 
 /// Errors that may be produced in decoding of payment requests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Zip321Error {
     /// A memo value exceeded 512 bytes in length or could not be interpreted as a UTF-8 string
     /// when using a valid UTF-8 lead byte.
@@ -27,18 +27,20 @@ pub enum Zip321Error {
     /// transparent recipient address, which is not supported by the protocol.
     TransparentMemo(usize),
     /// The ZIP 321 URI was malformed and failed to parse.
-    ParseError(String),
+    ParseError(zip321_parse::Error),
+    /// Any other stringly typed error
+    Other(String),
 }
 
 impl<E: Display> From<ConversionError<E>> for Zip321Error {
     fn from(value: ConversionError<E>) -> Self {
-        Zip321Error::ParseError(format!("Address parsing failed: {value}"))
+        Zip321Error::Other(format!("Address parsing failed: {value}"))
     }
 }
 
 impl From<zip321_parse::Error> for Zip321Error {
-    fn from(value: zip321_parse::Error) -> Self {
-        Zip321Error::ParseError(value.to_string())
+    fn from(e: zip321_parse::Error) -> Self {
+        Zip321Error::ParseError(e)
     }
 }
 
@@ -51,10 +53,10 @@ impl Display for Zip321Error {
             ),
             Zip321Error::TransparentMemo(idx) => write!(
                 f,
-                "Payment {idx} is invalid: cannot send a memo to a transparent recipient address",
-                idx = idx.to_string()
+                "Payment {idx} is invalid: cannot send a memo to a transparent recipient address"
             ),
-            Zip321Error::ParseError(s) => write!(f, "Parse failure: {s}"),
+            Zip321Error::ParseError(e) => write!(f, "Parse failure: {e}"),
+            Zip321Error::Other(s) => write!(f, "Parse failure: {s}"),
         }
     }
 }
@@ -113,7 +115,7 @@ impl Payment {
     ) -> Result<Self, Zip321Error> {
         let addy = inner.recipient_address_str();
         let recipient_address = ZcashAddress::try_from_encoded(addy).map_err(|err| {
-            Zip321Error::ParseError(format!(
+            Zip321Error::Other(format!(
                 "Could not interpret {addy} as a valid Zcash address: {err}"
             ))
         })?;
@@ -212,7 +214,7 @@ fn combine_zatoshis((zec, zats): (u64, u64)) -> Result<Zatoshis, Zip321Error> {
         .and_then(|coin_zats| coin_zats.checked_add(zats))
         .ok_or(BalanceError::Overflow)
         .and_then(Zatoshis::from_u64)
-        .map_err(|_| Zip321Error::ParseError(format!("Not a valid zat amount: {zec}.{zats}")))
+        .map_err(|_| Zip321Error::Other(format!("Not a valid zat amount: {zec}.{zats}")))
 }
 
 /// A ZIP321 transaction request.
