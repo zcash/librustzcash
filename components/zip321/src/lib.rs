@@ -158,7 +158,7 @@ impl Payment {
                 label,
                 message,
                 other_params,
-            )?;
+            );
             Some(Self {
                 recipient_address,
                 amount,

@@ -361,9 +361,6 @@ impl AsMut<Payment> for Payment {
 
 impl Payment {
     /// Constructs a new [`Payment`] from its constituent parts.
-    ///
-    /// Returns `None` if the payment requests that a memo be sent to a recipient that cannot
-    /// receive a memo.
     pub fn new(
         recipient_address: String,
         amount: (u64, u64),
@@ -371,19 +368,15 @@ impl Payment {
         label: Option<String>,
         message: Option<String>,
         other_params: Vec<(String, String)>,
-    ) -> Option<Self> {
-        if memo.is_none() {
-            Some(Self {
-                recipient_address,
-                amount_coins: amount.0,
-                amount_zatoshis: amount.1,
-                memo,
-                label,
-                message,
-                other_params,
-            })
-        } else {
-            None
+    ) -> Self {
+        Self {
+            recipient_address,
+            amount_coins: amount.0,
+            amount_zatoshis: amount.1,
+            memo,
+            label,
+            message,
+            other_params,
         }
     }
 
