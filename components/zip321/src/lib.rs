@@ -18,7 +18,7 @@ use zcash_protocol::{
 };
 
 /// Errors that may be produced in decoding of payment requests.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Zip321Error {
     /// A memo value exceeded 512 bytes in length or could not be interpreted as a UTF-8 string
     /// when using a valid UTF-8 lead byte.

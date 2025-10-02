@@ -14,7 +14,7 @@ use percent_encoding::percent_decode;
 use snafu::prelude::*;
 
 /// Parsing errors.
-#[derive(Debug, Snafu)]
+#[derive(Debug, Clone, PartialEq, Eq, Snafu)]
 pub enum Error {
     /// The ZIP 321 request included more payments than can be created within a single Zcash
     /// transaction. The wrapped value is the number of payments in the request.
@@ -29,15 +29,11 @@ pub enum Error {
     #[snafu(display("Memo length {count} is larger than maximum of 512"))]
     MemoBytesTooLong { count: usize },
 
-    #[snafu(display("Error parsing lead address: {source}"))]
-    LeadAddress {
-        source: nom::Err<nom::error::Error<String>>,
-    },
+    #[snafu(display("Error parsing lead address: {msg}"))]
+    LeadAddress { msg: String },
 
-    #[snafu(display("Error parsing query parameters: {source}"))]
-    QueryParams {
-        source: nom::Err<nom::error::Error<String>>,
-    },
+    #[snafu(display("Error parsing query parameters: {msg}"))]
+    QueryParams { msg: String },
 
     /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     #[snafu(display("There is a duplicate {} parameter at index {idx}", param.name()))]
@@ -623,17 +619,15 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
         E: From<Error>,
     {
         // Parse the leading zcash:<address>
-        let (rest, primary_addr_param) = lead_addr(uri)
-            .map_err(|e| e.to_owned())
-            .context(LeadAddressSnafu)?;
+        let (rest, primary_addr_param) =
+            lead_addr(uri).map_err(|e| Error::LeadAddress { msg: e.to_string() })?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = if rest.is_empty() {
             ("", vec![])
         } else {
             all_consuming(preceded(char('?'), separated_list0(char('&'), zcashparam)))(rest)
-                .map_err(|e| e.to_owned())
-                .context(QueryParamsSnafu)?
+                .map_err(|e| Error::QueryParams { msg: e.to_string() })?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.
