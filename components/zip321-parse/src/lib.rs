@@ -51,17 +51,20 @@ pub enum Error {
 type Result<T, E = Error> = core::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Memo {
-    pub bytes: Box<[u8; 512]>,
-    pub index: Option<usize>,
-}
+#[repr(transparent)]
+pub struct Memo([u8; 512]);
 
 impl Memo {
+    /// Create a new `Memo`.
+    pub fn new(bytes: [u8; 512]) -> Self {
+        Self(bytes)
+    }
+
     /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
     ///
     /// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
     pub fn to_base64(&self) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.bytes.as_slice())
+        BASE64_URL_SAFE_NO_PAD.encode(self.0.as_slice())
     }
 
     /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
@@ -78,10 +81,12 @@ impl Memo {
 
         let mut memo = [0u8; 512];
         memo[..bytes.len()].copy_from_slice(&bytes);
-        Ok(Self {
-            bytes: Box::new(memo),
-            index: None,
-        })
+        Ok(Self(memo))
+    }
+
+    /// Returns a slice representation of the underlying bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -254,13 +259,7 @@ fn to_indexed_param(
             .map_err(|e| e.to_string()),
 
         "memo" => Memo::try_from_base64(value)
-            .map(|mut m| {
-                // Set the index here so that we can access the info
-                // later from `Payment`, for error reporting during
-                // the "last mile" of parsing domain specefic payments.
-                m.index = payment_index;
-                Param::Memo(m)
-            })
+            .map(|m| Param::Memo(m))
             .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
         other if other.starts_with("req-") => {
             Err(format!("Required parameter {other} not recognized"))
@@ -465,18 +464,28 @@ pub struct TransactionRequest<P: AsRef<Payment> + AsMut<Payment> = Payment> {
     payments: BTreeMap<usize, P>,
 }
 
+impl<P: AsRef<Payment> + AsMut<Payment>> Default for TransactionRequest<P> {
+    fn default() -> Self {
+        Self {
+            payments: Default::default(),
+        }
+    }
+}
+
 impl TransactionRequest {
     /// Constructs a new transaction request that obeys the ZIP-321 invariants.
     pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest> {
-        Self::new_with_constructor(payments, |p| Ok(p))
+        Self::new_with_constructor(payments, |_idx, p| Ok(p))
     }
 }
 
 impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     /// Constructs a new transaction request that obeys the ZIP-321 invariants.
+    ///
+    /// TODO(schell): write about the constructor
     pub fn new_with_constructor<E>(
         payments: Vec<P>,
-        constructor: impl Fn(Payment) -> Result<P, E>,
+        constructor: impl Fn(usize, Payment) -> Result<P, E>,
     ) -> Result<Self, E>
     where
         E: From<Error>,
@@ -539,15 +548,15 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
 
     /// A utility for use in tests to help check round-trip serialization properties.
     /// by comparing a two transaction requests for equality after normalization.
-    #[cfg(test)]
-    pub fn normalize_and_eq(a: &mut Self, b: &mut Self) -> bool
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub fn normalize_and_eq(&mut self, b: &mut Self) -> bool
     where
         P: PartialEq,
     {
-        a.normalize();
+        self.normalize();
         b.normalize();
 
-        a == b
+        self == b
     }
 
     /// Convert this request to a URI string.
@@ -563,11 +572,12 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
                     (payment.amount_coins, payment.amount_zatoshis),
                     payment_index,
                 )))
-                .chain(payment.memo.as_ref().map(|m| {
-                    let mut m = m.clone();
-                    m.index = payment_index;
-                    render::memo_param_inner(&m)
-                }))
+                .chain(
+                    payment
+                        .memo
+                        .as_ref()
+                        .map(|m| render::memo_param(&m.to_base64(), payment_index)),
+                )
                 .chain(
                     payment
                         .label
@@ -628,7 +638,7 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     /// Parse the provided URI to a payment request value using a domain-specific constructor.
     pub fn from_uri_with_constructor<E>(
         uri: &str,
-        construct: impl Fn(Payment) -> Result<P, E>,
+        construct: impl Fn(usize, Payment) -> Result<P, E>,
     ) -> Result<Self, E>
     where
         E: From<Error>,
@@ -681,8 +691,8 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
         params_by_index
             .into_iter()
             .map(|(i, params)| {
-                let (i, payment) = to_payment(params, i).map(|payment| (i, payment))?;
-                let domain_payment = construct(payment)?;
+                let payment = to_payment(params, i)?;
+                let domain_payment = construct(i, payment)?;
                 Ok((i, domain_payment))
             })
             .collect::<Result<BTreeMap<usize, P>, _>>()
@@ -690,8 +700,14 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     }
 }
 
+impl TransactionRequest {
+    /// Attempt to parse the provided URI to a payment request value.
+    pub fn try_from_uri(uri: impl AsRef<str>) -> Result<Self, Error> {
+        Self::from_uri_with_constructor(uri.as_ref(), |_idx, p| Ok(p))
+    }
+}
+
 pub mod render {
-    use super::*;
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
     /// The set of ASCII characters that must be percent-encoded according
@@ -760,13 +776,8 @@ pub mod render {
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
     /// at the specified parameter index.
-    pub fn memo_param_inner(value: &Memo) -> String {
-        format!(
-            "{}{}={}",
-            "memo",
-            param_index(value.index),
-            value.to_base64()
-        )
+    pub fn memo_param(base_64_str: &str, index: Option<usize>) -> String {
+        format!("{}{}={base_64_str}", "memo", param_index(index))
     }
 
     /// Utility function for an arbitrary string key/value pair for inclusion in
@@ -795,10 +806,7 @@ pub mod testing {
         pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> Memo {
             let mut array = [0u8; 512];
             array[..bytes.len()].copy_from_slice(&bytes);
-            Memo {
-                bytes: Box::new(array),
-                index: None
-            }
+            Memo(array)
         }
     }
 
@@ -870,12 +878,50 @@ mod test {
     use super::testing::*;
     use super::*;
 
+    #[test]
+    fn test_zip321_parse_simple() {
+        let uri = "zcash:ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k?amount=3768769.02796286&message=";
+        let parse_result = TransactionRequest::try_from_uri(uri).unwrap();
+
+        let expected = TransactionRequest::new(
+            vec![
+                Payment {
+                    recipient_address: "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k".to_owned(),
+                    amount_coins: 3768769,
+                    amount_zatoshis: 2796286,
+                    memo: None,
+                    label: None,
+                    message: Some(String::new()),
+                    other_params: vec![],
+                }
+            ]
+        ).unwrap();
+
+        assert_eq!(parse_result, expected);
+    }
+
     proptest! {
         #[test]
+        fn prop_zip321_roundtrip_memo_param(
+            memo in arb_valid_memo(), i in proptest::option::of(0usize..2000)) {
+            let fragment = render::memo_param(&memo.to_base64(), i);
+            let (rest, iparam) = zcashparam(&fragment).unwrap();
+            assert_eq!(rest, "");
+            assert_eq!(iparam.param, Param::Memo(memo));
+            assert_eq!(iparam.payment_index, i.unwrap_or(0));
+        }
+
+        #[test]
+        fn prop_zip321_roundtrip_request(mut req in arb_zip321_request()) {
+            let req_uri = req.to_uri();
+            let mut parsed = TransactionRequest::try_from_uri(&req_uri).unwrap();
+            assert!(parsed.normalize_and_eq(&mut req));
+        }
+
+        #[test]
         fn prop_zip321_roundtrip_uri(uri in arb_zip321_uri()) {
-            let mut parsed = TransactionRequest::from_uri_with_constructor(
+            let mut parsed = TransactionRequest::try_from_uri(
                 &uri,
-                |p| Ok::<Payment, Error>(p)
             ).unwrap();
             parsed.normalize();
             let serialized = parsed.to_uri();

@@ -6854,7 +6854,6 @@ name = "zip321"
 version = "0.5.0"
 dependencies = [
  "base64",
- "nom",
  "percent-encoding",
  "proptest",
  "zcash_address",

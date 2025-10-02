@@ -19,7 +19,6 @@ zcash_protocol = { workspace = true, features = ["std"] }
 zip321-parse.workspace = true
 
 # - Parsing and Encoding
-nom = "7"
 base64.workspace = true
 percent-encoding.workspace = true
 
@@ -29,6 +28,7 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["std", "test-dependencies"] }
+zip321-parse = { workspace = true, features = ["test-dependencies"] } 
 proptest.workspace = true
 
 [features]
