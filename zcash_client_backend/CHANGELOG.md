@@ -13,7 +13,8 @@ workspace.
 ## [0.21.0] - PLANNED
 
 ### Changed
-- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
+  `zcash_transparent 0.6`
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.

@@ -13,7 +13,8 @@ workspace.
 ## [0.19.0] - PLANNED
 
 ### Changed
-- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
+  `zcash_transparent 0.6`
 
 ## [0.18.3] - 2025-09-30
 

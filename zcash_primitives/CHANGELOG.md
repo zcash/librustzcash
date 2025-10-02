@@ -17,7 +17,7 @@ workspace.
   (only for use in combination with `Builder::build_for_pczt`).
 
 ### Changed
-- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zcash_transparent 0.6`
 - `zcash_primitives::transaction::fees::zip317`:
   - `FeeError::NonP2pkhInputs` has been renamed to `UnknownP2shInputs`.
 
