@@ -280,35 +280,12 @@ impl TransactionRequest {
         })
     }
 
-    /// Constructs a new transaction request from the provided map from payment
-    /// index to payment.
-    ///
-    /// Payment index 0 will be mapped to the empty payment index.
-    pub fn from_indexed(
-        payments: BTreeMap<usize, Payment>,
-    ) -> Result<TransactionRequest, Zip321Error> {
-        if let Some(k) = payments.keys().find(|k| **k > 9999) {
-            // This is not quite the correct error, but close enough.
-            return Err(Zip321Error::TooManyPayments(*k));
-        }
-
-        Ok(TransactionRequest { payments })
-    }
-
-    /// Returns the map of payments that make up this request.
-    ///
-    /// This is a map from payment index to payment. Payment index `0` is used to denote
-    /// the empty payment index in the returned values.
-    pub fn payments(&self) -> &BTreeMap<usize, Payment> {
-        &self.payments
-    }
-
     /// Returns the total value of payments to be made.
     ///
     /// Returns `Err` in the case of overflow, or if the value is
     /// outside the range `0..=MAX_MONEY` zatoshis.
     pub fn total(&self) -> Result<Zatoshis, BalanceError> {
-        self.payments
+        self.payments()
             .values()
             .map(|p| p.amount)
             .try_fold(Zatoshis::ZERO, |acc, a| {
@@ -316,231 +293,48 @@ impl TransactionRequest {
             })
     }
 
-    /// A utility for use in tests to help check round-trip serialization properties.
-    #[cfg(any(test, feature = "test-dependencies"))]
-    pub(crate) fn normalize(&mut self) {
-        for p in &mut self.payments.values_mut() {
-            p.normalize();
-        }
-    }
-
-    /// A utility for use in tests to help check round-trip serialization properties.
-    /// by comparing a two transaction requests for equality after normalization.
-    #[cfg(test)]
-    pub(crate) fn normalize_and_eq(a: &mut TransactionRequest, b: &mut TransactionRequest) -> bool {
-        a.normalize();
-        b.normalize();
-
-        a == b
-    }
-
-    /// Convert this request to a URI string.
-    ///
-    /// Returns None if the payment request is empty.
-    pub fn to_uri(&self) -> String {
-        fn payment_params(
-            payment: &Payment,
-            payment_index: Option<usize>,
-        ) -> impl IntoIterator<Item = String> + '_ {
-            std::iter::empty()
-                .chain(Some(render::amount_param(payment.amount, payment_index)))
-                .chain(
-                    payment
-                        .memo
-                        .as_ref()
-                        .map(|m| render::memo_param(m, payment_index)),
-                )
-                .chain(
-                    payment
-                        .label
-                        .as_ref()
-                        .map(|m| render::str_param("label", m, payment_index)),
-                )
-                .chain(
-                    payment
-                        .message
-                        .as_ref()
-                        .map(|m| render::str_param("message", m, payment_index)),
-                )
-                .chain(
-                    payment
-                        .other_params
-                        .iter()
-                        .map(move |(name, value)| render::str_param(name, value, payment_index)),
-                )
-        }
-
-        match self.payments.len() {
-            0 => "zcash:".to_string(),
-            1 if *self.payments.iter().next().unwrap().0 == 0 => {
-                let (_, payment) = self.payments.iter().next().unwrap();
-                let query_params = payment_params(payment, None)
-                    .into_iter()
-                    .collect::<Vec<String>>();
-
-                format!(
-                    "zcash:{}{}{}",
-                    payment.recipient_address.encode(),
-                    if query_params.is_empty() { "" } else { "?" },
-                    query_params.join("&")
-                )
-            }
-            _ => {
-                let query_params = self
-                    .payments
-                    .iter()
-                    .flat_map(|(i, payment)| {
-                        let idx = if *i == 0 { None } else { Some(*i) };
-                        let primary_address = payment.recipient_address.clone();
-                        std::iter::empty()
-                            .chain(Some(render::addr_param(&primary_address, idx)))
-                            .chain(payment_params(payment, idx))
-                    })
-                    .collect::<Vec<String>>();
-
-                format!("zcash:?{}", query_params.join("&"))
-            }
-        }
-    }
-
     /// Parse the provided URI to a payment request value.
     pub fn from_uri(uri: &str) -> Result<Self, Zip321Error> {
-        // Parse the leading zcash:<address>
-        let (rest, primary_addr_param) = parse::lead_addr(uri)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {e}")))?;
-
-        // Parse the remaining parameters as an undifferentiated list
-        let (_, xs) = if rest.is_empty() {
-            ("", vec![])
-        } else {
-            all_consuming(preceded(
-                char('?'),
-                separated_list0(char('&'), parse::zcashparam),
-            ))(rest)
-            .map_err(|e| Zip321Error::ParseError(format!("Error parsing query parameters: {e}")))?
-        };
-
-        // Construct sets of payment parameters, keyed by the payment index.
-        let mut params_by_index: BTreeMap<usize, Vec<parse::Param>> = BTreeMap::new();
-
-        // Add the primary address, if any, to the index.
-        if let Some(p) = primary_addr_param {
-            params_by_index.insert(p.payment_index, vec![p.param]);
-        }
-
-        // Group the remaining parameters by payment index
-        for p in xs {
-            match params_by_index.get_mut(&p.payment_index) {
-                None => {
-                    params_by_index.insert(p.payment_index, vec![p.param]);
-                }
-
-                Some(current) => {
-                    if parse::has_duplicate_param(current, &p.param) {
-                        return Err(Zip321Error::DuplicateParameter(p.param, p.payment_index));
-                    } else {
-                        current.push(p.param);
-                    }
-                }
-            }
-        }
-
-        // Build the actual payment values from the index.
-        params_by_index
-            .into_iter()
-            .map(|(i, params)| parse::to_payment(params, i).map(|payment| (i, payment)))
-            .collect::<Result<BTreeMap<usize, Payment>, _>>()
-            .map(|payments| TransactionRequest { payments })
+        Ok(Self {
+            inner: zip321_parse::TransactionRequest::from_uri_with_constructor(
+                uri,
+                Payment::try_from,
+            )?,
+        })
     }
 }
 
 mod render {
-    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
     use zcash_address::ZcashAddress;
-    use zcash_protocol::{
-        memo::MemoBytes,
-        value::{Zatoshis, COIN},
-    };
-
-    use super::memo_to_base64;
-
-    /// The set of ASCII characters that must be percent-encoded according
-    /// to the definition of ZIP 321. This is the complement of the subset of
-    /// ASCII characters defined by `qchar`
-    ///
-    //      unreserved      = ALPHA / DIGIT / "-" / "." / "_" / "~"
-    //      allowed-delims  = "!" / "$" / "'" / "(" / ")" / "*" / "+" / "," / ";"
-    //      qchar           = unreserved / pct-encoded / allowed-delims / ":" / "@"
-    pub const QCHAR_ENCODE: &AsciiSet = &CONTROLS
-        .add(b' ')
-        .add(b'"')
-        .add(b'#')
-        .add(b'%')
-        .add(b'&')
-        .add(b'/')
-        .add(b'<')
-        .add(b'=')
-        .add(b'>')
-        .add(b'?')
-        .add(b'[')
-        .add(b'\\')
-        .add(b']')
-        .add(b'^')
-        .add(b'`')
-        .add(b'{')
-        .add(b'|')
-        .add(b'}');
-
-    /// Converts a parameter index value to the `String` representation
-    /// that must be appended to a parameter name when constructing a ZIP 321 URI.
-    pub fn param_index(idx: Option<usize>) -> String {
-        match idx {
-            Some(i) if i > 0 => format!(".{i}"),
-            _otherwise => "".to_string(),
-        }
-    }
+    use zcash_protocol::{memo::MemoBytes, value::Zatoshis};
 
     /// Constructs an "address" key/value pair containing the encoded recipient address
     /// at the specified parameter index.
     pub fn addr_param(addr: &ZcashAddress, idx: Option<usize>) -> String {
-        format!("address{}={}", param_index(idx), addr.encode())
+        zip321_parse::render::addr_param_encoded(&addr.encode(), idx)
     }
 
     /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
     pub fn amount_str(amount: Zatoshis) -> String {
-        let coins = u64::from(amount) / COIN;
-        let zats = u64::from(amount) % COIN;
-        if zats == 0 {
-            format!("{coins}")
-        } else {
-            format!("{coins}.{zats:0>8}")
-                .trim_end_matches('0')
-                .to_string()
-        }
+        let (coins, zats) = super::split_zatoshis(amount);
+        zip321_parse::render::amount_coins_zats_str(coins, zats)
     }
 
     /// Constructs an "amount" key/value pair containing the encoded ZEC amount
     /// at the specified parameter index.
     pub fn amount_param(amount: Zatoshis, idx: Option<usize>) -> String {
-        format!("amount{}={}", param_index(idx), amount_str(amount))
+        zip321_parse::render::amount_coins_zats_param(super::split_zatoshis(amount), idx)
     }
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
     /// at the specified parameter index.
     pub fn memo_param(value: &MemoBytes, idx: Option<usize>) -> String {
-        format!("{}{}={}", "memo", param_index(idx), memo_to_base64(value))
-    }
-
-    /// Utility function for an arbitrary string key/value pair for inclusion in
-    /// a ZIP 321 URI at the specified parameter index.
-    pub fn str_param(label: &str, value: &str, idx: Option<usize>) -> String {
-        format!(
-            "{}{}={}",
-            label,
-            param_index(idx),
-            utf8_percent_encode(value, QCHAR_ENCODE)
-        )
+        let memo = zip321_parse::Memo {
+            bytes: Box::new(value.as_array().to_owned()),
+            index: idx,
+        };
+        zip321_parse::render::memo_param_inner(&memo)
     }
 }
 
@@ -564,6 +358,7 @@ pub mod testing {
     }
 
     prop_compose! {
+        /// Constructs an arbitrary zip321 Payment
         pub fn arb_zip321_payment(network: NetworkType)(
             recipient_address in arb_address(network),
             amount in arb_zatoshis(),

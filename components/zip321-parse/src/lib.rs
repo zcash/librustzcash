@@ -554,16 +554,15 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
             payment_index: Option<usize>,
         ) -> impl IntoIterator<Item = String> + '_ {
             std::iter::empty()
-                .chain(Some(render::amount_param(
+                .chain(Some(render::amount_coins_zats_param(
                     (payment.amount_coins, payment.amount_zatoshis),
                     payment_index,
                 )))
-                .chain(
-                    payment
-                        .memo
-                        .as_ref()
-                        .map(|m| render::memo_param(m, payment_index)),
-                )
+                .chain(payment.memo.as_ref().map(|m| {
+                    let mut m = m.clone();
+                    m.index = payment_index;
+                    render::memo_param_inner(&m)
+                }))
                 .chain(
                     payment
                         .label
@@ -686,7 +685,7 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
     }
 }
 
-mod render {
+pub mod render {
     use super::*;
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
@@ -726,27 +725,11 @@ mod render {
         }
     }
 
-    // TODO(schell): add in the main crate
-    // /// Constructs an "address" key/value pair containing the encoded recipient address
-    // /// at the specified parameter index.
-    // pub fn addr_param(addr: &ZcashAddress, idx: Option<usize>) -> String {
-    //     format!("address{}={}", param_index(idx), addr.encode())
-    // }
-
     /// Constructs an "address" key/value pair containing the encoded recipient address
     /// at the specified parameter index.
     pub fn addr_param_encoded(encoded_addr: &str, idx: Option<usize>) -> String {
         format!("address{}={}", param_index(idx), encoded_addr)
     }
-
-    // TODO(schell):
-    // /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
-    // /// value for inclusion in a ZIP 321 URI.
-    // pub fn amount_str(amount: Zatoshis) -> String {
-    //     let coins = u64::from(amount) / COIN;
-    //     let zats = u64::from(amount) % COIN;
-    //     amount_coins_zats_str(coins, zats)
-    // }
 
     /// Converts a `(coins, zatoshis_remainder)` value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
@@ -762,7 +745,7 @@ mod render {
 
     /// Constructs an "amount" key/value pair containing the encoded ZEC amount
     /// at the specified parameter index.
-    pub fn amount_param(amount: (u64, u64), idx: Option<usize>) -> String {
+    pub fn amount_coins_zats_param(amount: (u64, u64), idx: Option<usize>) -> String {
         format!(
             "amount{}={}",
             param_index(idx),
@@ -772,8 +755,13 @@ mod render {
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
     /// at the specified parameter index.
-    pub fn memo_param(value: &Memo, idx: Option<usize>) -> String {
-        format!("{}{}={}", "memo", param_index(idx), value.to_base64())
+    pub fn memo_param_inner(value: &Memo) -> String {
+        format!(
+            "{}{}={}",
+            "memo",
+            param_index(value.index),
+            value.to_base64()
+        )
     }
 
     /// Utility function for an arbitrary string key/value pair for inclusion in
@@ -785,5 +773,93 @@ mod render {
             param_index(idx),
             utf8_percent_encode(value, QCHAR_ENCODE)
         )
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::collection::btree_map;
+    use proptest::collection::vec;
+    use proptest::option;
+    use proptest::prelude::{any, prop_compose};
+
+    use super::{Memo, Payment, TransactionRequest};
+    pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
+
+    prop_compose! {
+        pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> Memo {
+            let mut array = [0u8; 512];
+            array.copy_from_slice(&bytes);
+            Memo {
+                bytes: Box::new(array),
+                index: None
+            }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_amount()(
+            zec in 0u64..21_000_000,
+            zats in 0u64..100_000_000
+        ) -> (u64, u64) {
+            (zec, zats)
+        }
+    }
+
+    prop_compose! {
+        /// Constructs an arbitrary zip321_parse Payment
+        pub fn arb_zip321_payment(network: NetworkType)(
+            recipient_address in arb_address(network),
+            amount in arb_zatoshis(),
+            memo in option::of(arb_valid_memo()),
+            message in option::of(any::<String>()),
+            label in option::of(any::<String>()),
+            // prevent duplicates by generating a set rather than a vec
+            other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
+        ) -> Payment {
+            let memo = memo.filter(|_| recipient_address.can_receive_memo());
+            Payment {
+                recipient_address,
+                amount,
+                memo,
+                label,
+                message,
+                other_params: other_params.into_iter().collect(),
+            }
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_zip321_request(network: NetworkType)(
+            payments in btree_map(0usize..10000, arb_zip321_payment(network), 1..10)
+        ) -> TransactionRequest {
+            let mut req = TransactionRequest::from_indexed(payments).unwrap();
+            req.normalize(); // just to make test comparisons easier
+            req
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_zip321_request_sequential(network: NetworkType)(
+            payments in vec(arb_zip321_payment(network), 1..10)
+        ) -> TransactionRequest {
+            let mut req = TransactionRequest::new(payments).unwrap();
+            req.normalize(); // just to make test comparisons easier
+            req
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_zip321_uri(network: NetworkType)(req in arb_zip321_request(network)) -> String {
+            req.to_uri()
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_addr_str(network: NetworkType)(
+            recipient_address in arb_address(network)
+        ) -> String {
+            recipient_address.encode()
+        }
     }
 }
