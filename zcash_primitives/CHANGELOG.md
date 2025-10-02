@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.26.0] - PLANNED
+## [0.26.0] - 2025-10-02
 
 ### Added
 - `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
