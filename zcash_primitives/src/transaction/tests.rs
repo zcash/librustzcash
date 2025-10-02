@@ -20,9 +20,6 @@ use {
 #[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
 
-#[cfg(all(test, zcash_unstable = "zfuture"))]
-use crate::transaction::OrchardBundle::OrchardZSA;
-
 #[cfg(all(test, zcash_unstable = "nu7"))]
 use crate::transaction::OrchardBundle::OrchardZSA;
 
@@ -64,12 +61,12 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     prop_assert_eq!(
         tx.orchard_bundle.as_ref().map(|v| match v {
             OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_unstable = "nu7")]
             OrchardZSA(b) => *b.value_balance(),
         }),
         txo.orchard_bundle.as_ref().map(|v| match v {
             OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_unstable = "nu7")]
             OrchardZSA(b) => *b.value_balance(),
         })
     );
@@ -240,7 +237,7 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]

@@ -1,4 +1,4 @@
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 use {
     crate::transaction::{
         sighash::SignableInput, txid::to_hash, Authorization, TransactionData, TxDigests,
@@ -7,7 +7,7 @@ use {
     blake2b_simd::Hash as Blake2bHash,
 };
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,

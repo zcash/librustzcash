@@ -1,4 +1,4 @@
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 use {
     crate::{
         encoding::{ReadBytesExt, WriteBytesExt},
@@ -18,7 +18,7 @@ use {
 };
 
 /// Reads an [`IssueBundle`] from a v6 transaction format.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
     let issuer_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     if issuer_bytes.is_empty() {
@@ -54,7 +54,7 @@ pub fn read_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Sign
     }
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
     let sighash_info_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let sighash_version = to_issuance_version(sighash_info_bytes).ok_or(Error::new(
@@ -76,7 +76,7 @@ fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
     )))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn read_action<R: Read>(
     mut reader: R,
     ik: &IssueValidatingKey<ZSASchnorr>,
@@ -103,7 +103,7 @@ fn read_action<R: Read>(
     Ok(IssueAction::from_parts(asset_desc_hash, notes, finalize))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
     let mut tmp = [0; 8];
@@ -122,7 +122,7 @@ pub fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
     .ok_or(Error::new(ErrorKind::InvalidData, "Invalid note"))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
@@ -132,7 +132,7 @@ fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
     ))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
     let mut bytes = [0u8; 43];
     reader.read_exact(&mut bytes)?;
@@ -142,7 +142,7 @@ fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
     ))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
@@ -150,7 +150,7 @@ pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
         .ok_or(Error::new(ErrorKind::InvalidData, "Invalid asset"))
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
@@ -159,7 +159,7 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed>
 }
 
 /// Writes an [`IssueBundle`] in the v6 transaction format.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn write_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
@@ -189,7 +189,7 @@ pub fn write_bundle<W: Write>(
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Result<()> {
     writer.write_all(action.asset_desc_hash())?;
     Vector::write(&mut writer, action.notes(), write_note)?;
@@ -197,7 +197,7 @@ fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Resul
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn write_note<W: Write>(writer: &mut W, note: &Note) -> io::Result<()> {
     writer.write_all(&note.recipient().to_raw_address_bytes())?;
     writer.write_all(&note.value().to_bytes())?;
@@ -206,7 +206,7 @@ pub fn write_note<W: Write>(writer: &mut W, note: &Note) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 pub trait MapIssueAuth<A: IssueAuth, B: IssueAuth> {
     fn map_issue_authorization(&self, a: A) -> B;
 }
@@ -217,7 +217,7 @@ pub trait MapIssueAuth<A: IssueAuth, B: IssueAuth> {
 /// authorization of a subset of the transaction's bundles.
 ///
 /// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 impl MapIssueAuth<Signed, Signed> for () {
     fn map_issue_authorization(&self, a: Signed) -> Signed {
         a

@@ -198,7 +198,7 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
-        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+        #[cfg(zcash_unstable = "nu7")]
         None,
         #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle

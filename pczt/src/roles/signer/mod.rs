@@ -22,10 +22,7 @@ use zcash_primitives::transaction::{
     OrchardBundle, TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
-#[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233"
-))]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use zcash_protocol::value::Zatoshis;
 
 use crate::{
@@ -328,10 +325,7 @@ pub(crate) fn pczt_to_tx_data(
         consensus_branch_id,
         determine_lock_time(global, transparent.inputs()).ok_or(Error::IncompatibleLockTimes)?,
         global.expiry_height.into(),
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
         Zatoshis::ZERO,
         transparent_bundle,
         None,

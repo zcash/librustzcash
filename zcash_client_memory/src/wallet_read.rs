@@ -550,7 +550,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                         tx_data.sprout_bundle().cloned(),
                         tx_data.sapling_bundle().cloned(),
                         tx_data.orchard_bundle().cloned(),
-                        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+                        #[cfg(zcash_unstable = "nu7")]
                         None,
                     )
                         .freeze()?)

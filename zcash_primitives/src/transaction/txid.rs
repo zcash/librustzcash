@@ -15,10 +15,7 @@ use zcash_protocol::{
     TxId,
 };
 
-#[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233"
-))]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use zcash_protocol::value::Zatoshis;
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -32,7 +29,7 @@ use crate::transaction::{
     Authorization, Authorized, OrchardBundle, TransactionDigest, TransparentDigests, TxDigests,
     TxVersion,
 };
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_unstable = "nu7")]
 use {
     crate::sighash_versioning::ISSUE_SIGHASH_VERSION_TO_INFO_BYTES,
     crate::transaction::OrchardBundle::OrchardZSA,
@@ -240,11 +237,7 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    zip233_amount: &Zatoshis,
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -255,10 +248,7 @@ fn hash_header_txid_data(
     h.write_u32_le(expiry_height.into()).unwrap();
 
     // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     if version.has_zip233() {
         h.write_u64_le((*zip233_amount).into()).unwrap();
     }
@@ -328,7 +318,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type TransparentDigest = Option<TransparentDigests<Blake2bHash>>;
     type SaplingDigest = Option<Blake2bHash>;
     type OrchardDigest = Option<Blake2bHash>;
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     type IssueDigest = Option<Blake2bHash>;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -342,21 +332,14 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         hash_header_txid_data(
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             zip233_amount,
         )
     }
@@ -381,12 +364,12 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| match b {
             OrchardVanilla(v) => v.commitment().0,
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_unstable = "nu7")]
             OrchardZSA(z) => z.commitment().0,
         })
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<A::IssueAuth>>) -> Self::IssueDigest {
         issue_bundle.map(|b| b.commitment().0)
     }
@@ -403,7 +386,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         #[rustfmt::skip]
-        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+        #[cfg(zcash_unstable = "nu7")]
         issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digests: Self::TzeDigest,
     ) -> Self::Digest {
@@ -412,7 +395,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             transparent_digests,
             sapling_digest,
             orchard_digest,
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_unstable = "nu7")]
             issue_digest,
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests,
@@ -429,7 +412,7 @@ pub(crate) fn to_hash(
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
     #[rustfmt::skip]
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     issue_digest: Option<Blake2bHash>,
     #[cfg(zcash_unstable = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
@@ -455,7 +438,7 @@ pub(crate) fn to_hash(
     )
     .unwrap();
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     if _txversion.has_orchard_zsa() {
         h.write_all(
             issue_digest
@@ -486,7 +469,7 @@ pub fn to_txid(
         hash_transparent_txid_data(digests.transparent_digests.as_ref()),
         digests.sapling_digest,
         digests.orchard_digest,
-        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+        #[cfg(zcash_unstable = "nu7")]
         digests.issue_digest,
         #[cfg(zcash_unstable = "zfuture")]
         digests.tze_digests.as_ref(),
@@ -509,7 +492,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type SaplingDigest = Blake2bHash;
     type OrchardDigest = Blake2bHash;
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     type IssueDigest = Blake2bHash;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -523,11 +506,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        _zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] _zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }
@@ -582,7 +561,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
                         .authorizing_commitment(&ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES)
                         .0
                 }
-                #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+                #[cfg(zcash_unstable = "nu7")]
                 OrchardZSA(bundle) => {
                     bundle
                         .authorizing_commitment(&ORCHARD_SIGHASH_VERSION_TO_INFO_BYTES)
@@ -592,7 +571,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         )
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_unstable = "nu7")]
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<Signed>>) -> Self::IssueDigest {
         issue_bundle.map_or_else(
             orchard_bundle::commitments::hash_issue_bundle_auth_empty,
@@ -621,7 +600,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
         #[rustfmt::skip]
-        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+        #[cfg(zcash_unstable = "nu7")]
         issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
@@ -638,7 +617,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
             h.write_all(digest.as_bytes()).unwrap();
         }
 
-        #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+        #[cfg(zcash_unstable = "nu7")]
         if TxVersion::suggested_for_branch(consensus_branch_id).has_orchard_zsa() {
             h.write_all(issue_digest.as_bytes()).unwrap();
         }

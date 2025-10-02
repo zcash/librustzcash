@@ -239,10 +239,10 @@ jobs:
             os: windows-latest
 
           - state: ZFuture
-            rustflags: '--cfg zcash_unstable="zfuture"'
+            rustflags: '--cfg zcash_unstable="nu7" --cfg zcash_unstable="zfuture"'
           - state: ZFuture-allfeatures
             all-features: true
-            rustflags: '--cfg zcash_unstable="zfuture"'
+            rustflags: '--cfg zcash_unstable="nu7" --cfg zcash_unstable="zfuture"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
