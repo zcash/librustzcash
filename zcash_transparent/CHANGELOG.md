@@ -19,7 +19,7 @@ workspace.
   - `TransparentInputInfo::serialized_len`
 
 ### Changed
-- Migrated to `zcash_protocol 0.7`
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`
 - `zcash_transparent::pczt`:
   - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
     signing key is not involved with the input in any way we can detect.

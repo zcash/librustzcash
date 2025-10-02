@@ -36,7 +36,7 @@ categories = ["cryptography::cryptocurrencies"]
 [workspace.dependencies]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash", default-features = false }
-zcash_address = { version = "0.9", path = "components/zcash_address", default-features = false }
+zcash_address = { version = "0.10", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.20", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
 zcash_keys = { version = "0.11", path = "zcash_keys" }
