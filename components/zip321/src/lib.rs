@@ -243,6 +243,13 @@ impl DerefMut for TransactionRequest {
 }
 
 impl TransactionRequest {
+    /// Constructs a new empty transaction request.
+    pub fn empty() -> Self {
+        Self {
+            inner: zip321_parse::TransactionRequest::default(),
+        }
+    }
+
     /// Constructs a new transaction request that obeys the ZIP-321 invariants.
     pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest, Zip321Error> {
         Ok(TransactionRequest {
@@ -252,14 +259,7 @@ impl TransactionRequest {
             )?,
         })
     }
-
-    /// Constructs a new empty transaction request.
-    pub fn empty() -> Self {
-        Self {
-            inner: Default::default(),
-        }
-    }
-
+    ///
     /// Returns the total value of payments to be made.
     ///
     /// Returns `Err` in the case of overflow, or if the value is
