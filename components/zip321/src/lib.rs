@@ -55,7 +55,7 @@ impl Display for Zip321Error {
                 f,
                 "Payment {idx} is invalid: cannot send a memo to a transparent recipient address"
             ),
-            Zip321Error::ParseError(e) => write!(f, "Parse failure: {e}"),
+            Zip321Error::ParseError(e) => fmt::Display::fmt(e, f),
             Zip321Error::Other(s) => write!(f, "Parse failure: {s}"),
         }
     }

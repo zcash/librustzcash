@@ -599,7 +599,6 @@ impl<P: AsRef<Payment> + AsMut<Payment>> TransactionRequest<P> {
                         let idx = if *i == 0 { None } else { Some(*i) };
                         let primary_address = payment.as_ref().recipient_address.clone();
                         std::iter::empty()
-                            // TODO(schell): mention changed
                             .chain(Some(render::addr_param_encoded(&primary_address, idx)))
                             .chain(payment_params(payment.as_ref(), idx))
                     })
