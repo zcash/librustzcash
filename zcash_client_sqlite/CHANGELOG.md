@@ -10,13 +10,19 @@ workspace.
 
 ## [Unreleased]
 
+## [0.19.0] - PLANNED
+
+### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
+  `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
+
 ## [0.18.3] - 2025-09-30
 
 ### Changed
 - The `zcash_client_sqlite` implementation of `WalletWrite::update_chain_tip`
   now ensures that a transaction status request is queued for any transactions
   for which we do not have mined-height information and which are known to be
-  unexpired. 
+  unexpired.
 - Transaction status requests are no longer deleted until the transaction in
   question is positively known to be expired.
 
