@@ -692,7 +692,7 @@ mod tests {
             let fragment = memo_param(&memo, i);
             let (rest, iparam) = zcashparam(&fragment).unwrap();
             assert_eq!(rest, "");
-            assert_eq!(iparam.param, Param::Memo(zip321_parse::Memo::new(memo.into_bytes())));
+            assert_eq!(iparam.param, Param::Memo(Box::new(zip321_parse::Memo::new(memo.into_bytes()))));
             assert_eq!(iparam.payment_index, i.unwrap_or(0));
         }
 
