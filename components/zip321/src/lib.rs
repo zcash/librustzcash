@@ -27,7 +27,7 @@ pub enum Zip321Error {
     /// transparent recipient address, which is not supported by the protocol.
     TransparentMemo(usize),
     /// The ZIP 321 URI was malformed and failed to parse.
-    ParseError(zip321_parse::Error),
+    ParseError(Box<zip321_parse::Error>),
     /// Any other stringly typed error
     Other(String),
 }
@@ -40,7 +40,7 @@ impl<E: Display> From<ConversionError<E>> for Zip321Error {
 
 impl From<zip321_parse::Error> for Zip321Error {
     fn from(e: zip321_parse::Error) -> Self {
-        Zip321Error::ParseError(e)
+        Zip321Error::ParseError(Box::new(e))
     }
 }
 

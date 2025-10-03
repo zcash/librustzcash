@@ -37,7 +37,7 @@ pub enum Error {
 
     /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     #[snafu(display("There is a duplicate {} parameter at index {idx}", param.name()))]
-    DuplicateParameter { param: Param, idx: usize },
+    DuplicateParameter { param: Box<Param>, idx: usize },
 
     /// The payment at the wrapped index did not include a recipient address.
     #[snafu(display("Payment {idx} is missing its recipient address"))]
@@ -95,7 +95,7 @@ pub enum Param {
         coins: u64,
         fractional_zatoshis: u64,
     },
-    Memo(Memo),
+    Memo(Box<Memo>),
     Label(String),
     Message(String),
     Other(String, String),
@@ -261,7 +261,7 @@ fn to_indexed_param(
             .map_err(|e| e.to_string()),
 
         "memo" => Memo::try_from_base64(value)
-            .map(|m| Param::Memo(m))
+            .map(|m| Param::Memo(Box::new(m)))
             .map_err(|e| format!("Decoded memo was invalid: {e:?}")),
         other if other.starts_with("req-") => {
             Err(format!("Required parameter {other} not recognized"))
@@ -313,7 +313,7 @@ pub fn to_payment(vs: Vec<Param>, i: usize) -> Result<Payment> {
                 payment.amount_fractional_zatoshis = zatoshis;
             }
             Param::Memo(m) => {
-                payment.memo = Some(m);
+                payment.memo = Some(*m);
             }
             Param::Label(m) => payment.label = Some(m),
             Param::Message(m) => payment.message = Some(m),
@@ -879,7 +879,7 @@ mod test {
             let fragment = render::memo_param(&memo.to_base64(), i);
             let (rest, iparam) = zcashparam(&fragment).unwrap();
             assert_eq!(rest, "");
-            assert_eq!(iparam.param, Param::Memo(memo));
+            assert_eq!(iparam.param, Param::Memo(Box::new(memo)));
             assert_eq!(iparam.payment_index, i.unwrap_or(0));
         }
 
