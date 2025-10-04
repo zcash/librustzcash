@@ -32,8 +32,21 @@ workspace.
 ## [0.24.1] - 2025-09-09
 
 ### Added
-- `zcash_primitives::transaction::tests::data` has been exposed under the
-  `test-dependencies` feature to provide access to test vectors.
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `Error::Coinbase` enum variant
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::Coinbase` enum variant now contains `miner_data: MinerData`
+      and `sequence: u32`.
+    - `BuildConfig::is_coinbase`
+    - `Builder::add_transparent_null_data_output`
+    - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
+      instead of `u64`.
+    - `Builder` now supports constructing coinbase transactions.
+  - `Coinbase` marker type
+  - `impl Authorization for Coinbase`
+  - `tests::data` has been exposed under the `test-dependencies` feature to
+    provide access to test vectors.
 
 ### Changed
 - This release provides pre-release support for some planned Network Upgrade 7
