@@ -65,7 +65,7 @@ use {
         data_api::TransactionDataRequest,
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
-        wallet::{TransparentAddressMetadata, WalletTransparentOutput},
+        wallet::WalletTransparentOutput,
     },
     nonempty::NonEmpty,
     rand_core::OsRng,
@@ -1840,7 +1840,10 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 {
     use transparent::builder::TransparentSigningSet;
 
-    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
+    use crate::{
+        data_api::{testing::transparent::GapLimits, OutputOfSentTx},
+        wallet::{ExposedAt, TransparentAddressSource},
+    };
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
@@ -1928,6 +1931,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
 
+        // There should be no ephemeral addresses exposed at the current chain height
+        let exposed_at_tip = st
+            .wallet()
+            .get_ephemeral_transparent_receivers(account.account().id(), 0, false)
+            .unwrap();
+        assert_eq!(exposed_at_tip.len(), 0);
+
         let create_proposed_result = st
             .create_proposed_transactions::<Infallible, _, Infallible, _>(
                 account.usk(),
@@ -1936,6 +1946,28 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
         let txids = create_proposed_result.unwrap();
+
+        // After transaction creation, there should be a new ephemeral address exposed.
+        let exposed_at_tip = st
+            .wallet()
+            .get_ephemeral_transparent_receivers(account.account().id(), 0, false)
+            .unwrap();
+        assert_eq!(exposed_at_tip.len(), 1);
+        let cur_height = st.wallet().chain_height().unwrap().unwrap();
+        assert_eq!(
+            exposed_at_tip
+                .values()
+                .next()
+                .and_then(|opt| opt.as_ref().map(|m0| m0.exposed_at())),
+            Some(ExposedAt::Height(cur_height))
+        );
+
+        // There should be no unused transparent receivers in this range
+        let exposed_at_tip = st
+            .wallet()
+            .get_ephemeral_transparent_receivers(account.account().id(), 0, true)
+            .unwrap();
+        assert!(exposed_at_tip.is_empty());
 
         // Mine the created transactions.
         for txid in txids.iter() {
@@ -2069,11 +2101,11 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     // Check that the metadata is as expected.
     for (i, (_, meta)) in known_addrs.iter().enumerate() {
         assert_eq!(
-            meta,
-            &TransparentAddressMetadata::new(
-                TransparentKeyScope::EPHEMERAL,
-                NonHardenedChildIndex::from_index(i.try_into().unwrap()).unwrap()
-            )
+            meta.source(),
+            &TransparentAddressSource::Derived {
+                scope: TransparentKeyScope::EPHEMERAL,
+                address_index: NonHardenedChildIndex::from_index(i.try_into().unwrap()).unwrap(),
+            }
         );
     }
 

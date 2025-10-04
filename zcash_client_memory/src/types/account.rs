@@ -6,7 +6,7 @@ use std::{
 use subtle::ConditionallySelectable;
 use zcash_address::ZcashAddress;
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_client_backend::wallet::{ExposedAt, TransparentAddressMetadata};
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{Account as _, AccountBirthday, AccountPurpose, AccountSource},
@@ -382,9 +382,11 @@ impl Account {
             .map(|(idx, addr)| {
                 (
                     addr.address,
-                    TransparentAddressMetadata::new(
+                    TransparentAddressMetadata::derived(
                         TransparentKeyScope::EPHEMERAL,
                         NonHardenedChildIndex::from_index(*idx).unwrap(),
+                        ExposedAt::Unknown,
+                        None,
                     ),
                 )
             })
@@ -446,9 +448,11 @@ impl Account {
                                     );
                                     (
                                         addr,
-                                        TransparentAddressMetadata::new(
+                                        TransparentAddressMetadata::derived(
                                             TransparentKeyScope::EPHEMERAL,
                                             address_index,
+                                            ExposedAt::Unknown,
+                                            None,
                                         ),
                                     )
                                 })

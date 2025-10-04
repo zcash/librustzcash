@@ -10,7 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ## [0.21.0] - PLANNED
+
+### Added
+- `zcash_client_backend::wallet::ExposedAt`
+- `zcash_client_backend::wallet::TransparentAddressSource`
+- `zcash_client_backend::wallet::TransparentAddressMetadata::`
+    - `derived`
+    - `standalone`
+    - `exposed_at`
+    - `next_check_time`
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
@@ -18,6 +28,16 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
+  - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - `WalletWrite` has added method `schedule_next_check`.
+- `zcash_client_backend::wallet`:
+  - `TransparentAddressMetadata` has been converted from an enum to a struct
+    that contains both source metadata and information about when the address
+    was exposed by the wallet. The derivation information that this type
+    previously provided is now provided by `TranparentAddressSource`. As a
+    consequence of this change, the signature of
+    `TransparentAddressMetadata::new` has changed; use
+    `TransparentAddressMetadata::derived` instead.
 
 ## [0.20.0] - 2025-09-25
 

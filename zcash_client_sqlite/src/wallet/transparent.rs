@@ -21,6 +21,7 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_client_backend::wallet::ExposedAt;
 use zcash_client_backend::{
     data_api::{
         wallet::{ConfirmationsPolicy, TargetHeight},
@@ -50,12 +51,13 @@ use zip32::{DiversifierIndex, Scope};
 #[cfg(feature = "transparent-key-import")]
 use bip32::{PublicKey, PublicKeyBytes};
 
-use super::encoding::{decode_epoch_seconds, ReceiverFlags};
+use super::encoding::{decode_epoch_seconds, epoch_seconds, ReceiverFlags};
 use super::{
     account_birthday_internal, chain_tip_height,
     encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
     get_account_ids, get_account_internal, KeyScope,
 };
+use crate::util::Clock;
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
 
@@ -111,8 +113,18 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     scopes: &[KeyScope],
+    exposure_depth: Option<u32>,
+    exclude_used: bool,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
+
+    let min_exposure_height = exposure_depth
+        .map(|d| {
+            Ok::<_, SqliteClientError>(
+                chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)? - d,
+            )
+        })
+        .transpose()?;
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
@@ -120,19 +132,36 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             cached_transparent_receiver_address,
             key_scope,
             transparent_child_index,
-            imported_transparent_receiver_pubkey
+            imported_transparent_receiver_pubkey,
+            exposed_at_height,
+            transparent_receiver_next_check_time
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
          AND cached_transparent_receiver_address IS NOT NULL
-         AND key_scope IN rarray(:scopes_ptr)",
+         AND key_scope IN rarray(:scopes_ptr)
+         AND (
+             :min_exposure_height IS NULL
+             OR exposed_at_height >= :min_exposure_height
+         )
+         AND (
+             NOT(:exclude_used)
+             -- if we're only retrieving unused addresses, do not return those for which we have
+             -- observed an output.
+             OR NOT EXISTS(
+                 SELECT 1 FROM transparent_received_outputs tro
+                 WHERE tro.address_id = addresses.id
+             )
+         )",
     )?;
 
     let scope_values: Vec<Value> = scopes.iter().map(|s| Value::Integer(s.encode())).collect();
     let scopes_ptr = Rc::new(scope_values);
     let mut rows = addr_query.query(named_params![
         ":account_uuid": account_uuid.0,
-        ":scopes_ptr": &scopes_ptr
+        ":scopes_ptr": &scopes_ptr,
+        ":min_exposure_height": min_exposure_height.map(u32::from),
+        ":exclude_used": exclude_used
     ])?;
 
     while let Some(row) = rows.next()? {
@@ -144,6 +173,17 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })?
             .to_transparent_address();
+
+        let exposed_at = row
+            .get::<_, Option<u32>>("exposed_at_height")?
+            .map_or(ExposedAt::Unexposed, |h| {
+                ExposedAt::Height(BlockHeight::from(h))
+            });
+
+        let next_check_time = row
+            .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+            .map(decode_epoch_seconds)
+            .transpose()?;
 
         if let Some(taddr) = taddr {
             let metadata = match key_scope {
@@ -168,7 +208,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
                         SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
                     })?;
-                    TransparentAddressMetadata::Standalone(pubkey)
+                    TransparentAddressMetadata::standalone(pubkey, exposed_at, next_check_time)
                 }
                 derived => {
                     let scope_opt = <Option<TransparentKeyScope>>::from(derived);
@@ -181,15 +221,17 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                             )
                         })?;
 
-                    TransparentAddressMetadata::Derived {
+                    TransparentAddressMetadata::derived(
                         scope,
-                        address_index: NonHardenedChildIndex::from_index(address_index).ok_or(
+                        NonHardenedChildIndex::from_index(address_index).ok_or(
                             SqliteClientError::CorruptedData(format!(
                                 "{} is not a valid transparent child index",
                                 address_index
                             )),
                         )?,
-                    }
+                        exposed_at,
+                        next_check_time,
+                    )
                 }
             };
 
@@ -385,21 +427,26 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                     .map(|addr_str| TransparentAddress::decode(params, &addr_str))
                     .transpose()?;
 
-                Ok::<_, SqliteClientError>(transparent_child_index.zip(address).map(|(i, a)| {
-                    (
-                        address_id,
-                        a,
-                        match <Option<TransparentKeyScope>>::from(key_scope) {
-                            Some(scope) => TransparentAddressMetadata::Derived {
-                                scope,
-                                address_index: i,
-                            },
-                            None => {
-                                todo!("Use the standalone pubkey associated with the address")
-                            }
-                        },
-                    )
-                }))
+                transparent_child_index
+                    .zip(address)
+                    .map(|(i, a)| {
+                        Ok::<_, SqliteClientError>((
+                            address_id,
+                            a,
+                            <Option<TransparentKeyScope>>::from(key_scope).map_or(
+                                Err(SqliteClientError::UnknownZip32Derivation),
+                                |scope| {
+                                    Ok(TransparentAddressMetadata::derived(
+                                        scope,
+                                        i,
+                                        ExposedAt::Unexposed,
+                                        None,
+                                    ))
+                                },
+                            )?,
+                        ))
+                    })
+                    .transpose()
             },
         )?
         .filter_map(|r| r.transpose())
@@ -1333,6 +1380,40 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     Ok(from_event + Duration::new(event_delay, 0))
 }
 
+pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    clock: C,
+    mut rng: R,
+    address: &TransparentAddress,
+    offset_seconds: u32,
+) -> Result<Option<SystemTime>, SqliteClientError> {
+    let addr_str = address.encode(params);
+    let start_time = clock.now();
+    let next_check = next_check_time(&mut rng, start_time, offset_seconds)?;
+    let scheduled_next_check = conn
+        .query_row(
+            "UPDATE addresses
+             SET transparent_receiver_next_check_time = MIN(
+                :next_check,
+                MAX(:next_check, IFNULL(transparent_receiver_next_check_time, :next_check))
+             )
+             WHERE cached_transparent_receiver_address = :addr_str
+             RETURNING transparent_receiver_next_check_time",
+            named_params! {
+                ":addr_str": addr_str,
+                ":next_check": epoch_seconds(next_check)?
+            },
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    scheduled_next_check
+        .map(decode_epoch_seconds)
+        .transpose()
+        .map_err(SqliteClientError::from)
+}
+
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
 ///
@@ -1477,7 +1558,12 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let address_str = address.encode(params);
     let addr_meta = conn
         .query_row(
-            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey
+            "SELECT
+                diversifier_index_be,
+                key_scope,
+                imported_transparent_receiver_pubkey,
+                exposed_at_height,
+                transparent_receiver_next_check_time
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
@@ -1485,14 +1571,27 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
             named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| {
                 let scope_code = row.get("key_scope")?;
+                let exposed_at = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
+                    ExposedAt::Unexposed,
+                    |h| ExposedAt::Height(BlockHeight::from(h))
+                );
+
+                let next_check_time = row
+                    .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
+                    .map(decode_epoch_seconds)
+                    .transpose()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
                     match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
                         Some((scope, address_index)) => {
-                            Ok(TransparentAddressMetadata::Derived {
+                            Ok(TransparentAddressMetadata::derived(
                                 scope,
                                 address_index,
-                            })
+                                exposed_at,
+                                next_check_time
+                            ))
                         }
                         None => {
                             if let Some(_pubkey_bytes) = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")? {
@@ -1509,7 +1608,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                         )
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
-                                    Ok(TransparentAddressMetadata::Standalone(pubkey))
+                                    Ok(TransparentAddressMetadata::standalone(pubkey, exposed_at, next_check_time))
                                 };
 
                                 addr_meta
@@ -1532,7 +1631,12 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
         get_legacy_transparent_address(params, conn, account_uuid)?
     {
         if &legacy_taddr == address {
-            let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+            let metadata = TransparentAddressMetadata::derived(
+                Scope::External.into(),
+                address_index,
+                ExposedAt::Unknown,
+                None,
+            );
             return Ok(Some(metadata));
         }
     }
@@ -1790,7 +1894,7 @@ mod tests {
     use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
     use zcash_client_backend::{
         data_api::{testing::TestBuilder, Account as _, WalletWrite},
-        wallet::TransparentAddressMetadata,
+        wallet::{ExposedAt, TransparentAddressMetadata},
     };
     use zcash_primitives::block::BlockHash;
 
@@ -1874,7 +1978,13 @@ mod tests {
                     .unwrap();
 
             let expected_metadata: Vec<TransparentAddressMetadata> = (0..db.gap_limits.ephemeral())
-                .map(|i| ephemeral::metadata(NonHardenedChildIndex::from_index(i).unwrap()))
+                .map(|i| {
+                    ephemeral::metadata(
+                        NonHardenedChildIndex::from_index(i).unwrap(),
+                        ExposedAt::Unexposed,
+                        None,
+                    )
+                })
                 .collect();
             let actual_metadata: Vec<TransparentAddressMetadata> =
                 known_addrs.into_iter().map(|(_, meta)| meta).collect();
