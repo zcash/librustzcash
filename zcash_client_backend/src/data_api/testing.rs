@@ -87,7 +87,8 @@ use {
 #[cfg(feature = "orchard")]
 use {
     super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
-    ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
+    ::orchard::orchard_flavor::OrchardVanilla, ::orchard::tree::MerkleHashOrchard,
+    group::ff::PrimeField, pasta_curves::pallas,
 };
 
 pub mod pool;
@@ -2144,7 +2145,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..52].to_vec(),
         },
         note,
     )
@@ -2163,7 +2164,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
 ) -> (CompactOrchardAction, ::orchard::Note) {
     use zcash_note_encryption::ShieldedOutput;
 
-    let (compact_action, note) = ::orchard::note_encryption::testing::fake_compact_action(
+    let (compact_action, note) = ::orchard::primitives::fake_compact_action::<_, OrchardVanilla>(
         rng,
         nf_old,
         recipient,
@@ -2176,7 +2177,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
-            ciphertext: compact_action.enc_ciphertext()[..52].to_vec(),
+            ciphertext: compact_action.enc_ciphertext_compact().0[..52].to_vec(),
         },
         note,
     )
@@ -2294,7 +2295,7 @@ fn fake_compact_block_from_tx(
 
     #[cfg(feature = "orchard")]
     if let Some(bundle) = tx.orchard_bundle() {
-        for action in bundle.actions() {
+        for action in bundle.as_vanilla_bundle().actions() {
             ctx.actions.push(action.into());
         }
     }

@@ -44,7 +44,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
-fn transparent_sig_digest<A: TransparentAuthorizingContext>(
+pub(crate) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
@@ -142,7 +142,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
 }
 
 #[cfg(zcash_unstable = "zfuture")]
-fn tze_input_sigdigests<A: tze::Authorization>(
+pub(crate) fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
     txid_digests: &TzeDigests<Blake2bHash>,
@@ -198,6 +198,8 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
+        #[cfg(zcash_unstable = "nu7")]
+        None,
         #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle
             .as_ref()

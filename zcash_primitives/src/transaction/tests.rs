@@ -3,9 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
-        testing::arb_tx, transparent, txid::TxIdDigester, Authorization, Transaction,
-        TransactionData, TxDigests, TxIn,
+        sighash::signature_hash, sighash::SignableInput, sighash_v4::v4_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester, Authorization,
+        OrchardBundle::OrchardVanilla, Transaction, TransactionData, TxDigests, TxIn,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
@@ -19,6 +19,9 @@ use {
 
 #[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
+
+#[cfg(all(test, zcash_unstable = "nu7"))]
+use crate::transaction::OrchardBundle::OrchardZSA;
 
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
@@ -56,13 +59,27 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     );
     prop_assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     prop_assert_eq!(
-        tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
-        txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
+        tx.orchard_bundle.as_ref().map(|v| match v {
+            OrchardVanilla(b) => *b.value_balance(),
+            #[cfg(zcash_unstable = "nu7")]
+            OrchardZSA(b) => *b.value_balance(),
+        }),
+        txo.orchard_bundle.as_ref().map(|v| match v {
+            OrchardVanilla(b) => *b.value_balance(),
+            #[cfg(zcash_unstable = "nu7")]
+            OrchardZSA(b) => *b.value_balance(),
+        })
     );
+    #[cfg(zcash_unstable = "nu7")]
+    if tx.issue_bundle.is_some() {
+        prop_assert_eq!(tx.issue_bundle.as_ref(), txo.issue_bundle.as_ref());
+    }
+
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     if tx.version.has_zip233() {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
+
     Ok(())
 }
 
@@ -220,16 +237,27 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
+    #[cfg(zcash_unstable = "nu7")]
+    type IssueAuth = orchard::issuance::Signed;
+
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
 }
 
+mod orchard_zsa_digests;
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
-        let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
+        let tx = Transaction::read(
+            &tv.tx[..],
+            #[cfg(not(zcash_unstable = "nu7"))]
+            BranchId::Nu5,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7,
+        )
+        .unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
         assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
@@ -286,6 +314,8 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu7")]
+            txdata.issue_bundle().cloned(),
         );
         #[cfg(zcash_unstable = "zfuture")]
         let tdata = TransactionData::from_parts_zfuture(
@@ -299,12 +329,18 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            txdata.issue_bundle().cloned(),
             txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
     }
 
-    for tv in self::data::zip_0244::make_test_vectors() {
+    #[allow(unused_mut)] // mutability required for the V6 case which is flagged off by default
+    let mut test_vectors = self::data::zip_0244::make_test_vectors();
+    #[cfg(zcash_unstable = "nu7")]
+    test_vectors.extend(orchard_zsa_digests::make_test_vectors());
+
+    for tv in test_vectors {
         let (txdata, txid_parts) = to_test_txdata(&tv);
 
         if let Some(index) = tv.transparent_input {
@@ -324,19 +360,18 @@ fn zip_0244() {
             };
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts).as_ref(),
+                signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts).as_ref(),
                 &tv.sighash_all.unwrap()
             );
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts)
-                    .as_ref(),
+                signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts).as_ref(),
                 &tv.sighash_none.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SighashType::SINGLE), &txid_parts)
+                    signature_hash(&txdata, &signable_input(SighashType::SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
@@ -345,7 +380,7 @@ fn zip_0244() {
             }
 
             assert_eq!(
-                v5_signature_hash(
+                signature_hash(
                     &txdata,
                     &signable_input(SighashType::ALL_ANYONECANPAY),
                     &txid_parts,
@@ -355,7 +390,7 @@ fn zip_0244() {
             );
 
             assert_eq!(
-                v5_signature_hash(
+                signature_hash(
                     &txdata,
                     &signable_input(SighashType::NONE_ANYONECANPAY),
                     &txid_parts,
@@ -366,7 +401,7 @@ fn zip_0244() {
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(
+                    signature_hash(
                         &txdata,
                         &signable_input(SighashType::SINGLE_ANYONECANPAY),
                         &txid_parts,
@@ -380,8 +415,8 @@ fn zip_0244() {
         };
 
         assert_eq!(
-            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
-            tv.sighash_shielded
+            signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            &tv.sighash_shielded
         );
     }
 }

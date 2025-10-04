@@ -1111,7 +1111,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                 #[cfg(feature = "orchard")]
                 {
                     detectable_via_scanning = true;
-                    for action in _bundle.actions() {
+                    for action in _bundle.as_vanilla_bundle().actions() {
                         match self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid())
                         {
                             Ok(()) => {}

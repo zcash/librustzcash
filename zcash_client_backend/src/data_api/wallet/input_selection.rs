@@ -609,7 +609,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    ::orchard::builder::BundleType::DEFAULT,
+                    ::orchard::builder::BundleType::DEFAULT_VANILLA,
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
@@ -761,7 +761,7 @@ where
         } else {
             0
         };
-        orchard::builder::BundleType::DEFAULT
+        orchard::builder::BundleType::DEFAULT_VANILLA
             .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
     };

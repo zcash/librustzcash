@@ -1,4 +1,5 @@
 //! Structs representing the components within Zcash transactions.
+pub mod issuance;
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;

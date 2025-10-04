@@ -363,7 +363,7 @@ mod tests {
         let mut builder = Builder::new(
             db_data.params.clone(),
             height,
-            BuildConfig::Standard {
+            BuildConfig::TxV5 {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: None,
             },

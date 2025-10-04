@@ -31,6 +31,8 @@ pub mod extensions;
 pub mod merkle_tree;
 pub mod transaction;
 
+pub mod sighash_versioning;
+
 #[deprecated(note = "This module is deprecated; use `::zcash_protocol::consensus` instead.")]
 pub mod consensus {
     pub use zcash_protocol::consensus::*;

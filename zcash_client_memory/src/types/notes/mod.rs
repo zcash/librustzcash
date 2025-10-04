@@ -15,6 +15,9 @@ mod serialization {
     use jubjub::Fr;
     use zcash_client_backend::wallet::{Note, NoteId};
 
+    #[cfg(feature = "orchard")]
+    use orchard::note::AssetBase;
+
     impl From<NoteId> for proto::NoteId {
         fn from(note_id: NoteId) -> Self {
             Self {
@@ -123,7 +126,16 @@ mod serialization {
                         &rho,
                     )
                     .unwrap();
-                    Self::Orchard(orchard::Note::from_parts(recipient, value, rho, rseed).unwrap())
+                    Self::Orchard(
+                        orchard::Note::from_parts(
+                            recipient,
+                            value,
+                            AssetBase::native(),
+                            rho,
+                            rseed,
+                        )
+                        .unwrap(),
+                    )
                 }
                 #[cfg(not(feature = "orchard"))]
                 _ => panic!("invalid protocol"),

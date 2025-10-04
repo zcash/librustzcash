@@ -95,7 +95,7 @@ use {
 use {
     crate::data_api::error::PcztError,
     bip32::ChildNumber,
-    orchard::note_encryption::OrchardDomain,
+    orchard::primitives::OrchardDomain,
     pczt::roles::{
         creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
         tx_extractor::TransactionExtractor, updater::Updater,
@@ -106,6 +106,11 @@ use {
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::consensus::NetworkConstants,
 };
+
+#[cfg(feature = "orchard")]
+use orchard::note::AssetBase;
+#[cfg(all(feature = "orchard", feature = "pczt"))]
+use zcash_primitives::transaction::OrchardBundle;
 
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, InputSelector, InputSelectorError};
@@ -1128,7 +1133,7 @@ where
     let mut builder = Builder::new(
         params.clone(),
         BlockHeight::from(min_target_height),
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor,
             orchard_anchor,
         },
@@ -1347,6 +1352,7 @@ where
                     orchard_external_ovk.clone(),
                     to,
                     payment.amount().into(),
+                    AssetBase::native(),
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
@@ -1471,6 +1477,7 @@ where
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value().into(),
+                        AssetBase::native(),
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
@@ -1644,6 +1651,7 @@ where
                     .orchard_bundle()
                     .and_then(|bundle| {
                         bundle
+                            .as_vanilla_bundle()
                             .decrypt_output_with_key(output_index, &orchard_internal_ivk)
                             .map(|(note, _, _)| Note::Orchard(note))
                     })
@@ -2067,7 +2075,7 @@ where
     DbT::AccountId: serde::de::DeserializeOwned,
 {
     use std::collections::BTreeMap;
-    use zcash_note_encryption::{Domain, ShieldedOutput, ENC_CIPHERTEXT_SIZE};
+    use zcash_note_encryption::{Domain, ShieldedOutput};
 
     let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
 
@@ -2098,12 +2106,13 @@ where
                     .output()
                     .value()
                     .map(orchard::value::NoteValue::from_raw)?;
+                let asset = AssetBase::from_bytes(&act.spend().asset().unwrap()).into_option()?;
                 let rho = orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
                 let rseed = act.output().rseed().as_ref().and_then(|rseed| {
                     orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
                 })?;
 
-                orchard::Note::from_parts(recipient, value, rho, rseed).into_option()
+                orchard::Note::from_parts(recipient, value, asset, rho, rseed).into_option()
             };
 
             let external_address = act
@@ -2236,7 +2245,7 @@ where
     fn to_sent_transaction_output<
         AccountId: Copy,
         D: Domain,
-        O: ShieldedOutput<D, { ENC_CIPHERTEXT_SIZE }>,
+        O: ShieldedOutput<D>,
         DbT: WalletRead + WalletCommitmentTrees,
         N,
     >(
@@ -2290,31 +2299,58 @@ where
     #[cfg(feature = "orchard")]
     let orchard_outputs = transaction
         .orchard_bundle()
-        .map(|bundle| {
-            assert_eq!(bundle.actions().len(), orchard_output_info.len());
-            bundle
-                .actions()
-                .iter()
-                .zip(orchard_output_info)
-                .enumerate()
-                .filter_map(|(output_index, (action, output_info))| {
-                    output_info.map(|((pczt_recipient, external_address), note)| {
-                        let domain = OrchardDomain::for_action(action);
-                        to_sent_transaction_output::<_, _, _, DbT, _>(
-                            domain,
-                            note,
-                            action,
-                            ShieldedProtocol::Orchard,
-                            output_index,
-                            pczt_recipient,
-                            external_address,
-                            |note| note.value().inner(),
-                            |memo| memo,
-                            Note::Orchard,
-                        )
+        .map(|bundle| match bundle {
+            OrchardBundle::OrchardVanilla(b) => {
+                assert_eq!(b.actions().len(), orchard_output_info.len());
+                b.actions()
+                    .iter()
+                    .zip(orchard_output_info)
+                    .enumerate()
+                    .filter_map(|(output_index, (action, output_info))| {
+                        output_info.map(|((pczt_recipient, external_address), note)| {
+                            let domain = OrchardDomain::for_action(action);
+                            to_sent_transaction_output::<_, _, _, DbT, _>(
+                                domain,
+                                note,
+                                action,
+                                ShieldedProtocol::Orchard,
+                                output_index,
+                                pczt_recipient,
+                                external_address,
+                                |note| note.value().inner(),
+                                |memo| memo,
+                                Note::Orchard,
+                            )
+                        })
                     })
-                })
-                .collect::<Result<Vec<_>, _>>()
+                    .collect::<Result<Vec<_>, _>>()
+            }
+            #[cfg(zcash_unstable = "nu7")]
+            OrchardBundle::OrchardZSA(b) => {
+                assert_eq!(b.actions().len(), orchard_output_info.len());
+                b.actions()
+                    .iter()
+                    .zip(orchard_output_info)
+                    .enumerate()
+                    .filter_map(|(output_index, (action, output_info))| {
+                        output_info.map(|((pczt_recipient, external_address), note)| {
+                            let domain = OrchardDomain::for_action(action);
+                            to_sent_transaction_output::<_, _, _, DbT, _>(
+                                domain,
+                                note,
+                                action,
+                                ShieldedProtocol::Orchard,
+                                output_index,
+                                pczt_recipient,
+                                external_address,
+                                |note| note.value().inner(),
+                                |memo| memo,
+                                Note::Orchard,
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            }
         })
         .transpose()?;
 
