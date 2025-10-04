@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
 
+pub(crate) mod zip_0048;
+
 pub struct TransparentOvkTestVector {
     pub c: [u8; 32],
     pub pk: [u8; 33],
