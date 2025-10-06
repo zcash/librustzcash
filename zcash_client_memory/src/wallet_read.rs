@@ -33,7 +33,6 @@ use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    core::ops::Range,
     transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
@@ -630,25 +629,6 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 })
                 .collect(),
         })
-    }
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        account_id: Self::AccountId,
-        index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(self
-            .accounts
-            .get(account_id)
-            .map(Account::ephemeral_addresses)
-            .unwrap_or_else(|| Ok(vec![]))?
-            .into_iter()
-            .filter(|(_addr, meta)| {
-                index_range.as_ref().map_or(true, |range| {
-                    meta.address_index().is_some_and(|i| range.contains(&i))
-                })
-            })
-            .collect::<Vec<_>>())
     }
 
     #[cfg(feature = "transparent-inputs")]

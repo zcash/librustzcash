@@ -79,8 +79,7 @@ use crate::{
 use {
     super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
-    std::ops::Range,
+    ::transparent::address::TransparentAddress,
     transparent::GapLimits,
 };
 
@@ -2751,25 +2750,8 @@ impl WalletRead for MockWalletDb {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        _account: Self::AccountId,
-        _index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(vec![])
-    }
-
-    #[cfg(feature = "transparent-inputs")]
     fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
         Ok(BlockHeight::from(0u32))
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_ephemeral_address(
-        &self,
-        _address: &TransparentAddress,
-    ) -> Result<Option<Self::AccountId>, Self::Error> {
-        Ok(None)
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {

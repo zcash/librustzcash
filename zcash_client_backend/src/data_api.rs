@@ -1691,7 +1691,7 @@ pub trait WalletRead {
     ///   with the account should be returned. The value of this flag is ignored unless the
     ///   `transparent-key-import` feature is enabled.
     ///
-    /// Use [`Self::get_known_ephemeral_addresses`] to obtain the ephemeral transparent
+    /// Use [`Self::get_ephemeral_transparent_receivers`] to obtain the ephemeral transparent
     /// receivers.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -1764,23 +1764,10 @@ pub trait WalletRead {
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_address_metadata(
         &self,
-        account: Self::AccountId,
-        address: &TransparentAddress,
+        _account: Self::AccountId,
+        _address: &TransparentAddress,
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
-        // This should be overridden.
-        Ok(
-            if let Some(result) = self
-                .get_transparent_receivers(account, true, true)?
-                .get(address)
-            {
-                result.clone()
-            } else {
-                self.get_known_ephemeral_addresses(account, None)?
-                    .into_iter()
-                    .find(|(known_addr, _)| known_addr == address)
-                    .map(|(_, metadata)| metadata)
-            },
-        )
+        unimplemented!("WalletRead::get_transparent_address_metadata must be overridden for wallets to use the `transparent-inputs` feature")
     }
 
     /// Returns the maximum block height at which a transparent output belonging to the wallet has
@@ -1795,82 +1782,6 @@ pub trait WalletRead {
     #[cfg(feature = "transparent-inputs")]
     fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
         unimplemented!("WalletRead::utxo_query_height must be overridden for wallets to use the `transparent-inputs` feature")
-    }
-
-    /// Returns a vector of ephemeral transparent addresses associated with the given
-    /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for the backend's configured gap limit worth
-    /// of additional indices (capped to the maximum index).
-    ///
-    /// If `index_range` is some `Range`, it limits the result to addresses with indices
-    /// in that range. An `index_range` of `None` is defined to be equivalent to
-    /// `0..(1u32 << 31)`.
-    ///
-    /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
-    /// receivers, but do not need to do so regularly. Under expected usage, outputs
-    /// would only be detected with these receivers in the following situations:
-    ///
-    /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
-    ///   transaction (that spent the output sent to the ephemeral address) did not get
-    ///   mined before it expired.
-    ///   - In this case the output will already be known to the wallet (because it
-    ///     stores the transactions that it creates).
-    ///
-    /// - Another wallet app using the same seed phrase created a payment to a ZIP 320
-    ///   address, and this wallet queried for the ephemeral UTXOs after the first
-    ///   transaction was mined but before the second transaction was mined.
-    ///   - In this case, the output should not be considered unspent until the expiry
-    ///     height of the transaction it was received in has passed. Wallets creating
-    ///     payments to TEX addresses generally set the same expiry height for the first
-    ///     and second transactions, meaning that this wallet does not need to observe
-    ///     the second transaction to determine when it would have expired.
-    ///
-    /// - A TEX address recipient decided to return funds that the wallet had sent to
-    ///   them.
-    ///
-    /// In all cases, the wallet should re-shield the unspent outputs, in a separate
-    /// transaction per ephemeral address, before re-spending the funds.
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        _account: Self::AccountId,
-        _index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        unimplemented!("WalletRead::get_known_ephemeral_addresses must be overridden for wallets to use the `transparent-inputs` feature")
-    }
-
-    /// If a given ephemeral address might have been reserved, i.e. would be included in
-    /// the result of `get_known_ephemeral_addresses(account_id, None)` for any of the
-    /// wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return `Ok(None)`.
-    ///
-    /// This is equivalent to (but may be implemented more efficiently than):
-    /// ```compile_fail
-    /// for account_id in self.get_account_ids()? {
-    ///     if self
-    ///         .get_known_ephemeral_addresses(account_id, None)?
-    ///         .into_iter()
-    ///         .any(|(known_addr, _)| &known_addr == address)
-    ///     {
-    ///         return Ok(Some(account_id));
-    ///     }
-    /// }
-    /// Ok(None)
-    /// ```
-    #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_ephemeral_address(
-        &self,
-        address: &TransparentAddress,
-    ) -> Result<Option<Self::AccountId>, Self::Error> {
-        for account_id in self.get_account_ids()? {
-            if self
-                .get_known_ephemeral_addresses(account_id, None)?
-                .into_iter()
-                .any(|(known_addr, _)| &known_addr == address)
-            {
-                return Ok(Some(account_id));
-            }
-        }
-        Ok(None)
     }
 
     /// Returns a vector of [`TransactionDataRequest`] values that describe information needed by
@@ -1956,6 +1867,83 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
+
+    /// Returns a vector of ephemeral transparent addresses associated with the given
+    /// account controlled by this wallet, along with their metadata. The result includes
+    /// reserved addresses, and addresses for the backend's configured gap limit worth
+    /// of additional indices (capped to the maximum index).
+    ///
+    /// If `index_range` is some `Range`, it limits the result to addresses with indices
+    /// in that range. An `index_range` of `None` is defined to be equivalent to
+    /// `0..(1u32 << 31)`.
+    ///
+    /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
+    /// receivers, but do not need to do so regularly. Under expected usage, outputs
+    /// would only be detected with these receivers in the following situations:
+    ///
+    /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
+    ///   transaction (that spent the output sent to the ephemeral address) did not get
+    ///   mined before it expired.
+    ///   - In this case the output will already be known to the wallet (because it
+    ///     stores the transactions that it creates).
+    ///
+    /// - Another wallet app using the same seed phrase created a payment to a ZIP 320
+    ///   address, and this wallet queried for the ephemeral UTXOs after the first
+    ///   transaction was mined but before the second transaction was mined.
+    ///   - In this case, the output should not be considered unspent until the expiry
+    ///     height of the transaction it was received in has passed. Wallets creating
+    ///     payments to TEX addresses generally set the same expiry height for the first
+    ///     and second transactions, meaning that this wallet does not need to observe
+    ///     the second transaction to determine when it would have expired.
+    ///
+    /// - A TEX address recipient decided to return funds that the wallet had sent to
+    ///   them.
+    ///
+    /// In all cases, the wallet should re-shield the unspent outputs, in a separate
+    /// transaction per ephemeral address, before re-spending the funds.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_known_ephemeral_addresses(
+        &self,
+        _account: <Self as WalletRead>::AccountId,
+        _index_range: Option<Range<NonHardenedChildIndex>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
+        unimplemented!("WalletRead::get_known_ephemeral_addresses must be overridden for wallets to use the `transparent-inputs` feature")
+    }
+
+    /// If a given ephemeral address might have been reserved, i.e. would be included in
+    /// the result of `get_known_ephemeral_addresses(account_id, None)` for any of the
+    /// wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return `Ok(None)`.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// for account_id in self.get_account_ids()? {
+    ///     if self
+    ///         .get_known_ephemeral_addresses(account_id, None)?
+    ///         .into_iter()
+    ///         .any(|(known_addr, _)| &known_addr == address)
+    ///     {
+    ///         return Ok(Some(account_id));
+    ///     }
+    /// }
+    /// Ok(None)
+    /// ```
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<<Self as WalletRead>::AccountId>, <Self as WalletRead>::Error> {
+        for account_id in self.get_account_ids()? {
+            if self
+                .get_known_ephemeral_addresses(account_id, None)?
+                .into_iter()
+                .any(|(known_addr, _)| &known_addr == address)
+            {
+                return Ok(Some(account_id));
+            }
+        }
+        Ok(None)
+    }
 
     /// Performs final checks at the conclusion of each test.
     ///

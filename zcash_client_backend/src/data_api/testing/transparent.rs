@@ -21,7 +21,7 @@ use crate::{
             decrypt_and_store_transaction, input_selection::GreedyInputSelector,
             ConfirmationsPolicy, TargetHeight,
         },
-        Account as _, Balance, InputSource, WalletRead, WalletWrite,
+        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
     },
     fees::{standard, DustOutputPolicy, StandardFeeRule},
     wallet::WalletTransparentOutput,

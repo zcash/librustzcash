@@ -9,12 +9,16 @@ use std::{
 };
 
 use ::transparent::bundle::OutPoint;
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::keys::NonHardenedChildIndex;
 use incrementalmerkletree::{Address, Level, Marking, Position, Retention};
 use scanning::ScanQueue;
 use shardtree::{
     store::{memory::MemoryShardStore, ShardStore},
     ShardTree,
 };
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::wallet::TransparentAddressMetadata;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
@@ -1115,5 +1119,25 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         }
 
         Ok(output.outpoint().clone())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn get_known_ephemeral_addresses(
+        &self,
+        account_id: AccountId,
+        index_range: Option<Range<NonHardenedChildIndex>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Error> {
+        Ok(self
+            .accounts
+            .get(account_id)
+            .map(Account::ephemeral_addresses)
+            .unwrap_or_else(|| Ok(vec![]))?
+            .into_iter()
+            .filter(|(_addr, meta)| {
+                index_range.as_ref().map_or(true, |range| {
+                    meta.address_index().is_some_and(|i| range.contains(&i))
+                })
+            })
+            .collect::<Vec<_>>())
     }
 }

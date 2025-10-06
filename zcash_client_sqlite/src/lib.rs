@@ -1032,32 +1032,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::utxo_query_height(self.conn.borrow(), account_ref, &self.gap_limits)
     }
 
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        account: Self::AccountId,
-        index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
-        wallet::transparent::ephemeral::get_known_ephemeral_addresses(
-            self.conn.borrow(),
-            &self.params,
-            account_id,
-            index_range,
-        )
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_ephemeral_address(
-        &self,
-        address: &TransparentAddress,
-    ) -> Result<Option<Self::AccountId>, Self::Error> {
-        wallet::transparent::ephemeral::find_account_for_ephemeral_address_str(
-            self.conn.borrow(),
-            &address.encode(&self.params),
-        )
-    }
-
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
         if let Some(_chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
             let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
@@ -1250,6 +1224,33 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(result)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_known_ephemeral_addresses(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+        index_range: Option<Range<NonHardenedChildIndex>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
+        let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
+        wallet::transparent::ephemeral::get_known_ephemeral_addresses(
+            self.conn.borrow(),
+            &self.params,
+            account_id,
+            index_range,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<<Self as WalletRead>::AccountId>, <Self as WalletRead>::Error> {
+        wallet::transparent::ephemeral::find_account_for_ephemeral_address_str(
+            self.conn.borrow(),
+            &address.encode(&self.params),
+        )
     }
 }
 
