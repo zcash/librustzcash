@@ -22,6 +22,8 @@ workspace.
     - `standalone`
     - `exposure`
     - `next_check_time`
+- `zcash_client_backend::data_api::WalletTest::get_known_ephemeral_addresses`
+- `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
@@ -31,6 +33,9 @@ workspace.
     `select_unspent_notes`.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
   - `WalletWrite` has added method `schedule_next_check`.
+  - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
+    has been removed. Implementers of `WalletRead` must provide their own
+    implementation.
 - `zcash_client_backend::wallet`:
   - `TransparentAddressMetadata` has been converted from an enum to a struct
     that contains both source metadata and information about when the address
@@ -42,6 +47,14 @@ workspace.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
+- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
+  has been removed. It was previously only used in tests and is not well-designed,
+  for wallet use; a replacement for use in tests has been added to the `WalletTest`
+  trait.
+- `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
+  has been removed. It was previously only used in tests and is not well-designed,
+  for wallet use; a replacement for use in tests has been added to the `WalletTest`
+  trait.
 
 ## [0.20.0] - 2025-09-25
 

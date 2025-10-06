@@ -1,6 +1,6 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
-use std::{fmt::Debug, time::SystemTime};
+use std::fmt::Debug;
 
 use incrementalmerkletree::Position;
 
@@ -24,7 +24,10 @@ use crate::fees::sapling as sapling_fees;
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use {
+    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
+    std::time::SystemTime,
+};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

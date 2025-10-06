@@ -45,6 +45,7 @@ pub(crate) fn metadata(
 /// (capped to the maximum index).
 ///
 /// If `index_range` is some `Range`, it limits the result to addresses with indices in that range.
+#[cfg(any(test, feature = "test-dependencies"))]
 pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,

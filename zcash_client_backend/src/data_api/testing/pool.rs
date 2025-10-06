@@ -2061,29 +2061,6 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         Address::Transparent(TransparentAddress::PublicKeyHash(_))
     );
 
-    // Attempting to pay to an ephemeral address should cause an error.
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &ephemeral0,
-            transfer_amount,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
-
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(
-        &create_proposed_result,
-        Err(Error::PaysEphemeralTransparentAddress(address_str)) if address_str == &ephemeral0.encode(st.network()));
-
     // Simulate another wallet sending to an ephemeral address with an index
     // within the current gap limit. The `PaysEphemeralTransparentAddress` error
     // prevents us from doing so straightforwardly, so we'll do it by building

@@ -92,7 +92,6 @@ use {
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     transparent::bundle::TxOut,
-    zcash_keys::encoding::AddressCodec,
 };
 
 #[cfg(feature = "pczt")]
@@ -1369,15 +1368,6 @@ where
              transparent_output_meta: &mut Vec<_>,
              to: TransparentAddress|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                // Always reject sending to one of our known ephemeral addresses.
-                #[cfg(feature = "transparent-inputs")]
-                if wallet_db
-                    .find_account_for_ephemeral_address(&to)
-                    .map_err(Error::DataSource)?
-                    .is_some()
-                {
-                    return Err(Error::PaysEphemeralTransparentAddress(to.encode(params)));
-                }
                 if payment.memo().is_some() {
                     return Err(Error::MemoForbidden);
                 }
