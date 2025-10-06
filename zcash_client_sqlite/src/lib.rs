@@ -959,7 +959,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         include_change: bool,
         include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         let key_scopes = Some(KeyScope::EXTERNAL)
             .into_iter()
             .chain(include_change.then_some(KeyScope::INTERNAL))
@@ -985,7 +985,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         exposure_depth: u32,
         exclude_used: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,

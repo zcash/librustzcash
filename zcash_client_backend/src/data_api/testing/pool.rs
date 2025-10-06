@@ -1955,10 +1955,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         assert_eq!(exposed_at_tip.len(), 1);
         let cur_height = st.wallet().chain_height().unwrap().unwrap();
         assert_eq!(
-            exposed_at_tip
-                .values()
-                .next()
-                .and_then(|opt| opt.as_ref().map(|m0| m0.exposure())),
+            exposed_at_tip.values().next().map(|m0| m0.exposure()),
             Some(Exposure::Exposed {
                 at_height: cur_height
             })

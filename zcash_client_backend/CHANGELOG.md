@@ -31,10 +31,12 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
-  - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}` 
+  - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}`
     each now take an additional `target_height` argument; spendability isn't a
     well-defined property in absence of target height information.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - The result type of `WalletRead::get_transparent_receivers` has changed. The
+    value type of the returned `HashMap` is now non-optional.
   - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
     has been removed. Implementers of `WalletRead` must provide their own
     implementation.

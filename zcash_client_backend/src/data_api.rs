@@ -1699,7 +1699,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _include_change: bool,
         _include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         unimplemented!("WalletRead::get_transparent_receivers must be overridden for wallets to use the `transparent-inputs` feature")
     }
 
@@ -1724,7 +1724,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _exposure_depth: u32,
         _exclude_used: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         unimplemented!("WalletRead::get_ephemeral_transparent_receivers must be overridden for wallets to use the `transparent-inputs` feature")
     }
 
