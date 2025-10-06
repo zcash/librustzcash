@@ -32,6 +32,8 @@ workspace.
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - The result type of `WalletRead::get_transparent_receivers` has changed. The
+    value type of the returned `HashMap` is now non-optional.
   - `WalletWrite` has added method `schedule_next_check`.
   - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
     has been removed. Implementers of `WalletRead` must provide their own

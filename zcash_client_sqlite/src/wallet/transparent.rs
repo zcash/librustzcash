@@ -118,8 +118,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     scopes: &[KeyScope],
     exposure_depth: Option<u32>,
     exclude_used: bool,
-) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
-    let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
+) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, SqliteClientError> {
+    let mut ret: HashMap<TransparentAddress, TransparentAddressMetadata> = HashMap::new();
 
     let min_exposure_height = exposure_depth
         .map(|d| {
@@ -238,7 +238,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                 }
             };
 
-            ret.insert(taddr, Some(metadata));
+            ret.insert(taddr, metadata);
         }
     }
 

@@ -637,7 +637,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         _include_change: bool,
         _include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         let account = self
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
@@ -654,16 +654,16 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .iter()
             .filter_map(|(diversifier_index, ua)| {
                 ua.transparent().map(|ta| {
-                    let metadata =
+                    let metadata = TransparentAddressMetadata::derived(
+                        Scope::External.into(),
                         NonHardenedChildIndex::from_index((*diversifier_index).try_into().unwrap())
-                            .map(|i| {
-                                TransparentAddressMetadata::derived(
-                                    Scope::External.into(),
-                                    i,
-                                    Exposure::Unknown,
-                                    None,
-                                )
-                            });
+                            .expect(
+                                "non-hardened address corresponds to a valid diversifier index",
+                            ),
+                        Exposure::Unknown,
+                        None,
+                    );
+
                     (*ta, metadata)
                 })
             })

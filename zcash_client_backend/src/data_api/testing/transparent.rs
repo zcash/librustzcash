@@ -506,7 +506,7 @@ where
     // Pick an address half way through the set of external taddrs
     let external_taddrs_sorted = external_taddrs
         .into_iter()
-        .filter_map(|(addr, meta)| meta.and_then(|m| m.address_index().map(|i| (i, addr))))
+        .filter_map(|(addr, meta)| meta.address_index().map(|i| (i, addr)))
         .collect::<BTreeMap<_, _>>();
     let to = Address::from(
         *external_taddrs_sorted
