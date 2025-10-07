@@ -1954,11 +1954,9 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             .unwrap();
         assert_eq!(exposed_at_tip.len(), 1);
         let cur_height = st.wallet().chain_height().unwrap().unwrap();
-        assert_eq!(
+        assert_matches!(
             exposed_at_tip.values().next().map(|m0| m0.exposure()),
-            Some(Exposure::Exposed {
-                at_height: cur_height
-            })
+            Some(Exposure::Exposed { at_height, .. }) if at_height == cur_height
         );
 
         // There should be no unused transparent receivers in this range

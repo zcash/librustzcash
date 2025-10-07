@@ -12,6 +12,8 @@ use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
 use zcash_keys::encoding::AddressCodec;
 use zcash_protocol::consensus::{self, BlockHeight};
 
+#[cfg(any(test, feature = "test-dependencies"))]
+use crate::GapLimits;
 use crate::{
     error::SqliteClientError,
     util::Clock,
@@ -49,9 +51,19 @@ pub(crate) fn metadata(
 pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
+    gap_limits: &GapLimits,
     account_id: AccountRef,
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    use crate::wallet::transparent::find_gap_start;
+
+    let gap_start = find_gap_start(
+        conn,
+        account_id,
+        TransparentKeyScope::EPHEMERAL,
+        gap_limits.ephemeral(),
+    )?;
+
     let mut stmt = conn.prepare(
         "SELECT
             cached_transparent_receiver_address,
@@ -75,6 +87,8 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                 ":key_scope": KeyScope::Ephemeral.encode()
             },
             |row| {
+                use zcash_client_backend::wallet::GapMetadata;
+
                 let addr_str: String = row.get("cached_transparent_receiver_address")?;
 
                 let raw_index: u32 = row.get("transparent_child_index")?;
@@ -83,7 +97,22 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 
                 let exposure = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
                     Exposure::Unexposed,
-                    |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
+                    |h| Exposure::Exposed {
+                        at_height: BlockHeight::from(h),
+                        gap_metadata: gap_start.map_or(
+                            GapMetadata::DerivationUnknown,
+                            |gap_start| {
+                                if address_index >= gap_start {
+                                    GapMetadata::InGap {
+                                        gap_position: address_index.index() - gap_start.index(),
+                                        gap_limit: gap_limits.ephemeral(),
+                                    }
+                                } else {
+                                    GapMetadata::GapRecoverable { gap_limit: gap_limits.ephemeral() }
+                                }
+                            }
+                        )
+                    }
                 );
 
                 let next_check_time = row

@@ -21,7 +21,7 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
-use zcash_client_backend::wallet::Exposure;
+use zcash_client_backend::wallet::{Exposure, GapMetadata};
 use zcash_client_backend::{
     data_api::{
         wallet::{ConfirmationsPolicy, TargetHeight},
@@ -60,8 +60,10 @@ use super::{
     get_account_ids, get_account_internal, KeyScope,
 };
 use crate::{
-    error::SqliteClientError, util::Clock, wallet::common::tx_unexpired_condition, AccountRef,
-    AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
+    error::SqliteClientError,
+    util::Clock,
+    wallet::{common::tx_unexpired_condition, get_account},
+    AccountRef, AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
 };
 
 pub(crate) mod ephemeral;
@@ -114,6 +116,7 @@ fn address_index_from_diversifier_index_be(
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     scopes: &[KeyScope],
     exposure_depth: Option<u32>,
@@ -129,6 +132,25 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         })
         .transpose()?;
 
+    let account_id = get_account(conn, params, account_uuid)?
+        .ok_or(SqliteClientError::AccountUnknown)?
+        .id;
+
+    // A map from key scope to gap limit size for that scope and start index of the existing gap
+    let gap_limit_starts = scopes
+        .iter()
+        .filter_map(|key_scope| {
+            gap_limits
+                .limit_for(*key_scope)
+                .zip(key_scope.as_transparent())
+                .and_then(|(limit, t_key_scope)| {
+                    find_gap_start(conn, account_id, t_key_scope, limit)
+                        .transpose()
+                        .map(|res| res.map(|child_idx| (*key_scope, (limit, child_idx))))
+                })
+        })
+        .collect::<Result<HashMap<KeyScope, (u32, NonHardenedChildIndex)>, SqliteClientError>>()?;
+
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
         "SELECT
@@ -139,8 +161,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             exposed_at_height,
             transparent_receiver_next_check_time
          FROM addresses
-         JOIN accounts ON accounts.id = addresses.account_id
-         WHERE accounts.uuid = :account_uuid
+         WHERE account_id = :account_id
          AND cached_transparent_receiver_address IS NOT NULL
          AND key_scope IN rarray(:scopes_ptr)
          AND (
@@ -161,7 +182,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let scope_values: Vec<Value> = scopes.iter().map(|s| Value::Integer(s.encode())).collect();
     let scopes_ptr = Rc::new(scope_values);
     let mut rows = addr_query.query(named_params![
-        ":account_uuid": account_uuid.0,
+        ":account_id": account_id.0,
         ":scopes_ptr": &scopes_ptr,
         ":min_exposure_height": min_exposure_height.map(u32::from),
         ":exclude_used": exclude_used
@@ -177,10 +198,40 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             })?
             .to_transparent_address();
 
+        let address_index_opt = row
+            .get::<_, Option<u32>>("transparent_child_index")?
+            .map(|address_index| {
+                NonHardenedChildIndex::from_index(address_index).ok_or(
+                    SqliteClientError::CorruptedData(format!(
+                        "{} is not a valid transparent child index",
+                        address_index
+                    )),
+                )
+            })
+            .transpose()?;
+
         let exposure =
             row.get::<_, Option<u32>>("exposed_at_height")?
                 .map_or(Exposure::Unexposed, |h| Exposure::Exposed {
                     at_height: BlockHeight::from(h),
+                    gap_metadata: gap_limit_starts
+                        .get(&key_scope)
+                        .zip(address_index_opt)
+                        .map_or(
+                            GapMetadata::DerivationUnknown,
+                            |((gap_limit, start), idx)| {
+                                if *start <= idx {
+                                    GapMetadata::InGap {
+                                        gap_position: idx.index() - start.index(),
+                                        gap_limit: *gap_limit,
+                                    }
+                                } else {
+                                    GapMetadata::GapRecoverable {
+                                        gap_limit: *gap_limit,
+                                    }
+                                }
+                            },
+                        ),
                 });
 
         let next_check_time = row
@@ -215,7 +266,6 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                 }
                 derived => {
                     let scope_opt = <Option<TransparentKeyScope>>::from(derived);
-                    let address_index_opt = row.get::<_, Option<u32>>(2)?;
                     let (scope, address_index) =
                         scope_opt.zip(address_index_opt).ok_or_else(|| {
                             SqliteClientError::CorruptedData(
@@ -226,12 +276,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
                     TransparentAddressMetadata::derived(
                         scope,
-                        NonHardenedChildIndex::from_index(address_index).ok_or(
-                            SqliteClientError::CorruptedData(format!(
-                                "{} is not a valid transparent child index",
-                                address_index
-                            )),
-                        )?,
+                        address_index,
                         exposure,
                         next_check_time,
                     )
@@ -1535,6 +1580,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
 pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     address: &TransparentAddress,
 ) -> Result<Option<TransparentAddressMetadata>, SqliteClientError> {
@@ -1542,6 +1588,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let addr_meta = conn
         .query_row(
             "SELECT
+                account_id,
                 diversifier_index_be,
                 key_scope,
                 imported_transparent_receiver_pubkey,
@@ -1553,11 +1600,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
              AND cached_transparent_receiver_address = :address",
             named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| {
+                let account_id = row.get("account_id").map(AccountRef)?;
                 let scope_code = row.get("key_scope")?;
-                let exposure = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
-                    Exposure::Unexposed,
-                    |h| Exposure::Exposed { at_height: BlockHeight::from(h) }
-                );
 
                 let next_check_time = row
                     .get::<_, Option<i64>>("transparent_receiver_next_check_time")?
@@ -1567,8 +1611,39 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
+                    let exposed_at_height = row.get::<_, Option<u32>>("exposed_at_height")?.map(BlockHeight::from);
+
                     match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
                         Some((scope, address_index)) => {
+                            let exposure = exposed_at_height.map_or(
+                                Ok::<_, SqliteClientError>(Exposure::Unexposed),
+                                |at_height| {
+                                    let gap_metadata =  match gap_limits.limit_for(key_scope) {
+                                        None => GapMetadata::DerivationUnknown,
+                                        Some(gap_limit) => {
+                                            find_gap_start(conn, account_id, scope, gap_limit)?.map_or(
+                                                GapMetadata::GapRecoverable { gap_limit },
+                                                |gap_start| {
+                                                    if address_index >= gap_start {
+                                                        GapMetadata::InGap {
+                                                            gap_position: address_index.index() - gap_start.index(),
+                                                            gap_limit,
+                                                        }
+                                                    } else {
+                                                        GapMetadata::GapRecoverable { gap_limit }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    };
+
+                                    Ok(Exposure::Exposed {
+                                        at_height,
+                                        gap_metadata
+                                    })
+                                }
+                            )?;
+
                             Ok(TransparentAddressMetadata::derived(
                                 scope,
                                 address_index,
@@ -1591,7 +1666,20 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                         )
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
-                                    Ok(TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time))
+
+                                    let addr_meta = TransparentAddressMetadata::standalone(
+                                        pubkey,
+                                        exposed_at_height.map_or(
+                                            Exposure::Unexposed,
+                                            |at_height| Exposure::Exposed {
+                                                at_height,
+                                                gap_metadata: GapMetadata::DerivationUnknown
+                                            }
+                                        ),
+                                        next_check_time
+                                    );
+
+                                    Ok(addr_meta)
                                 };
 
                                 addr_meta
@@ -1966,9 +2054,14 @@ mod tests {
             );
             //assert_matches!(ephemeral::first_unstored_index(&db.conn, account_id), Ok(addr_index) if addr_index == GAP_LIMIT);
 
-            let known_addrs =
-                ephemeral::get_known_ephemeral_addresses(&db.conn, &db.params, account_id, None)
-                    .unwrap();
+            let known_addrs = ephemeral::get_known_ephemeral_addresses(
+                &db.conn,
+                &db.params,
+                &db.gap_limits,
+                account_id,
+                None,
+            )
+            .unwrap();
 
             let expected_metadata: Vec<TransparentAddressMetadata> = (0..db.gap_limits.ephemeral())
                 .map(|i| {

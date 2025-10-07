@@ -15,7 +15,7 @@ workspace.
 ### Added
 - `zcash_client_backend::tor::http::cryptex`:
     - `exchanges::{CoinEx, DigiFinex, Kraken, Xt}`
-- `zcash_client_backend::wallet::Exposure`
+- `zcash_client_backend::wallet::{Exposure, GapMetadata}`
 - `zcash_client_backend::wallet::TransparentAddressSource`
 - `zcash_client_backend::wallet::TransparentAddressMetadata::`
     - `derived`
