@@ -311,6 +311,15 @@ impl GapLimits {
     pub(crate) fn ephemeral(&self) -> u32 {
         self.ephemeral
     }
+
+    pub(crate) fn limit_for(&self, scope: KeyScope) -> Option<u32> {
+        match scope {
+            KeyScope::EXTERNAL => Some(self.external()),
+            KeyScope::INTERNAL => Some(self.internal()),
+            KeyScope::Ephemeral => Some(self.ephemeral()),
+            _ => None,
+        }
+    }
 }
 
 /// The default gap limits supported by this implementation are:
@@ -971,6 +980,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account,
             &key_scopes[..],
             None,
@@ -988,6 +998,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account,
             &[KeyScope::Ephemeral],
             Some(exposure_depth),
@@ -1020,6 +1031,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::get_transparent_address_metadata(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account,
             address,
         )
@@ -1227,6 +1239,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account_id,
             index_range,
         )
