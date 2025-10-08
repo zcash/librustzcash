@@ -31,7 +31,7 @@ mod serialization {
     #[cfg(feature = "transparent-inputs")]
     use {
         ::transparent::address::TransparentAddress, zcash_keys::encoding::AddressCodec as _,
-        zcash_primitives::consensus::Network::MainNetwork as EncodingParams,
+        zcash_protocol::consensus::Network::MainNetwork as EncodingParams,
     };
 
     impl From<TransactionDataRequest> for proto::TransactionDataRequest {

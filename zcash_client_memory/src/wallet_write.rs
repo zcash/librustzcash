@@ -47,11 +47,10 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::bundle::TxOut,
+    ::transparent::{address::TransparentAddress, bundle::TxOut},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
-    zcash_primitives::legacy::TransparentAddress,
 };
 
 impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
@@ -1196,7 +1195,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         use zcash_keys::keys::AddressGenerationError;
         // TODO: We need to implement first_unsafe_index to make sure we dont violate gap invarient
 
-        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
+        use transparent::keys::NonHardenedChildIndex;
         let first_unsafe = self.first_unsafe_index(account_id)?;
         if let Some(account) = self.accounts.get_mut(account_id) {
             let first_unreserved = account.first_unreserved_index()?;

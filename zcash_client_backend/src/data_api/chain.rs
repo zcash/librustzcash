@@ -6,7 +6,7 @@
 //! ```
 //! # #[cfg(feature = "test-dependencies")]
 //! # {
-//! use zcash_primitives::{
+//! use zcash_protocol::{
 //!     consensus::{BlockHeight, Network, Parameters},
 //! };
 //!
@@ -244,7 +244,7 @@ pub trait BlockSource {
 ///        scanning::{ScanPriority, ScanRange},
 ///    };
 ///    use zcash_client_backend::proto::compact_formats::CompactBlock;
-///    use zcash_primitives::consensus::BlockHeight;
+///    use zcash_protocol::consensus::BlockHeight;
 ///
 ///    struct ExampleBlockCache {
 ///        cached_blocks: Arc<Mutex<Vec<CompactBlock>>>,

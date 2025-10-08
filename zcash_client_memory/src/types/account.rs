@@ -4,6 +4,11 @@ use std::{
 };
 
 use subtle::ConditionallySelectable;
+use transparent::address::TransparentAddress;
+#[cfg(feature = "transparent-inputs")]
+use transparent::keys::{
+    AccountPubKey, EphemeralIvk, IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope,
+};
 use zcash_address::ZcashAddress;
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::wallet::TransparentAddressMetadata;
@@ -17,11 +22,7 @@ use zcash_keys::{
     address::Receiver,
     keys::{AddressGenerationError, UnifiedIncomingViewingKey},
 };
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::{
-    AccountPubKey, EphemeralIvk, IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope,
-};
-use zcash_primitives::{legacy::TransparentAddress, transaction::TxId};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::consensus::NetworkType;
 use zip32::DiversifierIndex;
 
@@ -247,10 +248,10 @@ impl PartialEq for Account {
             && self.kind == other.kind
             && self
                 .viewing_key
-                .encode(&zcash_primitives::consensus::MainNetwork)
+                .encode(&zcash_protocol::consensus::MainNetwork)
                 == other
                     .viewing_key
-                    .encode(&zcash_primitives::consensus::MainNetwork)
+                    .encode(&zcash_protocol::consensus::MainNetwork)
             && self.birthday == other.birthday
             && self.addresses == other.addresses
             && self.ephemeral_addresses == other.ephemeral_addresses
@@ -540,8 +541,8 @@ mod serialization {
     use zcash_client_backend::data_api::Zip32Derivation;
     use zcash_keys::encoding::AddressCodec;
     use zcash_primitives::block::BlockHash;
-    use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
     use zcash_primitives::merkle_tree::{read_frontier_v1, write_frontier_v1};
+    use zcash_protocol::consensus::Network::MainNetwork as EncodingParams;
     use zip32::fingerprint::SeedFingerprint;
 
     use super::*;
