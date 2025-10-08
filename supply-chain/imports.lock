@@ -1,10 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_client_sqlite]]
-version = "0.18.4"
-audited_as = "0.18.3"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -306,8 +302,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.18.3"
-when = "2025-10-01"
+version = "0.18.4"
+when = "2025-10-08"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
