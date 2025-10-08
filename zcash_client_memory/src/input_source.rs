@@ -32,8 +32,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     type AccountId = AccountId;
     type NoteRef = NoteId;
 
-    /// Find the note with the given index (output index for Sapling, action index for Orchard)
-    /// that belongs to the given transaction
     fn get_spendable_note(
         &self,
         txid: &zcash_primitives::transaction::TxId,
@@ -152,14 +150,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         unimplemented!()
     }
 
-    /// Returns the list of spendable transparent outputs received by this wallet at `address`
-    /// such that, at height `target_height`:
-    /// * the transaction that produced the output had or will have at least `min_confirmations`
-    ///   confirmations; and
-    /// * the output is unspent as of the current chain tip.
-    ///
-    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
-    /// iff the spending transaction will not be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
@@ -183,10 +173,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         Ok(txos)
     }
 
-    /// Fetches the transparent output corresponding to the provided `outpoint`.
-    ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
@@ -201,7 +187,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
             }))
     }
 
-    /// Returns metadata for the spendable notes in the wallet.
     fn get_account_metadata(
         &self,
         account_id: Self::AccountId,

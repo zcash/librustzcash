@@ -13,7 +13,7 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_primitives::transaction::{fees::zip317, TxId};
+use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317, TxId};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
@@ -74,6 +74,53 @@ pub(crate) fn table_constants<E: ErrUnsupportedPool>(
     }
 }
 
+/// Generates an SQL condition that a transaction is unexpired.
+///
+/// # Usage requirements
+/// - `tx` must be set to the SQL variable name for the transaction in the parent.
+/// - The parent must provide `:target_height` as a named argument.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+///
+/// If the wallet doesn't know an actual mined height or expiry height for a transaction, it will
+/// be treated as unexpired _only_ if we just observed it in the last DEFAULT_TX_EXPIRY_DELTA
+/// blocks, guessing that the wallet creating the transaction used the same expiry delta as our
+/// default. If our guess is wrong (and the wallet used a larger expiry delta or disabled expiry),
+/// then the transaction will be treated as unexpired when it shouldn't be for as long as it takes
+/// this wallet to either observe the transaction being mined, or enhance it to learn its expiry
+/// height.
+pub(crate) fn tx_unexpired_condition(tx: &str) -> String {
+    format!(
+        r#"
+        {tx}.mined_height < :target_height  -- the transaction is mined
+        OR {tx}.expiry_height = 0  -- the tx will not expire
+        OR {tx}.expiry_height >= :target_height  -- the tx is unexpired
+        OR (
+            {tx}.expiry_height IS NULL -- the expiry height is unknown
+            AND {tx}.min_observed_height + {DEFAULT_TX_EXPIRY_DELTA} >= :target_height
+        )
+        "#
+    )
+}
+
+// Generates a SQL expression that returns the identifiers of all spent notes in the wallet.
+///
+/// # Usage requirements
+/// - `table_prefix` must be set to the table prefix for the shielded protocol under which the
+///   query is being performed.
+/// - The parent must provide `:target_height` as a named argument.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
+    format!(
+        r#"
+        SELECT rns.{table_prefix}_received_note_id
+        FROM {table_prefix}_received_note_spends rns
+        JOIN transactions stx ON stx.id_tx = rns.transaction_id
+        WHERE {}
+        "#,
+        tx_unexpired_condition("stx")
+    )
+}
+
 fn unscanned_tip_exists(
     conn: &Connection,
     anchor_height: BlockHeight,
@@ -96,8 +143,12 @@ fn unscanned_tip_exists(
     )
 }
 
-/// Retrieves the set of nullifiers for "potentially spendable" notes that the
-/// wallet is tracking.
+/// Retrieves the set of nullifiers for "potentially spendable" notes that the wallet is tracking.
+///
+/// This may over-select nullifiers and return those that have been spent in un-mined transactions
+/// that have not yet expired, or for which the expiry height is unknown. This is fine because
+/// these nullifiers are primarily used to detect the spends of our own notes in scanning; if we
+/// select a few too many nullifiers, it's not a big deal.
 ///
 /// "Potentially spendable" means:
 /// - The transaction in which the note was created has been observed as mined.
@@ -112,13 +163,10 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
 
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
-        NullifierQuery::Unspent => {
-            // This may over-select nullifiers and return those that have been spent in un-mined
-            // transactions that have not yet expired, or for which the expiry height is unknown.
-            // This is fine because these nullifiers are primarily used to detect the spends of our
-            // own notes in scanning; if we select a few too many nullifiers, it's not a big deal.
-            conn.prepare(&format!(
-                "SELECT a.uuid, rn.nf
+        NullifierQuery::Unspent => conn.prepare(&format!(
+            // See the method documentation for why this does not use `spent_notes_clause`.
+            // We prefer to be more restrictive in determining whether a note is spent here.
+            "SELECT a.uuid, rn.nf
                  FROM {table_prefix}_received_notes rn
                  JOIN accounts a ON a.id = rn.account_id
                  JOIN transactions tx ON tx.id_tx = rn.tx
@@ -129,10 +177,9 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
                    FROM {table_prefix}_received_note_spends rns
                    JOIN transactions stx ON stx.id_tx = rns.transaction_id
                    WHERE stx.mined_height IS NOT NULL  -- the spending tx is mined
-                   OR stx.expiry_height IS NULL -- the spending tx will not expire
+                   OR stx.expiry_height = 0 -- the spending tx will not expire
                  )"
-            ))
-        }
+        )),
         NullifierQuery::All => conn.prepare(&format!(
             "SELECT a.uuid, rn.nf
              FROM {table_prefix}_received_notes rn
@@ -160,6 +207,7 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     txid: &TxId,
     index: u32,
     protocol: ShieldedProtocol,
+    target_height: TargetHeight,
     to_spendable_note: F,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
@@ -195,18 +243,14 @@ where
              AND rn.recipient_key_scope IS NOT NULL
              AND rn.nf IS NOT NULL
              AND rn.commitment_tree_position IS NOT NULL
-             AND rn.id NOT IN (
-               SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends rns
-               JOIN transactions stx ON stx.id_tx = rns.transaction_id
-               WHERE stx.block IS NOT NULL -- the spending tx is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-             )
-             GROUP BY rn.id"
+             AND rn.id NOT IN ({})
+             GROUP BY rn.id",
+            spent_notes_clause(table_prefix)
         ),
         named_params![
            ":txid": txid.as_ref(),
            ":output_index": index,
+           ":target_height": u32::from(target_height),
         ],
         |row| to_spendable_note(params, row),
     );
@@ -359,21 +403,12 @@ where
          AND accounts.ufvk IS NOT NULL
          AND recipient_key_scope IS NOT NULL
          AND nf IS NOT NULL
-         AND (
-            t.block IS NOT NULL -- the receiving tx is mined
-            OR t.expiry_height IS NULL -- the receiving tx will not expire
-            OR t.expiry_height >= :target_height -- the receiving tx is unexpired
-         )
-         AND rn.id NOT IN rarray(:exclude)
-         AND rn.id NOT IN (
-           SELECT {table_prefix}_received_note_id
-           FROM {table_prefix}_received_note_spends rns
-           JOIN transactions stx ON stx.id_tx = rns.transaction_id
-           WHERE stx.mined_height < :target_height -- the spending tx is mined
-           OR stx.expiry_height IS NULL -- the spending tx will not expire
-           OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-         )
-         GROUP BY rn.id"
+         AND ({})  -- the transaction is unexpired
+         AND rn.id NOT IN rarray(:exclude)  -- the note is not excluded
+         AND rn.id NOT IN ({})  -- the note is unspent
+         GROUP BY rn.id",
+        tx_unexpired_condition("t"),
+        spent_notes_clause(table_prefix)
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -511,7 +546,8 @@ where
         "WITH eligible AS (
              SELECT
                  rn.id AS id, t.txid, rn.{output_index_col},
-                 rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+                 rn.diversifier, rn.value,
+                 {note_reconstruction_cols}, rn.commitment_tree_position,
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
@@ -540,14 +576,7 @@ where
              AND scan_state.max_priority <= :scanned_priority
              AND t.block <= :anchor_height
              AND rn.id NOT IN rarray(:exclude)
-             AND rn.id NOT IN (
-               SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends rns
-               JOIN transactions stx ON stx.id_tx = rns.transaction_id
-               WHERE stx.block IS NOT NULL -- the spending tx is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-             )
+             AND rn.id NOT IN ({})
              GROUP BY rn.id
          )
          SELECT id, txid, {output_index_col},
@@ -561,6 +590,7 @@ where
                 ufvk, recipient_key_scope,
                 mined_height, max_shielding_input_height
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
+        spent_notes_clause(table_prefix)
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -654,8 +684,8 @@ impl UnspentNoteMeta {
 pub(crate) fn select_unspent_note_meta(
     conn: &rusqlite::Connection,
     protocol: ShieldedProtocol,
-    chain_tip_height: BlockHeight,
     wallet_birthday: BlockHeight,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     let TableConstants {
         table_prefix,
@@ -667,40 +697,34 @@ pub(crate) fn select_unspent_note_meta(
     // used in `select_spendable_notes`.
     //
     // TODO: Deduplicate this in the future by introducing a view?
-    let mut stmt = conn.prepare_cached(&format!("
-        SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-               commitment_tree_position, value
-        FROM {table_prefix}_received_notes rn
-        INNER JOIN transactions ON transactions.id_tx = rn.tx
-        WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
-        AND recipient_key_scope IS NOT NULL
-        AND nf IS NOT NULL
-        AND commitment_tree_position IS NOT NULL
-        AND rn.id NOT IN (
-          SELECT {table_prefix}_received_note_id
-          FROM {table_prefix}_received_note_spends
-          JOIN transactions stx ON stx.id_tx = transaction_id
-          WHERE stx.block IS NOT NULL -- the spending tx is mined
-          OR stx.expiry_height IS NULL -- the spending tx will not expire
-          OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
-        )
-        AND NOT EXISTS (
-           SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
-           -- select all the unscanned ranges involving the shard containing this note
-           WHERE rn.commitment_tree_position >= unscanned.start_position
-           AND rn.commitment_tree_position < unscanned.end_position_exclusive
-           -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-           AND unscanned.block_range_start <= :anchor_height
-           -- exclude unscanned ranges that end below the wallet birthday
-           AND unscanned.block_range_end > :wallet_birthday
-        )
-    "))?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+                commitment_tree_position, value
+         FROM {table_prefix}_received_notes rn
+         INNER JOIN transactions ON transactions.id_tx = rn.tx
+         WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
+         AND recipient_key_scope IS NOT NULL
+         AND nf IS NOT NULL
+         AND commitment_tree_position IS NOT NULL
+         AND rn.id NOT IN ({})
+         AND NOT EXISTS (
+            SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
+            -- select all the unscanned ranges involving the shard containing this note
+            WHERE rn.commitment_tree_position >= unscanned.start_position
+            AND rn.commitment_tree_position < unscanned.end_position_exclusive
+            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
+            AND unscanned.block_range_start < :anchor_height
+            -- exclude unscanned ranges that end below the wallet birthday
+            AND unscanned.block_range_end > :wallet_birthday
+         )",
+         spent_notes_clause(table_prefix)
+    ))?;
 
     let res = stmt
         .query_and_then::<_, SqliteClientError, _, _>(
             named_params![
-                ":anchor_height": u32::from(chain_tip_height),
                 ":wallet_birthday": u32::from(wallet_birthday),
+                ":anchor_height": u32::from(anchor_height),
             ],
             |row| {
                 Ok(UnspentNoteMeta {
@@ -722,7 +746,7 @@ pub(crate) fn select_unspent_note_meta(
 pub(crate) fn spendable_notes_meta(
     conn: &rusqlite::Connection,
     protocol: ShieldedProtocol,
-    chain_tip_height: BlockHeight,
+    target_height: TargetHeight,
     account: AccountUuid,
     filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
@@ -759,20 +783,14 @@ pub(crate) fn spendable_notes_meta(
                  AND rn.value >= :min_value
                  AND transactions.mined_height IS NOT NULL
                  AND rn.id NOT IN rarray(:exclude)
-                 AND rn.id NOT IN (
-                   SELECT {table_prefix}_received_note_id
-                   FROM {table_prefix}_received_note_spends rns
-                   JOIN transactions stx ON stx.id_tx = rns.transaction_id
-                   WHERE stx.block IS NOT NULL -- the spending tx is mined
-                   OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
-                 )"
+                 AND rn.id NOT IN ({})",
+                spent_notes_clause(table_prefix)
             ),
             named_params![
                 ":account_uuid": account.0,
                 ":min_value": u64::from(min_value),
                 ":exclude": &excluded_ptr,
-                ":chain_tip_height": u32::from(chain_tip_height)
+                ":target_height": u32::from(target_height)
             ],
             |row| {
                 Ok((
@@ -789,7 +807,7 @@ pub(crate) fn spendable_notes_meta(
         conn: &rusqlite::Connection,
         account: AccountUuid,
         filter: &NoteFilter,
-        chain_tip_height: BlockHeight,
+        target_height: TargetHeight,
     ) -> Result<Option<Zatoshis>, SqliteClientError> {
         match filter {
             NoteFilter::ExceedsMinValue(v) => Ok(Some(*v)),
@@ -832,28 +850,27 @@ pub(crate) fn spendable_notes_meta(
             }
             NoteFilter::ExceedsBalancePercentage(p) => {
                 let balance = conn.query_row_and_then::<_, SqliteClientError, _, _>(
-                    "SELECT SUM(rn.value)
-                     FROM v_received_outputs rn
-                     INNER JOIN accounts a ON a.id = rn.account_id
-                     INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
-                     WHERE a.uuid = :account_uuid
-                     AND a.ufvk IS NOT NULL
-                     AND transactions.mined_height IS NOT NULL
-                     AND rn.pool != :transparent_pool
-                     AND (rn.pool, rn.id_within_pool_table) NOT IN (
-                       SELECT rns.pool, rns.received_output_id
-                       FROM v_received_output_spends rns
-                       JOIN transactions stx ON stx.id_tx = rns.transaction_id
-                       WHERE (
-                           stx.block IS NOT NULL -- the spending tx is mined
-                           OR stx.expiry_height IS NULL -- the spending tx will not expire
-                           OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
-                       )
-                     )",
+                    &format!(
+                        "SELECT SUM(rn.value)
+                         FROM v_received_outputs rn
+                         INNER JOIN accounts a ON a.id = rn.account_id
+                         INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
+                         WHERE a.uuid = :account_uuid
+                         AND a.ufvk IS NOT NULL
+                         AND transactions.mined_height IS NOT NULL
+                         AND rn.pool != :transparent_pool
+                         AND (rn.pool, rn.id_within_pool_table) NOT IN (
+                            SELECT rns.pool, rns.received_output_id
+                            FROM v_received_output_spends rns
+                            JOIN transactions stx ON stx.id_tx = rns.transaction_id
+                            WHERE ({})  -- the spending transaction is unexpired
+                         )",
+                        tx_unexpired_condition("stx")
+                    ),
                     named_params![
                         ":account_uuid": account.0,
-                        ":chain_tip_height": u32::from(chain_tip_height),
-                        ":transparent_pool": pool_code(PoolType::Transparent)
+                        ":transparent_pool": pool_code(PoolType::Transparent),
+                        ":target_height": u32::from(target_height),
                     ],
                     |row| row.get::<_, Option<i64>>(0)?.map(zatoshis).transpose(),
                 )?;
@@ -869,8 +886,8 @@ pub(crate) fn spendable_notes_meta(
             NoteFilter::Combine(a, b) => {
                 // All the existing note selectors set lower bounds on note value, so the "and"
                 // operation is just taking the maximum of the two lower bounds.
-                let a_min_value = min_note_value(conn, account, a.as_ref(), chain_tip_height)?;
-                let b_min_value = min_note_value(conn, account, b.as_ref(), chain_tip_height)?;
+                let a_min_value = min_note_value(conn, account, a.as_ref(), target_height)?;
+                let b_min_value = min_note_value(conn, account, b.as_ref(), target_height)?;
                 Ok(a_min_value
                     .zip(b_min_value)
                     .map(|(av, bv)| std::cmp::max(av, bv))
@@ -881,9 +898,9 @@ pub(crate) fn spendable_notes_meta(
                 condition,
                 fallback,
             } => {
-                let cond = min_note_value(conn, account, condition.as_ref(), chain_tip_height)?;
+                let cond = min_note_value(conn, account, condition.as_ref(), target_height)?;
                 if cond.is_none() {
-                    min_note_value(conn, account, fallback, chain_tip_height)
+                    min_note_value(conn, account, fallback, target_height)
                 } else {
                     Ok(cond)
                 }
@@ -893,7 +910,7 @@ pub(crate) fn spendable_notes_meta(
 
     // TODO: Simplify the query before executing it. Not worrying about this now because queries
     // will be developer-configured, not end-user defined.
-    if let Some(min_value) = min_note_value(conn, account, filter, chain_tip_height)? {
+    if let Some(min_value) = min_note_value(conn, account, filter, target_height)? {
         let (note_count, total_value) = run_selection(min_value)?;
 
         Ok(Some(PoolMeta::new(

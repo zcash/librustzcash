@@ -2078,21 +2078,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 AND tro.account_id = accounts.id
              LEFT OUTER JOIN transactions tt
                 ON tt.id_tx = tro.transaction_id
-             WHERE (
-                t.block IS NOT NULL -- the receiving tx is mined
-                OR t.expiry_height IS NULL -- the receiving tx will not expire
-                OR t.expiry_height >= :target_height -- the receiving tx is unexpired
-             )
-             -- and the received note is unspent
-             AND rn.id NOT IN (
-               SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends rns
-               JOIN transactions stx ON stx.id_tx = rns.transaction_id
-               WHERE stx.block IS NOT NULL -- the spending transaction is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-             )
-             GROUP BY rn.id"
+             WHERE ({}) -- the transaction is unexpired
+             AND rn.id NOT IN ({}) -- and the received note is unspent
+             GROUP BY rn.id",
+            common::tx_unexpired_condition("t"),
+            common::spent_notes_clause(table_prefix)
         ))?;
 
         let mut rows =
@@ -2577,7 +2567,7 @@ pub(crate) fn get_account_ref(
     .ok_or(SqliteClientError::AccountUnknown)
 }
 
-/// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
+/// Returns the maximum height of blocks in the chain which may be scanned.
 pub(crate) fn chain_tip_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
@@ -2588,6 +2578,12 @@ pub(crate) fn chain_tip_height(
         // height of the last known chain tip;
         Ok(max_height.map(|h| BlockHeight::from(h.saturating_sub(1))))
     })
+}
+
+pub(crate) fn mempool_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<TargetHeight>, rusqlite::Error> {
+    Ok(chain_tip_height(conn)?.map(|h| TargetHeight::from(h + 1)))
 }
 
 pub(crate) fn get_anchor_height(
@@ -2624,9 +2620,8 @@ pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(TargetHeight, BlockHeight)>, SqliteClientError> {
-    match chain_tip_height(conn)? {
-        Some(chain_tip_height) => {
-            let target_height = TargetHeight::from(chain_tip_height + 1);
+    match mempool_height(conn)? {
+        Some(target_height) => {
             let anchor_height = get_anchor_height(conn, target_height, min_confirmations)?;
 
             Ok(anchor_height.map(|h| (target_height, h)))
@@ -2861,6 +2856,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
         Some(sent_tx.target_height()),
+        sent_tx.target_height().into(),
     )?;
 
     let mut detectable_via_scanning = false;
@@ -2970,6 +2966,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         None,
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
+                    sent_tx.target_height().into(),
                     true,
                 )?;
             }
@@ -3067,6 +3064,11 @@ pub(crate) fn refresh_status_requests(
     conn: &rusqlite::Transaction,
 ) -> Result<(), SqliteClientError> {
     if let Some(chain_tip) = chain_tip_height(conn)? {
+        // This does not use `tx_unexpired_condition` because, in this specific case we do not want
+        // to consider the observation height. If the wallet observes a transaction via scanning
+        // (and thus doesn't have an expiry height), then observes a reorg that un-mines the
+        // transaction, and then goes offline for more than `DEFAULT_TX_EXPIRY_DELTA`, we still
+        // want the wallet to check on the status of that transaction.
         let mut unmined_query = conn.prepare(
             "SELECT
                 t.txid,
@@ -3077,7 +3079,7 @@ pub(crate) fn refresh_status_requests(
              WHERE t.mined_height IS NULL
              AND (
                 t.expiry_height IS NULL -- expiry is unknown
-                OR t.expiry_height = 0 -- tx will note expire
+                OR t.expiry_height = 0 -- tx will never expire
                 OR t.expiry_height > :chain_tip -- tx is unexpired
              )
              AND (
@@ -3644,7 +3646,16 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // fee value.
     let fee = determine_fee(conn, d_tx.tx())?;
 
-    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None)?;
+    let observed_height = d_tx.mined_height().map_or_else(
+        || {
+            mempool_height(conn)?
+                .ok_or(SqliteClientError::ChainHeightUnknown)
+                .map(BlockHeight::from)
+        },
+        Ok,
+    )?;
+
+    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None, observed_height)?;
     if let Some(height) = d_tx.mined_height() {
         set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
@@ -3883,8 +3894,13 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     for (received_t_output, key_scope) in &wallet_transparent_outputs.received {
-        let (account_id, _, _) =
-            transparent::put_transparent_output(conn, params, received_t_output, false)?;
+        let (account_id, _, _) = transparent::put_transparent_output(
+            conn,
+            params,
+            received_t_output,
+            observed_height,
+            false,
+        )?;
 
         receiving_accounts.insert(account_id, *key_scope);
 
@@ -4017,12 +4033,13 @@ pub(crate) fn put_tx_meta(
 ) -> Result<TxRef, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
-        "INSERT INTO transactions (txid, block, mined_height, tx_index)
-        VALUES (:txid, :block, :block, :tx_index)
+        "INSERT INTO transactions (txid, block, mined_height, tx_index, min_observed_height)
+        VALUES (:txid, :block, :block, :tx_index, :block)
         ON CONFLICT (txid) DO UPDATE
         SET block = :block,
             mined_height = :block,
-            tx_index = :tx_index
+            tx_index = :tx_index,
+            min_observed_height = MIN(min_observed_height, :block)
         RETURNING id_tx",
     )?;
 
@@ -4095,14 +4112,19 @@ pub(crate) fn put_tx_data(
     fee: Option<Zatoshis>,
     created_at: Option<time::OffsetDateTime>,
     target_height: Option<TargetHeight>,
+    observed_height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
-        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
-        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height)
+        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height, min_observed_height)
+        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height, :observed_height)
         ON CONFLICT (txid) DO UPDATE
         SET expiry_height = :expiry_height,
             raw = :raw,
-            fee = IFNULL(:fee, fee)
+            fee = IFNULL(:fee, fee),
+            min_observed_height = MIN(
+                min_observed_height,
+                :observed_height
+            )
         RETURNING id_tx",
     )?;
 
@@ -4117,6 +4139,7 @@ pub(crate) fn put_tx_data(
         ":raw": raw_tx,
         ":fee": fee.map(u64::from),
         ":target_height": target_height.map(u32::from),
+        ":observed_height": u32::from(observed_height)
     ];
 
     stmt_upsert_tx_data

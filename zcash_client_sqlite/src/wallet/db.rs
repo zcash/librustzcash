@@ -266,6 +266,8 @@ CREATE TABLE blocks (
 ///   will only be set for transactions created using this wallet specifically, and not any
 ///   other wallet that uses the same seed (including previous installations of the same
 ///   wallet application.)
+/// - `min_observed_height`: the mempool height at the time that the wallet observed the
+///   transaction, or the mined height of the transaction, whichever is less.
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -278,8 +280,14 @@ CREATE TABLE "transactions" (
     raw BLOB,
     fee INTEGER,
     target_height INTEGER,
+    min_observed_height INTEGER NOT NULL,
     FOREIGN KEY (block) REFERENCES blocks(height),
-    CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
+    CONSTRAINT height_consistency CHECK (
+        block IS NULL OR mined_height = block
+    ),
+    CONSTRAINT min_observed_consistency CHECK (
+        mined_height IS NULL OR min_observed_height <= mined_height
+    )
 )"#;
 
 /// Stores the Sapling notes received by the wallet.

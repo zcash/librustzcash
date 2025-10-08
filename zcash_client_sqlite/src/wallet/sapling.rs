@@ -214,6 +214,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
+    target_height: TargetHeight,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -221,6 +222,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         txid,
         index,
         ShieldedProtocol::Sapling,
+        target_height,
         to_received_note,
     )
 }
@@ -254,14 +256,14 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
 
 pub(crate) fn select_unspent_note_meta(
     conn: &Connection,
-    chain_tip_height: BlockHeight,
     wallet_birthday: BlockHeight,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
         ShieldedProtocol::Sapling,
-        chain_tip_height,
         wallet_birthday,
+        anchor_height,
     )
 }
 

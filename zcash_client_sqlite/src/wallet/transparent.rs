@@ -56,6 +56,8 @@ use super::{
     encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
     get_account_ids, get_account_internal, KeyScope,
 };
+use crate::wallet::common::tx_unexpired_condition;
+use crate::wallet::mempool_height;
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
 
@@ -778,20 +780,32 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     })
 }
 
+pub(crate) fn spent_utxos_clause() -> String {
+    format!(
+        r#"
+        SELECT txo_spends.transparent_received_output_id
+        FROM transparent_received_output_spends txo_spends
+        JOIN transactions stx ON stx.id_tx = txo_spends.transaction_id
+        WHERE {}
+        "#,
+        super::common::tx_unexpired_condition("stx")
+    )
+}
+
 /// Select an output to fund a new transaction that is targeting at least `chain_tip_height + 1`.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     allow_unspendable: bool,
 ) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
-    let chain_tip_height = chain_tip_height(conn)?;
+    let target_height = mempool_height(conn)?;
 
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
     // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
     // way to detect the circumstance related to anchor invalidation at present, but it should be
     // vanishingly rare as the vast majority of rewinds are of a single block.
-    let mut stmt_select_utxo = conn.prepare_cached(
+    let mut stmt_select_utxo = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height
          FROM transparent_received_outputs u
@@ -802,30 +816,20 @@ pub(crate) fn get_wallet_transparent_output(
          AND (
              :allow_unspendable
              OR (
-                 (
-                    t.mined_height IS NOT NULL -- tx is mined
-                    OR t.expiry_height = 0 -- tx will not expire
-                    OR t.expiry_height >= :mempool_height -- tx has not yet expired
-                 )
-                 -- and the output is unspent
-                 AND u.id NOT IN (
-                    SELECT txo_spends.transparent_received_output_id
-                    FROM transparent_received_output_spends txo_spends
-                    JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-                    WHERE tx.mined_height IS NOT NULL  -- the spending tx is mined
-                    OR tx.expiry_height = 0 -- the spending tx will not expire
-                    OR tx.expiry_height >= :mempool_height -- the spending tx has not yet expired
-                 )
+                 ({}) -- the transaction is unexpired
+                 AND u.id NOT IN ({}) -- and the output is unspent
              )
          )",
-    )?;
+        tx_unexpired_condition("t"),
+        spent_utxos_clause()
+    ))?;
 
     let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
         .query_and_then(
             named_params![
                 ":txid": outpoint.hash(),
                 ":output_index": outpoint.n(),
-                ":mempool_height": chain_tip_height.map(|h| u32::from(h) + 1),
+                ":target_height": target_height.map(u32::from),
                 ":allow_unspendable": allow_unspendable
             ],
             to_unspent_transparent_output,
@@ -856,7 +860,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
-    let mut stmt_utxos = conn.prepare(
+    let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height
          FROM transparent_received_outputs u
@@ -875,15 +879,9 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
             )
          )
          -- and the output is unspent
-         AND u.id NOT IN (
-            SELECT txo_spends.transparent_received_output_id
-            FROM transparent_received_output_spends txo_spends
-            JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE tx.mined_height < :target_height -- the spending transaction is mined
-            OR tx.expiry_height = 0 -- the spending tx will not expire
-            OR tx.expiry_height >= :target_height -- the spending tx is unexpired
-         )",
-    )?;
+         AND u.id NOT IN ({})",
+        spent_utxos_clause()
+    ))?;
 
     let addr_str = address.encode(params);
 
@@ -933,7 +931,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 
     let mut result = HashMap::new();
 
-    let mut stmt_address_balances = conn.prepare(
+    let mut stmt_address_balances = conn.prepare(&format!(
         "SELECT u.address, u.value_zat
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
@@ -953,15 +951,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             )
          )
          -- and the output is unspent
-         AND u.id NOT IN (
-            SELECT txo_spends.transparent_received_output_id
-            FROM transparent_received_output_spends txo_spends
-            JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-            OR tx.expiry_height = 0 -- the spending tx will not expire
-            OR tx.expiry_height >= :target_height -- the spending tx is unexpired
-         )",
-    )?;
+         AND u.id NOT IN ({})",
+        spent_utxos_clause()
+    ))?;
 
     let mut rows = stmt_address_balances.query(named_params![
         ":account_uuid": account_uuid.0,
@@ -986,7 +978,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
     // appear in the spendable balance and we don't want to double-count it.
     if min_confirmations > 0 {
-        let mut stmt_address_balances = conn.prepare(
+        let mut stmt_address_balances = conn.prepare(&format!(
             "SELECT u.address, u.value_zat
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
@@ -1006,15 +998,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
                 )
              )
              -- and the output is unspent
-             AND u.id NOT IN (
-                SELECT txo_spends.transparent_received_output_id
-                FROM transparent_received_output_spends txo_spends
-                JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-                WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-                OR tx.expiry_height = 0 -- the spending tx will not expire
-                OR tx.expiry_height >= :target_height -- the spending tx is unexpired
-             )",
-        )?;
+             AND u.id NOT IN ({})",
+            spent_utxos_clause()
+        ))?;
 
         let mut rows = stmt_address_balances.query(named_params![
             ":account_uuid": account_uuid.0,
@@ -1054,7 +1040,7 @@ pub(crate) fn add_transparent_account_balances(
         u32::from(confirmations_policy.untrusted())
     };
 
-    let mut stmt_account_spendable_balances = conn.prepare(
+    let mut stmt_account_spendable_balances = conn.prepare(&format!(
         "SELECT a.uuid, SUM(u.value_zat)
          FROM transparent_received_outputs u
          JOIN accounts a ON a.id = u.account_id
@@ -1074,16 +1060,10 @@ pub(crate) fn add_transparent_account_balances(
             )
          )
          -- and the received txo is unspent
-         AND u.id NOT IN (
-           SELECT txo_spends.transparent_received_output_id
-           FROM transparent_received_output_spends txo_spends
-           JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-           OR tx.expiry_height = 0 -- the spending tx will not expire
-           OR tx.expiry_height >= :target_height -- the spending tx is unexpired
-         )
+         AND u.id NOT IN ({})
          GROUP BY a.uuid",
-    )?;
+        spent_utxos_clause()
+    ))?;
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
         ":target_height": u32::from(target_height),
@@ -1109,7 +1089,7 @@ pub(crate) fn add_transparent_account_balances(
     // appear in the spendable balance and we don't want to double-count it.
     // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
     if min_confirmations > 0 {
-        let mut stmt_account_unconfirmed_balances = conn.prepare(
+        let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
             "SELECT a.uuid, SUM(u.value_zat)
              FROM transparent_received_outputs u
              JOIN accounts a ON a.id = u.account_id
@@ -1127,16 +1107,10 @@ pub(crate) fn add_transparent_account_balances(
                 )
              )
              -- and the received txo is unspent
-             AND u.id NOT IN (
-               SELECT txo_spends.transparent_received_output_id
-               FROM transparent_received_output_spends txo_spends
-               JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-               WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-               OR tx.expiry_height = 0 -- the spending tx will not expire
-               OR tx.expiry_height >= :target_height -- the spending tx is unexpired
-             )
+             AND u.id NOT IN ({})
              GROUP BY a.uuid",
-        )?;
+            spent_utxos_clause()
+        ))?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
             ":target_height": u32::from(target_height),
@@ -1266,7 +1240,8 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
-    put_transparent_output(conn, params, output, true)
+    let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    put_transparent_output(conn, params, output, observed_height, true)
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -1602,6 +1577,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     output: &WalletTransparentOutput,
+    observation_height: BlockHeight,
     known_unspent: bool,
 ) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
     let addr_str = output.recipient_address().encode(params);
@@ -1646,16 +1622,21 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     };
 
     let id_tx = conn.query_row(
-        "INSERT INTO transactions (txid, block, mined_height)
-         VALUES (:txid, :block, :mined_height)
+        "INSERT INTO transactions (txid, block, mined_height, min_observed_height)
+         VALUES (:txid, :block, :mined_height, :observation_height)
          ON CONFLICT (txid) DO UPDATE
          SET block = IFNULL(block, :block),
-             mined_height = :mined_height
+             mined_height = :mined_height,
+             min_observed_height = MIN(min_observed_height, :observation_height)
          RETURNING id_tx",
         named_params![
            ":txid": &output.outpoint().hash().to_vec(),
            ":block": block,
-           ":mined_height": output_height
+           ":mined_height": output_height,
+           ":observation_height": output_height.map_or_else(
+               || u32::from(observation_height),
+               |h| std::cmp::min(h, u32::from(observation_height))
+           )
         ],
         |row| row.get::<_, i64>(0),
     )?;
