@@ -1719,7 +1719,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              JOIN transactions t ON t.id_tx = ts.spending_transaction_id
              WHERE ts.prevout_txid = :prevout_txid
              AND ts.prevout_output_index = :prevout_idx
-             ORDER BY t.block NULLS LAST LIMIT 1",
+             ORDER BY t.mined_height NULLS LAST LIMIT 1",
             named_params![
                 ":prevout_txid": output.outpoint().txid().as_ref(),
                 ":prevout_idx": output.outpoint().n()
