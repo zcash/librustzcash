@@ -556,34 +556,32 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        mempool_height(self.conn.borrow())?
-            .map(|target_height| match protocol {
-                ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+        match protocol {
+            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+                self.conn.borrow(),
+                &self.params,
+                txid,
+                index,
+                target_height,
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
+            ShieldedProtocol::Orchard => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_orchard_note(
                     self.conn.borrow(),
                     &self.params,
                     txid,
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
-                ShieldedProtocol::Orchard => {
-                    #[cfg(feature = "orchard")]
-                    return wallet::orchard::get_spendable_orchard_note(
-                        self.conn.borrow(),
-                        &self.params,
-                        txid,
-                        index,
-                        target_height,
-                    )
-                    .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
-                    #[cfg(not(feature = "orchard"))]
-                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
-                }
-            })
-            .transpose()
-            .map(|n| n.flatten())
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
+            }
+        }
     }
 
     fn select_spendable_notes(
@@ -1189,6 +1187,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
+        let (target_height, _) = self
+            .get_target_and_anchor_heights(NonZeroU32::MIN)?
+            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+
         let TableConstants {
             table_prefix,
             output_index_col,
@@ -1209,7 +1211,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
                 let txid: [u8; 32] = row.get("txid")?;
                 let output_index: u32 = row.get(output_index_col)?;
                 let note = self
-                    .get_spendable_note(&TxId::from_bytes(txid), protocol, output_index)
+                    .get_spendable_note(
+                        &TxId::from_bytes(txid),
+                        protocol,
+                        output_index,
+                        target_height,
+                    )
                     .unwrap()
                     .unwrap();
                 Ok(note)
