@@ -16,6 +16,17 @@ workspace.
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
 
+## [0.18.4] - 2025-10-08
+
+### Fixed
+- This modifies balance calculation to explicitly ignore balance held in
+  ephemeral addresses. This will be altered in a future release; at present,
+  the only use of ephemeral addresses is as interstitial addresses in TEX
+  address transfers, and so it is safe to ignore these funds. Funds would only
+  appear in the case of a partial TEX transfer failure or funds being returned
+  to a TEX address, which would not be detected by normal scanning but which
+  could be detected by the new mempool detection logic implemented by Zashi.
+
 ## [0.18.3] - 2025-09-30
 
 ### Changed
