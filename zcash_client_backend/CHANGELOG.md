@@ -22,6 +22,9 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
+  - `InputSource::get_spendable_note` now takes an additional `target_height`
+    argument; spendability isn't a well-defined property in absence of target
+    height information.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`

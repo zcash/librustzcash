@@ -1391,12 +1391,13 @@ pub trait InputSource {
     /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
-    /// is not spendable.
+    /// is not spendable as of the given height.
     fn get_spendable_note(
         &self,
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if

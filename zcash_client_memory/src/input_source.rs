@@ -36,6 +36,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         txid: &zcash_primitives::transaction::TxId,
         protocol: zcash_protocol::ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<
         Option<
             zcash_client_backend::wallet::ReceivedNote<
@@ -45,10 +46,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         >,
         Self::Error,
     > {
-        let target_height = TargetHeight::from(
-            self.chain_height()?
-                .ok_or(crate::error::Error::ChainHeightUnknown)?,
-        );
         let note = self.received_notes.iter().find(|rn| {
             &rn.txid == txid && rn.note.protocol() == protocol && rn.output_index == index
         });

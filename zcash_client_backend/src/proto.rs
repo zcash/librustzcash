@@ -26,7 +26,7 @@ use zcash_protocol::{
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::{chain::ChainState, InputSource},
+    data_api::{chain::ChainState, wallet::TargetHeight, InputSource},
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
 };
@@ -705,6 +705,8 @@ impl proposal::Proposal {
                     }
                 };
 
+                let target_height = TargetHeight::from(self.min_target_height);
+
                 let mut steps = Vec::with_capacity(self.steps.len());
                 for step in &self.steps {
                     let transaction_request =
@@ -763,7 +765,12 @@ impl proposal::Proposal {
                                     }
                                     PoolType::Shielded(protocol) => received_notes.push(
                                         wallet_db
-                                            .get_spendable_note(&txid, protocol, out.index)
+                                            .get_spendable_note(
+                                                &txid,
+                                                protocol,
+                                                out.index,
+                                                target_height,
+                                            )
                                             .map_err(ProposalDecodingError::InputRetrieval)
                                             .and_then(|opt| {
                                                 opt.ok_or({
@@ -876,7 +883,7 @@ impl proposal::Proposal {
 
                 Proposal::multi_step(
                     fee_rule,
-                    BlockHeight::from_u32(self.min_target_height).into(),
+                    target_height,
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
                 .map_err(ProposalDecodingError::ProposalInvalid)
