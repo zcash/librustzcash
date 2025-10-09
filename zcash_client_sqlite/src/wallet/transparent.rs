@@ -1059,7 +1059,9 @@ pub(crate) fn add_transparent_account_balances(
          FROM transparent_received_outputs u
          JOIN accounts a ON a.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
-         WHERE (
+         JOIN addresses ON addresses.id = u.address_id
+         WHERE addresses.key_scope != :key_scope_ephemeral
+         AND (
             -- tx is mined and has at least min_confirmations
             (
                 t.mined_height < :target_height -- tx is mined
@@ -1085,7 +1087,8 @@ pub(crate) fn add_transparent_account_balances(
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
         ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations
+        ":min_confirmations": min_confirmations,
+        ":key_scope_ephemeral": KeyScope::Ephemeral.encode()
     ])?;
 
     while let Some(row) = rows.next()? {
