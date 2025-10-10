@@ -658,7 +658,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                         Scope::External.into(),
                         NonHardenedChildIndex::from_index((*diversifier_index).try_into().unwrap())
                             .expect(
-                                "non-hardened address corresponds to a valid diversifier index",
+                                "diversifier index corresponds to a valid NonHardenedChildIndex",
                             ),
                         Exposure::Unknown,
                         None,
