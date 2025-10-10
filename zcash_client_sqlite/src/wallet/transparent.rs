@@ -127,7 +127,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let min_exposure_height = exposure_depth
         .map(|d| {
             Ok::<_, SqliteClientError>(
-                chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)? - d,
+                mempool_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)? - d,
             )
         })
         .transpose()?;
@@ -220,9 +220,9 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                         .map_or(
                             GapMetadata::DerivationUnknown,
                             |((gap_limit, start), idx)| {
-                                if *start <= idx {
+                                if let Some(gap_position) = idx.index().checked_sub(start.index()) {
                                     GapMetadata::InGap {
-                                        gap_position: idx.index() - start.index(),
+                                        gap_position,
                                         gap_limit: *gap_limit,
                                     }
                                 } else {
@@ -481,17 +481,12 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                         Ok::<_, SqliteClientError>((
                             address_id,
                             a,
-                            <Option<TransparentKeyScope>>::from(key_scope).map_or(
-                                Err(SqliteClientError::UnknownZip32Derivation),
-                                |scope| {
-                                    Ok(TransparentAddressMetadata::derived(
-                                        scope,
-                                        i,
-                                        Exposure::Unexposed,
-                                        None,
-                                    ))
-                                },
-                            )?,
+                            TransparentAddressMetadata::derived(
+                                key_scope,
+                                i,
+                                Exposure::Unexposed,
+                                None,
+                            ),
                         ))
                     })
                     .transpose()
@@ -1618,15 +1613,15 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             let exposure = exposed_at_height.map_or(
                                 Ok::<_, SqliteClientError>(Exposure::Unexposed),
                                 |at_height| {
-                                    let gap_metadata =  match gap_limits.limit_for(key_scope) {
+                                    let gap_metadata = match gap_limits.limit_for(key_scope) {
                                         None => GapMetadata::DerivationUnknown,
                                         Some(gap_limit) => {
                                             find_gap_start(conn, account_id, scope, gap_limit)?.map_or(
                                                 GapMetadata::GapRecoverable { gap_limit },
                                                 |gap_start| {
-                                                    if address_index >= gap_start {
+                                                    if let Some(gap_position) = address_index.index().checked_sub(gap_start.index()) {
                                                         GapMetadata::InGap {
-                                                            gap_position: address_index.index() - gap_start.index(),
+                                                            gap_position,
                                                             gap_limit,
                                                         }
                                                     } else {

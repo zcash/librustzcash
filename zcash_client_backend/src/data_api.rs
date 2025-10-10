@@ -1709,15 +1709,20 @@ pub trait WalletRead {
     /// The set contains all ephemeral transparent receivers that are known to have been derived
     /// under this account within `exposure_depth` blocks of the chain tip. Wallets may scan the
     /// chain for UTXOs sent to these receivers, but should do so in a fashion that does not reveal
-    /// that they are controlled by the same wallet.
+    /// that they are controlled by the same wallet. If the [`next_check_time`] field is set for a
+    /// returned [`TransparentAddressMetadata`], the wallet application should defer any query to
+    /// any public light wallet server for this address until [`next_check_time`] has passed; when
+    /// using a light wallet server that is trusted for privacy, this delay may be omitted.
     ///
     /// # Parameters
     /// - `account`: The identifier for the account from which transparent receivers should be
     ///   returned.
     /// - `exposure_depth`: Implementations of this method should return only addresses exposed at
-    ///   heights greater than or equal to `chain_tip_height - exposure_depth`
-    /// - `exclude_used`: When set to `true`, do not return addresses that are known have already
-    ///   received funds in a transaction.
+    ///   heights greater than `chain_tip_height - exposure_depth`.
+    /// - `exclude_used`: When set to `true`, do not return addresses that are known to have
+    ///   already received funds in a transaction.
+    ///
+    /// [`next_check_time`]: TransparentAddressMetadata::next_check_time
     #[cfg(feature = "transparent-inputs")]
     fn get_ephemeral_transparent_receivers(
         &self,
@@ -2943,6 +2948,9 @@ pub trait WalletWrite: WalletRead {
 
     /// Schedules a UTXO check for the given address at a random time that has an expected value of
     /// `offset_seconds` from the current system time.
+    ///
+    /// Returns the time at which the check has been scheduled, or `None` if the address is not
+    /// being tracked by the wallet.
     #[cfg(feature = "transparent-inputs")]
     fn schedule_next_check(
         &mut self,

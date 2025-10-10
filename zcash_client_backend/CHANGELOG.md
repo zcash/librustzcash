@@ -57,14 +57,15 @@ workspace.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
-- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
-  has been removed. It was previously only used in tests and is not well-designed,
-  for wallet use; a replacement for use in tests has been added to the `WalletTest`
-  trait.
-- `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
-  has been removed. It was previously only used in tests and is not well-designed,
-  for wallet use; a replacement for use in tests has been added to the `WalletTest`
-  trait.
+- `zcash_client_backend::data_api`:
+  - `WalletRead::{get_known_ephemeral_addresses, find_account_for_ephemeral_address}`
+    have been removed. They were previously only used in tests and are not
+    well-designed for wallet use; replacements for use in tests have been added
+    to the `WalletTest` trait.
+- `zcash_client_backend::data_api::error::Error::PaysEphemeralTransparentAddress`
+  has been removed; the wallet no longer restricts the caller from constructing
+  payments to explicit ephemeral transparent addresses, in order to allow
+  for gap limit management operations to be performed by the wallet application.
 
 ## [0.20.0] - 2025-09-25
 

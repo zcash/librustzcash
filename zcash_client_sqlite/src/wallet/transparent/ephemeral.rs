@@ -102,9 +102,9 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                         gap_metadata: gap_start.map_or(
                             GapMetadata::DerivationUnknown,
                             |gap_start| {
-                                if address_index >= gap_start {
+                                if let Some(gap_position) = address_index.index().checked_sub(gap_start.index()) {
                                     GapMetadata::InGap {
-                                        gap_position: address_index.index() - gap_start.index(),
+                                        gap_position,
                                         gap_limit: gap_limits.ephemeral(),
                                     }
                                 } else {
