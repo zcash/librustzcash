@@ -1085,7 +1085,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         let mut stmt_sent_notes = self.conn.borrow().prepare(
             "SELECT output_index
              FROM sent_notes
-             JOIN transactions ON transactions.id_tx = sent_notes.tx
+             JOIN transactions ON transactions.id_tx = sent_notes.transaction_id
              WHERE transactions.txid = :txid
              AND sent_notes.output_pool = :pool_code",
         )?;
@@ -1113,7 +1113,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
             "SELECT value, to_address,
                     a.cached_transparent_receiver_address, a.transparent_child_index
              FROM sent_notes
-             JOIN transactions t ON t.id_tx = sent_notes.tx
+             JOIN transactions t ON t.id_tx = sent_notes.transaction_id
              LEFT JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
              LEFT JOIN addresses a ON a.id = tro.address_id AND a.key_scope = :key_scope
              WHERE t.txid = :txid
@@ -1214,7 +1214,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         let mut stmt_received_notes = self.conn.borrow().prepare(&format!(
             "SELECT txid, {output_index_col}
              FROM {table_prefix}_received_notes rn
-             INNER JOIN transactions ON transactions.id_tx = rn.tx
+             INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
              WHERE transactions.block IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL

@@ -7,6 +7,7 @@
 //! Omitted versions had the same migration state as the first prior version that is
 //! included.
 
+mod account_delete_cascade;
 mod add_account_birthdays;
 mod add_account_uuids;
 mod add_transaction_trust_marker;
@@ -87,44 +88,48 @@ pub(super) fn all_migrations<
     //                                               |
     //                                       v_transactions_net
     //                                               |
-    //                                            received_notes_nullable_nf----------------------
+    //                                            received_notes_nullable_nf---------------------.
     //                                            /           |                                   \
     //                                           /            |                                    \
-    //           --------------- shardtree_support    sapling_memo_consistency                    nullifier_map
+    //           ,-------------- shardtree_support    sapling_memo_consistency                    nullifier_map
     //          /                     /           \                       \                                  |
     // orchard_shardtree   add_account_birthdays   receiving_key_scopes   v_transactions_transparent_history |
     //   |                    |                 \            |                     |                         |
     //   |   v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false           |
     //   |                    |                   \          |                     |                         |
-    //   |            wallet_summaries             \         |      v_transactions_shielding_balance         |
-    //   |                    \                     \        |                     |                        /
+    //   |            wallet_summaries             \         |      v_transactions_shielding_balance         /
+    //   \                    \                     \        |                     |                        /
     //    \                    \                     \       |      v_transactions_note_uniqueness         /
     //     \                    \                     \      |        /                                   /
-    //      \                    -------------------- full_account_ids                                   /
+    //      \                    `------------------- full_account_ids                                   /
     //       \                                        /               \                                 /
     //        \                         orchard_received_notes        spend_key_available              /
-    //         \                             /         \                      /                       /
+    //         \                            /          \                      /                       /
     //          \     ensure_orchard_ua_receiver     utxos_to_txos           /                       /
     //           \                          \              |                /                       /
     //            \                          \     ephemeral_addresses     /                       /
     //             \                          \            |              /                       /
-    //              ------------------------------ tx_retrieval_queue ----------------------------
-    //                                              |              \
-    //                                    support_legacy_sqlite    tx_retrieval_queue_expiry
-    //                                       /              \
-    //                  fix_broken_commitment_trees         add_account_uuids
-    //                             /                                /        \
-    //          fix_bad_change_flagging      transparent_gap_limit_handling   v_transactions_additional_totals
-    //                             \                       |                      /
-    //                              \      ensure_default_transparent_address    /
-    //                               \                     |                    /
-    //                                `---- fix_transparent_received_outputs --'
-    //                                      /    /         |
-    //           support_zcashd_wallet_import   /      fix_v_transactions_expired_unmined
-    //                                         /      /                |                \
-    //                     tx_observation_height     /                 |                 \
-    //                                         \    /                  |                  \
-    //                   add_transaction_trust_marker  v_received_output_spends_account  v_tx_outputs_return_addrs
+    //              `----------------------------- tx_retrieval_queue ---------------------------'
+    //                                                  /    \
+    //                              support_legacy_sqlite    tx_retrieval_queue_expiry ----------------.
+    //                                 /              \                                                 \
+    //            fix_broken_commitment_trees         add_account_uuids                                  \
+    //                       /                                /        \                                  \
+    //    fix_bad_change_flagging      transparent_gap_limit_handling   v_transactions_additional_totals   \
+    //                       \                       |                      /                               \
+    //                        \      ensure_default_transparent_address    /                                 \
+    //                         \                     |                    /                                   \
+    //                          `---- fix_transparent_received_outputs --'                                     \
+    //                                  /         /               \                                            |
+    //           support_zcashd_wallet_import    /             fix_v_transactions_expired_unmined              |
+    //                \                         /                    /        |         \                      |
+    //                 \      tx_observation_height                 /         |          \                     |
+    //                  \                       \                  /          |           \                    /
+    //                   \                   add_transaction_trust_marker     |  v_tx_outputs_return_addrs    /
+    //                    \                       \                           |                     /        /
+    //                     \                       \         v_received_output_spends_account      /        /
+    //                      \                       \               /                             /        /
+    //                       `------------------- account_delete_cascade ---------------------------------'
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -209,6 +214,7 @@ pub(super) fn all_migrations<
         }),
         Box::new(v_received_output_spends_account::Migration),
         Box::new(add_transaction_trust_marker::Migration),
+        Box::new(account_delete_cascade::Migration),
     ]
 }
 
@@ -346,13 +352,7 @@ pub const V_0_18_5: &[Uuid] = &[
 ];
 
 /// Leaf migrations as of the current repository state.
-pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
-    tx_retrieval_queue_expiry::MIGRATION_ID,
-    support_zcashd_wallet_import::MIGRATION_ID,
-    v_received_output_spends_account::MIGRATION_ID,
-    v_tx_outputs_return_addrs::MIGRATION_ID,
-    add_transaction_trust_marker::MIGRATION_ID,
-];
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

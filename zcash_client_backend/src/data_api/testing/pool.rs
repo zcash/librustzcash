@@ -2143,6 +2143,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             Err(e) if is_reached_gap_limit(&e, account_id, expected_bad_index));
         };
 
+    assert_matches!(
+        known_addrs[usize::try_from(gap_limits.ephemeral()).unwrap()]
+            .1
+            .exposure(),
+        Exposure::Unknown
+    );
+
     let next_reserved = reservation_should_succeed(&mut st, 1);
 
     // By reserving the address, its exposure has transitioned from "unknown" to "exposed".

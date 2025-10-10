@@ -770,6 +770,7 @@ mod tests {
 
         use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
+        let re_paren = Regex::new(r"([\(\)])").unwrap();
 
         let expected_tables = vec![
             db::TABLE_ACCOUNTS,
@@ -805,8 +806,10 @@ mod tests {
         assert_eq!(rows.len(), expected_tables.len());
         for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
-                re.replace_all(actual, " "),
-                re.replace_all(expected, " ").trim(),
+                re.replace_all(&re_paren.replace_all(actual, " $1 "), " ")
+                    .trim(),
+                re.replace_all(&re_paren.replace_all(expected, " $1 "), " ")
+                    .trim(),
             );
         }
 
@@ -820,14 +823,27 @@ mod tests {
             db::INDEX_ADDRESSES_PUBKEYS,
             db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
+            db::INDEX_ORCHARD_RNS_NOTE,
+            db::INDEX_ORCHARD_RNS_TX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_ADDRESS,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
+            db::INDEX_SAPLING_RNS_NOTE,
+            db::INDEX_SAPLING_RNS_TX,
             db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_SAPLING_RECEIVED_NOTES_ADDRESS,
             db::INDEX_SAPLING_RECEIVED_NOTES_TX,
             db::INDEX_SENT_NOTES_FROM_ACCOUNT,
             db::INDEX_SENT_NOTES_TO_ACCOUNT,
             db::INDEX_SENT_NOTES_TX,
-            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT_ID,
+            db::INDEX_TRANSPARENT_ROS_OUTPUT,
+            db::INDEX_TRANSPARENT_ROS_TX,
+            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT,
+            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ADDRESS,
+            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_TX,
+            db::INDEX_TRANSPARENT_SPEND_MAP_TX,
+            db::INDEX_TRANSPARENT_SPEND_SEARCH_TX,
+            db::INDEX_TX_RETIREVAL_QUEUE_DEPENDENT_TX,
         ];
         let mut indices_query = st
             .wallet()
@@ -838,10 +854,15 @@ mod tests {
         let mut rows = indices_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
-            let sql: String = row.get(0).unwrap();
+            let actual: String = row.get(0).unwrap();
             assert_eq!(
-                re.replace_all(&sql, " "),
-                re.replace_all(expected_indices[expected_idx], " ").trim(),
+                re.replace_all(&re_paren.replace_all(&actual, " $1 "), " ")
+                    .trim(),
+                re.replace_all(
+                    &re_paren.replace_all(expected_indices[expected_idx], " $1 "),
+                    " "
+                )
+                .trim(),
             );
             expected_idx += 1;
         }
@@ -870,10 +891,15 @@ mod tests {
         let mut rows = views_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
-            let sql: String = row.get(0).unwrap();
+            let actual: String = row.get(0).unwrap();
             assert_eq!(
-                re.replace_all(&sql, " "),
-                re.replace_all(&expected_views[expected_idx], " ").trim(),
+                re.replace_all(&re_paren.replace_all(&actual, " $1 "), " ")
+                    .trim(),
+                re.replace_all(
+                    &re_paren.replace_all(&expected_views[expected_idx], " $1 "),
+                    " "
+                )
+                .trim(),
             );
             expected_idx += 1;
         }

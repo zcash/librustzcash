@@ -169,7 +169,7 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
             "SELECT a.uuid, rn.nf
                  FROM {table_prefix}_received_notes rn
                  JOIN accounts a ON a.id = rn.account_id
-                 JOIN transactions tx ON tx.id_tx = rn.tx
+                 JOIN transactions tx ON tx.id_tx = rn.transaction_id
                  WHERE rn.nf IS NOT NULL
                  AND tx.mined_height IS NOT NULL
                  AND rn.id NOT IN (
@@ -228,7 +228,7 @@ where
                 MAX(tt.mined_height) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
-             INNER JOIN transactions t ON t.id_tx = rn.tx
+             INNER JOIN transactions t ON t.id_tx = rn.transaction_id
              LEFT OUTER JOIN transparent_received_output_spends ros
                 ON ros.transaction_id = t.id_tx
              LEFT OUTER JOIN transparent_received_outputs tro
@@ -389,7 +389,7 @@ where
              MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
          FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
-         INNER JOIN transactions t ON t.id_tx = rn.tx
+         INNER JOIN transactions t ON t.id_tx = rn.transaction_id
          LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
             ON rn.commitment_tree_position >= scan_state.start_position
             AND rn.commitment_tree_position < scan_state.end_position_exclusive
@@ -572,7 +572,7 @@ where
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
-             INNER JOIN transactions t ON t.id_tx = rn.tx
+             INNER JOIN transactions t ON t.id_tx = rn.transaction_id
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
@@ -738,7 +738,7 @@ pub(crate) fn select_unspent_note_meta(
         "SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
                 commitment_tree_position, value
          FROM {table_prefix}_received_notes rn
-         INNER JOIN transactions ON transactions.id_tx = rn.tx
+         INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
          WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
          AND recipient_key_scope IS NOT NULL
          AND nf IS NOT NULL
@@ -814,7 +814,7 @@ pub(crate) fn unspent_notes_meta(
                 "SELECT COUNT(*), SUM(rn.value)
                  FROM {table_prefix}_received_notes rn
                  INNER JOIN accounts a ON a.id = rn.account_id
-                 INNER JOIN transactions ON transactions.id_tx = rn.tx
+                 INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
                  WHERE a.uuid = :account_uuid
                  AND a.ufvk IS NOT NULL
                  AND rn.value >= :min_value
@@ -853,7 +853,7 @@ pub(crate) fn unspent_notes_meta(
                     "WITH bucketed AS (
                         SELECT s.value, NTILE(10) OVER (ORDER BY s.value) AS bucket_index
                         FROM sent_notes s
-                        JOIN transactions t ON s.tx = t.id_tx
+                        JOIN transactions t ON s.transaction_id = t.id_tx
                         JOIN accounts a on a.id = s.from_account_id
                         WHERE a.uuid = :account_uuid
                         -- only count mined transactions

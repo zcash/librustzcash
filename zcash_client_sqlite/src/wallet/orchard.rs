@@ -320,18 +320,18 @@ pub(crate) fn put_received_note<
     let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO orchard_received_notes (
-            tx, action_index, account_id, address_id,
+            transaction_id, action_index, account_id, address_id,
             diversifier, value, rho, rseed, memo, nf,
             is_change, commitment_tree_position,
             recipient_key_scope
         )
         VALUES (
-            :tx, :action_index, :account_id, :address_id,
+            :transaction_id, :action_index, :account_id, :address_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
             :is_change, :commitment_tree_position,
             :recipient_key_scope
         )
-        ON CONFLICT (tx, action_index) DO UPDATE
+        ON CONFLICT (transaction_id, action_index) DO UPDATE
         SET account_id = :account_id,
             address_id = :address_id,
             diversifier = :diversifier,
@@ -351,7 +351,7 @@ pub(crate) fn put_received_note<
     let diversifier = to.diversifier();
 
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":action_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
         ":account_id": account_id.0,
         ":address_id": address_id.map(|a| a.0),
