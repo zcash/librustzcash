@@ -1,4 +1,10 @@
 //! The Sapling fields of a PCZT.
+//!
+//! Sapling is Zcash's first-generation shielded protocol, providing privacy for
+//! transaction amounts and addresses. The Sapling protocol is defined in [ZIP 212]
+//! and related specifications.
+//!
+//! [ZIP 212]: https://zips.z.cash/zip-0212
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -17,6 +23,8 @@ use crate::{
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// PCZT fields that are specific to producing the transaction's Sapling bundle (if any).
+///
+/// The Sapling bundle structure follows the specification in [ZIP 212 §4.5].
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
@@ -34,6 +42,7 @@ pub struct Bundle {
 
     /// The Sapling anchor for this transaction.
     ///
+    /// This is the root of the Sapling commitment tree as defined in [ZIP 212 §4.5.1].
     /// Set by the Creator.
     #[getset(get = "pub")]
     pub(crate) anchor: [u8; 32],
@@ -46,6 +55,8 @@ pub struct Bundle {
 }
 
 /// Information about a Sapling spend within a transaction.
+///
+/// A Sapling spend represents the consumption of a shielded note as defined in [ZIP 212 §4.5.2].
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Spend {

@@ -207,8 +207,10 @@ pub(crate) struct Zip32Derivation {
 
 /// Determines the lock time for the transaction.
 ///
-/// Implemented following the specification in [BIP 370], with the rationale that this
+/// Implemented following the specification in [BIP 370 §2.1.1.2], with the rationale that this
 /// makes integration of PCZTs simpler for codebases that already support PSBTs.
+/// This function handles the interaction between transparent inputs and the global
+/// fallback lock time as defined in the PCZT specification.
 ///
 /// [BIP 370]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki#determining-lock-time
 pub fn determine_lock_time<L: LockTimeInput>(

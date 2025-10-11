@@ -1,4 +1,10 @@
 //! The Orchard fields of a PCZT.
+//!
+//! Orchard is Zcash's shielded protocol, providing enhanced privacy
+//! and functionality compared to Sapling. The Orchard protocol is defined in [ZIP 224]
+//! and related specifications.
+//!
+//! [ZIP 224]: https://zips.z.cash/zip-0224
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -17,10 +23,13 @@ use crate::{
 };
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
+///
+/// The Orchard bundle structure follows the specification in [ZIP 224 §4.6].
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     /// The Orchard actions in this bundle.
     ///
+    /// Each action represents either a spend or output as defined in [ZIP 224 §4.7].
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
     #[getset(get = "pub")]
@@ -29,12 +38,13 @@ pub struct Bundle {
     /// The flags for the Orchard bundle.
     ///
     /// Contains:
-    /// - `enableSpendsOrchard` flag (bit 0)
-    /// - `enableOutputsOrchard` flag (bit 1)
+    /// - `enableSpendsOrchard` flag (bit 0) - enables Orchard spends
+    /// - `enableOutputsOrchard` flag (bit 1) - enables Orchard outputs
     /// - Reserved, zeros (bits 2..=7)
     ///
     /// This is set by the Creator. The Constructor MUST only add spends and outputs that
     /// are consistent with these flags (i.e. are dummies as appropriate).
+    /// The flag format follows [ZIP 224 §4.6.1].
     #[getset(get = "pub")]
     pub(crate) flags: u8,
 
@@ -48,6 +58,7 @@ pub struct Bundle {
 
     /// The Orchard anchor for this transaction.
     ///
+    /// This is the root of the Orchard commitment tree as defined in [ZIP 224 §4.6.2].
     /// Set by the Creator.
     #[getset(get = "pub")]
     pub(crate) anchor: [u8; 32],
@@ -65,6 +76,9 @@ pub struct Bundle {
 }
 
 /// Information about an Orchard action within a transaction.
+///
+/// An action represents either a spend or output as defined in [ZIP 224 §4.7].
+/// Each action contains both a spend and output component, but one will be a dummy.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Action {
     //

@@ -1,4 +1,11 @@
 //! The transparent fields of a PCZT.
+//!
+//! The transparent component follows Bitcoin's UTXO model with additional Zcash-specific
+//! features. Key derivation follows the hierarchical deterministic wallet structure
+//! defined in [BIP 32] and [BIP 44].
+//!
+//! [BIP 32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
+//! [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -19,6 +26,9 @@ use zcash_script::script::Evaluable;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
+///
+/// The transparent bundle follows the Bitcoin transaction format with Zcash extensions
+/// as defined in [BIP 143] for signature hashing.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
@@ -101,6 +111,9 @@ pub struct Input {
     /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
     /// spending key can be found.
     ///
+    /// The derivation path follows the structure defined in [BIP 44 §2.2] for Zcash
+    /// (coin type 133) as specified in [SLIP 44].
+    ///
     /// - The pubkeys should appear in `script_pubkey` or `redeem_script`.
     /// - Each entry is set by an Updater.
     /// - Individual entries may be required by a Signer.
@@ -160,6 +173,9 @@ pub struct Output {
 
     /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
     /// spending key can be found.
+    ///
+    /// The derivation path follows the structure defined in [BIP 44 §2.2] for Zcash
+    /// (coin type 133) as specified in [SLIP 44].
     ///
     /// - The pubkeys should appear in `script_pubkey` or `redeem_script`.
     /// - Each entry is set by an Updater.
