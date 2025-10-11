@@ -9,7 +9,7 @@ use zcash_client_backend::{
     data_api::{
         scanning::ScanPriority,
         wallet::{ConfirmationsPolicy, TargetHeight},
-        MaxSpendMode, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+        MaxSpendMode, NoteFilter, NullifierQuery, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
     },
     wallet::ReceivedNote,
 };
@@ -96,6 +96,60 @@ fn unscanned_tip_exists(
     )
 }
 
+/// Retrieves the set of nullifiers for "potentially spendable" notes that the
+/// wallet is tracking.
+///
+/// "Potentially spendable" means:
+/// - The transaction in which the note was created has been observed as mined.
+/// - No transaction in which the note's nullifier appears has been observed as mined.
+pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
+    conn: &Connection,
+    protocol: ShieldedProtocol,
+    query: NullifierQuery,
+    parse_nf: F,
+) -> Result<Vec<(AccountUuid, N)>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = match query {
+        NullifierQuery::Unspent => {
+            // This may over-select nullifiers and return those that have been spent in un-mined
+            // transactions that have not yet expired, or for which the expiry height is unknown.
+            // This is fine because these nullifiers are primarily used to detect the spends of our
+            // own notes in scanning; if we select a few too many nullifiers, it's not a big deal.
+            conn.prepare(&format!(
+                "SELECT a.uuid, rn.nf
+                 FROM {table_prefix}_received_notes rn
+                 JOIN accounts a ON a.id = rn.account_id
+                 JOIN transactions tx ON tx.id_tx = rn.tx
+                 WHERE rn.nf IS NOT NULL
+                 AND tx.block IS NOT NULL
+                 AND rn.id NOT IN (
+                   SELECT rns.{table_prefix}_received_note_id
+                   FROM {table_prefix}_received_note_spends rns
+                   JOIN transactions stx ON stx.id_tx = rns.transaction_id
+                   WHERE stx.mined_height IS NOT NULL  -- the spending tx is mined
+                   OR stx.expiry_height IS NULL -- the spending tx will not expire
+                 )"
+            ))
+        }
+        NullifierQuery::All => conn.prepare(&format!(
+            "SELECT a.uuid, rn.nf
+             FROM {table_prefix}_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
+             WHERE nf IS NOT NULL",
+        )),
+    }?;
+
+    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
+        let account = AccountUuid(row.get(0)?);
+        let nf_bytes: Vec<u8> = row.get(1)?;
+        Ok::<_, SqliteClientError>((account, parse_nf(&nf_bytes)?))
+    })?;
+
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
+}
 // The `clippy::let_and_return` lint is explicitly allowed here because a bug in Clippy
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.

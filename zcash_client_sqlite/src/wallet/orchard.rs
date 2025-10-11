@@ -392,39 +392,17 @@ pub(crate) fn get_orchard_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers = match query {
-        NullifierQuery::Unspent => conn.prepare(
-            "SELECT a.uuid, rn.nf
-             FROM orchard_received_notes rn
-             JOIN accounts a ON a.id = rn.account_id
-             JOIN transactions tx ON tx.id_tx = rn.tx
-             WHERE rn.nf IS NOT NULL
-             AND tx.block IS NOT NULL
-             AND rn.id NOT IN (
-               SELECT spends.orchard_received_note_id
-               FROM orchard_received_note_spends spends
-               JOIN transactions stx ON stx.id_tx = spends.transaction_id
-               WHERE stx.block IS NOT NULL  -- the spending tx is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-             )",
-        )?,
-        NullifierQuery::All => conn.prepare(
-            "SELECT a.uuid, rn.nf
-             FROM orchard_received_notes rn
-             JOIN accounts a ON a.id = rn.account_id
-             WHERE nf IS NOT NULL",
-        )?,
-    };
-
-    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountUuid(row.get(0)?);
-        let nf_bytes: [u8; 32] = row.get(1)?;
-        Ok::<_, rusqlite::Error>((account, Nullifier::from_bytes(&nf_bytes).unwrap()))
-    })?;
-
-    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
-    Ok(res)
+    super::common::get_nullifiers(conn, ShieldedProtocol::Orchard, query, |nf_bytes| {
+        Nullifier::from_bytes(<&[u8; 32]>::try_from(nf_bytes).map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "unable to parse Orchard nullifier: expected 32 bytes".to_string(),
+            )
+        })?)
+        .into_option()
+        .ok_or(SqliteClientError::CorruptedData(
+            "unable to parse Orchard nullifier".to_string(),
+        ))
+    })
 }
 
 pub(crate) fn detect_spending_accounts<'a>(
