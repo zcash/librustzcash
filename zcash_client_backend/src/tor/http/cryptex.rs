@@ -12,7 +12,6 @@ use super::Retry;
 
 mod binance;
 mod coinbase;
-mod gate_io;
 mod gemini;
 mod ku_coin;
 mod mexc;
@@ -54,7 +53,6 @@ fn retry_filter(res: Result<StatusCode, &Error>) -> Option<Retry> {
 pub mod exchanges {
     pub use super::binance::Binance;
     pub use super::coinbase::Coinbase;
-    pub use super::gate_io::GateIo;
     pub use super::gemini::Gemini;
     pub use super::ku_coin::KuCoin;
     pub use super::mexc::Mexc;
@@ -104,7 +102,6 @@ impl Exchanges {
         Self::builder(exchanges::Gemini::unauthenticated())
             .with(exchanges::Binance::unauthenticated())
             .with(exchanges::Coinbase::unauthenticated())
-            .with(exchanges::GateIo::unauthenticated())
             .with(exchanges::KuCoin::unauthenticated())
             .with(exchanges::Mexc::unauthenticated())
             .build()

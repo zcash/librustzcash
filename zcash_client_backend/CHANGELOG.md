@@ -19,6 +19,9 @@ workspace.
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
 
+### Removed
+- `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
+
 ## [0.20.0] - 2025-09-25
 
 ### Added
