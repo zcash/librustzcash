@@ -12,6 +12,10 @@ workspace.
 
 ## [0.21.0] - PLANNED
 
+### Added
+- `zcash_client_backend::tor::http::cryptex`:
+    - `exchanges::{CoinEx, DigiFinex, Kraken, Xt}`
+
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
