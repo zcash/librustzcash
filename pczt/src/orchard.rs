@@ -1,4 +1,5 @@
 //! The Orchard fields of a PCZT.
+//! Currently burning assets is not supported, so it is always empty.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -15,6 +16,11 @@ use crate::{
     common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
+
+#[cfg(feature = "orchard")]
+const DUMMY_EXPIRY_HEIGHT: u32 = 0;
+#[cfg(feature = "orchard")]
+const EMPTY_BURN: Vec<([u8; 32], u64)> = vec![];
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
@@ -110,8 +116,8 @@ pub struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
-    #[serde_as(as = "Option<[_; 64]>")]
-    pub(crate) spend_auth_sig: Option<[u8; 64]>,
+    #[serde_as(as = "Option<(_, [_; 64])>")]
+    pub(crate) spend_auth_sig: Option<(u8, [u8; 64])>,
 
     /// The [raw encoding] of the Orchard payment address that received the note being spent.
     ///
@@ -132,6 +138,17 @@ pub struct Spend {
     /// information, or after signatures have been applied, this can be redacted.
     pub(crate) value: Option<u64>,
 
+    /// The asset of the input being spent.
+    ///
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value matches `cv`, and to
+    ///   confirm the values and change involved in the transaction.
+    ///
+    /// This exposes the asset value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    #[getset(get = "pub")]
+    pub(crate) asset: Option<[u8; 32]>,
+
     /// The rho value for the note being spent.
     ///
     /// - This is set by the Constructor.
@@ -143,6 +160,12 @@ pub struct Spend {
     /// - This is set by the Constructor.
     /// - This is required by the Prover.
     pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The seed randomness for split notes.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rseed_split_note: Option<[u8; 32]>,
 
     /// The full viewing key that received the note being spent.
     ///
@@ -164,6 +187,12 @@ pub struct Spend {
     ///   validate `rk`.
     /// - After `zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
+
+    /// A flag to indicate whether the value of the SpendInfo will be counted in the `ValueSum` of the action.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) split_flag: Option<bool>,
 
     /// The ZIP 32 derivation path at which the spending key can be found for the note
     /// being spent.
@@ -338,8 +367,11 @@ impl Bundle {
                         spend_auth_sig,
                         recipient,
                         value,
+                        asset,
                         rho,
                         rseed,
+                        rseed_split_note,
+                        split_flag,
                         fvk,
                         witness,
                         alpha,
@@ -378,11 +410,14 @@ impl Bundle {
             if !(merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig)
                 && merge_optional(&mut lhs.spend.recipient, recipient)
                 && merge_optional(&mut lhs.spend.value, value)
+                && merge_optional(&mut lhs.spend.asset, asset)
                 && merge_optional(&mut lhs.spend.rho, rho)
                 && merge_optional(&mut lhs.spend.rseed, rseed)
+                && merge_optional(&mut lhs.spend.rseed_split_note, rseed_split_note)
                 && merge_optional(&mut lhs.spend.fvk, fvk)
                 && merge_optional(&mut lhs.spend.witness, witness)
                 && merge_optional(&mut lhs.spend.alpha, alpha)
+                && merge_optional(&mut lhs.spend.split_flag, split_flag)
                 && merge_optional(&mut lhs.spend.zip32_derivation, spend_zip32_derivation)
                 && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk)
                 && merge_map(&mut lhs.spend.proprietary, spend_proprietary)
@@ -416,11 +451,14 @@ impl Bundle {
                     action.spend.spend_auth_sig,
                     action.spend.recipient,
                     action.spend.value,
+                    action.spend.asset,
                     action.spend.rho,
                     action.spend.rseed,
+                    action.spend.rseed_split_note,
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
+                    action.spend.split_flag,
                     action
                         .spend
                         .zip32_derivation
@@ -468,6 +506,8 @@ impl Bundle {
             self.flags,
             self.value_sum,
             self.anchor,
+            EMPTY_BURN,
+            DUMMY_EXPIRY_HEIGHT,
             self.zkproof,
             self.bsk,
         )
@@ -486,14 +526,22 @@ impl Bundle {
                     spend: Spend {
                         nullifier: spend.nullifier().to_bytes(),
                         rk: spend.rk().into(),
-                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| s.into()),
+                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| {
+                            let version = s.version().clone() as u8;
+                            let sig = s.sig().into();
+                            (version, sig)
+                        }),
                         recipient: action
                             .spend()
                             .recipient()
                             .map(|recipient| recipient.to_raw_address_bytes()),
                         value: spend.value().map(|value| value.inner()),
+                        asset: spend.asset().map(|asset| asset.to_bytes()),
                         rho: spend.rho().map(|rho| rho.to_bytes()),
                         rseed: spend.rseed().map(|rseed| *rseed.as_bytes()),
+                        rseed_split_note: spend
+                            .rseed_split_note()
+                            .map(|rseed_split_note| *rseed_split_note.as_bytes()),
                         fvk: spend.fvk().as_ref().map(|fvk| fvk.to_bytes()),
                         witness: spend.witness().as_ref().map(|witness| {
                             (
@@ -509,6 +557,7 @@ impl Bundle {
                             )
                         }),
                         alpha: spend.alpha().map(|alpha| alpha.to_repr()),
+                        split_flag: *spend.split_flag(),
                         zip32_derivation: spend.zip32_derivation().as_ref().map(|z| {
                             Zip32Derivation {
                                 seed_fingerprint: *z.seed_fingerprint(),
@@ -528,7 +577,7 @@ impl Bundle {
                     output: Output {
                         cmx: output.cmx().to_bytes(),
                         ephemeral_key: output.encrypted_note().epk_bytes,
-                        enc_ciphertext: output.encrypted_note().enc_ciphertext.to_vec(),
+                        enc_ciphertext: output.encrypted_note().enc_ciphertext.clone(),
                         out_ciphertext: output.encrypted_note().out_ciphertext.to_vec(),
                         recipient: action
                             .output()

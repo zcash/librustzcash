@@ -9,7 +9,7 @@ use ::sapling::bundle::GrothProofBytes;
 #[cfg(zcash_unstable = "zfuture")]
 use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 use super::sighash_v6::v6_signature_hash;
 
 #[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ALL` instead.")]
@@ -78,7 +78,7 @@ pub fn signature_hash<
 
         #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
-        #[cfg(zcash_unstable = "zfuture")]
+        #[cfg(all(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
         TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
     })
 }

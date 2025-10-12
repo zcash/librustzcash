@@ -1,6 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use incrementalmerkletree::Position;
+use orchard::note::AssetBase;
 use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
@@ -185,6 +186,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
             let note = Option::from(Note::from_parts(
                 recipient,
                 orchard::value::NoteValue::from_raw(note_value),
+                AssetBase::native(),
                 rho,
                 rseed,
             ))

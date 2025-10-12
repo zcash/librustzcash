@@ -306,13 +306,15 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         )?);
 
         #[cfg(feature = "orchard")]
-        funding_accounts.extend(
-            self.received_notes.detect_orchard_spending_accounts(
-                tx.orchard_bundle()
+        funding_accounts.extend(self.received_notes.detect_orchard_spending_accounts(
+            tx.orchard_bundle().iter().flat_map(|bundle| {
+                bundle
+                    .as_vanilla_bundle()
+                    .actions()
                     .iter()
-                    .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier())),
-            )?,
-        );
+                    .map(|action| action.nullifier())
+            }),
+        )?);
 
         Ok(funding_accounts)
     }

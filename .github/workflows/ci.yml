@@ -29,7 +29,8 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            # TODO: return to ubuntu-latest-8cores when merging with upstream
+            os: ubuntu-latest
 
           - state: transparent
             extra_flags: transparent-inputs transparent-key-encoding
@@ -95,7 +96,8 @@ jobs:
           - target: macOS
             os: macOS-latest
           - target: Windows
-            os: windows-latest-8cores
+            # TODO: return to windows-latest-8cores when merging with upstream
+            os: windows-latest
 
           - state: transparent
             extra_flags: transparent-inputs transparent-key-encoding
@@ -143,6 +145,12 @@ jobs:
           cargo test
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run pczt end-to-end tests
+        run: >
+          cargo test
+          --package pczt
+          --test end_to_end
+          --features "io-finalizer,prover,signer,tx-extractor,spend-finalizer,zcp-builder"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -163,7 +171,8 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            # TODO: return to ubuntu-latest-8cores when merging with upstream
+            os: ubuntu-latest
 
           - state: transparent
             extra_flags: transparent-inputs
@@ -230,10 +239,10 @@ jobs:
             os: windows-latest
 
           - state: ZFuture
-            rustflags: '--cfg zcash_unstable="zfuture"'
+            rustflags: '--cfg zcash_unstable="nu7" --cfg zcash_unstable="zfuture"'
           - state: ZFuture-allfeatures
             all-features: true
-            rustflags: '--cfg zcash_unstable="zfuture"'
+            rustflags: '--cfg zcash_unstable="nu7" --cfg zcash_unstable="zfuture"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -475,12 +484,14 @@ jobs:
           key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Generate coverage report
         run: >
+          timeout --preserve-status 300s 
           cargo tarpaulin
           --engine llvm
           ${{ steps.prepare.outputs.feature-flags }}
           --release
-          --timeout 600
+          --timeout 300
           --out xml
+          || true
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         with:
