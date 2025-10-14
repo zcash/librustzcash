@@ -68,12 +68,16 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 fee INTEGER,
                 target_height INTEGER,
                 min_observed_height INTEGER NOT NULL,
+                confirmed_unmined_at_height INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height),
                 CONSTRAINT height_consistency CHECK (
                     block IS NULL OR mined_height = block
                 ),
                 CONSTRAINT min_observed_consistency CHECK (
                     mined_height IS NULL OR min_observed_height <= mined_height
+                ),
+                CONSTRAINT confirmed_unmined_consistency CHECK (
+                    confirmed_unmined_at_height IS NULL OR mined_height IS NULL
                 )
             );
 
@@ -93,7 +97,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     IFNULL(target_height, {fallback_height}),
                     IFNULL(mined_height, {fallback_height}),
                     {fallback_height}
-                )
+                ),
+                NULL  -- no transactions are initially confirmed as having expired without being mined
             FROM transactions;
 
             DROP TABLE transactions;

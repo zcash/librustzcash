@@ -1316,16 +1316,15 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
 ///
 /// FIXME: the need for these requests will be obviated if transparent spend and output information
 /// is added to compact block data.
+///
+/// `lightwalletd` will return an error for `GetTaddressTxids` requests having an end height
+/// greater than the current chain tip height, so we take the chain tip height into account
+/// here in order to make this pothole easier for clients of the API to avoid.
 pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
+    chain_tip_height: BlockHeight,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    // `lightwalletd` will return an error for `GetTaddressTxids` requests having an end height
-    // greater than the current chain tip height, so we take the chain tip height into account
-    // here in order to make this pothole easier for clients of the API to avoid.
-    let chain_tip_height =
-        super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-
     debug!(
         "Generating transaction data requests as of chain tip height {}",
         chain_tip_height
@@ -1627,7 +1626,11 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
          ON CONFLICT (txid) DO UPDATE
          SET block = IFNULL(block, :block),
              mined_height = :mined_height,
-             min_observed_height = MIN(min_observed_height, :observation_height)
+             min_observed_height = MIN(min_observed_height, :observation_height),
+             confirmed_unmined_at_height = CASE
+                WHEN :mined_height IS NOT NULL THEN NULL
+                ELSE confirmed_unmined_at_height
+             END
          RETURNING id_tx",
         named_params![
            ":txid": &output.outpoint().hash().to_vec(),

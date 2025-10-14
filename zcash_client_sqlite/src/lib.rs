@@ -1035,15 +1035,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
-        let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
+        if let Some(chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
+            let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
-        #[cfg(feature = "transparent-inputs")]
-        let iter = iter.chain(wallet::transparent::transaction_data_requests(
-            self.conn.borrow(),
-            &self.params,
-        )?);
+            #[cfg(feature = "transparent-inputs")]
+            let iter = iter.chain(wallet::transparent::transaction_data_requests(
+                self.conn.borrow(),
+                &self.params,
+                chain_tip_height,
+            )?);
 
-        Ok(iter.collect())
+            Ok(iter.collect())
+        } else {
+            // If the chain tip height is unknown, we're not in a state where it makes sense to process
+            // transaction data requests anyway so we just return the empty vector of requests.
+            Ok(vec![])
+        }
     }
 }
 
@@ -2911,7 +2918,8 @@ mod tests {
             .schedule_ephemeral_address_checks()
             .unwrap();
         let data_requests =
-            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params).unwrap();
+            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params, birthday)
+                .unwrap();
 
         let base_time = st.wallet().db().clock.now();
         let day = Duration::from_secs(60 * 60 * 24);

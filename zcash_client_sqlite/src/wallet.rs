@@ -130,7 +130,7 @@ use crate::{
         encoding::LEGACY_ADDRESS_INDEX_NULL,
     },
     AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
-    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2988,6 +2988,8 @@ pub(crate) fn set_transaction_status(
     txid: TxId,
     status: TransactionStatus,
 ) -> Result<(), SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
     // It is safe to unconditionally delete the request from `tx_retrieval_queue` below (both in
     // the expired case and the case where it has been mined), because we already have all the data
     // we need about this transaction:
@@ -3006,28 +3008,16 @@ pub(crate) fn set_transaction_status(
     // is whether that transaction ends up being mined or expires.
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
-            // Remove the txid from the retrieval queue unless an unexpired transaction having that
-            // txid exists in the transactions table, with a `VERIFY_LOOKAHEAD` buffer.
-            if let Some(chain_tip) = chain_tip_height(conn)? {
-                conn.execute(
-                    "DELETE FROM tx_retrieval_queue
-                     WHERE txid = :txid
-                     AND request_expiry <= :chain_tip
-                     AND txid NOT IN (
-                        SELECT tx.txid
-                        FROM transactions tx
-                        WHERE tx.mined_height IS NULL
-                        AND (
-                            tx.expiry_height == 0 -- tx will never expire
-                            OR tx.expiry_height > :chain_tip -- tx is unexpired
-                        )
-                     )",
-                    named_params![
-                        ":txid": txid.as_ref(),
-                        ":chain_tip": u32::from(chain_tip)
-                    ],
-                )?;
-            }
+            conn.execute(
+                "UPDATE transactions
+                 SET confirmed_unmined_at_height = :chain_tip
+                 WHERE txid = :txid
+                 AND mined_height IS NULL",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":chain_tip": u32::from(chain_tip)
+                ],
+            )?;
         }
         TransactionStatus::Mined(height) => {
             // The transaction has been mined, so we can set its mined height, associate it with
@@ -3039,7 +3029,8 @@ pub(crate) fn set_transaction_status(
 
             conn.execute(
                 "UPDATE transactions
-                 SET mined_height = :height
+                 SET mined_height = :height,
+                     confirmed_unmined_at_height = NULL
                  WHERE txid = :txid",
                 sql_args,
             )?;
@@ -3052,76 +3043,10 @@ pub(crate) fn set_transaction_status(
                  AND blocks.height = :height",
                 sql_args,
             )?;
-
-            notify_tx_retrieved(conn, txid)?;
         }
     }
 
-    Ok(())
-}
-
-pub(crate) fn refresh_status_requests(
-    conn: &rusqlite::Transaction,
-) -> Result<(), SqliteClientError> {
-    if let Some(chain_tip) = chain_tip_height(conn)? {
-        // This does not use `tx_unexpired_condition` because, in this specific case we do not want
-        // to consider the observation height. If the wallet observes a transaction via scanning
-        // (and thus doesn't have an expiry height), then observes a reorg that un-mines the
-        // transaction, and then goes offline for more than `DEFAULT_TX_EXPIRY_DELTA`, we still
-        // want the wallet to check on the status of that transaction.
-        let mut unmined_query = conn.prepare(
-            "SELECT
-                t.txid,
-                t.expiry_height,
-                r.query_type IS NOT NULL AS status_request_exists
-             FROM transactions t
-             LEFT OUTER JOIN tx_retrieval_queue r ON r.txid = t.txid
-             WHERE t.mined_height IS NULL
-             AND (
-                t.expiry_height IS NULL -- expiry is unknown
-                OR t.expiry_height = 0 -- tx will never expire
-                OR t.expiry_height > :chain_tip -- tx is unexpired
-             )
-             AND (
-                r.query_type IS NULL
-                OR r.query_type = :status_type
-             )",
-        )?;
-
-        let mut rows = unmined_query.query(named_params! {
-            ":chain_tip": u32::from(chain_tip),
-            ":status_type": TxQueryType::Status.code(),
-        })?;
-        while let Some(row) = rows.next()? {
-            let txid = row.get::<_, Vec<u8>>("txid")?;
-            let tx_expiry = row.get::<_, Option<u32>>("expiry_height")?;
-
-            if row.get::<_, bool>("status_request_exists")? {
-                conn.execute(
-                    "UPDATE tx_retrieval_queue
-                     SET request_expiry = :new_expiry
-                     WHERE txid = :txid
-                     AND query_type = :status_type",
-                    named_params! {
-                        ":new_expiry": tx_retrieval_expiry(chain_tip, tx_expiry),
-                        ":txid": &txid[..],
-                        ":status_type": TxQueryType::Status.code(),
-                    },
-                )?;
-            } else {
-                conn.execute(
-                    "INSERT INTO tx_retrieval_queue (txid, query_type, request_expiry)
-                     VALUES (:txid, :status_type, :new_expiry)
-                     ON CONFLICT (txid) DO NOTHING",
-                    named_params! {
-                        ":new_expiry": tx_retrieval_expiry(chain_tip, tx_expiry),
-                        ":txid": &txid[..],
-                        ":status_type": TxQueryType::Status.code(),
-                    },
-                )?;
-            }
-        }
-    }
+    delete_retrieval_queue_entries(conn, txid)?;
 
     Ok(())
 }
@@ -3231,7 +3156,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // spends in the transaction.
     conn.execute(
         "UPDATE transparent_received_outputs
-         SET max_observed_unspent_height = CASE WHEN tx.mined_height <= :height THEN :height ELSE NULL END
+         SET max_observed_unspent_height = CASE
+            WHEN tx.mined_height <= :height THEN :height
+            ELSE NULL
+         END
          FROM transactions tx
          WHERE tx.id_tx = transaction_id
          AND max_observed_unspent_height > :height",
@@ -3242,7 +3170,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // transaction entries may be created as a consequence of receiving transparent TXOs.
     conn.execute(
         "UPDATE transactions
-         SET block = NULL, mined_height = NULL, tx_index = NULL
+         SET block = NULL, mined_height = NULL, tx_index = NULL, confirmed_unmined_at_height = NULL
          WHERE mined_height > :height",
         named_params![":height": u32::from(truncation_height)],
     )?;
@@ -4014,7 +3942,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         queue_transparent_input_retrieval(conn, tx_ref, &d_tx)?
     }
 
-    notify_tx_retrieved(conn, d_tx.tx().txid())?;
+    delete_retrieval_queue_entries(conn, d_tx.tx().txid())?;
 
     // If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
@@ -4039,7 +3967,8 @@ pub(crate) fn put_tx_meta(
         SET block = :block,
             mined_height = :block,
             tx_index = :tx_index,
-            min_observed_height = MIN(min_observed_height, :block)
+            min_observed_height = MIN(min_observed_height, :block),
+            confirmed_unmined_at_height = NULL
         RETURNING id_tx",
     )?;
 
@@ -4211,22 +4140,9 @@ pub(crate) fn queue_tx_retrieval(
     txids: impl Iterator<Item = TxId>,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
-    let chain_tip = match chain_tip_height(conn)? {
-        Some(h) => h,
-        None => {
-            return Ok(());
-        }
-    };
-
-    let mut q_tx_expiry = conn.prepare_cached(
-        "SELECT expiry_height
-         FROM transactions
-         WHERE txid = :txid",
-    )?;
-
     // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
-        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id, request_expiry)
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
          SELECT
             :txid,
             IIF(
@@ -4234,8 +4150,7 @@ pub(crate) fn queue_tx_retrieval(
                 :status_type,
                 :enhancement_type
             ),
-            :dependent_transaction_id,
-            :request_expiry
+            :dependent_transaction_id
         ON CONFLICT (txid) DO UPDATE
         SET query_type =
             IIF(
@@ -4243,52 +4158,19 @@ pub(crate) fn queue_tx_retrieval(
                 :status_type,
                 :enhancement_type
             ),
-            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id),
-            request_expiry = :request_expiry",
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
     )?;
 
     for txid in txids {
-        let tx_expiry = q_tx_expiry
-            .query_row(
-                named_params! {
-                    ":txid": txid.as_ref(),
-                },
-                |row| row.get::<_, Option<u32>>(0),
-            )
-            .optional()?
-            .flatten();
-
         stmt_insert_tx.execute(named_params! {
             ":txid": txid.as_ref(),
             ":status_type": TxQueryType::Status.code(),
             ":enhancement_type": TxQueryType::Enhancement.code(),
             ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
-            ":request_expiry": tx_retrieval_expiry(chain_tip, tx_expiry)
         })?;
     }
 
     Ok(())
-}
-
-// Computes a block height at which transaction status requests should be considered
-// expired. Note that even expired requests will be serviced; expiry is only used
-// to determine when a request can be deleted and not retried.
-//
-// TODO: the underlying `request_expiry` mechanism that this method is being used to configure is
-// not sufficiently precise and should probably be scrapped in favor of something better; however,
-// this will do for now.
-fn tx_retrieval_expiry(chain_tip_height: BlockHeight, tx_expiry: Option<u32>) -> u32 {
-    match tx_expiry {
-        // If the transaction never expires or we don't know its expiry, keep checking for the next
-        // expiry delta from the chain tip.
-        Some(0) | None => u32::from(chain_tip_height) + DEFAULT_TX_EXPIRY_DELTA,
-        // If the transaction expires in the future, the request can expire with the transaction.
-        Some(h) if h > u32::from(chain_tip_height) => h + VERIFY_LOOKAHEAD,
-        // The transaction has already expired; we can keep checking for a few blocks, but if we
-        // don't get a positive response for the transaction being mined soon, we can assume it
-        // will never be mined.
-        Some(_) => u32::from(chain_tip_height) + VERIFY_LOOKAHEAD,
-    }
 }
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
@@ -4296,35 +4178,68 @@ fn tx_retrieval_expiry(chain_tip_height: BlockHeight, tx_expiry: Option<u32>) ->
 pub(crate) fn transaction_data_requests(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    let mut tx_retrieval_stmt =
-        conn.prepare_cached("SELECT txid, query_type FROM tx_retrieval_queue")?;
+    // We will return both explicitly constructed status requests, and a status request for each
+    // transaction that is known to the wallet for which we don't have the mined height,
+    // and for which we have no positive confirmation that the transaction expired unmined.
+    //
+    // For transactions with a known expiry height of 0, we will continue to query indefinitely.
+    // Such transactions should be rebroadcast by the wallet until they are mined.
+    let mut tx_retrieval_stmt = conn.prepare_cached(
+        "SELECT txid, query_type FROM tx_retrieval_queue
+         UNION
+         SELECT txid, :status_type
+         FROM transactions
+         WHERE mined_height IS NULL
+         AND (
+            -- we have no confirmation of expiry
+            confirmed_unmined_at_height IS NULL
+            -- a nonzero expiry height is known, and we have confirmation that the transaction was
+            -- not mined as of a height greater than that expiry height
+            OR (
+                expiry_height > 0
+                AND confirmed_unmined_at_height > expiry_height
+            )
+            -- the expiry height is unknown and the default expiry height for it is in the stable
+            -- block range according to the PRUNING_DEPTH
+            OR (
+                expiry_height IS NULL
+                AND confirmed_unmined_at_height > min_observed_height + :certainty_depth
+            )
+        )",
+    )?;
 
     let result = tx_retrieval_stmt
-        .query_and_then([], |row| {
-            let txid = row.get(0).map(TxId::from_bytes)?;
-            let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
-                SqliteClientError::CorruptedData(
-                    "Unrecognized transaction data request type.".to_owned(),
-                )
-            })?;
+        .query_and_then(
+            named_params![
+                ":status_type": TxQueryType::Status.code(),
+                ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA
+            ],
+            |row| {
+                let txid = row.get(0).map(TxId::from_bytes)?;
+                let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
+                    SqliteClientError::CorruptedData(
+                        "Unrecognized transaction data request type.".to_owned(),
+                    )
+                })?;
 
-            Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
-                TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
-                TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
-            })
-        })?
+                Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
+                    TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
+                    TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
+                })
+            },
+        )?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(result)
 }
 
-pub(crate) fn notify_tx_retrieved(
+pub(crate) fn delete_retrieval_queue_entries(
     conn: &rusqlite::Transaction<'_>,
     txid: TxId,
 ) -> Result<(), SqliteClientError> {
     conn.execute(
         "DELETE FROM tx_retrieval_queue WHERE txid = :txid",
-        named_params![":txid": &txid.as_ref()[..]],
+        named_params![":txid": txid.as_ref()],
     )?;
 
     Ok(())
