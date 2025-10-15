@@ -213,7 +213,8 @@ pub(super) fn all_migrations<
 #[allow(dead_code)] // marked as dead code so that this appears in docs with --document-private-items
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
-    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3,
+    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3, V_0_18_0,
+    V_0_18_5,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -327,6 +328,14 @@ pub const V_0_18_0: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
     v_tx_outputs_return_addrs::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.18.0 release.
+pub const V_0_18_5: &[Uuid] = &[
+    tx_retrieval_queue_expiry::MIGRATION_ID,
+    support_zcashd_wallet_import::MIGRATION_ID,
+    v_tx_outputs_return_addrs::MIGRATION_ID,
+    tx_observation_height::MIGRATION_ID,
 ];
 
 /// Leaf migrations as of the current repository state.

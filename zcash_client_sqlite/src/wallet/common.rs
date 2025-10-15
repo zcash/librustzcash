@@ -145,14 +145,14 @@ fn unscanned_tip_exists(
 
 /// Retrieves the set of nullifiers for "potentially spendable" notes that the wallet is tracking.
 ///
+/// "Potentially spendable" means:
+/// - The transaction in which the note was created has been observed as mined.
+/// - No transaction in which the note's nullifier appears has been observed as mined.
+///
 /// This may over-select nullifiers and return those that have been spent in un-mined transactions
 /// that have not yet expired, or for which the expiry height is unknown. This is fine because
 /// these nullifiers are primarily used to detect the spends of our own notes in scanning; if we
 /// select a few too many nullifiers, it's not a big deal.
-///
-/// "Potentially spendable" means:
-/// - The transaction in which the note was created has been observed as mined.
-/// - No transaction in which the note's nullifier appears has been observed as mined.
 pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
     conn: &Connection,
     protocol: ShieldedProtocol,
@@ -171,7 +171,7 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
                  JOIN accounts a ON a.id = rn.account_id
                  JOIN transactions tx ON tx.id_tx = rn.tx
                  WHERE rn.nf IS NOT NULL
-                 AND tx.block IS NOT NULL
+                 AND tx.mined_height IS NOT NULL
                  AND rn.id NOT IN (
                    SELECT rns.{table_prefix}_received_note_id
                    FROM {table_prefix}_received_note_spends rns
@@ -713,7 +713,7 @@ pub(crate) fn select_unspent_note_meta(
             WHERE rn.commitment_tree_position >= unscanned.start_position
             AND rn.commitment_tree_position < unscanned.end_position_exclusive
             -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-            AND unscanned.block_range_start < :anchor_height
+            AND unscanned.block_range_start <= :anchor_height
             -- exclude unscanned ranges that end below the wallet birthday
             AND unscanned.block_range_end > :wallet_birthday
          )",

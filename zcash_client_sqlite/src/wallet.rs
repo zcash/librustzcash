@@ -4183,7 +4183,8 @@ pub(crate) fn transaction_data_requests(
     // and for which we have no positive confirmation that the transaction expired unmined.
     //
     // For transactions with a known expiry height of 0, we will continue to query indefinitely.
-    // Such transactions should be rebroadcast by the wallet until they are mined.
+    // Such transactions should be rebroadcast by the wallet until they are either mined or
+    // conflict with another mined transaction.
     let mut tx_retrieval_stmt = conn.prepare_cached(
         "SELECT txid, query_type FROM tx_retrieval_queue
          UNION
@@ -4194,16 +4195,16 @@ pub(crate) fn transaction_data_requests(
             -- we have no confirmation of expiry
             confirmed_unmined_at_height IS NULL
             -- a nonzero expiry height is known, and we have confirmation that the transaction was
-            -- not mined as of a height greater than that expiry height
+            -- not unmined as of a height greater than or equal to that expiry height
             OR (
                 expiry_height > 0
-                AND confirmed_unmined_at_height > expiry_height
+                AND confirmed_unmined_at_height < expiry_height
             )
-            -- the expiry height is unknown and the default expiry height for it is in the stable
-            -- block range according to the PRUNING_DEPTH
+            -- the expiry height is unknown and the default expiry height for it is not yet in the
+            -- stable block range according to the PRUNING_DEPTH
             OR (
                 expiry_height IS NULL
-                AND confirmed_unmined_at_height > min_observed_height + :certainty_depth
+                AND confirmed_unmined_at_height < min_observed_height + :certainty_depth
             )
         )",
     )?;
