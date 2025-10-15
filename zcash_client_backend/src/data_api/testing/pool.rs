@@ -68,17 +68,12 @@ use {
         wallet::WalletTransparentOutput,
     },
     nonempty::NonEmpty,
-    rand_core::OsRng,
     std::{collections::HashSet, str::FromStr},
     transparent::{
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    zcash_primitives::transaction::{
-        builder::{BuildConfig, Builder},
-        fees::zip317,
-    },
-    zcash_proofs::prover::LocalTxProver,
+    zcash_primitives::transaction::fees::zip317,
     zcash_protocol::{value::ZatBalance, TxId},
 };
 
@@ -86,7 +81,10 @@ use {
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
-use pczt::roles::{prover::Prover, signer::Signer};
+use {
+    pczt::roles::{prover::Prover, signer::Signer},
+    zcash_proofs::prover::LocalTxProver,
+};
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
@@ -1125,7 +1123,6 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let (default_addr, _) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
@@ -1165,12 +1162,8 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     // value of the wallet
     assert_eq!(total_sent, value);
 
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match default_addr {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
+    // Generate a ZIP 320 proposal, sending to an external TEX address.
+    let tex_addr = Address::Tex([0x4; 20]);
 
     // TODO: Do we want to allow shielded change memos in ephemeral transfers?
     //let change_memo = Memo::from_str("change").expect("valid memo").encode();
@@ -1306,7 +1299,6 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let (default_addr, _) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
@@ -1351,13 +1343,8 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     // value of the wallet
     assert_eq!(total_sent, value);
 
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match default_addr {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
-
+    // Generate a ZIP 320 proposal, sending to an external TEX address.
+    let tex_addr = Address::Tex([0x4; 20]);
     let fee_rule = StandardFeeRule::Zip317;
 
     // We use `st.propose_standard_transfer` here in order to also test round-trip
@@ -1486,7 +1473,6 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let (default_addr, _) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
@@ -1532,12 +1518,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     // value of the wallet
     assert_eq!(total_sent, non_marginal_notes_value);
 
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match default_addr {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
+    // Generate a ZIP 320 proposal, sending to an external TEX address.
+    let tex_addr = Address::Tex([0x4; 20]);
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -1838,10 +1820,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use transparent::builder::TransparentSigningSet;
-
     use crate::{
-        data_api::{testing::transparent::GapLimits, OutputOfSentTx},
+        data_api::{testing::transparent::GapLimits, OutputOfSentTx, TransactionStatus},
         wallet::{Exposure, TransparentAddressSource},
     };
 
@@ -1855,8 +1835,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let (default_addr, default_index) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
+    let tex_addr = Address::Tex([0x4; 20]);
 
     let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -1894,12 +1874,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
         let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
-        // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
+        // Generate a ZIP 320 proposal, sending to the another wallet's default transparent address
         // expressed as a TEX address.
-        let tex_addr = match default_addr {
-            TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-            _ => unreachable!(),
-        };
         let change_memo = Some(Memo::from_str("change").expect("valid memo").encode());
 
         // We use `st.propose_standard_transfer` here in order to also test round-trip
@@ -2006,7 +1982,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         assert_matches!(
             &confirmed_sent[1][0],
             OutputOfSentTx { value: sent_v, external_recipient: sent_to_addr, ephemeral_address: None }
-            if sent_v == &transfer_amount && sent_to_addr == &Some(tex_addr));
+            if sent_v == &transfer_amount && sent_to_addr.as_ref() == Some(&tex_addr));
 
         // Check that the transaction history matches what we expect.
         let tx_history = st.wallet().get_tx_history().unwrap();
@@ -2049,7 +2025,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let (ephemeral1, _, _) = run_test(&mut st, 1, bal_0);
     assert_ne!(ephemeral0, ephemeral1);
 
-    let height = add_funds(&mut st, value);
+    add_funds(&mut st, value);
 
     assert_matches!(
         ephemeral0,
@@ -2057,9 +2033,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     );
 
     // Simulate another wallet sending to an ephemeral address with an index
-    // within the current gap limit. The `PaysEphemeralTransparentAddress` error
-    // prevents us from doing so straightforwardly, so we'll do it by building
-    // a transaction and calling `store_decrypted_tx` with it.
+    // within the current gap limit.
     let known_addrs = st
         .wallet()
         .get_known_ephemeral_addresses(account_id, None)
@@ -2083,75 +2057,38 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
     }
 
-    let mut builder = Builder::new(
-        *st.network(),
-        height + 1,
-        BuildConfig::Standard {
-            sapling_anchor: None,
-            orchard_anchor: None,
-        },
-    );
-    let mut transparent_signing_set = TransparentSigningSet::new();
     let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
-    assert_matches!(
-        builder.add_transparent_output(colliding_addr, utxo_value),
-        Ok(_)
-    );
-    let sk = account
-        .usk()
-        .transparent()
-        .derive_secret_key(Scope::External.into(), default_index)
-        .unwrap();
-    let pubkey = transparent_signing_set.add_key(sk);
-    let outpoint = OutPoint::fake();
-    let txout = TxOut::new(value, default_addr.script().into());
-    // Add the fake input to our UTXO set so that we can ensure we recognize the outpoint.
-    st.wallet_mut()
-        .put_received_transparent_utxo(
-            &WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), None).unwrap(),
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            StandardFeeRule::Zip317,
+            ConfirmationsPolicy::MIN,
+            &Address::from(*colliding_addr),
+            utxo_value,
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
         )
         .unwrap();
 
-    assert_matches!(
-        builder.add_transparent_input(pubkey, outpoint, txout),
-        Ok(_)
-    );
-    let test_prover = LocalTxProver::bundled();
-    let build_result = builder
-        .build(
-            &transparent_signing_set,
-            &[],
-            &[],
-            OsRng,
-            &test_prover,
-            &test_prover,
-            &zip317::FeeRule::standard(),
+    // Create the transaction. This will cause the the gap start to move & a new
+    // `gap_limits.ephemeral()` of addresses to be created.
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
         )
         .unwrap();
-    let txid = build_result.transaction().txid();
 
-    // Now, store the transaction, pretending it has been mined (we will actually mine the block
-    // next). This will cause the the gap start to move & a new `gap_limits.ephemeral()` of
-    // addresses to be created.
-    let target_height = st.latest_cached_block().unwrap().height() + 1;
-    st.wallet_mut()
-        .store_decrypted_tx(DecryptedTransaction::new(
-            Some(target_height),
-            build_result.transaction(),
-            vec![],
-            #[cfg(feature = "orchard")]
-            vec![],
-        ))
-        .unwrap();
-
-    // Mine the transaction & scan it so that it is will be detected as mined. Note that
-    // `generate_next_block_including` does not actually do anything with fully-transparent
-    // transactions; we're doing this just to get the mined block that we added via
-    // `store_decrypted_tx` into the database.
-    let (h, _) = st.generate_next_block_including(txid);
+    // Mine the transaction & update its status to advance the gap. We have to manually update the
+    // status because scanning will not detect the transparent outputs.
+    let (h, _) = st.generate_next_block_including(txids.head);
     st.scan_cached_blocks(h, 1);
-    assert_eq!(h, target_height);
+    st.wallet_mut()
+        .set_transaction_status(txids.head, TransactionStatus::Mined(h))
+        .unwrap();
 
     // At this point the start of the gap should be at index `gap_limits.ephemeral()` and the new
     // size of the known address set should be `gap_limits.ephemeral() * 2`.
@@ -2163,7 +2100,17 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         new_known_addrs.len(),
         usize::try_from(gap_limits.ephemeral() * 2).unwrap()
     );
-    assert!(new_known_addrs.starts_with(&known_addrs));
+
+    // check that known_addrs is a prefix of new_known_addrs; we have already checked their
+    // lengths.
+    assert!(
+        new_known_addrs
+            .iter()
+            .map(|a| a.0)
+            .zip(known_addrs.iter().map(|a| a.0))
+            .all(|(a, b)| a == b),
+        "new_known_addrs must have known_addrs as its prefix"
+    );
 
     let reservation_should_succeed = |st: &mut TestState<_, DSF::DataStore, _>, n: u32| {
         let reserved = st
@@ -2396,7 +2343,6 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let (default_addr, _) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
     let value = Zatoshis::const_from_u64(100000);
@@ -2430,12 +2376,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match default_addr {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
+    // Generate a ZIP 320 proposal, sending to the an external TEX address.
+    let tex_addr = Address::Tex([0x4; 20]);
 
     let change_memo: Option<MemoBytes> = None;
     // We use `st.propose_standard_transfer` here in order to also test round-trip
@@ -2585,13 +2527,8 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     // Add funds to the wallet.
     add_funds(&mut st, value);
 
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match account.usk().default_transparent_address().0 {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
-
+    // Generate a ZIP 320 proposal, sending to the an external TEX address.
+    let tex_addr = Address::Tex([0x4; 20]);
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -4079,10 +4016,14 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
     st.scan_cached_blocks(h, 1);
 
+    // Since the recipient address is in the same account, the total balance includes the transfer
+    // amount.
     assert_eq!(
         st.get_total_balance(account.id()),
-        (initial_balance - transfer_amount - expected_fee).unwrap()
+        (initial_balance - expected_fee).unwrap()
     );
+    // The spendable balance doesn't include the transparent value, so it excludes the transfer
+    // amount.
     assert_eq!(
         st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (initial_balance - transfer_amount - expected_fee).unwrap()
