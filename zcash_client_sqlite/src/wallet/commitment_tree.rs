@@ -1087,12 +1087,11 @@ pub(crate) fn put_shard_roots<
 
 pub(crate) fn check_witnesses(
     conn: &rusqlite::Transaction<'_>,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
-    let chain_tip_height =
-        super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
     let wallet_birthday = super::wallet_birthday(conn)?.ok_or(SqliteClientError::AccountUnknown)?;
     let unspent_sapling_note_meta =
-        super::sapling::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+        super::sapling::select_unspent_note_meta(conn, wallet_birthday, anchor_height)?;
 
     let mut scan_ranges = vec![];
     let mut sapling_incomplete = vec![];
@@ -1117,7 +1116,7 @@ pub(crate) fn check_witnesses(
     #[cfg(feature = "orchard")]
     {
         let unspent_orchard_note_meta =
-            super::orchard::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+            super::orchard::select_unspent_note_meta(conn, wallet_birthday, anchor_height)?;
         let mut orchard_incomplete = vec![];
         let orchard_tree = orchard_tree(conn)?;
         for m in unspent_orchard_note_meta.iter() {

@@ -15,7 +15,6 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
-use crate::wallet::refresh_status_requests;
 use crate::TableConstants;
 use crate::{
     error::SqliteClientError,
@@ -556,9 +555,6 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         tip_shard_entry.into_iter().chain(Some(tip_entry)),
         false,
     )?;
-
-    // ensure that transaction status requests exist for any unmined, unexpired transactions
-    refresh_status_requests(conn)?;
 
     Ok(())
 }
@@ -1660,7 +1656,7 @@ pub(crate) mod tests {
             }
 
             // Generate a block with the last note in the block belonging to the wallet
-            let (_, res, _) = st.generate_next_block_multi(&vec![
+            let (_, res, _) = st.generate_next_block_multi(&[
                 // 3 Orchard notes not for this wallet
                 fake_output(false),
                 fake_output(false),
