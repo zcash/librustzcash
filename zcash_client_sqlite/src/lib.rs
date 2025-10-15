@@ -1941,6 +1941,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 wallet::transparent::put_received_transparent_utxo(
                     wdb.conn.0,
                     &wdb.params,
+                    &wdb.gap_limits,
                     _output,
                 )?;
 
@@ -1987,7 +1988,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             for sent_tx in transactions {
-                wallet::store_transaction_to_be_sent(wdb.conn.0, &wdb.params, sent_tx)?;
+                wallet::store_transaction_to_be_sent(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    sent_tx,
+                )?;
             }
             Ok(())
         })
@@ -2031,7 +2038,16 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
+        self.transactionally(|wdb| {
+            wallet::set_transaction_status(
+                wdb.conn.0,
+                &wdb.params,
+                #[cfg(feature = "transparent-inputs")]
+                &wdb.gap_limits,
+                txid,
+                status,
+            )
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]

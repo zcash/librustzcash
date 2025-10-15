@@ -411,7 +411,7 @@ pub(crate) fn decode_transparent_child_index(
 
 /// Returns the current gap start, along with a vector with at most the next `n` previously
 /// unreserved transparent addresses for the given account. These addresses must have been
-/// previously generated using `generate_gap_addresses`.
+/// previously generated using [`generate_gap_addresses`].
 ///
 /// WARNING: the addresses returned by this method have not been marked as exposed; it is the
 /// responsibility of the caller to correctly update the `exposed_at_height` value for each
@@ -500,7 +500,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
 
 /// Returns a vector with the next `n` previously unreserved transparent addresses for the given
 /// account, having marked each address as having been exposed at the current chain-tip height.
-/// These addresses must have been previously generated using `generate_gap_addresses`.
+/// These addresses must have been previously generated using [`generate_gap_addresses`].
 ///
 /// # Errors
 ///
@@ -752,13 +752,75 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     Ok(())
 }
 
+/// Finds the wallet addresses that are involved with the given transaction, and regenerates the gap
+/// limit worth of addresses as appropriate for each key scope.
+pub(crate) fn update_gap_limits<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    gap_limits: &GapLimits,
+    txid: TxId,
+    observation_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let mut scopes_query = conn.prepare_cached(
+        "SELECT tro.address_id, a.account_id, a.key_scope
+         FROM transparent_received_outputs tro
+         JOIN addresses a ON a.id = tro.address_id
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         WHERE t.txid = :txid
+         UNION
+         SELECT tro.address_id, a.account_id, a.key_scope
+         FROM transparent_received_output_spends tros
+         JOIN transparent_received_outputs tro ON tro.id = tros.transparent_received_output_id
+         JOIN addresses a ON a.id = tro.address_id
+         JOIN transactions t ON t.id_tx = tros.transaction_id
+         WHERE t.txid = :txid",
+    )?;
+
+    let mut rows = scopes_query.query(named_params! {":txid": txid.as_ref() })?;
+    while let Some(row) = rows.next()? {
+        let addr_id: i64 = row.get("address_id")?;
+        let account_id = AccountRef(row.get("account_id")?);
+        let key_scope = KeyScope::decode(row.get("key_scope")?)?;
+
+        // Update the exposure height for the address, in case the transaction was mined at a lower
+        // height than the existing exposure height due to a reorg.
+        conn.execute(
+            "UPDATE addresses
+             SET exposed_at_height = MIN(
+                IFNULL(exposed_at_height, :height),
+                :height
+             )
+             WHERE id = :addr_id",
+            named_params![
+               ":height": u32::from(observation_height),
+               ":addr_id": addr_id
+            ],
+        )?;
+
+        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+            use zcash_keys::keys::ReceiverRequirement::*;
+            generate_gap_addresses(
+                conn,
+                params,
+                account_id,
+                t_key_scope,
+                gap_limits,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                false,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Check whether `address` has previously been used as the recipient address for any previously
 /// received output. This is intended primarily for use in ensuring that the wallet does not create
 /// ZIP 320 transactions that reuse the same ephemeral address, although it is written in such a
 /// way that it may be used for detection of transparent address reuse more generally.
 ///
 /// If the address was already used in an output we received, this method will return
-/// [`SqliteClientError::AddressReuse`].
+/// the [`SqliteClientError::AddressReuse`] error variant.
 pub(crate) fn check_ephemeral_address_reuse<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -1329,10 +1391,11 @@ pub(crate) fn update_observed_unspent_heights<P: consensus::Parameters>(
 pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     output: &WalletTransparentOutput,
 ) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-    put_transparent_output(conn, params, output, observed_height, true)
+    put_transparent_output(conn, params, gap_limits, output, observed_height, true)
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -1768,6 +1831,7 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     output: &WalletTransparentOutput,
     observation_height: BlockHeight,
     known_unspent: bool,
@@ -1892,12 +1956,13 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         RETURNING id",
     )?;
 
+    let addr_str = output.recipient_address().encode(params);
     let sql_args = named_params![
         ":transaction_id": id_tx,
         ":output_index": output.outpoint().n(),
         ":account_id": account_id.0,
         ":address_id": address_id.0,
-        ":address": output.recipient_address().encode(params),
+        ":address": &addr_str,
         ":script": &output.txout().script_pubkey().0.0,
         ":value_zat": &i64::from(ZatBalance::from(output.txout().value())),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
@@ -1905,6 +1970,15 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     let utxo_id = stmt_upsert_transparent_output
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
+
+    #[cfg(feature = "transparent-inputs")]
+    update_gap_limits(
+        conn,
+        params,
+        gap_limits,
+        *output.outpoint().txid(),
+        output_height.map_or(observation_height, BlockHeight::from),
+    )?;
 
     // If we have a record of the output already having been spent, then mark it as spent using the
     // stored reference to the spending transaction.

@@ -2848,6 +2848,7 @@ pub(crate) fn get_max_height_hash(
 pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
@@ -2898,11 +2899,44 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
 
         match output.recipient() {
             Recipient::External {
-                recipient_address: _addr,
+                recipient_address: _zaddr,
                 output_pool: _pool,
-                ..
             } => {
-                // Nothing to do for external recipients.
+                // In the case that a transaction sends to a transparent address belonging to the
+                // wallet (such as is the case for gap limit management transactions) then we need
+                // to add the received transparent output to our wallet. For shielded outputs,
+                #[cfg(feature = "transparent-inputs")]
+                if _pool == &PoolType::Transparent {
+                    let address = Address::try_from_zcash_address(params, _zaddr.clone())
+                        .expect("recipient is an understood Zcash address.");
+                    if let Some(taddr) = address.to_transparent_address() {
+                        if transparent::find_account_uuid_for_transparent_address(
+                            conn, params, &taddr,
+                        )?
+                        .is_some()
+                        {
+                            transparent::put_transparent_output(
+                                conn,
+                                params,
+                                gap_limits,
+                                &WalletTransparentOutput::from_parts(
+                                    OutPoint::new(
+                                        sent_tx.tx().txid().into(),
+                                        u32::try_from(output.output_index())
+                                            .expect("output index fits into a u32")
+                                    ),
+                                    TxOut::new(output.value(), taddr.script().into()),
+                                    None,
+                                )
+                                .expect(
+                                    "can extract a recipient address from an internal address script",
+                                ),
+                                sent_tx.target_height().into(),
+                                true,
+                            )?;
+                        }
+                    }
+                }
             }
             Recipient::InternalAccount {
                 receiving_account,
@@ -2959,7 +2993,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
 
                 transparent::put_transparent_output(
                     conn,
-                    &params,
+                    params,
+                    gap_limits,
                     &WalletTransparentOutput::from_parts(
                         outpoint.clone(),
                         TxOut::new(output.value(), ephemeral_address.script().into()),
@@ -2983,8 +3018,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     Ok(())
 }
 
-pub(crate) fn set_transaction_status(
+pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
+    _params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     txid: TxId,
     status: TransactionStatus,
 ) -> Result<(), SqliteClientError> {
@@ -3048,6 +3085,9 @@ pub(crate) fn set_transaction_status(
                  AND blocks.height = :height",
                 sql_args,
             )?;
+
+            #[cfg(feature = "transparent-inputs")]
+            transparent::update_gap_limits(conn, _params, gap_limits, txid, height)?;
         }
     }
 
@@ -3594,7 +3634,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None, observed_height)?;
     if let Some(height) = d_tx.mined_height() {
-        set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
+        set_transaction_status(
+            conn,
+            params,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
+            d_tx.tx().txid(),
+            TransactionStatus::Mined(height),
+        )?;
     }
 
     // A flag used to determine whether it is necessary to query for transactions that
@@ -3834,6 +3881,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         let (account_id, _, _) = transparent::put_transparent_output(
             conn,
             params,
+            gap_limits,
             received_t_output,
             observed_height,
             false,
@@ -3880,6 +3928,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         }
     }
 
+    // Regenerate the gap limit addresses.
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in receiving_accounts {
         if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
