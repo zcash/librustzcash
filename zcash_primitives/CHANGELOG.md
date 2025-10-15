@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed deprecated modules:
+    - `zcash_primitives::consensus`
+    - `zcash_primitives::constants`
+    - `zcash_primitives::memo`
+    - `zcash_primitives::zip32`
+    - `zcash_primitives::legacy`
+
 ## [0.26.0] - 2025-10-02
 
 ### Added

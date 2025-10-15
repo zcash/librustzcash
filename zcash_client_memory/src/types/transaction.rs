@@ -7,11 +7,8 @@ use zcash_client_backend::{
     data_api::{wallet::TargetHeight, TransactionStatus},
     wallet::WalletTx,
 };
-use zcash_primitives::{
-    consensus::BlockHeight,
-    transaction::{Transaction, TxId},
-};
-use zcash_protocol::value::Zatoshis;
+use zcash_primitives::transaction::{Transaction, TxId};
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
 use crate::error::Error;
 use crate::AccountId;

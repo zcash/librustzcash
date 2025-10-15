@@ -3,9 +3,12 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use ::transparent::bundle::{OutPoint, TxOut};
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
+};
 use zcash_client_backend::wallet::WalletTransparentOutput;
-use zcash_primitives::legacy::TransparentAddress;
+
 use zcash_protocol::{consensus::BlockHeight, TxId};
 
 use super::AccountId;
@@ -154,8 +157,7 @@ mod serialization {
     use crate::{proto::memwallet as proto, read_optional};
     use transparent::address::Script;
     use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
-    use zcash_protocol::value::Zatoshis;
+    use zcash_protocol::{consensus::Network::MainNetwork as EncodingParams, value::Zatoshis};
 
     impl From<ReceivedTransparentOutput> for proto::ReceivedTransparentOutput {
         fn from(output: ReceivedTransparentOutput) -> Self {

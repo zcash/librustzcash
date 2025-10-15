@@ -19,9 +19,8 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::bundle::OutPoint,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTransparentOutput},
-    zcash_primitives::legacy::TransparentAddress,
     zcash_protocol::consensus::BlockHeight,
 };
 

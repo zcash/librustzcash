@@ -170,10 +170,8 @@ mod serialization {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_keys::encoding::AddressCodec as _,
-        zcash_primitives::{
-            consensus::Network::MainNetwork as EncodingParams, legacy::TransparentAddress,
-        },
+        transparent::address::TransparentAddress, zcash_keys::encoding::AddressCodec as _,
+        zcash_protocol::consensus::Network::MainNetwork as EncodingParams,
     };
 
     impl From<SentNote> for proto::SentNote {

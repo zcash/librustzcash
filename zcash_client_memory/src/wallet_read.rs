@@ -22,11 +22,10 @@ use zcash_client_backend::{
 use zcash_keys::{address::UnifiedAddress, keys::UnifiedIncomingViewingKey};
 use zcash_primitives::{
     block::BlockHash,
-    consensus::BlockHeight,
     transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
-    consensus::{self, BranchId},
+    consensus::{self, BlockHeight, BranchId},
     memo::Memo,
     PoolType,
 };
@@ -35,8 +34,8 @@ use zip32::fingerprint::SeedFingerprint;
 #[cfg(feature = "transparent-inputs")]
 use {
     core::ops::Range,
+    transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::{keys::NonHardenedChildIndex, TransparentAddress},
     zip32::Scope,
 };
 
@@ -676,10 +675,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .filter_map(|(diversifier_index, ua)| {
                 ua.transparent().map(|ta| {
                     let metadata =
-                        zcash_primitives::legacy::keys::NonHardenedChildIndex::from_index(
-                            (*diversifier_index).try_into().unwrap(),
-                        )
-                        .map(|i| TransparentAddressMetadata::new(Scope::External.into(), i));
+                        NonHardenedChildIndex::from_index((*diversifier_index).try_into().unwrap())
+                            .map(|i| TransparentAddressMetadata::new(Scope::External.into(), i));
                     (*ta, metadata)
                 })
             })
