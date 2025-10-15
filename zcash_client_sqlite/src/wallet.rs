@@ -3344,6 +3344,7 @@ pub(crate) fn put_block(
     Ok(())
 }
 
+#[derive(Debug)]
 struct TransparentSentOutput {
     from_account_uuid: AccountUuid,
     output_index: usize,
@@ -3351,6 +3352,7 @@ struct TransparentSentOutput {
     value: Zatoshis,
 }
 
+#[derive(Debug)]
 struct WalletTransparentOutputs {
     #[cfg(feature = "transparent-inputs")]
     received: Vec<(WalletTransparentOutput, KeyScope)>,
