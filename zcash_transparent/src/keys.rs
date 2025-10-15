@@ -1,5 +1,7 @@
 //! Transparent key components.
 
+use core::fmt;
+
 use bip32::ChildNumber;
 use subtle::{Choice, ConstantTimeEq};
 use zip32::DiversifierIndex;
@@ -20,7 +22,7 @@ use {
 ///
 /// This type can represent [`zip32`] internal and external scopes, as well as custom scopes that
 /// may be used in non-hardened derivation at the `change` level of the BIP 44 key path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {
@@ -49,6 +51,17 @@ impl TransparentKeyScope {
     pub const EPHEMERAL: Self = TransparentKeyScope(2);
 }
 
+impl fmt::Debug for TransparentKeyScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::EXTERNAL => f.write_str("EXTERNAL"),
+            Self::INTERNAL => f.write_str("INTERNAL"),
+            Self::EPHEMERAL => f.write_str("EPHEMERAL"),
+            TransparentKeyScope(other) => f.write_str(&format!("Custom({other})")),
+        }
+    }
+}
+
 impl From<zip32::Scope> for TransparentKeyScope {
     fn from(value: zip32::Scope) -> Self {
         match value {
@@ -67,8 +80,14 @@ impl From<TransparentKeyScope> for ChildNumber {
 /// A child index for a derived transparent address.
 ///
 /// Only NON-hardened derivation is supported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NonHardenedChildIndex(u32);
+
+impl core::fmt::Debug for NonHardenedChildIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&format!("{}", self.0))
+    }
+}
 
 impl ConstantTimeEq for NonHardenedChildIndex {
     fn ct_eq(&self, other: &Self) -> Choice {
