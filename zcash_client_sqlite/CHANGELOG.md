@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.6] - 2025-10-16
+
+### Fixed
+- Fulfilled transaction enhancement requests are now deleted once it is
+  determined that there is no wallet involvement with the transaction.
+
 ## [0.18.5] - 2025-10-14
 
 ### Changed
