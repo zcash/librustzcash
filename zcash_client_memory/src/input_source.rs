@@ -187,10 +187,9 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         &self,
         account_id: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let chain_tip_height = self.chain_height()?.ok_or(Error::ChainHeightUnknown)?;
-        let target_height = TargetHeight::from(chain_tip_height + 1);
         let confirmations_policy = ConfirmationsPolicy::new_symmetrical(
             NonZeroU32::MIN,
             #[cfg(feature = "transparent-inputs")]

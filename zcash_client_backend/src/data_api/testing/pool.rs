@@ -4820,11 +4820,12 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
         note_values.push(value);
     }
     st.scan_cached_blocks(h0, 10);
+    let target_height = TargetHeight::from(h0 + 10);
 
     let test_meta = |st: &TestState<TC, DSF::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
-            .get_account_metadata(account.id(), &query, &[])
+            .get_account_metadata(account.id(), &query, target_height, &[])
             .unwrap();
 
         assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);

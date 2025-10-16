@@ -1426,7 +1426,7 @@ pub trait InputSource {
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///
     /// The returned metadata value must exclude:
-    /// - spent notes;
+    /// - notes that are not considered spendable as of the given `target_height`
     /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
     ///
@@ -1436,6 +1436,7 @@ pub trait InputSource {
         &self,
         account: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error>;
 

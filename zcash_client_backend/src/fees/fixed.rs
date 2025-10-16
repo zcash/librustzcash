@@ -69,6 +69,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         &self,
         _meta_source: &Self::MetaSource,
         _account: <Self::MetaSource as InputSource>::AccountId,
+        _target_height: TargetHeight,
         _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
     ) -> Result<Self::AccountMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
         Ok(())

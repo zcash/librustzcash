@@ -2574,6 +2574,7 @@ impl InputSource for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _selector: &NoteFilter,
+        _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
         Err(())

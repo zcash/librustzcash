@@ -510,6 +510,7 @@ pub trait ChangeStrategy {
         &self,
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
+        target_height: TargetHeight,
         exclude: &[<Self::MetaSource as InputSource>::NoteRef],
     ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error>;
 

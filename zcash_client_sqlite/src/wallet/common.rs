@@ -743,7 +743,7 @@ pub(crate) fn select_unspent_note_meta(
     Ok(res)
 }
 
-pub(crate) fn spendable_notes_meta(
+pub(crate) fn unspent_notes_meta(
     conn: &rusqlite::Connection,
     protocol: ShieldedProtocol,
     target_height: TargetHeight,

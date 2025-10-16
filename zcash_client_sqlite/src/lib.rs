@@ -88,11 +88,11 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
-    wallet::{chain_tip_height, commitment_tree::SqliteShardStore, mempool_height},
+    wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    common::{spendable_notes_meta, TableConstants},
+    common::{unspent_notes_meta, TableConstants},
     scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
@@ -695,12 +695,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         account_id: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let target_height =
-            mempool_height(self.conn.borrow())?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-
-        let sapling_pool_meta = spendable_notes_meta(
+        let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Sapling,
             target_height,
@@ -710,7 +708,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         )?;
 
         #[cfg(feature = "orchard")]
-        let orchard_pool_meta = spendable_notes_meta(
+        let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Orchard,
             target_height,
