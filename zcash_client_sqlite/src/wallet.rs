@@ -3565,6 +3565,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         && wallet_transparent_outputs.is_empty()
         && !d_tx.has_decrypted_outputs()
     {
+        delete_retrieval_queue_entries(conn, d_tx.tx().txid())?;
         return Ok(());
     }
 
