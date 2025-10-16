@@ -1,4 +1,4 @@
-# Changelog
+ Changelog
 All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -10,11 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+
 ## [0.19.0] - PLANNED
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
+
+## [0.18.6] - 2025-10-16
+
+### Fixed
+- Fulfilled transaction enhancement requests are now deleted once it is
+  determined that there is no wallet involvement with the transaction.
 
 ## [0.18.5] - 2025-10-14
 
