@@ -21,6 +21,7 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_client_backend::data_api::WalletUtxo;
 use zcash_client_backend::wallet::{Exposure, GapMetadata};
 use zcash_client_backend::{
     data_api::{
@@ -62,7 +63,7 @@ use super::{
 use crate::{
     error::SqliteClientError,
     util::Clock,
-    wallet::{common::tx_unexpired_condition, get_account},
+    wallet::{common::tx_unexpired_condition, get_account, mempool_height},
     AccountRef, AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
 };
 
@@ -952,7 +953,7 @@ pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     spendable_as_of: Option<TargetHeight>,
-) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
+) -> Result<Option<WalletUtxo>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
     // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
@@ -960,9 +961,11 @@ pub(crate) fn get_wallet_transparent_output(
     // vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_select_utxo = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, t.mined_height AS received_height
+                u.value_zat, a.key_scope,
+                t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN addresses a ON a.id = u.address_id
          WHERE t.txid = :txid
          AND u.output_index = :output_index
          AND (
@@ -977,7 +980,7 @@ pub(crate) fn get_wallet_transparent_output(
         spent_utxos_clause()
     ))?;
 
-    let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
+    let result: Result<Option<WalletUtxo>, SqliteClientError> = stmt_select_utxo
         .query_and_then(
             named_params![
                 ":txid": outpoint.hash(),
@@ -985,7 +988,12 @@ pub(crate) fn get_wallet_transparent_output(
                 ":target_height": spendable_as_of.map(u32::from),
                 ":allow_unspendable": spendable_as_of.is_none()
             ],
-            to_unspent_transparent_output,
+            |row| {
+                let output = to_unspent_transparent_output(row)?;
+                let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
+
+                Ok(WalletUtxo::new(output, key_scope))
+            },
         )?
         .next()
         .transpose();
@@ -1012,12 +1020,14 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
+) -> Result<Vec<WalletUtxo>, SqliteClientError> {
     let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, t.mined_height AS received_height
+                u.value_zat, a.key_scope,
+                t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN addresses a ON a.id = u.address_id
          WHERE u.address = :address
          AND (
             -- tx is mined and has at least min_confirmations
@@ -1052,10 +1062,11 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":min_confirmations": min_confirmations
     ])?;
 
-    let mut utxos = Vec::<WalletTransparentOutput>::new();
+    let mut utxos = Vec::<WalletUtxo>::new();
     while let Some(row) = rows.next()? {
         let output = to_unspent_transparent_output(row)?;
-        utxos.push(output);
+        let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
+        utxos.push(WalletUtxo::new(output, key_scope));
     }
 
     Ok(utxos)

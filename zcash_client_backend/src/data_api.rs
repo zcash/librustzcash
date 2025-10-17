@@ -984,6 +984,83 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     }
 }
 
+/// An unspent transparent output belonging to the wallet, along with derivation key metadata (if
+/// available).
+#[derive(Clone, Debug)]
+#[cfg(feature = "transparent-inputs")]
+pub struct WalletUtxo {
+    wallet_output: WalletTransparentOutput,
+    recipient_key_scope: Option<TransparentKeyScope>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl WalletUtxo {
+    /// Constructs a new [`WalletUtxo`] from its constituent parts.
+    pub fn new(
+        wallet_output: WalletTransparentOutput,
+        recipient_key_scope: Option<TransparentKeyScope>,
+    ) -> Self {
+        Self {
+            wallet_output,
+            recipient_key_scope,
+        }
+    }
+
+    /// Returns the [`WalletTransparentOutput`] data for this UTXO.
+    pub fn wallet_output(&self) -> &WalletTransparentOutput {
+        &self.wallet_output
+    }
+
+    /// Consumes this value and returns the [`WalletTransparentOutput`] data for this UTXO.
+    pub fn into_wallet_output(self) -> WalletTransparentOutput {
+        self.wallet_output
+    }
+
+    /// Returns the [`OutPoint`] corresponding to the UTXO.
+    pub fn outpoint(&self) -> &OutPoint {
+        self.wallet_output.outpoint()
+    }
+
+    /// Returns the transaction output itself.
+    pub fn txout(&self) -> &transparent::bundle::TxOut {
+        self.wallet_output.txout()
+    }
+
+    /// Returns the height at which the UTXO was mined, if any.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.wallet_output.mined_height()
+    }
+
+    /// Returns the wallet address that received the UTXO.
+    pub fn recipient_address(&self) -> &TransparentAddress {
+        self.wallet_output().recipient_address()
+    }
+
+    /// Returns the value of the UTXO
+    pub fn value(&self) -> Zatoshis {
+        self.wallet_output().value()
+    }
+
+    /// Returns the transparent key scope at which this address was derived, if known. This
+    /// metadata MUST be returned for any transparent address derived by the wallet; this metadata
+    /// is used by `propose_shielding` to ensure that shielding transactions do not inadvertently
+    /// link ephemeral addresses to other wallet activity on-chain.
+    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.recipient_key_scope
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl zcash_primitives::transaction::fees::transparent::InputView for WalletUtxo {
+    fn outpoint(&self) -> &OutPoint {
+        self.wallet_output.outpoint()
+    }
+
+    fn coin(&self) -> &transparent::bundle::TxOut {
+        self.wallet_output.txout()
+    }
+}
+
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1450,26 +1527,26 @@ pub trait InputSource {
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
         unimplemented!("InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature")
     }
 
-    /// Returns the list of spendable transparent outputs received by this wallet at `address`
+    /// Returns the list of unspent transparent outputs received by this wallet at `address`
     /// such that, at height `target_height`:
-    /// * the transaction that produced the output had or will have at least `min_confirmations`
-    ///   confirmations; and
+    /// * the transaction that produced the output had or will have at least the required number of
+    ///   confirmations according to the provided [`ConfirmationsPolicy`]; and
     /// * the output can potentially be spent in a transaction mined in a block at the given
     ///   `target_height`.
     ///
-    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
-    /// iff the spending transaction will not be expired at `target_height`.
+    /// Any output that is potentially spent by an unmined transaction in the mempool should be
+    /// excluded unless the spending transaction will be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletUtxo>, Self::Error> {
         unimplemented!("InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature")
     }
 }

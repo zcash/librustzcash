@@ -168,6 +168,7 @@ impl<AccountId> WalletTx<AccountId> {
     }
 }
 
+/// A transparent output controlled by the wallet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
@@ -177,6 +178,10 @@ pub struct WalletTransparentOutput {
 }
 
 impl WalletTransparentOutput {
+    /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
+    ///
+    /// Returns None if the recipient address for the provided [`TxOut`] cannot be determined
+    /// based on the set of output script patterns understood by this wallet.
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,
@@ -192,22 +197,27 @@ impl WalletTransparentOutput {
             })
     }
 
+    /// Returns the [`OutPoint`] corresponding to the output.
     pub fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }
 
+    /// Returns the transaction output itself.
     pub fn txout(&self) -> &TxOut {
         &self.txout
     }
 
+    /// Returns the height at which the UTXO was mined, if any.
     pub fn mined_height(&self) -> Option<BlockHeight> {
         self.mined_height
     }
 
+    /// Returns the wallet address that received the UTXO.
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
     }
 
+    /// Returns the value of the UTXO
     pub fn value(&self) -> Zatoshis {
         self.txout.value()
     }
