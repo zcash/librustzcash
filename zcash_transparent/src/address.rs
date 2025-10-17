@@ -115,10 +115,25 @@ impl From<&script::Sig> for Script {
 }
 
 /// A transparent address corresponding to either a public key hash or a script hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransparentAddress {
     PublicKeyHash([u8; 20]),
     ScriptHash([u8; 20]),
+}
+
+impl core::fmt::Debug for TransparentAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublicKeyHash(arg0) => f
+                .debug_tuple("PublicKeyHash")
+                .field(&hex::encode(arg0))
+                .finish(),
+            Self::ScriptHash(arg0) => f
+                .debug_tuple("ScriptHash")
+                .field(&hex::encode(arg0))
+                .finish(),
+        }
+    }
 }
 
 impl TransparentAddress {

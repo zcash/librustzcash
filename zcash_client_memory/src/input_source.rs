@@ -1,5 +1,7 @@
 use std::num::NonZeroU32;
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::WalletUtxo;
 use zcash_client_backend::{
     data_api::{
         wallet::{ConfirmationsPolicy, TargetHeight},
@@ -20,7 +22,7 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 #[cfg(feature = "transparent-inputs")]
 use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint},
-    zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTransparentOutput},
+    zcash_client_backend::data_api::TransactionStatus,
     zcash_protocol::consensus::BlockHeight,
 };
 
@@ -155,7 +157,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletUtxo>, Self::Error> {
         let txos = self
             .transparent_received_outputs
             .iter()
@@ -167,6 +169,14 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
             })
             .filter_map(|(outpoint, txo, tx)| {
                 txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                    .map(|out| {
+                        WalletUtxo::new(
+                            out,
+                            // FIXME: this needs to be updated to identify the transparent key
+                            // scope for derived addresses in the wallet.
+                            None,
+                        )
+                    })
             })
             .collect();
         Ok(txos)
@@ -176,13 +186,21 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
         Ok(self
             .transparent_received_outputs
             .get(outpoint)
             .map(|txo| (txo, self.tx_table.get(&txo.transaction_id)))
             .and_then(|(txo, tx)| {
                 txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                    .map(|out| {
+                        WalletUtxo::new(
+                            out,
+                            // FIXME: this needs to be updated to identify the transparent key
+                            // scope for derived addresses in the wallet.
+                            None,
+                        )
+                    })
             }))
     }
 

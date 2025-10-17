@@ -11,7 +11,7 @@ use transparent::keys::{
 };
 use zcash_address::ZcashAddress;
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{Account as _, AccountBirthday, AccountPurpose, AccountSource},
@@ -383,9 +383,11 @@ impl Account {
             .map(|(idx, addr)| {
                 (
                     addr.address,
-                    TransparentAddressMetadata::new(
+                    TransparentAddressMetadata::derived(
                         TransparentKeyScope::EPHEMERAL,
                         NonHardenedChildIndex::from_index(*idx).unwrap(),
+                        Exposure::Unknown,
+                        None,
                     ),
                 )
             })
@@ -447,9 +449,11 @@ impl Account {
                                     );
                                     (
                                         addr,
-                                        TransparentAddressMetadata::new(
+                                        TransparentAddressMetadata::derived(
                                             TransparentKeyScope::EPHEMERAL,
                                             address_index,
+                                            Exposure::Unknown,
+                                            None,
                                         ),
                                     )
                                 })

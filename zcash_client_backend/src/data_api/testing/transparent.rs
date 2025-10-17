@@ -21,7 +21,7 @@ use crate::{
             decrypt_and_store_transaction, input_selection::GreedyInputSelector,
             ConfirmationsPolicy, TargetHeight,
         },
-        Account as _, Balance, InputSource, WalletRead, WalletWrite,
+        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
     },
     fees::{standard, DustOutputPolicy, StandardFeeRule},
     wallet::WalletTransparentOutput,
@@ -506,7 +506,7 @@ where
     // Pick an address half way through the set of external taddrs
     let external_taddrs_sorted = external_taddrs
         .into_iter()
-        .filter_map(|(addr, meta)| meta.and_then(|m| m.address_index().map(|i| (i, addr))))
+        .filter_map(|(addr, meta)| meta.address_index().map(|i| (i, addr)))
         .collect::<BTreeMap<_, _>>();
     let to = Address::from(
         *external_taddrs_sorted

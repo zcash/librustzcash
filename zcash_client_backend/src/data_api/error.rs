@@ -100,11 +100,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
-    /// The wallet tried to pay to an ephemeral transparent address as a normal
-    /// output.
-    #[cfg(feature = "transparent-inputs")]
-    PaysEphemeralTransparentAddress(String),
-
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
@@ -225,10 +220,6 @@ where
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
-            }
-            #[cfg(feature = "transparent-inputs")]
-            Error::PaysEphemeralTransparentAddress(addr) => {
-                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {addr}")
             }
             #[cfg(feature = "pczt")]
             Error::Pczt(e) => write!(f, "PCZT error: {e}"),
