@@ -212,7 +212,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
         let exposure =
             row.get::<_, Option<u32>>("exposed_at_height")?
-                .map_or(Exposure::Unexposed, |h| Exposure::Exposed {
+                .map_or(Exposure::Unknown, |h| Exposure::Exposed {
                     at_height: BlockHeight::from(h),
                     gap_metadata: gap_limit_starts
                         .get(&key_scope)
@@ -484,7 +484,7 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                             TransparentAddressMetadata::derived(
                                 key_scope,
                                 i,
-                                Exposure::Unexposed,
+                                Exposure::Unknown,
                                 None,
                             ),
                         ))
@@ -1674,7 +1674,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                     match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
                         Some((scope, address_index)) => {
                             let exposure = exposed_at_height.map_or(
-                                Ok::<_, SqliteClientError>(Exposure::Unexposed),
+                                Ok::<_, SqliteClientError>(Exposure::Unknown),
                                 |at_height| {
                                     let gap_metadata = match gap_limits.limit_for(key_scope) {
                                         None => GapMetadata::DerivationUnknown,
@@ -1728,7 +1728,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                     let addr_meta = TransparentAddressMetadata::standalone(
                                         pubkey,
                                         exposed_at_height.map_or(
-                                            Exposure::Unexposed,
+                                            Exposure::Unknown,
                                             |at_height| Exposure::Exposed {
                                                 at_height,
                                                 gap_metadata: GapMetadata::DerivationUnknown
@@ -1763,7 +1763,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
             let metadata = TransparentAddressMetadata::derived(
                 Scope::External.into(),
                 address_index,
-                Exposure::Unknown,
+                Exposure::CannotKnow,
                 None,
             );
             return Ok(Some(metadata));
@@ -1971,15 +1971,6 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     let utxo_id = stmt_upsert_transparent_output
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
 
-    #[cfg(feature = "transparent-inputs")]
-    update_gap_limits(
-        conn,
-        params,
-        gap_limits,
-        *output.outpoint().txid(),
-        output_height.map_or(observation_height, BlockHeight::from),
-    )?;
-
     // If we have a record of the output already having been spent, then mark it as spent using the
     // stored reference to the spending transaction.
     let spending_tx_ref = conn
@@ -2001,6 +1992,15 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    update_gap_limits(
+        conn,
+        params,
+        gap_limits,
+        *output.outpoint().txid(),
+        output_height.map_or(observation_height, BlockHeight::from),
+    )?;
 
     Ok((account_id, key_scope, utxo_id))
 }
@@ -2136,7 +2136,7 @@ mod tests {
                 .map(|i| {
                     ephemeral::metadata(
                         NonHardenedChildIndex::from_index(i).unwrap(),
-                        Exposure::Unexposed,
+                        Exposure::Unknown,
                         None,
                     )
                 })

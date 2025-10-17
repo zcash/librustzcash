@@ -2904,7 +2904,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
             } => {
                 // In the case that a transaction sends to a transparent address belonging to the
                 // wallet (such as is the case for gap limit management transactions) then we need
-                // to add the received transparent output to our wallet. For shielded outputs,
+                // to add the received transparent output to our wallet. For shielded outputs sent
+                // back to our own addresses, we can expect to detect those by normal scanning so
+                // it's not necessary to add them here, and we don't have the note information
+                // needed to do so.
                 #[cfg(feature = "transparent-inputs")]
                 if _pool == &PoolType::Transparent {
                     let address = Address::try_from_zcash_address(params, _zaddr.clone())
