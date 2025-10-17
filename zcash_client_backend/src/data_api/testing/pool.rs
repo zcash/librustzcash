@@ -1874,7 +1874,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
         let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
-        // Generate a ZIP 320 proposal, sending to the another wallet's default transparent address
+        // Generate a ZIP 320 proposal, sending to another wallet's default transparent address
         // expressed as a TEX address.
         let change_memo = Some(Memo::from_str("change").expect("valid memo").encode());
 
@@ -2376,7 +2376,7 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
-    // Generate a ZIP 320 proposal, sending to the an external TEX address.
+    // Generate a ZIP 320 proposal, sending to an external TEX address.
     let tex_addr = Address::Tex([0x4; 20]);
 
     let change_memo: Option<MemoBytes> = None;
@@ -2527,7 +2527,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     // Add funds to the wallet.
     add_funds(&mut st, value);
 
-    // Generate a ZIP 320 proposal, sending to the an external TEX address.
+    // Generate a ZIP 320 proposal, sending to an external TEX address.
     let tex_addr = Address::Tex([0x4; 20]);
     let proposal = st
         .propose_standard_transfer::<Infallible>(
