@@ -3542,22 +3542,24 @@ fn determine_fee(
     conn: &rusqlite::Connection,
     tx: &Transaction,
 ) -> Result<Option<Zatoshis>, SqliteClientError> {
-    let fee_result: Result<std::option::Option<Zatoshis>, SqliteClientError> =
-        tx.fee_paid(|outpoint| {
-            // This closure can do DB lookups to fetch the value of each transparent input.
-            if let Some(out) = get_wallet_transparent_output(conn, outpoint, true)? {
-                Ok(Some(out.txout().value()))
-            } else {
-                // If we can’t find it, fee computation can't complete accurately
-                Ok(None)
-            }
-        });
+    tx.fee_paid(|outpoint| {
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            // Transparent inputs aren't supported, so this closure should never be
+            // called during transaction construction. But in case it is, handle it
+            // correctly.
+            Ok(None)
+        }
 
-    match fee_result {
-        Ok(Some(fee)) => Ok(Some(fee)),
-        Ok(None) => Ok(None), // cannot compute fee because some inputs are missing
-        Err(e) => Err(SqliteClientError::from(e)),
-    }
+        // This closure can do DB lookups to fetch the value of each transparent input.
+        #[cfg(feature = "transparent-inputs")]
+        if let Some(out) = get_wallet_transparent_output(conn, outpoint, true)? {
+            Ok(Some(out.txout().value()))
+        } else {
+            // If we can’t find it, fee computation can't complete accurately
+            Ok::<_, SqliteClientError>(None)
+        }
+    })
 }
 
 pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
