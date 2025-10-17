@@ -3,7 +3,7 @@
 use core::fmt;
 use core2::io::{self, Read, Write};
 
-use zcash_address::TryFromAddress;
+use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
 use zcash_protocol::consensus::NetworkType;
 
 use zcash_encoding::Vector;
@@ -177,6 +177,16 @@ impl TransparentAddress {
         TransparentAddress::PublicKeyHash(
             *ripemd::Ripemd160::digest(Sha256::digest(pubkey)).as_ref(),
         )
+    }
+
+    /// Encodes this transparent address for the given network type.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
+        match self {
+            TransparentAddress::PublicKeyHash(data) => {
+                ZcashAddress::from_transparent_p2pkh(net, *data)
+            }
+            TransparentAddress::ScriptHash(data) => ZcashAddress::from_transparent_p2sh(net, *data),
+        }
     }
 }
 
