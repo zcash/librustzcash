@@ -1035,14 +1035,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
-        if let Some(chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
+        if let Some(_chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
             let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
             #[cfg(feature = "transparent-inputs")]
             let iter = iter.chain(wallet::transparent::transaction_data_requests(
                 self.conn.borrow(),
                 &self.params,
-                chain_tip_height,
+                _chain_tip_height,
             )?);
 
             Ok(iter.collect())
