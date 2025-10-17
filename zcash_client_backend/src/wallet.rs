@@ -691,7 +691,7 @@ pub struct TransparentAddressMetadata {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
-    /// Constructs a new [`TransparentAddressMetadata`] value from its constitutent parts.
+    /// Constructs a new [`TransparentAddressMetadata`] value from its constituent parts.
     pub fn new(
         source: TransparentAddressSource,
         exposure: Exposure,

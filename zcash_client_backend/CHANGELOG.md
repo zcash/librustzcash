@@ -66,6 +66,9 @@ workspace.
   has been removed; the wallet no longer restricts the caller from constructing
   payments to explicit ephemeral transparent addresses, in order to allow
   for gap limit management operations to be performed by the wallet application.
+  If it is desired to maintain the previous policy of excluding explicit payments
+  to ephemeral addresses, call `get_transparent_address_metadata` on the address
+  and check whether its `scope` is `TransparentKeyScope::EPHEMERAL` if it is `Derived`.
 
 ## [0.20.0] - 2025-09-25
 
