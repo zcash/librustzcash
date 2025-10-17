@@ -53,6 +53,8 @@ use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
 #[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::WalletUtxo;
+#[cfg(feature = "transparent-inputs")]
 use {
     std::time::SystemTime, transparent::keys::TransparentKeyScope,
     zcash_client_backend::data_api::Balance,
@@ -685,7 +687,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
     }
 
@@ -695,7 +697,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletUtxo>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
@@ -1187,11 +1189,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         outpoint: &OutPoint,
         allow_unspendable: bool,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
-        wallet::transparent::get_wallet_transparent_output(
+        let result = wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             allow_unspendable,
-        )
+        )?
+        .map(|utxo| utxo.into_wallet_output());
+
+        Ok(result)
     }
 
     fn get_notes(

@@ -22,6 +22,7 @@ workspace.
     - `standalone`
     - `exposure`
     - `next_check_time`
+- `zcash_client_backend::data_api::WalletUtxo`
 - `zcash_client_backend::data_api::WalletTest::get_known_ephemeral_addresses`
 - `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
 
@@ -38,6 +39,16 @@ workspace.
   - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
     has been removed. Implementers of `WalletRead` must provide their own
     implementation.
+  - The result types of `InputSource::get_unspent_transparent_output` and
+    `InputSource::get_unspent_transparent_outputs` have each changed; instead
+    of returning bare `WalletTransparentOutput`s, these now return `WalletUtxo`
+    values that include the `WalletTransparentOutput` data along with additional
+    derivation metadata.
+- Variants of `zcash_client_backend::proposal::ProposalError` have changed.
+  A new `EphemeralAddressLinkability` variant has been added, to represent
+  the case where a caller attempts to construct a shielding transaction that
+  would link an ephemeral address to any other transparent address in the wallet
+  on-chain.
 - `zcash_client_backend::wallet`:
   - `TransparentAddressMetadata` has been converted from an enum to a struct
     that contains both source metadata and information about when the address
