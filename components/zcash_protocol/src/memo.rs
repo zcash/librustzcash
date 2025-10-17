@@ -11,6 +11,12 @@ use core::str;
 #[cfg(feature = "std")]
 use std::error;
 
+mod builder;
+pub use builder::Builder;
+
+mod structured;
+pub use structured::{Payload, StructuredMemo};
+
 /// Format a byte array as a colon-delimited hex string.
 ///
 /// - Source: <https://github.com/tendermint/signatory>
@@ -35,6 +41,8 @@ where
 /// Errors that may result from attempting to construct an invalid memo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
+    InvalidEncoding,
+    InvalidPayload,
     InvalidUtf8(core::str::Utf8Error),
     TooLong(usize),
 }
@@ -42,6 +50,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::InvalidEncoding => write!(f, "Invalid memo encoding"),
+            Error::InvalidPayload => write!(f, "Invalid memo payload"),
             Error::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {e}"),
             Error::TooLong(n) => write!(f, "Memo length {n} is larger than maximum of 512"),
         }
@@ -136,7 +146,7 @@ impl MemoBytes {
 }
 
 /// Type-safe wrapper around String to enforce memo length requirements.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextMemo(String);
 
 impl From<TextMemo> for String {
@@ -162,6 +172,8 @@ pub enum Memo {
     Empty,
     /// A memo field containing a UTF-8 string.
     Text(TextMemo),
+    /// A structured memo field containing one or more payloads.
+    Structured(StructuredMemo),
     /// Some unknown memo format from ✨*the future*✨ that we can't parse.
     Future(MemoBytes),
     /// A memo field containing arbitrary bytes.
@@ -172,7 +184,8 @@ impl fmt::Debug for Memo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Memo::Empty => write!(f, "Memo::Empty"),
-            Memo::Text(memo) => write!(f, "Memo::Text(\"{}\")", memo.0),
+            Memo::Text(memo) => write!(f, "Memo::Text({:?})", memo),
+            Memo::Structured(memo) => write!(f, "Memo::Structured({:?})", memo),
             Memo::Future(bytes) => write!(f, "Memo::Future({:0x})", bytes.0[0]),
             Memo::Arbitrary(bytes) => {
                 write!(f, "Memo::Arbitrary(")?;
@@ -188,6 +201,7 @@ impl PartialEq for Memo {
         match (self, rhs) {
             (Memo::Empty, Memo::Empty) => true,
             (Memo::Text(a), Memo::Text(b)) => a == b,
+            (Memo::Structured(a), Memo::Structured(b)) => a == b,
             (Memo::Future(a), Memo::Future(b)) => a.0[..] == b.0[..],
             (Memo::Arbitrary(a), Memo::Arbitrary(b)) => a[..] == b[..],
             _ => false,
@@ -216,6 +230,7 @@ impl TryFrom<&MemoBytes> for Memo {
     /// example, if the slice is not 512 bytes, or the encoded `Memo` is non-canonical).
     fn try_from(bytes: &MemoBytes) -> Result<Self, Self::Error> {
         match bytes.0[0] {
+            0xF5 => StructuredMemo::parse(&bytes.0[1..]).map(Memo::Structured),
             0xF6 if bytes.0.iter().skip(1).all(|&b| b == 0) => Ok(Memo::Empty),
             0xFF => Ok(Memo::Arbitrary(Box::new(bytes.0[1..].try_into().unwrap()))),
             b if b <= 0xF4 => str::from_utf8(bytes.as_slice())
@@ -247,6 +262,12 @@ impl From<&Memo> for MemoBytes {
                 let s_bytes = s.0.as_bytes();
                 // s_bytes.len() is guaranteed to be <= 512
                 bytes[..s_bytes.len()].copy_from_slice(s_bytes);
+                MemoBytes(Box::new(bytes))
+            }
+            Memo::Structured(s) => {
+                let mut bytes = [0u8; 512];
+                bytes[0] = 0xF5;
+                s.serialize(&mut bytes[1..]);
                 MemoBytes(Box::new(bytes))
             }
             Memo::Future(memo) => memo.clone(),
