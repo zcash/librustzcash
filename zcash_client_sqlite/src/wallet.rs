@@ -3958,6 +3958,23 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     Ok(())
 }
 
+pub(crate) fn mark_tx_trusted(
+    conn: &rusqlite::Transaction,
+    txid: TxId,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE transactions
+         SET trust_status = :trust_status
+         WHERE txid = :txid",
+        named_params! {
+           ":txid": &txid.as_ref()[..],
+           ":trust_status": true
+        },
+    )?;
+
+    Ok(())
+}
+
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
 pub(crate) fn put_tx_meta(
