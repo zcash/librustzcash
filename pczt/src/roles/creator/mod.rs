@@ -1,6 +1,12 @@
 //! The Creator role (single entity).
 //!
-//!  - Creates the base PCZT with no information about spends or outputs.
+//! The Creator initializes the PCZT according to the role definitions in
+//! [BIP 174 §2.1] and [BIP 370 §2.1], adapted for Zcash's shielded protocols.
+//!
+//! - Creates the base PCZT with no information about spends or outputs.
+//!
+//! [BIP 174]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+//! [BIP 370]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki
 
 use alloc::collections::BTreeMap;
 
@@ -21,19 +27,37 @@ const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
 
 const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
+/// The Creator role implementation.
+///
+/// Initializes a PCZT with the basic transaction structure and consensus parameters
+/// as defined in [BIP 174 §2.1.1] and [BIP 370 §2.1.1], with Zcash-specific
+/// shielded protocol support.
 pub struct Creator {
+    /// Transaction version (must be 5 for Zcash v5 transactions).
     tx_version: u32,
+    /// Version group ID for Zcash v5 transactions.
     version_group_id: u32,
+    /// Consensus branch ID determining which consensus rules apply.
     consensus_branch_id: u32,
+    /// Fallback lock time as defined in [BIP 370 §2.1.1.2].
     fallback_lock_time: Option<u32>,
+    /// Transaction expiry height for Zcash shielded transactions.
     expiry_height: u32,
+    /// SLIP 44 coin type for network identification.
     coin_type: u32,
+    /// Orchard protocol flags as defined in [ZIP 224 §4.6.1].
     orchard_flags: u8,
+    /// Sapling commitment tree root as defined in [ZIP 212 §4.5.1].
     sapling_anchor: [u8; 32],
+    /// Orchard commitment tree root as defined in [ZIP 224 §4.6.2].
     orchard_anchor: [u8; 32],
 }
 
 impl Creator {
+    /// Creates a new Creator with the specified consensus parameters.
+    ///
+    /// The consensus branch ID determines which Zcash network and protocol features
+    /// are active as defined in the Zcash protocol specifications.
     pub fn new(
         consensus_branch_id: u32,
         expiry_height: u32,
@@ -66,6 +90,9 @@ impl Creator {
         self
     }
 
+    /// Builds the initial PCZT structure.
+    ///
+    /// Creates a PCZT with all modification flags enabled as defined in [BIP 174 §2.1.2].
     pub fn build(self) -> Pczt {
         Pczt {
             global: crate::common::Global {

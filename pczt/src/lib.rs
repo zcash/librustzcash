@@ -5,8 +5,17 @@
 //! [BIP 174: Partially Signed Bitcoin Transaction Format] and [BIP 370: PSBT Version 2],
 //! with additional Zcash-specific roles.
 //!
-//! [BIP 174: Partially Signed Bitcoin Transaction Format]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-//! [BIP 370: PSBT Version 2]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki
+//! The PCZT format supports all three Zcash shielded protocols:
+//! - **Transparent**: Bitcoin-compatible UTXO-based transactions ([BIP 16], [BIP 143])
+//! - **Sapling**: First-generation shielded protocol ([ZIP 212])
+//! - **Orchard**: Next-generation shielded protocol ([ZIP 224])
+//!
+//! [BIP 16]: https://github.com/bitcoin/bips/blob/master/bip-0016.mediawiki
+//! [BIP 143]: https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki
+//! [BIP 174]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+//! [BIP 370]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki
+//! [ZIP 212]: https://zips.z.cash/zip-0212
+//! [ZIP 224]: https://zips.z.cash/zip-0224
 //!
 #![cfg_attr(feature = "std", doc = "## Feature flags")]
 #![cfg_attr(feature = "std", doc = document_features::document_features!())]
@@ -14,7 +23,6 @@
 
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
@@ -40,6 +48,10 @@ const MAGIC_BYTES: &[u8] = b"PCZT";
 const PCZT_VERSION_1: u32 = 1;
 
 /// A partially-created Zcash transaction.
+///
+/// The PCZT format extends the PSBT format ([BIP 174], [BIP 370]) to support Zcash's
+/// shielded protocols (Sapling and Orchard) while maintaining compatibility with
+/// Bitcoin's transparent transaction model.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Pczt {
     /// Global fields that are relevant to the transaction as a whole.
@@ -81,6 +93,9 @@ impl Pczt {
     }
 
     /// Serializes this PCZT.
+    ///
+    /// The PCZT serialization format follows a binary encoding with magic bytes
+    /// "PCZT" followed by the version number and postcard-encoded data.
     pub fn serialize(&self) -> Vec<u8> {
         let mut bytes = vec![];
         bytes.extend_from_slice(MAGIC_BYTES);

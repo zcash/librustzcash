@@ -1645,6 +1645,14 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     assert_eq!(ending_balance, Zatoshis::ZERO); // ending balance should be zero
 }
 
+/// Tests sending funds with multiple change outputs using a multi-output change strategy.
+///
+/// The test:
+/// - Adds a large amount of funds to the wallet.
+/// - Creates a proposal with a multi-output change strategy that splits change into multiple outputs.
+/// - Verifies that the proposal creates the expected number of change outputs.
+/// - Executes the transaction and verifies the outputs are decryptable.
+/// - Creates a second proposal that further splits the remaining change.
 pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
@@ -1829,6 +1837,17 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     assert_eq!(step.balance().proposed_change().len(), 7);
 }
 
+/// Tests multi-step transfers with ephemeral transparent addresses and gap limits.
+///
+/// This comprehensive test covers:
+/// - Creating multi-step ZIP 320 transfers with ephemeral transparent addresses.
+/// - Verifying correct fee calculation and change output creation.
+/// - Testing ephemeral address generation and gap limit enforcement.
+/// - Validating address reservation behavior and collision detection.
+/// - Ensuring proper handling of ephemeral address metadata.
+///
+/// The test runs multiple iterations to verify consistent ephemeral address generation
+/// and proper gap limit enforcement across multiple transfers.
 #[cfg(feature = "transparent-inputs")]
 pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     ds_factory: DSF,
@@ -2538,6 +2557,13 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     assert_eq!(initial_balance - total_sent, ending_balance.into());
 }
 
+/// Tests that proposal creation fails when not all ephemeral outputs are consumed.
+///
+/// The test:
+/// - Creates a valid multi-step proposal with ephemeral outputs.
+/// - Modifies the proposal to leave an ephemeral output unspent.
+/// - Verifies that creating transactions from the modified proposal fails.
+/// - Confirms the error indicates an unspent ephemeral output.
 #[cfg(feature = "transparent-inputs")]
 pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester, DSF>(
     ds_factory: DSF,
@@ -2630,6 +2656,13 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     );
 }
 
+/// Tests that spending fails when using a USK that is not recognized by the wallet.
+///
+/// The test:
+/// - Creates a wallet with an account.
+/// - Generates a USK for a different account that doesn't exist in the wallet.
+/// - Attempts to spend using the unrecognized USK.
+/// - Verifies that the operation fails with `KeyNotRecognized` error.
 pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     ds_factory: DSF,
 ) {
@@ -2668,6 +2701,13 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
     );
 }
 
+/// Tests that proposal creation fails when no blocks have been scanned.
+///
+/// The test:
+/// - Creates a wallet with no scanned blocks.
+/// - Verifies that the wallet summary is not available.
+/// - Attempts to propose a transfer.
+/// - Confirms that the proposal fails with `ScanRequired` error.
 pub fn proposal_fails_with_no_blocks<T: ShieldedPoolTester, DSF>(ds_factory: DSF)
 where
     DSF: DataStoreFactory,
@@ -2701,6 +2741,13 @@ where
     );
 }
 
+/// Tests that spending fails when there are insufficient verified notes.
+///
+/// The test:
+/// - Adds funds to the wallet in two notes.
+/// - Verifies that only the first note meets the confirmation policy.
+/// - Attempts to spend more funds than available in verified notes.
+/// - Confirms that the spend fails with `InsufficientFunds` error.
 pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
@@ -2895,6 +2942,14 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     );
 }
 
+/// Tests that spending fails when notes are locked by a pending transaction.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Creates a pending transaction that locks the note.
+/// - Verifies that subsequent spend attempts fail due to insufficient funds.
+/// - Mines blocks until the lock expires.
+/// - Confirms that spending succeeds after the lock expires.
 pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
