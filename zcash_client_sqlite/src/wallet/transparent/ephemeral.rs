@@ -96,7 +96,7 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                     .expect("where clause ensures this is in range");
 
                 let exposure = row.get::<_, Option<u32>>("exposed_at_height")?.map_or(
-                    Exposure::Unexposed,
+                    Exposure::Unknown,
                     |h| Exposure::Exposed {
                         at_height: BlockHeight::from(h),
                         gap_metadata: gap_start.map_or(

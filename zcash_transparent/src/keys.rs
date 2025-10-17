@@ -54,10 +54,10 @@ impl TransparentKeyScope {
 impl fmt::Debug for TransparentKeyScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Self::EXTERNAL => f.write_str("EXTERNAL"),
-            Self::INTERNAL => f.write_str("INTERNAL"),
-            Self::EPHEMERAL => f.write_str("EPHEMERAL"),
-            TransparentKeyScope(other) => f.write_str(&format!("Custom({other})")),
+            Self::EXTERNAL => f.write_str("TransparentKeyScope::EXTERNAL"),
+            Self::INTERNAL => f.write_str("TransparentKeyScope::INTERNAL"),
+            Self::EPHEMERAL => f.write_str("TransparentKeyScope::EPHEMERAL"),
+            TransparentKeyScope(other) => f.write_str(&format!("TransparentKeyScope({other})")),
         }
     }
 }
@@ -85,7 +85,7 @@ pub struct NonHardenedChildIndex(u32);
 
 impl core::fmt::Debug for NonHardenedChildIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&format!("{}", self.0))
+        f.write_str(&format!("NonHardenedChildIndex({})", self.0))
     }
 }
 
