@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.7] - 2025-10-16
+
+### Fixed
+- Fixes a data persistence error that could result in a violation of the
+  `transactions.min_observed_consistency` constraint.
+
 ## [0.18.6] - 2025-10-16
 
 ### Fixed

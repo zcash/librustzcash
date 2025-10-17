@@ -3030,6 +3030,11 @@ pub(crate) fn set_transaction_status(
             conn.execute(
                 "UPDATE transactions
                  SET mined_height = :height,
+                     min_observed_height = MIN(
+                        min_observed_height,
+                        IFNULL(mined_height, :height),
+                        :height
+                     ),
                      confirmed_unmined_at_height = NULL
                  WHERE txid = :txid",
                 sql_args,
