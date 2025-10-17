@@ -10,12 +10,17 @@ workspace.
 
 ## [Unreleased]
 
-
 ## [0.19.0] - PLANNED
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
+
+## [0.18.7] - 2025-10-16
+
+### Fixed
+- Fixes a data persistence error that could result in a violation of the
+  `transactions.min_observed_consistency` constraint.
 
 ## [0.18.6] - 2025-10-16
 
