@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.10.1] - PLANNED
+## [0.10.1] - 2025-10-18
 
 ### Fixed
 - Adjusted doc features to fix builds on docs.rs after nightly Rust update.
