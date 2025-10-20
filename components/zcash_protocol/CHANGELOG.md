@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-10-18
+
+### Fixed
+- Adjusted doc features to fix builds on docs.rs after nightly Rust update.
+
 ## [0.7.0] - 2025-10-02
 
 - The mainnet activation height has been set for `consensus::BranchId::Nu6_1`
