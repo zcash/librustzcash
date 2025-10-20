@@ -1448,6 +1448,7 @@ pub trait InputSource {
     fn get_unspent_transparent_output(
         &self,
         _outpoint: &OutPoint,
+        _target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
         unimplemented!("InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature")
     }
@@ -1906,13 +1907,18 @@ pub trait WalletTest: InputSource + WalletRead {
     /// Fetches the transparent output corresponding to the provided `outpoint`.
     /// Allows selecting unspendable outputs for testing purposes.
     ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
+    /// # Parameters
+    /// - `outpoint`: The identifier for the output to be retrieved.
+    /// - `spendable_as_of`: The target height of a transaction under construction that will spend the
+    ///   returned output. If this is `None`, no spendability checks are performed.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or if `spendable_as_of`
+    /// is set and the output is not spendable as of the given target height.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_output(
         &self,
         _outpoint: &OutPoint,
-        _allow_unspendable: bool,
+        _spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         unimplemented!("WalletTest::get_transparent_output must be overridden for wallets to use the `transparent-inputs` feature")
     }

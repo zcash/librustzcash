@@ -50,16 +50,18 @@ use zip32::{DiversifierIndex, Scope};
 #[cfg(feature = "transparent-key-import")]
 use bip32::{PublicKey, PublicKeyBytes};
 
-use super::encoding::{decode_epoch_seconds, ReceiverFlags};
 use super::{
     account_birthday_internal, chain_tip_height,
-    encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
+    encoding::{
+        decode_diversifier_index_be, decode_epoch_seconds, encode_diversifier_index_be,
+        ReceiverFlags,
+    },
     get_account_ids, get_account_internal, KeyScope,
 };
-use crate::wallet::common::tx_unexpired_condition;
-use crate::wallet::mempool_height;
-use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
-use crate::{AccountRef, AddressRef, GapLimits};
+use crate::{
+    error::SqliteClientError, wallet::common::tx_unexpired_condition, AccountRef, AccountUuid,
+    AddressRef, GapLimits, TxRef, UtxoId,
+};
 
 pub(crate) mod ephemeral;
 
@@ -792,14 +794,17 @@ pub(crate) fn spent_utxos_clause() -> String {
     )
 }
 
-/// Select an output to fund a new transaction that is targeting at least `chain_tip_height + 1`.
+/// Get information about a transparent output controlled by the wallet.
+///
+/// # Parameters
+/// - `outpoint`: The identifier for the output to be retrieved.
+/// - `spendable_as_of`: The target height of a transaction under construction that will spend the
+///   returned output. If this is `None`, no spendability checks are performed.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
-    allow_unspendable: bool,
+    spendable_as_of: Option<TargetHeight>,
 ) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
-    let target_height = mempool_height(conn)?;
-
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
     // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
@@ -812,10 +817,10 @@ pub(crate) fn get_wallet_transparent_output(
          JOIN transactions t ON t.id_tx = u.transaction_id
          WHERE t.txid = :txid
          AND u.output_index = :output_index
-         -- the transaction that created the output is mined or is definitely unexpired
          AND (
              :allow_unspendable
              OR (
+                 -- the transaction that created the output is mined or is definitely unexpired
                  ({}) -- the transaction is unexpired
                  AND u.id NOT IN ({}) -- and the output is unspent
              )
@@ -829,8 +834,8 @@ pub(crate) fn get_wallet_transparent_output(
             named_params![
                 ":txid": outpoint.hash(),
                 ":output_index": outpoint.n(),
-                ":target_height": target_height.map(u32::from),
-                ":allow_unspendable": allow_unspendable
+                ":target_height": spendable_as_of.map(u32::from),
+                ":allow_unspendable": spendable_as_of.is_none()
             ],
             to_unspent_transparent_output,
         )?

@@ -173,7 +173,9 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
+        _target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        // FIXME: make use of `target_height` to check spendability.
         Ok(self
             .transparent_received_outputs
             .get(outpoint)

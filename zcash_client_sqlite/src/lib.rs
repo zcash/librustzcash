@@ -670,8 +670,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
+        target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
+        wallet::transparent::get_wallet_transparent_output(
+            self.conn.borrow(),
+            outpoint,
+            Some(target_height),
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1172,12 +1177,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     fn get_transparent_output(
         &self,
         outpoint: &OutPoint,
-        allow_unspendable: bool,
+        spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
-            allow_unspendable,
+            spendable_as_of,
         )
     }
 

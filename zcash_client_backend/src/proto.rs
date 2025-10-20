@@ -751,7 +751,10 @@ impl proposal::Proposal {
                                             let outpoint = OutPoint::new(txid.into(), out.index);
                                             transparent_inputs.push(
                                                 wallet_db
-                                                    .get_unspent_transparent_output(&outpoint)
+                                                    .get_unspent_transparent_output(
+                                                        &outpoint,
+                                                        target_height,
+                                                    )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
                                                         ProposalDecodingError::InputNotFound(

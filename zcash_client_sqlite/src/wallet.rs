@@ -3507,7 +3507,8 @@ fn determine_fee(
                 for t_in in &t_bundle.vin {
                     match (
                         result,
-                        get_wallet_transparent_output(_conn, t_in.prevout(), true)?,
+                        // ignore spendability for fee determination
+                        get_wallet_transparent_output(_conn, t_in.prevout(), None)?,
                     ) {
                         (Some(b), Some(out)) => {
                             result = Some((b + out.txout().value()).ok_or(BalanceError::Overflow)?)
@@ -3576,10 +3577,6 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
 
-    // If the transaction is fully shielded, or all transparent inputs are available, set the
-    // fee value.
-    let fee = determine_fee(conn, d_tx.tx())?;
-
     let observed_height = d_tx.mined_height().map_or_else(
         || {
             mempool_height(conn)?
@@ -3588,6 +3585,10 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         },
         Ok,
     )?;
+
+    // If the transaction is fully shielded, or all transparent inputs are available, set the
+    // fee value.
+    let fee = determine_fee(conn, d_tx.tx())?;
 
     let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None, observed_height)?;
     if let Some(height) = d_tx.mined_height() {
