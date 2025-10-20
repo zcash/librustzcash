@@ -40,16 +40,19 @@ use orchard::tree::MerkleHashOrchard;
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod compact_formats;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod proposal;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod service;
 
 impl compact_formats::CompactBlock {
