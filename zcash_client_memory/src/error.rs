@@ -1,12 +1,13 @@
 use std::{array::TryFromSliceError, convert::Infallible};
 
 use shardtree::error::ShardTreeError;
+use transparent::address::TransparentAddress;
 use zcash_address::ConversionError;
 use zcash_keys::{
     encoding::TransparentCodecError,
     keys::{AddressGenerationError, DerivationError},
 };
-use zcash_primitives::{legacy::TransparentAddress, transaction::TxId};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, memo};
 
 use crate::AccountId;

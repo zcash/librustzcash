@@ -11,11 +11,14 @@ use crate::tor::{Client, Error};
 use super::Retry;
 
 mod binance;
+mod coin_ex;
 mod coinbase;
-mod gate_io;
+mod digi_finex;
 mod gemini;
+mod kraken;
 mod ku_coin;
 mod mexc;
+mod xt;
 
 /// Maximum number of retries for exchange queries implemented in this crate.
 const RETRY_LIMIT: u8 = 1;
@@ -53,11 +56,14 @@ fn retry_filter(res: Result<StatusCode, &Error>) -> Option<Retry> {
 /// Queries to these exchanges will be retried a single time on error.
 pub mod exchanges {
     pub use super::binance::Binance;
+    pub use super::coin_ex::CoinEx;
     pub use super::coinbase::Coinbase;
-    pub use super::gate_io::GateIo;
+    pub use super::digi_finex::DigiFinex;
     pub use super::gemini::Gemini;
+    pub use super::kraken::Kraken;
     pub use super::ku_coin::KuCoin;
     pub use super::mexc::Mexc;
+    pub use super::xt::Xt;
 }
 
 /// An exchange that can be queried for ZEC data.
@@ -103,10 +109,13 @@ impl Exchanges {
     pub fn unauthenticated_known_with_gemini_trusted() -> Self {
         Self::builder(exchanges::Gemini::unauthenticated())
             .with(exchanges::Binance::unauthenticated())
+            .with(exchanges::CoinEx::unauthenticated())
             .with(exchanges::Coinbase::unauthenticated())
-            .with(exchanges::GateIo::unauthenticated())
+            .with(exchanges::DigiFinex::unauthenticated())
+            .with(exchanges::Kraken::unauthenticated())
             .with(exchanges::KuCoin::unauthenticated())
             .with(exchanges::Mexc::unauthenticated())
+            .with(exchanges::Xt::unauthenticated())
             .build()
     }
 

@@ -7,8 +7,7 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 use zcash_client_backend::data_api::{
     chain::CommitmentTreeRoot, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT,
 };
-use zcash_primitives::consensus::BlockHeight;
-use zcash_protocol::consensus;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::MemoryWalletDb;
 

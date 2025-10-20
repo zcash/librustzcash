@@ -1544,8 +1544,8 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     /// use std::num::NonZeroU8;
     ///
     /// use incrementalmerkletree::frontier::Frontier;
-    /// use zcash_primitives::{block::BlockHash, consensus::Parameters};
-    /// use zcash_protocol::consensus::NetworkUpgrade;
+    /// use zcash_primitives::block::BlockHash;
+    /// use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
     /// use zcash_client_backend::data_api::{
     ///     chain::{ChainState, CommitmentTreeRoot},
     ///     testing::{InitialChainState, TestBuilder},

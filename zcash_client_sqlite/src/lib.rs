@@ -86,7 +86,10 @@ use zcash_protocol::{
 
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
-use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
+use crate::{
+    error::SqliteClientError,
+    wallet::{chain_tip_height, commitment_tree::SqliteShardStore, mempool_height},
+};
 use wallet::{
     commitment_tree::{self, put_shard_roots},
     common::{spendable_notes_meta, TableConstants},
@@ -483,7 +486,13 @@ impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     ///
     /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
     pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
-        self.transactionally(|wdb| wallet::commitment_tree::check_witnesses(wdb.conn.0))
+        self.transactionally(|wdb| {
+            if let Some(anchor_height) = chain_tip_height(wdb.conn.0)? {
+                wallet::commitment_tree::check_witnesses(wdb.conn.0, anchor_height)
+            } else {
+                Ok(vec![])
+            }
+        })
     }
 
     /// Updates the scan queue by inserting scan ranges for the given range of block heights, with
@@ -548,28 +557,33 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         protocol: ShieldedProtocol,
         index: u32,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        match protocol {
-            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
-                self.conn.borrow(),
-                &self.params,
-                txid,
-                index,
-            )
-            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
-            ShieldedProtocol::Orchard => {
-                #[cfg(feature = "orchard")]
-                return wallet::orchard::get_spendable_orchard_note(
+        mempool_height(self.conn.borrow())?
+            .map(|target_height| match protocol {
+                ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
                     self.conn.borrow(),
                     &self.params,
                     txid,
                     index,
+                    target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
+                ShieldedProtocol::Orchard => {
+                    #[cfg(feature = "orchard")]
+                    return wallet::orchard::get_spendable_orchard_note(
+                        self.conn.borrow(),
+                        &self.params,
+                        txid,
+                        index,
+                        target_height,
+                    )
+                    .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
-                #[cfg(not(feature = "orchard"))]
-                return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
-            }
-        }
+                    #[cfg(not(feature = "orchard"))]
+                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
+                }
+            })
+            .transpose()
+            .map(|n| n.flatten())
     }
 
     fn select_spendable_notes(
@@ -685,13 +699,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         selector: &NoteFilter,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?
-            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+        let target_height =
+            mempool_height(self.conn.borrow())?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
         let sapling_pool_meta = spendable_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Sapling,
-            chain_tip_height,
+            target_height,
             account_id,
             selector,
             exclude,
@@ -701,7 +715,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         let orchard_pool_meta = spendable_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Orchard,
-            chain_tip_height,
+            target_height,
             account_id,
             selector,
             exclude,
@@ -1021,15 +1035,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
-        let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
+        if let Some(_chain_tip_height) = wallet::chain_tip_height(self.conn.borrow())? {
+            let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
-        #[cfg(feature = "transparent-inputs")]
-        let iter = iter.chain(wallet::transparent::transaction_data_requests(
-            self.conn.borrow(),
-            &self.params,
-        )?);
+            #[cfg(feature = "transparent-inputs")]
+            let iter = iter.chain(wallet::transparent::transaction_data_requests(
+                self.conn.borrow(),
+                &self.params,
+                _chain_tip_height,
+            )?);
 
-        Ok(iter.collect())
+            Ok(iter.collect())
+        } else {
+            // If the chain tip height is unknown, we're not in a state where it makes sense to process
+            // transaction data requests anyway so we just return the empty vector of requests.
+            Ok(vec![])
+        }
     }
 }
 
@@ -1185,8 +1206,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
         let result = stmt_received_notes
             .query_map([], |row| {
-                let txid: [u8; 32] = row.get(0)?;
-                let output_index: u32 = row.get(1)?;
+                let txid: [u8; 32] = row.get("txid")?;
+                let output_index: u32 = row.get(output_index_col)?;
                 let note = self
                     .get_spendable_note(&TxId::from_bytes(txid), protocol, output_index)
                     .unwrap()
@@ -2897,7 +2918,8 @@ mod tests {
             .schedule_ephemeral_address_checks()
             .unwrap();
         let data_requests =
-            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params).unwrap();
+            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params, birthday)
+                .unwrap();
 
         let base_time = st.wallet().db().clock.now();
         let day = Duration::from_secs(60 * 60 * 24);

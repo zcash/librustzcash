@@ -79,7 +79,7 @@ impl TestCache for MemBlockCache {
 
 impl<P> Reset for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     type Handle = ();
 
@@ -91,7 +91,7 @@ where
 
 impl<P> WalletTest for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     #[allow(clippy::type_complexity)]
     fn get_sent_outputs(&self, txid: &TxId) -> Result<Vec<OutputOfSentTx>, Error> {
