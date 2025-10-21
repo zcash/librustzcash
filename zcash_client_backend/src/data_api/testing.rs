@@ -2543,6 +2543,7 @@ impl InputSource for MockWalletDb {
         _txid: &TxId,
         _protocol: ShieldedProtocol,
         _index: u32,
+        _target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -2573,6 +2574,7 @@ impl InputSource for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _selector: &NoteFilter,
+        _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
         Err(())

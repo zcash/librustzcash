@@ -116,18 +116,21 @@ where
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
     assert_matches!(res0, Ok(_));
 
+    let target_height = TargetHeight::from(height_1 + 1);
     // Confirm that we see the output unspent as of `height_1`.
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
             taddr,
-            TargetHeight::from(height_1 + 1),
+            target_height,
             ConfirmationsPolicy::MIN
         ).as_deref(),
-        Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
+        Ok([ret])
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint()),
-        Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
+        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height),
+        Ok(Some(ret))
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
 
     // Change the mined height of the UTXO and upsert; we should get back
@@ -141,19 +144,16 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(
-                taddr,
-                TargetHeight::from(height_1 + 1),
-                ConfirmationsPolicy::MIN
-            )
+            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok(&[])
     );
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint()),
-        Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
+        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height),
+        Ok(Some(ret))
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
 
     // If we include `height_2` then the output is returned.

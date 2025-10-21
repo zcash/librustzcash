@@ -88,11 +88,11 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
-    wallet::{chain_tip_height, commitment_tree::SqliteShardStore, mempool_height},
+    wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    common::{spendable_notes_meta, TableConstants},
+    common::{unspent_notes_meta, TableConstants},
     scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
@@ -556,34 +556,32 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        mempool_height(self.conn.borrow())?
-            .map(|target_height| match protocol {
-                ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+        match protocol {
+            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+                self.conn.borrow(),
+                &self.params,
+                txid,
+                index,
+                target_height,
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
+            ShieldedProtocol::Orchard => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_orchard_note(
                     self.conn.borrow(),
                     &self.params,
                     txid,
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
-                ShieldedProtocol::Orchard => {
-                    #[cfg(feature = "orchard")]
-                    return wallet::orchard::get_spendable_orchard_note(
-                        self.conn.borrow(),
-                        &self.params,
-                        txid,
-                        index,
-                        target_height,
-                    )
-                    .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
-                    #[cfg(not(feature = "orchard"))]
-                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
-                }
-            })
-            .transpose()
-            .map(|n| n.flatten())
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
+            }
+        }
     }
 
     fn select_spendable_notes(
@@ -672,8 +670,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
+        target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
+        wallet::transparent::get_wallet_transparent_output(
+            self.conn.borrow(),
+            outpoint,
+            Some(target_height),
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -697,12 +700,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         account_id: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let target_height =
-            mempool_height(self.conn.borrow())?.ok_or(SqliteClientError::ChainHeightUnknown)?;
-
-        let sapling_pool_meta = spendable_notes_meta(
+        let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Sapling,
             target_height,
@@ -712,7 +713,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         )?;
 
         #[cfg(feature = "orchard")]
-        let orchard_pool_meta = spendable_notes_meta(
+        let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
             ShieldedProtocol::Orchard,
             target_height,
@@ -1176,12 +1177,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     fn get_transparent_output(
         &self,
         outpoint: &OutPoint,
-        allow_unspendable: bool,
+        spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
-            allow_unspendable,
+            spendable_as_of,
         )
     }
 
@@ -1189,6 +1190,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
+        let (target_height, _) = self
+            .get_target_and_anchor_heights(NonZeroU32::MIN)?
+            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+
         let TableConstants {
             table_prefix,
             output_index_col,
@@ -1209,7 +1214,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
                 let txid: [u8; 32] = row.get("txid")?;
                 let output_index: u32 = row.get(output_index_col)?;
                 let note = self
-                    .get_spendable_note(&TxId::from_bytes(txid), protocol, output_index)
+                    .get_spendable_note(
+                        &TxId::from_bytes(txid),
+                        protocol,
+                        output_index,
+                        target_height,
+                    )
                     .unwrap()
                     .unwrap();
                 Ok(note)

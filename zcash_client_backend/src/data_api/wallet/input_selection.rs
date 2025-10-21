@@ -538,7 +538,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
 
             let wallet_meta = change_strategy
-                .fetch_wallet_meta(wallet_db, account, &selected_input_ids)
+                .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
                 .map_err(InputSelectorError::DataSource)?;
 
             #[cfg(not(feature = "transparent-inputs"))]
@@ -1055,7 +1055,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             .collect();
 
         let wallet_meta = change_strategy
-            .fetch_wallet_meta(wallet_db, to_account, &[])
+            .fetch_wallet_meta(wallet_db, to_account, target_height, &[])
             .map_err(InputSelectorError::DataSource)?;
 
         let trial_balance = change_strategy.compute_balance(

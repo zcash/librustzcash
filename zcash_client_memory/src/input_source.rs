@@ -36,6 +36,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         txid: &zcash_primitives::transaction::TxId,
         protocol: zcash_protocol::ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<
         Option<
             zcash_client_backend::wallet::ReceivedNote<
@@ -45,10 +46,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         >,
         Self::Error,
     > {
-        let target_height = TargetHeight::from(
-            self.chain_height()?
-                .ok_or(crate::error::Error::ChainHeightUnknown)?,
-        );
         let note = self.received_notes.iter().find(|rn| {
             &rn.txid == txid && rn.note.protocol() == protocol && rn.output_index == index
         });
@@ -176,7 +173,9 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
+        _target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        // FIXME: make use of `target_height` to check spendability.
         Ok(self
             .transparent_received_outputs
             .get(outpoint)
@@ -190,10 +189,9 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         &self,
         account_id: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let chain_tip_height = self.chain_height()?.ok_or(Error::ChainHeightUnknown)?;
-        let target_height = TargetHeight::from(chain_tip_height + 1);
         let confirmations_policy = ConfirmationsPolicy::new_symmetrical(
             NonZeroU32::MIN,
             #[cfg(feature = "transparent-inputs")]

@@ -1391,12 +1391,13 @@ pub trait InputSource {
     /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
-    /// is not spendable.
+    /// is not spendable as of the given height.
     fn get_spendable_note(
         &self,
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
@@ -1425,7 +1426,7 @@ pub trait InputSource {
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///
     /// The returned metadata value must exclude:
-    /// - spent notes;
+    /// - notes that are not considered spendable as of the given `target_height`
     /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
     ///
@@ -1435,17 +1436,20 @@ pub trait InputSource {
         &self,
         account: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error>;
 
-    /// Fetches the transparent output corresponding to the provided `outpoint`.
+    /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
+    /// spendable as of the provided `target_height`.
     ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or would not be
+    /// spendable in a transaction mined in the block at the target height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         _outpoint: &OutPoint,
+        _target_height: TargetHeight,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
         unimplemented!("InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature")
     }
@@ -1454,7 +1458,8 @@ pub trait InputSource {
     /// such that, at height `target_height`:
     /// * the transaction that produced the output had or will have at least `min_confirmations`
     ///   confirmations; and
-    /// * the output is unspent as of the current chain tip.
+    /// * the output can potentially be spent in a transaction mined in a block at the given
+    ///   `target_height`.
     ///
     /// An output that is potentially spent by an unmined transaction in the mempool is excluded
     /// iff the spending transaction will not be expired at `target_height`.
@@ -1904,13 +1909,19 @@ pub trait WalletTest: InputSource + WalletRead {
     /// Fetches the transparent output corresponding to the provided `outpoint`.
     /// Allows selecting unspendable outputs for testing purposes.
     ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
+    /// # Parameters
+    /// - `outpoint`: The identifier for the output to be retrieved.
+    /// - `spendable_as_of`: The target height of a transaction under construction that will spend the
+    ///   returned output. If this is `None`, no spendability checks are performed.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or if `spendable_as_of`
+    /// is set and the output is available to be spent by the wallet in a transaction that is
+    /// intended to be mined at the target height.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_output(
         &self,
         _outpoint: &OutPoint,
-        _allow_unspendable: bool,
+        _spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         unimplemented!("WalletTest::get_transparent_output must be overridden for wallets to use the `transparent-inputs` feature")
     }
