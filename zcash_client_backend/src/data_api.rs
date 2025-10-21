@@ -1041,10 +1041,11 @@ impl WalletUtxo {
         self.wallet_output().value()
     }
 
-    /// Returns the transparent key scope at which this address was derived, if known. This
-    /// metadata MUST be returned for any transparent address derived by the wallet; this metadata
-    /// is used by `propose_shielding` to ensure that shielding transactions do not inadvertently
-    /// link ephemeral addresses to other wallet activity on-chain.
+    /// Returns the transparent key scope at which this address was derived, if known.
+    ///
+    /// This metadata MUST be returned for any transparent address derived by the wallet;
+    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
+    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
     pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
         self.recipient_key_scope
     }
@@ -1831,12 +1832,11 @@ pub trait WalletRead {
     /// ```compile_fail
     /// Ok(
     ///     if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
-    ///         result.clone()
+    ///         Some(result.clone())
     ///     } else {
-    ///         self.get_known_ephemeral_addresses(account, None)?
-    ///             .into_iter()
-    ///             .find(|(known_addr, _)| known_addr == address)
-    ///             .map(|(_, metadata)| metadata)
+    ///         self.get_ephemeral_transparent_receivers(account, u32::MAX, false)?
+    ///             .get(address)
+    ///             .cloned()
     ///     },
     /// )
     /// ```

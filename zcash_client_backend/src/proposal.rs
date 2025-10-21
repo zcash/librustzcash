@@ -61,7 +61,8 @@ pub enum ProposalError {
     /// change output when needed for sending to a TEX address.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputsInvalid,
-    /// The request to generate a proposal that would link activity on
+    /// The requested proposal would link activity on an ephemeral address to other wallet
+    /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
 }

@@ -180,8 +180,8 @@ pub struct WalletTransparentOutput {
 impl WalletTransparentOutput {
     /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
     ///
-    /// Returns None if the recipient address for the provided [`TxOut`] cannot be determined
-    /// based on the set of output script patterns understood by this wallet.
+    /// Returns `None` if the recipient address for the provided [`TxOut`] cannot be
+    /// determined based on the set of output script patterns understood by this wallet.
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,

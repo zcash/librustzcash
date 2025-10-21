@@ -1052,6 +1052,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                     .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
                     .map_err(InputSelectorError::DataSource)?;
 
+                // `InputSource::get_spendable_transparent_outputs` is required to return
+                // outputs received by `taddr`, so these `.extend()` calls are guaranteed
+                // to add at most a single new address to each set. But it's more
+                // convenient this way as we can reuse `utxo.recipient_key_scope()`
+                // instead of needing to query the wallet twice for each address to
+                // determine their scopes.
                 ephemeral_addrs.extend(utxos.iter().filter_map(|utxo| {
                     (utxo.recipient_key_scope() == Some(TransparentKeyScope::EPHEMERAL))
                         .then_some(utxo.recipient_address())
