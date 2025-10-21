@@ -28,6 +28,8 @@ workspace.
   - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
     instead of an `allow_unspendable` flag. See the method documentation for
     details.
+- `zcash_client_backend::fees::ChangeStrategy::fetch_wallet_meta` now takes
+  an additional `target_height` argument.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`

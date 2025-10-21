@@ -1440,10 +1440,11 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error>;
 
-    /// Fetches the transparent output corresponding to the provided `outpoint`.
+    /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
+    /// spendable as of the provided `target_height`.
     ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or would not be
+    /// spendable in a transaction mined in the block at the target height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
@@ -1457,7 +1458,8 @@ pub trait InputSource {
     /// such that, at height `target_height`:
     /// * the transaction that produced the output had or will have at least `min_confirmations`
     ///   confirmations; and
-    /// * the output is unspent as of the current chain tip.
+    /// * the output can potentially be spent in a transaction mined in a block at the given
+    ///   `target_height`.
     ///
     /// An output that is potentially spent by an unmined transaction in the mempool is excluded
     /// iff the spending transaction will not be expired at `target_height`.
@@ -1913,7 +1915,8 @@ pub trait WalletTest: InputSource + WalletRead {
     ///   returned output. If this is `None`, no spendability checks are performed.
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or if `spendable_as_of`
-    /// is set and the output is not spendable as of the given target height.
+    /// is set and the output is available to be spent by the wallet in a transaction that is
+    /// intended to be mined at the target height.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_output(
         &self,
