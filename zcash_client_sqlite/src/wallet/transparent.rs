@@ -128,7 +128,9 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let min_exposure_height = exposure_depth
         .map(|d| {
             Ok::<_, SqliteClientError>(
-                mempool_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)? - d,
+                mempool_height(conn)?
+                    .ok_or(SqliteClientError::ChainHeightUnknown)?
+                    .saturating_sub(d),
             )
         })
         .transpose()?;
