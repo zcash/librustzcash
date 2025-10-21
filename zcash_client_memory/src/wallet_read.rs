@@ -33,9 +33,8 @@ use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    core::ops::Range,
     transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
 };
 
@@ -631,25 +630,6 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .collect(),
         })
     }
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        account_id: Self::AccountId,
-        index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(self
-            .accounts
-            .get(account_id)
-            .map(Account::ephemeral_addresses)
-            .unwrap_or_else(|| Ok(vec![]))?
-            .into_iter()
-            .filter(|(_addr, meta)| {
-                index_range.as_ref().map_or(true, |range| {
-                    meta.address_index().is_some_and(|i| range.contains(&i))
-                })
-            })
-            .collect::<Vec<_>>())
-    }
 
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -657,7 +637,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         _include_change: bool,
         _include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         let account = self
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
@@ -674,9 +654,16 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .iter()
             .filter_map(|(diversifier_index, ua)| {
                 ua.transparent().map(|ta| {
-                    let metadata =
+                    let metadata = TransparentAddressMetadata::derived(
+                        Scope::External.into(),
                         NonHardenedChildIndex::from_index((*diversifier_index).try_into().unwrap())
-                            .map(|i| TransparentAddressMetadata::new(Scope::External.into(), i));
+                            .expect(
+                                "diversifier index corresponds to a valid NonHardenedChildIndex",
+                            ),
+                        Exposure::Unknown,
+                        None,
+                    );
+
                     (*ta, metadata)
                 })
             })

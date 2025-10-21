@@ -61,6 +61,10 @@ pub enum ProposalError {
     /// change output when needed for sending to a TEX address.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputsInvalid,
+    /// The requested proposal would link activity on an ephemeral address to other wallet
+    /// activity.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralAddressLinkability,
 }
 
 impl Display for ProposalError {
@@ -128,6 +132,11 @@ impl Display for ProposalError {
                 f,
                 "The proposal generator failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
             ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::EphemeralAddressLinkability => write!(
+                f,
+                "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
+            )
         }
     }
 }

@@ -34,6 +34,7 @@
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
+use rand::RngCore;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -52,7 +53,12 @@ use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
 #[cfg(feature = "transparent-inputs")]
-use {transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::Balance};
+use zcash_client_backend::data_api::WalletUtxo;
+#[cfg(feature = "transparent-inputs")]
+use {
+    std::time::SystemTime, transparent::keys::TransparentKeyScope,
+    zcash_client_backend::data_api::Balance,
+};
 
 use zcash_client_backend::{
     data_api::{
@@ -306,6 +312,15 @@ impl GapLimits {
 
     pub(crate) fn ephemeral(&self) -> u32 {
         self.ephemeral
+    }
+
+    pub(crate) fn limit_for(&self, scope: KeyScope) -> Option<u32> {
+        match scope {
+            KeyScope::EXTERNAL => Some(self.external()),
+            KeyScope::INTERNAL => Some(self.internal()),
+            KeyScope::Ephemeral => Some(self.ephemeral()),
+            _ => None,
+        }
     }
 }
 
@@ -671,7 +686,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         outpoint: &OutPoint,
         target_height: TargetHeight,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -685,7 +700,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletUtxo>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
@@ -955,7 +970,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         include_change: bool,
         include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         let key_scopes = Some(KeyScope::EXTERNAL)
             .into_iter()
             .chain(include_change.then_some(KeyScope::INTERNAL))
@@ -968,8 +983,29 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account,
             &key_scopes[..],
+            None,
+            false,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_ephemeral_transparent_receivers(
+        &self,
+        account: Self::AccountId,
+        exposure_depth: u32,
+        exclude_used: bool,
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
+        wallet::transparent::get_transparent_receivers(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            account,
+            &[KeyScope::Ephemeral],
+            Some(exposure_depth),
+            exclude_used,
         )
     }
 
@@ -998,6 +1034,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::transparent::get_transparent_address_metadata(
             self.conn.borrow(),
             &self.params,
+            &self.gap_limits,
             account,
             address,
         )
@@ -1007,32 +1044,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
         let account_ref = wallet::get_account_ref(self.conn.borrow(), account)?;
         wallet::transparent::utxo_query_height(self.conn.borrow(), account_ref, &self.gap_limits)
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        account: Self::AccountId,
-        index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
-        wallet::transparent::ephemeral::get_known_ephemeral_addresses(
-            self.conn.borrow(),
-            &self.params,
-            account_id,
-            index_range,
-        )
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_ephemeral_address(
-        &self,
-        address: &TransparentAddress,
-    ) -> Result<Option<Self::AccountId>, Self::Error> {
-        wallet::transparent::ephemeral::find_account_for_ephemeral_address_str(
-            self.conn.borrow(),
-            &address.encode(&self.params),
-        )
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
@@ -1179,11 +1190,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         outpoint: &OutPoint,
         spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
-        wallet::transparent::get_wallet_transparent_output(
+        let result = wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             spendable_as_of,
-        )
+        )?
+        .map(|utxo| utxo.into_wallet_output());
+
+        Ok(result)
     }
 
     fn get_notes(
@@ -1228,10 +1242,38 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
         Ok(result)
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_known_ephemeral_addresses(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+        index_range: Option<Range<NonHardenedChildIndex>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
+        let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
+        wallet::transparent::ephemeral::get_known_ephemeral_addresses(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            account_id,
+            index_range,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<<Self as WalletRead>::AccountId>, <Self as WalletRead>::Error> {
+        wallet::transparent::ephemeral::find_account_for_ephemeral_address_str(
+            self.conn.borrow(),
+            &address.encode(&self.params),
+        )
+    }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R> WalletWrite
-    for WalletDb<C, P, CL, R>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    WalletWrite for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -1904,6 +1946,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 wallet::transparent::put_received_transparent_utxo(
                     wdb.conn.0,
                     &wdb.params,
+                    &wdb.gap_limits,
                     _output,
                 )?;
 
@@ -1950,7 +1993,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             for sent_tx in transactions {
-                wallet::store_transaction_to_be_sent(wdb.conn.0, &wdb.params, sent_tx)?;
+                wallet::store_transaction_to_be_sent(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    sent_tx,
+                )?;
             }
             Ok(())
         })
@@ -1994,7 +2043,34 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
+        self.transactionally(|wdb| {
+            wallet::set_transaction_status(
+                wdb.conn.0,
+                &wdb.params,
+                #[cfg(feature = "transparent-inputs")]
+                &wdb.gap_limits,
+                txid,
+                status,
+            )
+        })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn schedule_next_check(
+        &mut self,
+        address: &TransparentAddress,
+        offset_seconds: u32,
+    ) -> Result<Option<SystemTime>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::transparent::schedule_next_check(
+                wdb.conn.0,
+                &wdb.params,
+                wdb.clock,
+                &mut wdb.rng,
+                address,
+                offset_seconds,
+            )
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]

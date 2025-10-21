@@ -1039,20 +1039,43 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         ParamsT: consensus::Parameters,
         ChangeT: ChangeStrategy<MetaSource = Self::InputSource>,
     {
-        let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
-            .iter()
-            .map(|taddr| {
-                wallet_db.get_spendable_transparent_outputs(
-                    taddr,
-                    target_height,
-                    confirmations_policy,
-                )
-            })
-            .collect::<Result<Vec<Vec<_>>, _>>()
-            .map_err(InputSelectorError::DataSource)?
-            .into_iter()
-            .flat_map(|v| v.into_iter())
-            .collect();
+        let (mut transparent_inputs, _, _) = source_addrs.iter().try_fold(
+            (
+                vec![],
+                BTreeSet::<TransparentAddress>::new(),
+                BTreeSet::<TransparentAddress>::new(),
+            ),
+            |(mut inputs, mut ephemeral_addrs, mut input_addrs), taddr| {
+                use transparent::keys::TransparentKeyScope;
+
+                let utxos = wallet_db
+                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+                    .map_err(InputSelectorError::DataSource)?;
+
+                // `InputSource::get_spendable_transparent_outputs` is required to return
+                // outputs received by `taddr`, so these `.extend()` calls are guaranteed
+                // to add at most a single new address to each set. But it's more
+                // convenient this way as we can reuse `utxo.recipient_key_scope()`
+                // instead of needing to query the wallet twice for each address to
+                // determine their scopes.
+                ephemeral_addrs.extend(utxos.iter().filter_map(|utxo| {
+                    (utxo.recipient_key_scope() == Some(TransparentKeyScope::EPHEMERAL))
+                        .then_some(utxo.recipient_address())
+                }));
+                input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
+                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
+
+                // Funds may be spent from at most one ephemeral address at a time. If there are no
+                // ephemeral addresses, we allow shielding from multiple transparent addresses.
+                if !ephemeral_addrs.is_empty() && input_addrs.len() > 1 {
+                    Err(InputSelectorError::Proposal(
+                        ProposalError::EphemeralAddressLinkability,
+                    ))
+                } else {
+                    Ok((inputs, ephemeral_addrs, input_addrs))
+                }
+            },
+        )?;
 
         let wallet_meta = change_strategy
             .fetch_wallet_meta(wallet_db, to_account, target_height, &[])

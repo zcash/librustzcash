@@ -15,6 +15,16 @@ workspace.
 ### Added
 - `zcash_client_backend::tor::http::cryptex`:
     - `exchanges::{CoinEx, DigiFinex, Kraken, Xt}`
+- `zcash_client_backend::wallet::{Exposure, GapMetadata}`
+- `zcash_client_backend::wallet::TransparentAddressSource`
+- `zcash_client_backend::wallet::TransparentAddressMetadata::`
+    - `derived`
+    - `standalone`
+    - `exposure`
+    - `next_check_time`
+- `zcash_client_backend::data_api::WalletUtxo`
+- `zcash_client_backend::data_api::WalletTest::get_known_ephemeral_addresses`
+- `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
 
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
@@ -22,17 +32,54 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
-  - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}` 
+  - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}`
     each now take an additional `target_height` argument; spendability isn't a
     well-defined property in absence of target height information.
+  - The result types of `InputSource::get_unspent_transparent_output` and
+    `InputSource::get_unspent_transparent_outputs` have each changed; instead
+    of returning bare `WalletTransparentOutput`s, these now return `WalletUtxo`
+    values that include the `WalletTransparentOutput` data along with additional
+    derivation metadata.
+  - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
+  - The result type of `WalletRead::get_transparent_receivers` has changed. The
+    value type of the returned `HashMap` is now non-optional.
+  - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
+    has been removed. Implementers of `WalletRead` must provide their own
+    implementation.
+  - `WalletWrite` has added method `schedule_next_check`.
   - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
     instead of an `allow_unspendable` flag. See the method documentation for
     details.
 - `zcash_client_backend::fees::ChangeStrategy::fetch_wallet_meta` now takes
   an additional `target_height` argument.
+- Variants of `zcash_client_backend::proposal::ProposalError` have changed.
+  A new `EphemeralAddressLinkability` variant has been added, to represent
+  the case where a caller attempts to construct a shielding transaction that
+  would link an ephemeral address to any other transparent address in the wallet
+  on-chain.
+- `zcash_client_backend::wallet`:
+  - `TransparentAddressMetadata` has been converted from an enum to a struct
+    that contains both source metadata and information about when the address
+    was exposed by the wallet. The derivation information that this type
+    previously provided is now provided by `TranparentAddressSource`. As a
+    consequence of this change, the signature of
+    `TransparentAddressMetadata::new` has changed; use
+    `TransparentAddressMetadata::derived` instead.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
+- `zcash_client_backend::data_api`:
+  - `WalletRead::{get_known_ephemeral_addresses, find_account_for_ephemeral_address}`
+    have been removed. They were previously only used in tests and are not
+    well-designed for wallet use; replacements for use in tests have been added
+    to the `WalletTest` trait.
+- `zcash_client_backend::data_api::error::Error::PaysEphemeralTransparentAddress`
+  has been removed; the wallet no longer restricts the caller from constructing
+  payments to explicit ephemeral transparent addresses, in order to allow
+  for gap limit management operations to be performed by the wallet application.
+  If it is desired to maintain the previous policy of excluding explicit payments
+  to ephemeral addresses, call `get_transparent_address_metadata` on the address
+  and check whether its `scope` is `TransparentKeyScope::EPHEMERAL` if it is `Derived`.
 
 ## [0.20.0] - 2025-09-25
 

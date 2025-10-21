@@ -228,7 +228,7 @@ fn transparent_p2sh_multisig_to_orchard() {
     ];
     let redeem_script = script::Component(check_multisig(2, &pks, false).unwrap());
     let p2sh_addr = TransparentAddress::ScriptHash(
-        *ripemd::Ripemd160::digest(sha2::Sha256::digest(&redeem_script.to_bytes())).as_ref(),
+        *ripemd::Ripemd160::digest(sha2::Sha256::digest(redeem_script.to_bytes())).as_ref(),
     );
 
     // Create an Orchard account to receive funds.
