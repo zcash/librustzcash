@@ -2,11 +2,11 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
-use incrementalmerkletree::{Level, Position, frontier::Frontier};
+use incrementalmerkletree::{frontier::Frontier, Level, Position};
 use rand::{Rng, RngCore};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -16,40 +16,42 @@ use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::{
     block::BlockHash,
     transaction::{
-        Transaction,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
+        Transaction,
     },
 };
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
 
 use crate::{
     data_api::{
-        self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
         testing::{
-            AddressType, CacheInsertionResult, CachedBlock, FakeCompactOutput, InitialChainState,
-            TestBuilder, single_output_change_strategy,
+            single_output_change_strategy, AddressType, CacheInsertionResult, CachedBlock,
+            FakeCompactOutput, InitialChainState, TestBuilder,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, TargetHeight, TransferErrT,
         },
+        Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, MaxSpendMode,
+        NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletTest, WalletWrite,
     },
     decrypt_transaction,
     fees::{
-        self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
+        self,
         standard::{self, SingleOutputChangeStrategy},
+        DustOutputPolicy, SplitPolicy, StandardFeeRule,
     },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
@@ -72,7 +74,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_primitives::transaction::fees::zip317,
-    zcash_protocol::{TxId, value::ZatBalance},
+    zcash_protocol::{value::ZatBalance, TxId},
 };
 
 #[cfg(feature = "orchard")]
@@ -202,9 +204,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -388,9 +388,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     input_trust: InputTrust,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -489,9 +487,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -655,9 +651,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -811,9 +805,7 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     use crate::data_api::MaxSpendMode;
 
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -879,9 +871,7 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -961,9 +951,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1119,20 +1107,18 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
 /// This test attempts to send the max spendable funds to a TEX address recipient
 /// checks that the transactions were stored and that the amounts involved are correct
 #[cfg(feature = "transparent-inputs")]
-pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::data_api::{testing::transparent::GapLimits, MaxSpendMode, OutputOfSentTx};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .with_gap_limits(gap_limits)
         .build();
 
@@ -1140,7 +1126,7 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
@@ -1295,20 +1281,18 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
 /// This test attempts to send the max spendable funds to a TEX address recipient
 /// checks that the transactions were stored and that the amounts involved are correct
 #[cfg(feature = "transparent-inputs")]
-pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .with_gap_limits(gap_limits)
         .build();
 
@@ -1316,7 +1300,7 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
@@ -1468,21 +1452,19 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
 #[cfg(feature = "transparent-inputs")]
 pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     T: ShieldedPoolTester,
-    DSF,
+    Dsf,
 >(
-    ds_factory: DSF,
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::data_api::{testing::transparent::GapLimits, MaxSpendMode, OutputOfSentTx};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .with_gap_limits(gap_limits)
         .build();
 
@@ -1490,7 +1472,7 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
@@ -1647,9 +1629,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1827,24 +1807,21 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
-    is_reached_gap_limit: impl Fn(&<DSF::DataStore as WalletRead>::Error, DSF::AccountId, u32) -> bool,
+    is_reached_gap_limit: impl Fn(&<Dsf::DataStore as WalletRead>::Error, Dsf::AccountId, u32) -> bool,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
 {
     use crate::{
-        data_api::{OutputOfSentTx, TransactionStatus, testing::transparent::GapLimits},
+        data_api::{testing::transparent::GapLimits, OutputOfSentTx, TransactionStatus},
         wallet::{Exposure, TransparentAddressSource},
     };
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .with_gap_limits(gap_limits)
         .build();
 
@@ -1853,7 +1830,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let dfvk = T::test_account_fvk(&st);
     let tex_addr = Address::Tex([0x4; 20]);
 
-    let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
@@ -1871,7 +1848,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let value = Zatoshis::const_from_u64(100000);
     let transfer_amount = Zatoshis::const_from_u64(50000);
 
-    let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index, prior_balance| {
+    let run_test = |st: &mut TestState<_, Dsf::DataStore, _>, expected_index, prior_balance| {
         // Add funds to the wallet.
         add_funds(st, value);
         let initial_balance: Option<Zatoshis> = prior_balance + value;
@@ -2127,7 +2104,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         "new_known_addrs must have known_addrs as its prefix"
     );
 
-    let reservation_should_succeed = |st: &mut TestState<_, DSF::DataStore, _>, n: u32| {
+    let reservation_should_succeed = |st: &mut TestState<_, Dsf::DataStore, _>, n: u32| {
         let reserved = st
             .wallet_mut()
             .reserve_next_n_ephemeral_addresses(account_id, n.try_into().unwrap())
@@ -2136,7 +2113,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         reserved
     };
     let reservation_should_fail =
-        |st: &mut TestState<_, DSF::DataStore, _>, n: u32, expected_bad_index| {
+        |st: &mut TestState<_, Dsf::DataStore, _>, n: u32, expected_bad_index| {
             assert_matches!(st
             .wallet_mut()
             .reserve_next_n_ephemeral_addresses(account_id, n.try_into().unwrap()),
@@ -2195,9 +2172,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -2360,20 +2335,18 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
 /// - all funds are spent
 /// - Fees are the least possible: in this case 15000 for tr0 and 10000 Zats for tr1
 #[cfg(feature = "transparent-inputs")]
-pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .with_gap_limits(gap_limits)
         .build();
 
@@ -2523,23 +2496,21 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
+    Dsf: DataStoreFactory,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_, DSF::DataStore, _>, value| {
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
@@ -2609,12 +2580,11 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     );
 }
 
-pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: DataStoreFactory>(
-    ds_factory: DSF,
+pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, ())
         .build();
     let dfvk = T::test_account_fvk(&st);
     let to = T::fvk_default_address(&dfvk);
@@ -2623,7 +2593,7 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
     let acct1 = zip32::AccountId::try_from(1).unwrap();
     let usk1 = UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], acct1).unwrap();
 
-    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
@@ -2647,14 +2617,13 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
     );
 }
 
-pub fn proposal_fails_with_no_blocks<T: ShieldedPoolTester, DSF>(ds_factory: DSF)
+pub fn proposal_fails_with_no_blocks<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf)
 where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, ())
         .build();
 
     let account_id = st.test_account().unwrap().id();
@@ -2685,9 +2654,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -2879,9 +2846,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3021,16 +2986,14 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     );
 }
 
-pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
+    Dsf: DataStoreFactory,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3055,14 +3018,14 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
     let fee_rule = StandardFeeRule::Zip317;
 
     #[allow(clippy::type_complexity)]
-    let send_and_recover_with_policy = |st: &mut TestState<_, DSF::DataStore, _>,
+    let send_and_recover_with_policy = |st: &mut TestState<_, Dsf::DataStore, _>,
                                         ovk_policy|
      -> Result<
         Option<(Note, Address, MemoBytes)>,
         TransferErrT<
-            DSF::DataStore,
-            GreedyInputSelector<DSF::DataStore>,
-            SingleOutputChangeStrategy<DSF::DataStore>,
+            Dsf::DataStore,
+            GreedyInputSelector<Dsf::DataStore>,
+            SingleOutputChangeStrategy<Dsf::DataStore>,
         >,
     > {
         let proposal = st.propose_standard_transfer(
@@ -3120,9 +3083,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3170,9 +3131,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3403,12 +3362,12 @@ where
     );
 }
 
-pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::DataStore: Reset,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::DataStore: Reset,
 {
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -3519,14 +3478,12 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
 }
 
 #[allow(dead_code)]
-pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
-    ds_factory: DSF,
+pub fn zip317_spend<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3559,7 +3516,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         total
     );
 
-    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
@@ -3616,18 +3573,16 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn shield_transparent<T: ShieldedPoolTester, DSF>(ds_factory: DSF, cache: impl TestCache)
+pub fn shield_transparent<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
-    DSF: DataStoreFactory,
-    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3698,11 +3653,9 @@ where
     // Verify that a transaction enhancement request for the transaction containing the spent
     // outpoint does not yet exist.
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 
     // Use `decrypt_and_store_transaction` for the side effect of creating enhancement requests for
     // the transparent inputs of the transaction.
@@ -3716,11 +3669,9 @@ where
 
     // Verify that a transaction enhancement request for the received transaction was created
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 
     // Now advance the chain by 40 blocks; even though a record for the transaction that created
     // `spent_outpoint` exists in the wallet database, the transaction can't be enhanced because
@@ -3747,11 +3698,9 @@ where
 
     // Verify that the transaction enhancement request for the invalid txid has been deleted.
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 }
 
 // FIXME: This requires fixes to the test framework.
@@ -3875,14 +3824,12 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     assert_eq!(spendable.len(), 1);
 }
 
-pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
-    ds_factory: DSF,
+pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -3933,7 +3880,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     .unwrap();
     assert_eq!(spendable.len(), 1);
 
-    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let input_selector = GreedyInputSelector::<Dsf::DataStore>::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
@@ -3968,10 +3915,8 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
-        // activation after Sapling
+        .with_standard_sapling_account(ds_factory, cache)
+        // TODO: Allow for Orchard activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4060,10 +4005,8 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
-        // activation after Sapling
+        .with_standard_sapling_account(ds_factory, cache)
+        // TODO: Allow for Orchard activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4154,10 +4097,8 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
-        // activation after Sapling
+        .with_standard_sapling_account(ds_factory, cache)
+        // TODO: Allow for Orchard activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4248,10 +4189,8 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
-        // activation after Sapling
+        .with_standard_sapling_account(ds_factory, cache)
+        // TODO: Allow for Orchard activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4421,10 +4360,8 @@ pub fn multi_pool_checkpoints_with_pruning<P0: ShieldedPoolTester, P1: ShieldedP
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
-        // activation after Sapling
+        .with_standard_sapling_account(ds_factory, cache)
+        // TODO: Allow for Orchard activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4455,9 +4392,7 @@ pub fn valid_chain_states<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let dfvk = T::test_account_fvk(&st);
@@ -4493,9 +4428,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let dfvk = T::test_account_fvk(&st);
@@ -4546,15 +4479,13 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     );
 }
 
-pub fn data_db_truncation<T: ShieldedPoolTester, DSF>(ds_factory: DSF, cache: impl TestCache)
+pub fn data_db_truncation<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4611,23 +4542,21 @@ where
     );
 }
 
-pub fn reorg_to_checkpoint<T: ShieldedPoolTester, DSF, C>(ds_factory: DSF, cache: C)
+pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
     C: TestCache,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
 
     // Create a sequence of blocks to serve as the foundation of our chain state.
     let p0_fvk = T::random_fvk(st.rng_mut());
-    let gen_random_block = |st: &mut TestState<C, DSF::DataStore, LocalNetwork>,
+    let gen_random_block = |st: &mut TestState<C, Dsf::DataStore, LocalNetwork>,
                             output_count: usize| {
         let fake_outputs =
             std::iter::repeat_with(|| FakeCompactOutput::random(st.rng_mut(), p0_fvk.clone()))
@@ -4756,9 +4685,7 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4807,17 +4734,15 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     );
 }
 
-pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4857,17 +4782,15 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
 }
 
 // TODO: This test can probably be entirely removed, as the following test duplicates it entirely.
-pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4903,17 +4826,15 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     );
 }
 
-pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4952,18 +4873,16 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF
     );
 }
 
-pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
-    ds_factory: DSF,
+pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
+    ds_factory: Dsf,
     cache: TC,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
     TC: TestCache,
 {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -4981,7 +4900,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
     st.scan_cached_blocks(h0, 10);
     let target_height = TargetHeight::from(h0 + 10);
 
-    let test_meta = |st: &TestState<TC, DSF::DataStore, LocalNetwork>, query, expected_count| {
+    let test_meta = |st: &TestState<TC, Dsf::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
             .get_account_metadata(account.id(), &query, target_height, &[])
@@ -5040,12 +4959,12 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
 }
 
 #[cfg(feature = "pczt")]
-pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
-    ds_factory: DSF,
+pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
     cache: impl TestCache,
 ) where
-    DSF: DataStoreFactory,
-    <DSF as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
 {
     use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
 
@@ -5171,9 +5090,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
     use secrecy::ExposeSecret;
 
     let mut st = TestBuilder::new()
-        .with_data_store_factory(ds_factory)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(ds_factory, cache)
         .build();
 
     let seed = Secret::new(st.test_seed().unwrap().expose_secret().clone());
@@ -5324,9 +5241,7 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_standard_sapling_account(dsf, cache)
         .build();
 
     let account = st.test_account().cloned().unwrap();

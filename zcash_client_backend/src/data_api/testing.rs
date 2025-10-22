@@ -1468,6 +1468,27 @@ impl TestBuilder<(), ()> {
             gap_limits: None,
         }
     }
+
+    /// Equip the builder with the provided [`DataStoreFactory`] and [`TestCache`],
+    /// as well as an account that has a birthday at Sapling activation.
+    ///
+    /// Shorthand for the following:
+    /// ```rust,ignore
+    /// let mut st = TestBuilder::new()
+    ///     .with_data_store_factory(dsf)
+    ///     .with_block_cache(tc)
+    ///     .with_account_from_sapling_activation(BlockHash([0; 32]))
+    ///     .build();
+    /// ```
+    pub fn with_standard_sapling_account<Dsf: DataStoreFactory, Tc>(
+        self,
+        dsf: Dsf,
+        tc: Tc,
+    ) -> TestBuilder<Tc, Dsf> {
+        self.with_data_store_factory(dsf)
+            .with_block_cache(tc)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+    }
 }
 
 impl Default for TestBuilder<(), ()> {
@@ -1478,7 +1499,7 @@ impl Default for TestBuilder<(), ()> {
 
 impl<A> TestBuilder<(), A> {
     /// Adds a block cache to the test environment.
-    pub fn with_block_cache<C: TestCache>(self, cache: C) -> TestBuilder<C, A> {
+    pub fn with_block_cache<C>(self, cache: C) -> TestBuilder<C, A> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
