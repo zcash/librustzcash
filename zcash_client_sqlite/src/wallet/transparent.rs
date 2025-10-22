@@ -960,6 +960,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          JOIN addresses a ON a.id = u.address_id
          WHERE accounts.uuid = :account_uuid
          AND a.key_scope != :ephemeral_key_scope
+         AND u.value_zat > 0
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent",
         tx_unexpired_condition("t"),
@@ -998,6 +999,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
              JOIN addresses a ON a.id = u.address_id
              WHERE accounts.uuid = :account_uuid
              AND a.key_scope != :ephemeral_key_scope
+             AND u.value_zat > 0
              -- the transaction that created the output is mined or is definitely unexpired
              AND (
                  -- the transaction that created the output is mined with not enough confirmations
