@@ -896,6 +896,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
          WHERE u.address = :address
+         AND u.value_zat >= :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent",
         tx_unexpired_condition_minconf_0("t"),
@@ -916,6 +917,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":address": addr_str,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE)
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
@@ -1077,7 +1079,13 @@ pub(crate) fn add_transparent_account_balances(
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| bal.add_spendable_value(value))?;
+            .with_unshielded_balance_mut(|bal| {
+                if value >= zip317::MARGINAL_FEE {
+                    bal.add_spendable_value(value)
+                } else {
+                    bal.add_uneconomic_value(value)
+                }
+            })?;
     }
 
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
@@ -1123,7 +1131,13 @@ pub(crate) fn add_transparent_account_balances(
             account_balances
                 .entry(account)
                 .or_insert(AccountBalance::ZERO)
-                .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+                .with_unshielded_balance_mut(|bal| {
+                    if value >= zip317::MARGINAL_FEE {
+                        bal.add_pending_spendable_value(value)
+                    } else {
+                        bal.add_uneconomic_value(value)
+                    }
+                })?;
         }
     }
     Ok(())
