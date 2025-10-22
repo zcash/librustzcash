@@ -957,7 +957,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN addresses a ON a.id = u.address_id
          WHERE accounts.uuid = :account_uuid
+         AND a.key_scope != :ephemeral_key_scope
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent",
         tx_unexpired_condition("t"),
@@ -966,6 +968,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 
     let mut rows = stmt_address_balances.query(named_params![
         ":account_uuid": account_uuid.0,
+        ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
     ])?;
@@ -992,7 +995,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
+             JOIN addresses a ON a.id = u.address_id
              WHERE accounts.uuid = :account_uuid
+             AND a.key_scope != :ephemeral_key_scope
              -- the transaction that created the output is mined or is definitely unexpired
              AND (
                  -- the transaction that created the output is mined with not enough confirmations
@@ -1013,6 +1018,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 
         let mut rows = stmt_address_balances.query(named_params![
             ":account_uuid": account_uuid.0,
+            ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
             ":target_height": u32::from(target_height),
             ":min_confirmations": min_confirmations
         ])?;
