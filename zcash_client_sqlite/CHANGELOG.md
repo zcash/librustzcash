@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.8] - 2025-10-22
+
+### Fixed
+- Fixes a problem whereby dust-valued transparent outputs in the wallet could
+  disrupt shielding operations.
+- Fixes a bug wherein `WalletDb::get_transparent_balances` was returning
+  balance for ephemeral addresses, contradicting its documented requirements.
+
 ## [0.18.7] - 2025-10-16
 
 ### Fixed
