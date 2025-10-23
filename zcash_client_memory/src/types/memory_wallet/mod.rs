@@ -1038,6 +1038,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     }
 
     #[cfg(feature = "transparent-inputs")]
+    #[allow(unreachable_code, unused_variables)] //FIXME: need address key scope detection
     pub(crate) fn put_transparent_output(
         &mut self,
         output: &WalletTransparentOutput,
@@ -1088,6 +1089,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         };
 
         // insert into transparent_received_outputs table. Update if it exists
+        #[allow(clippy::diverging_sub_expression)] // FIXME
         match self
             .transparent_received_outputs
             .entry(output.outpoint().clone())
@@ -1103,6 +1105,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                     txid,
                     *receiving_account,
                     *address,
+                    todo!("look up the key scope for the address"),
                     output.txout().clone(),
                     max_observed_unspent.unwrap_or(BlockHeight::from(0)),
                 ));

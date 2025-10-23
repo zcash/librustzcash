@@ -33,7 +33,10 @@ use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
+    transparent::{
+        address::TransparentAddress,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
     zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
 };
@@ -271,7 +274,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         for (account, balance) in account_balances.iter_mut() {
             let transparent_balances =
                 self.get_transparent_balances(*account, target_height, confirmations_policy)?;
-            for (_, bal) in transparent_balances.into_iter() {
+            for (_, (_, bal)) in transparent_balances.into_iter() {
                 balance.with_unshielded_balance_mut(|b: &mut Balance| -> Result<(), Error> {
                     *b = (*b + bal)?;
                     Ok(())
@@ -683,7 +686,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         tracing::debug!("get_transparent_balances");
 
         let mut balances = HashMap::new();
@@ -699,10 +702,11 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         }) {
             if self.utxo_is_spendable(outpoint, target_height, confirmations_policy)? {
                 let address = txo.address;
-                balances
+                let entry = balances
                     .entry(address)
-                    .or_insert(Balance::ZERO)
-                    .add_spendable_value(txo.txout.value())?;
+                    .or_insert((txo.key_scope, Balance::ZERO));
+
+                entry.1.add_spendable_value(txo.txout.value())?;
             }
         }
 

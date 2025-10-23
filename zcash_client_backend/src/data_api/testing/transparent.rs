@@ -59,7 +59,7 @@ fn check_balance<DSF>(
             .unwrap()
             .get(taddr)
             .cloned()
-            .map_or(Zatoshis::ZERO, |b| b.spendable_value()),
+            .map_or(Zatoshis::ZERO, |(_, b)| b.spendable_value()),
         expected.total(),
     );
     assert_eq!(
@@ -170,7 +170,7 @@ where
             TargetHeight::from(height_2 + 1),
             ConfirmationsPolicy::MIN
         ),
-        Ok(h) if h.get(taddr).map(|b| b.spendable_value()) == Some(value)
+        Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
 }
 

@@ -43,6 +43,10 @@ workspace.
   - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
   - The result type of `WalletRead::get_transparent_receivers` has changed. The
     value type of the returned `HashMap` is now non-optional.
+  - The result type of `WalletRead::get_transparent_balances` has changed. The
+    key scope for the address must now be returned along with the balance. The
+    semantics of this method have been changed such that it may now return balance
+    received by ephemeral addresses.
   - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
     has been removed. Implementers of `WalletRead` must provide their own
     implementation.
