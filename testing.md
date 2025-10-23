@@ -11,6 +11,21 @@
 The following is a step-by-step analysis of each test function. I'm using this
 analysis to inform what abstractions to employ in the testing DSL.
 
+## TODO
+
+### Kris
+
+* Fee rule and change strategy should probably be part of the setup at this point; we basically only want to consider ZIP 317 fees.
+* In many cases, the proposal / creation / scan don't need to be separate operations, one function should do all 3.
+
+### str4d
+
+My ideal here is that the test DSL can express three high-level operations:
+* [x] Specify the initial state.
+* Verify the current state.
+* [x] Apply a state transition.
+and the second/third are repeated and interleaved for as many steps as it takes to test the functionality.
+
 ## Sandbox
 
 This section is a sandbox to gather code present in each test function (listed below) to analyze
