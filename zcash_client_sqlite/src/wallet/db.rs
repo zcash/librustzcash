@@ -876,21 +876,27 @@ pub(super) const VIEW_RECEIVED_OUTPUT_SPENDS: &str = "
 CREATE VIEW v_received_output_spends AS
 SELECT
     2 AS pool,
-    sapling_received_note_id AS received_output_id,
-    transaction_id
-FROM sapling_received_note_spends
+    s.sapling_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM sapling_received_note_spends s
+JOIN sapling_received_notes rn ON rn.id = s.sapling_received_note_id
 UNION
 SELECT
     3 AS pool,
-    orchard_received_note_id AS received_output_id,
-    transaction_id
-FROM orchard_received_note_spends
+    s.orchard_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM orchard_received_note_spends s
+JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
 UNION
 SELECT
     0 AS pool,
-    transparent_received_output_id AS received_output_id,
-    transaction_id
-FROM transparent_received_output_spends";
+    s.transparent_received_output_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM transparent_received_output_spends s
+JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id";
 
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS
