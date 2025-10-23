@@ -1,46 +1,670 @@
 # Testing DSL
 
-## Analysis of prior art
+<!--toc:start-->
+- [Testing DSL](#testing-dsl)
+  - [Analysis of prior art](#analysis-of-prior-art)
+    - [Sandbox](#sandbox)
+    - [Existing test functions](#existing-test-functions)
+    - [High level steps present in (nearly) all test functions](#high-level-steps-present-in-nearly-all-test-functions)
+<!--toc:end-->
 
 The following is a step-by-step analysis of each test function. I'm using this
 analysis to inform what abstractions to employ in the testing DSL.
 
-### High level steps present in (nearly) all test functions
+## Sandbox
 
- 1 Setup Test State:                                                                               
-    • This step is present in all functions. It involves initializing a test state with a data     
-      store factory and block cache, and setting up an account from the Sapling activation block.  
- 2 Add Funds:                                                                                      
-    • Most functions include a step to add funds to the wallet, either as a single note or multiple
-      notes.                                                                                       
- 3 Verify Initial Balance:                                                                         
-    • This step is common across functions to ensure that the total and spendable balances match   
-      the added value.                                                                             
- 4 Create Transaction Request:                                                                     
-    • Many functions involve constructing a transaction request to send a specified amount to an   
-      external address.                                                                            
- 5 Setup Fee and Change Strategy:                                                                  
-    • Defining the fee rule and change strategy for the transaction is a common step.              
- 6 Propose Transfer:                                                                               
-     • Proposing a transfer using the input selector and change strategy is a frequent action.     
-  7 Create Proposed Transactions:                                                                  
-     • Creating the proposed transactions and verifying that transaction IDs are returned is a     
-       common step.                                                                                
-  8 Verify Transaction Storage and Decryption:                                                     
-     • Checking that the transaction was stored and that the outputs are decryptable is a recurring
-       step.                                                                                       
-  9 Verify Memos:                                                                                  
-     • Ensuring that the correct memos are associated with the transaction outputs is often        
-       included.                                                                                   
- 10 Verify Sent Notes:                                                                             
-     • Confirming that the sent notes match the expected details is a common verification step.    
- 11 Verify Transaction History:                                                                    
-     • Checking that the transaction history matches the expected values is a frequent action.     
- 12 Decrypt and Store Transaction:                                                                 
-     • Ensuring that the transaction can be decrypted and stored successfully is a common final    
-       step.     
+This section is a sandbox to gather code present in each test function (listed below) to analyze
+and determine an appropriate abstraction.
 
-### Existing test functions
+The current effort is about discovering an abstraction for "Add Funds", which is described
+below in the [high level steps](#high-level-steps-present-in-nearly-all-test-functions).
+
+### send_single_step_proposed_transfer
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+
+### zip_315_confirmations_test_steps
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, address_type, starting_balance);
+st.scan_cached_blocks(h, 1);
+```
+### spend_max_spendable_single_step_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+let confirmation_policy = ConfirmationsPolicy::new_symmetrical(
+    NonZeroU32::new(2).expect("2 is not zero"),
+    #[cfg(feature = "transparent-inputs")]
+    false,
+);
+st.generate_empty_block();
+st.generate_empty_block();
+st.generate_empty_block();
+
+st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+st.scan_cached_blocks(h, 5);
+```
+### spend_everything_single_step_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### fails_to_send_max_spendable_to_transparent_with_memo
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### spend_everything_proposal_fails_when_unconfirmed_funds_present
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+st.generate_empty_block();
+st.generate_empty_block();
+let later_on_value = Zatoshis::const_from_u64(123456);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, later_on_value);
+st.scan_cached_blocks(h1, 4);
+```
+### send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+st.generate_empty_block();
+st.generate_empty_block();
+let later_on_value = Zatoshis::const_from_u64(123456);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, later_on_value);
+st.scan_cached_blocks(h1, 4);
+```
+
+### spend_everything_multi_step_single_note_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(100000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### spend_everything_multi_step_many_notes_proposed_transfer
+
+```rust
+// Add funds to the wallet in multiple notes
+let number_of_notes = 3u64;
+let note_value = Zatoshis::const_from_u64(100000);
+let value = (note_value * number_of_notes).unwrap();
+
+for _ in 0..number_of_notes {
+    add_funds(&mut st, note_value);
+}
+```
+### spend_everything_multi_step_with_marginal_notes_proposed_transfer
+
+```rust
+// Add funds to the wallet in multiple notes
+let number_of_notes = 10u64;
+let note_value = Zatoshis::const_from_u64(100000);
+let non_marginal_notes_value =
+    (note_value * number_of_notes).expect("sum of notes should not fail.");
+
+for _ in 0..number_of_notes {
+    add_funds(&mut st, note_value);
+    add_funds(&mut st, zip317::MARGINAL_FEE);
+}
+```
+### send_with_multiple_change_outputs
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(650_0000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### send_multi_step_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(100000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### spend_all_funds_single_step_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(60000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### spend_all_funds_multi_step_proposed_transfer
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(100000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### proposal_fails_if_not_all_ephemeral_outputs_consumed
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(100000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### create_to_address_fails_on_incorrect_usk
+
+```rust
+// No funds added in this function
+```
+### proposal_fails_with_no_blocks
+
+```rust
+// No funds added in this function
+```
+### spend_fails_on_unverified_notes
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(50000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h1, 1);
+```
+
+```rust
+// Add more funds to the wallet
+let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h2, 1);
+```
+### spend_fails_on_locked_notes
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(50000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h1, 1);
+```
+### ovk_policy_prevents_recovery_from_chain
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(50000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h1, 1);
+```
+### spend_succeeds_to_t_addr_zero_change
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(70000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### change_note_spends_succeed
+
+```rust
+// Add funds to the wallet in a single note owned by the internal spending key
+let value = Zatoshis::const_from_u64(70000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
+st.scan_cached_blocks(h, 1);
+```
+### external_address_change_spends_detected_in_restore_from_seed
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::from_u64(100000).unwrap();
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h, 1);
+```
+### zip317_spend
+
+```rust
+// Add funds to the wallet
+let (h1, _, _) = st.generate_next_block(
+    &dfvk,
+    AddressType::Internal,
+    Zatoshis::const_from_u64(50000),
+);
+
+// Add 10 dust notes to the wallet
+for _ in 1..=10 {
+    st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(1000),
+    );
+}
+
+st.scan_cached_blocks(h1, 11);
+```
+### shield_transparent
+
+```rust
+// Add funds to the wallet in a single note
+let value = Zatoshis::const_from_u64(50000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
+st.scan_cached_blocks(h, 1);
+```
+### birthday_in_anchor_shard
+
+```rust
+// Generate blocks with and without value for the wallet
+let not_our_value = Zatoshis::const_from_u64(10000);
+let not_our_key = T::random_fvk(st.rng_mut());
+let (initial_height, _, _) =
+    st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+for _ in 1..9 {
+    st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+}
+
+// Now, generate a block that belongs to our wallet
+let (received_tx_height, _, _) = st.generate_next_block(
+    &T::test_account_fvk(&st),
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(500000),
+);
+
+// Generate some more blocks to get above our anchor height
+for _ in 0..15 {
+    st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+}
+```
+### checkpoint_gaps
+
+```rust
+// Generate a block with funds belonging to our wallet.
+st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(500000),
+);
+st.scan_cached_blocks(account.birthday().height(), 1);
+
+// Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
+// belong to us so that we can get a checkpoint in the tree.
+let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+let not_our_value = Zatoshis::const_from_u64(10000);
+st.generate_block_at(
+    account.birthday().height() + 10,
+    BlockHash([0; 32]),
+    &[FakeCompactOutput::new(
+        &not_our_key,
+        AddressType::DefaultExternal,
+        not_our_value,
+    )],
+    st.latest_cached_block().unwrap().sapling_end_size(),
+    st.latest_cached_block().unwrap().orchard_end_size(),
+    false,
+);
+
+// Scan the block
+st.scan_cached_blocks(account.birthday().height() + 10, 1);
+```
+### pool_crossing_required
+
+```rust
+// Add funds to the wallet in a single note
+let note_value = Zatoshis::const_from_u64(350000);
+st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.scan_cached_blocks(account.birthday().height(), 2);
+```
+### fully_funded_fully_private
+
+```rust
+// Add funds to the wallet in multiple notes
+let note_value = Zatoshis::const_from_u64(350000);
+st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+st.scan_cached_blocks(account.birthday().height(), 2);
+```
+### fully_funded_send_to_t
+
+```rust
+// Add funds to the wallet in multiple notes
+let note_value = Zatoshis::const_from_u64(350000);
+st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+st.scan_cached_blocks(account.birthday().height(), 2);
+```
+### multi_pool_checkpoint
+
+```rust
+// Add funds to the wallet in multiple notes
+let note_value = Zatoshis::const_from_u64(500000);
+let (start_height, _, _) =
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+let scanned = st.scan_cached_blocks(start_height, 3);
+```
+### multi_pool_checkpoints_with_pruning
+
+```rust
+// Generate blocks with and without value for the wallet
+let note_value = Zatoshis::const_from_u64(10000);
+// Generate 100 P0 blocks, then 100 P1 blocks, then another 100 P0 blocks.
+for _ in 0..10 {
+    for _ in 0..10 {
+        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    }
+    for _ in 0..10 {
+        st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    }
+}
+st.scan_cached_blocks(account.birthday().height(), 200);
+for _ in 0..100 {
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+}
+st.scan_cached_blocks(account.birthday().height() + 200, 200);
+```
+### valid_chain_states
+
+```rust
+// Create a fake CompactBlock sending value to the address
+let (h1, _, _) = st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(5),
+);
+
+// Scan the cache
+st.scan_cached_blocks(h1, 1);
+
+// Create a second fake CompactBlock sending more value to the address
+let (h2, _, _) = st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(7),
+);
+
+// Scanning should detect no inconsistencies
+st.scan_cached_blocks(h2, 1);
+```
+### invalid_chain_cache_disconnected
+
+```rust
+// Create some fake CompactBlocks
+let (h, _, _) = st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(5),
+);
+let (last_contiguous_height, _, _) = st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(7),
+);
+
+// Scanning the cache should find no inconsistencies
+st.scan_cached_blocks(h, 2);
+
+// Create more fake CompactBlocks that don't connect to the scanned ones
+let disconnect_height = last_contiguous_height + 1;
+st.generate_block_at(
+    disconnect_height,
+    BlockHash([1; 32]),
+    &[FakeCompactOutput::new(
+        &dfvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(8),
+    )],
+    2,
+    2,
+    true,
+);
+st.generate_next_block(
+    &dfvk,
+    AddressType::DefaultExternal,
+    Zatoshis::const_from_u64(3),
+);
+```
+### data_db_truncation
+
+```rust
+// Create fake CompactBlocks sending value to the address
+let value = Zatoshis::const_from_u64(50000);
+let value2 = Zatoshis::const_from_u64(70000);
+let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+
+// Scan the cache
+st.scan_cached_blocks(h, 2);
+```
+### reorg_to_checkpoint
+
+```rust
+// Create a sequence of blocks to serve as the foundation of our chain state.
+let p0_fvk = T::random_fvk(st.rng_mut());
+let gen_random_block = |st: &mut TestState<C, Dsf::DataStore, LocalNetwork>,
+                        output_count: usize| {
+    let fake_outputs =
+        std::iter::repeat_with(|| FakeCompactOutput::random(st.rng_mut(), p0_fvk.clone()))
+            .take(output_count)
+            .collect::<Vec<_>>();
+    st.generate_next_block_multi(&fake_outputs[..]);
+    output_count
+};
+
+// The stable portion of the tree will contain 20 notes.
+for _ in 0..10 {
+    gen_random_block(&mut st, 4);
+}
+
+// We will reorg to this height.
+let reorg_height = account.birthday().height() + 4;
+let reorg_position = Position::from(19);
+
+// Scan the first 5 blocks. The last block in this sequence will be where we simulate a
+// reorg.
+st.scan_cached_blocks(account.birthday().height(), 5);
+```
+### scan_cached_blocks_allows_blocks_out_of_order
+
+```rust
+// Create blocks with value for the wallet
+let value = Zatoshis::const_from_u64(50000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+st.scan_cached_blocks(h1, 1);
+assert_eq!(st.get_total_balance(account.id()), value);
+
+// Create blocks to reach height + 2
+let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+// Scan the later block first
+st.scan_cached_blocks(h3, 1);
+
+// Now scan the block of height height + 1
+st.scan_cached_blocks(h2, 1);
+assert_eq!(
+    st.get_total_balance(account.id()),
+    Zatoshis::const_from_u64(150_000)
+);
+```
+### scan_cached_blocks_finds_received_notes
+
+```rust
+// Create a fake CompactBlock sending value to the address
+let value = Zatoshis::const_from_u64(50000);
+let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+// Scan the cache
+let summary = st.scan_cached_blocks(h1, 1);
+assert_eq!(summary.scanned_range().start, h1);
+assert_eq!(summary.scanned_range().end, h1 + 1);
+assert_eq!(T::received_note_count(&summary), 1);
+
+// Account balance should reflect the received note
+assert_eq!(st.get_total_balance(account.id()), value);
+
+// Create a second fake CompactBlock sending more value to the address
+let value2 = Zatoshis::const_from_u64(70000);
+let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+
+// Scan the cache again
+let summary = st.scan_cached_blocks(h2, 1);
+assert_eq!(summary.scanned_range().start, h2);
+assert_eq!(summary.scanned_range().end, h2 + 1);
+assert_eq!(T::received_note_count(&summary), 1);
+
+// Account balance should reflect both received notes
+assert_eq!(
+    st.get_total_balance(account.id()),
+    (value + value2).unwrap()
+);
+```
+### scan_cached_blocks_finds_change_notes
+
+```rust
+// Create a fake CompactBlock sending value to the address
+let value = Zatoshis::const_from_u64(50000);
+let (received_height, _, nf) =
+    st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+// Scan the cache
+st.scan_cached_blocks(received_height, 1);
+
+// Account balance should reflect the received note
+assert_eq!(st.get_total_balance(account.id()), value);
+
+// Create a second fake CompactBlock spending value from the address
+let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+let to2 = T::fvk_default_address(&not_our_key);
+let value2 = Zatoshis::const_from_u64(20000);
+let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+
+// Scan the cache again
+st.scan_cached_blocks(spent_height, 1);
+
+// Account balance should equal the change
+assert_eq!(
+    st.get_total_balance(account.id()),
+    (value - value2).unwrap()
+);
+```
+### scan_cached_blocks_detects_spends_out_of_order
+
+```rust
+// Create a fake CompactBlock sending value to the address
+let value = Zatoshis::const_from_u64(50000);
+let (received_height, _, nf) =
+    st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+// Create a second fake CompactBlock spending value from the address
+let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+let to2 = T::fvk_default_address(&not_our_key);
+let value2 = Zatoshis::const_from_u64(20000);
+let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+
+// Scan the spending block first.
+st.scan_cached_blocks(spent_height, 1);
+
+// Account balance should equal the change
+assert_eq!(
+    st.get_total_balance(account.id()),
+    (value - value2).unwrap()
+);
+
+// Now scan the block in which we received the note that was spent.
+st.scan_cached_blocks(received_height, 1);
+
+// Account balance should be the same.
+assert_eq!(
+    st.get_total_balance(account.id()),
+    (value - value2).unwrap()
+);
+```
+### metadata_queries_exclude_unwanted_notes
+
+```rust
+// Create blocks with value for the wallet
+let value = Zatoshis::const_from_u64(100_0000);
+let (h0, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+let mut note_values = vec![value];
+for i in 2..=10 {
+    let value = Zatoshis::const_from_u64(i * 100_0000);
+    st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    note_values.push(value);
+}
+st.scan_cached_blocks(h0, 10);
+let target_height = TargetHeight::from(h0 + 10);
+```
+### pczt_single_step
+
+```rust
+// Add funds to the wallet in a single note
+let note_value = Zatoshis::const_from_u64(350000);
+st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+st.scan_cached_blocks(account.birthday().height(), 1);
+```
+### wallet_recovery_computes_fees
+
+```rust
+// Get some funds in the source account
+let note_value = Zatoshis::const_from_u64(350000);
+st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+st.scan_cached_blocks(source_account.birthday().height(), 2);
+```
+### receive_two_notes_with_same_value
+
+```rust
+// Add funds to the wallet in two identical notes
+let value = Zatoshis::const_from_u64(60000);
+let outputs = [
+    FakeCompactOutput::new(&dfvk, AddressType::DefaultExternal, value),
+    FakeCompactOutput::new(&dfvk, AddressType::DefaultExternal, value),
+];
+let total_value = (value + value).unwrap;
+
+// `st.generate_next_block` with multiple outputs.
+let pre_activation_block = CachedBlock::none(st.sapling_activation_height() - 1);
+let prior_cached_block = st.latest_cached_block().unwrap_or(&pre_activation_block);
+let h = prior_cached_block.height() + 1;
+st.generate_block_at(
+    h,
+    prior_cached_block.chain_state.block_hash(),
+    &outputs,
+    prior_cached_block.sapling_end_size,
+    prior_cached_block.orchard_end_size,
+    false,
+);
+
+st.scan_cached_blocks(h, 1);
+assert_eq!(
+    st.wallet()
+        .block_max_scanned()
+        .unwrap()
+        .unwrap()
+        .block_height(),
+    h
+);
+```
+
+## Existing test functions
+
+This is a list of the test functions that the DSL will pertain to.
 
 ```yaml
 - send_single_step_proposed_transfer
@@ -88,6 +712,41 @@ analysis to inform what abstractions to employ in the testing DSL.
 - wallet_recovery_computes_fees
 - receive_two_notes_with_same_value
 ```
+
+## High level steps present in (nearly) all test functions
+
+ 1 Setup Test State:                                                                               
+    • This step is present in all functions. It involves initializing a test state with a data     
+      store factory and block cache, and setting up an account from the Sapling activation block.  
+ 2 Add Funds:                                                                                      
+    • Most functions include a step to add funds to the wallet, either as a single note or multiple
+      notes.                                                                                       
+ 3 Verify Initial Balance:                                                                         
+    • This step is common across functions to ensure that the total and spendable balances match   
+      the added value.                                                                             
+ 4 Create Transaction Request:                                                                     
+    • Many functions involve constructing a transaction request to send a specified amount to an   
+      external address.                                                                            
+ 5 Setup Fee and Change Strategy:                                                                  
+    • Defining the fee rule and change strategy for the transaction is a common step.              
+ 6 Propose Transfer:                                                                               
+     • Proposing a transfer using the input selector and change strategy is a frequent action.     
+  7 Create Proposed Transactions:                                                                  
+     • Creating the proposed transactions and verifying that transaction IDs are returned is a     
+       common step.                                                                                
+  8 Verify Transaction Storage and Decryption:                                                     
+     • Checking that the transaction was stored and that the outputs are decryptable is a recurring
+       step.                                                                                       
+  9 Verify Memos:                                                                                  
+     • Ensuring that the correct memos are associated with the transaction outputs is often        
+       included.                                                                                   
+ 10 Verify Sent Notes:                                                                             
+     • Confirming that the sent notes match the expected details is a common verification step.    
+ 11 Verify Transaction History:                                                                    
+     • Checking that the transaction history matches the expected values is a frequent action.     
+ 12 Decrypt and Store Transaction:                                                                 
+     • Ensuring that the transaction can be decrypted and stored successfully is a common final    
+       step.     
 
 Function: send_single_step_proposed_transfer                                                       
 
