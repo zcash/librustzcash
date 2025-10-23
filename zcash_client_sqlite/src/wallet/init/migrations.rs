@@ -39,6 +39,7 @@ mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
+mod v_received_output_spends_account;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_additional_totals;
 mod v_transactions_net;
@@ -119,8 +120,10 @@ pub(super) fn all_migrations<
     //                                `---- fix_transparent_received_outputs --'
     //                                        /         |               \
     //                 support_zcashd_wallet_import     |            fix_v_transactions_expired_unmined
-    //                                                  |                            |
-    //                                       tx_observation_height        v_tx_outputs_return_addrs
+    //                                                  |                      /         \
+    //                                       tx_observation_height            /           \
+    //                                                                       /             \
+    //                                            v_received_output_spends_account    v_tx_outputs_return_addrs
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -202,6 +205,7 @@ pub(super) fn all_migrations<
         Box::new(tx_observation_height::Migration {
             params: params.clone(),
         }),
+        Box::new(v_received_output_spends_account::Migration),
     ]
 }
 
@@ -344,6 +348,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     support_zcashd_wallet_import::MIGRATION_ID,
     v_tx_outputs_return_addrs::MIGRATION_ID,
     tx_observation_height::MIGRATION_ID,
+    v_received_output_spends_account::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
