@@ -12,15 +12,20 @@ workspace.
 
 ### Added
 - `zcash_transparent::address::TransparentAddress::to_zcash_address`
-- `zcash_transparent::builder`:
-  - `TransparentBuilder::add_p2sh_input` (only for use in combination with
-    `TransparentBuilder::build_for_pczt`).
-  - `TransparentInputInfo::serialized_len`
 - `zcash_transparent::pczt`:
   - `Bip32Derivation::extract_zip_48_fields`
 - `zcash_transparent::zip48` module.
 
+## [0.6.0] - 2025-10-02
+
+### Added
+- `zcash_transparent::builder`:
+  - `TransparentBuilder::add_p2sh_input` (only for use in combination with
+    `TransparentBuilder::build_for_pczt`).
+  - `TransparentInputInfo::serialized_len`
+
 ### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`
 - `zcash_transparent::pczt`:
   - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
     signing key is not involved with the input in any way we can detect.

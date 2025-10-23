@@ -896,7 +896,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
+        wallet::get_tx_height(self.conn.borrow(), txid)
     }
 
     fn get_unified_full_viewing_keys(

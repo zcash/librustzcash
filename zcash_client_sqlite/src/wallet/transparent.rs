@@ -804,9 +804,8 @@ pub(crate) fn get_wallet_transparent_output(
              OR (
                  (
                     t.mined_height IS NOT NULL -- tx is mined
-                    -- TODO: uncomment the following two lines in order to enable zero-conf spends
-                    -- OR t.expiry_height = 0 -- tx will not expire
-                    -- OR t.expiry_height >= :mempool_height -- tx has not yet expired
+                    OR t.expiry_height = 0 -- tx will not expire
+                    OR t.expiry_height >= :mempool_height -- tx has not yet expired
                  )
                  -- and the output is unspent
                  AND u.id NOT IN (
