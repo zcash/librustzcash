@@ -405,6 +405,8 @@ jobs:
   clippy:
     name: Clippy (MSRV)
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -412,19 +414,21 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Run clippy
-        uses: actions-rs/clippy-check@v1
+        uses: auguwu/clippy-action@94a9ff2f6920180b89e5c03d121d0af04a9d3e03 # 1.4.0
         with:
-          name: Clippy (MSRV)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: >
-            ${{ steps.prepare.outputs.feature-flags }}
+          working-directory: ${{ inputs.target }}
+          check-args: >
+            --all-features
             --all-targets
-            --
+          args: >
             -D warnings
 
   clippy-beta:
     name: Clippy (beta)
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
@@ -441,14 +445,14 @@ jobs:
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
-        uses: actions-rs/clippy-check@v1
+        uses: auguwu/clippy-action@94a9ff2f6920180b89e5c03d121d0af04a9d3e03 # 1.4.0
         with:
-          name: Clippy (beta)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: >
-            ${{ steps.prepare.outputs.feature-flags }}
+          working-directory: ${{ inputs.target }}
+          check-args: >
+            --all-features
             --all-targets
-            --
+          args: >
             -W clippy::all
 
   codecov:
@@ -486,6 +490,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
+  # docs.rs and in `.github/workflows/book.yml` as closely as possible.
   doc-links:
     name: Intra-doc links
     runs-on: ubuntu-latest
@@ -495,14 +501,22 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: dtolnay/rust-toolchain@nightly
+        id: toolchain
+      - run: rustup override set "${TOOLCHAIN}"
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - run: cargo fetch
       # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
         run: >
           cargo doc
-          --all
+          --no-deps
+          --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --document-private-items
+        env:
+          RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
 
   fmt:
     name: Rustfmt

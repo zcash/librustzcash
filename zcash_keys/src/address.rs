@@ -392,7 +392,8 @@ impl Address {
     /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
     ///
     /// Returns `None` if any error is encountered in decoding. Use
-    /// [`Self::try_from_zcash_address(s.parse()?)?`] if you need detailed error information.
+    /// [`Self::try_from_zcash_address`] passing in `s.parse()?` if you need detailed
+    /// error information.
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
     }

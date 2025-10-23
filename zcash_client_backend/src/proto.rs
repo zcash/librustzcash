@@ -60,11 +60,8 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.header`] is not set and
-    /// [`CompactBlock.hash`] is not exactly 32 bytes.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
-    /// [`CompactBlock.hash`]: #structfield.hash
+    /// This function will panic if [`field@Self::header`] is not set and
+    /// [`field@Self::hash`] is not exactly 32 bytes.
     pub fn hash(&self) -> BlockHash {
         if let Some(header) = self.header() {
             header.hash()
@@ -77,11 +74,8 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.header`] is not set and
-    /// [`CompactBlock.prevHash`] is not exactly 32 bytes.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
-    /// [`CompactBlock.prevHash`]: #structfield.prevHash
+    /// This function will panic if [`field@Self::header`] is not set and
+    /// [`field@Self::prev_hash`] is not exactly 32 bytes.
     pub fn prev_hash(&self) -> BlockHash {
         if let Some(header) = self.header() {
             header.prev_block
@@ -94,17 +88,15 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.height`] is not
-    /// representable within a u32.
+    /// This function will panic if [`field@Self::height`] is not representable within a
+    /// `u32`.
     pub fn height(&self) -> BlockHeight {
         self.height.try_into().unwrap()
     }
 
     /// Returns the [`BlockHeader`] for this block if present.
     ///
-    /// A convenience method that parses [`CompactBlock.header`] if present.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
+    /// A convenience method that parses [`field@Self::header`] if present.
     pub fn header(&self) -> Option<BlockHeader> {
         if self.header.is_empty() {
             None
@@ -126,9 +118,7 @@ impl compact_formats::CompactTx {
 impl compact_formats::CompactSaplingOutput {
     /// Returns the note commitment for this output.
     ///
-    /// A convenience method that parses [`CompactOutput.cmu`].
-    ///
-    /// [`CompactOutput.cmu`]: #structfield.cmu
+    /// A convenience method that parses [`field@Self::cmu`].
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
         repr.copy_from_slice(&self.cmu[..]);
@@ -137,9 +127,7 @@ impl compact_formats::CompactSaplingOutput {
 
     /// Returns the ephemeral public key for this output.
     ///
-    /// A convenience method that parses [`CompactOutput.epk`].
-    ///
-    /// [`CompactOutput.epk`]: #structfield.epk
+    /// A convenience method that parses [`field@Self::ephemeral_key`].
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
         self.ephemeral_key[..]
             .try_into()
@@ -187,6 +175,9 @@ impl TryFrom<&compact_formats::CompactSaplingOutput>
 }
 
 impl compact_formats::CompactSaplingSpend {
+    /// Returns the nullifier for this spend.
+    ///
+    /// A convenience method that parses [`field@Self::nf`].
     pub fn nf(&self) -> Result<sapling::Nullifier, ()> {
         sapling::Nullifier::from_slice(&self.nf).map_err(|_| ())
     }
@@ -210,9 +201,7 @@ impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryptio
 impl compact_formats::CompactOrchardAction {
     /// Returns the note commitment for the output of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.cmx`].
-    ///
-    /// [`CompactOrchardAction.cmx`]: #structfield.cmx
+    /// A convenience method that parses [`field@Self::cmx`].
     pub fn cmx(&self) -> Result<orchard::note::ExtractedNoteCommitment, ()> {
         Option::from(orchard::note::ExtractedNoteCommitment::from_bytes(
             &self.cmx[..].try_into().map_err(|_| ())?,
@@ -222,9 +211,7 @@ impl compact_formats::CompactOrchardAction {
 
     /// Returns the nullifier for the spend of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.nullifier`].
-    ///
-    /// [`CompactOrchardAction.nullifier`]: #structfield.nullifier
+    /// A convenience method that parses [`field@Self::nullifier`].
     pub fn nf(&self) -> Result<orchard::note::Nullifier, ()> {
         let nf_bytes: [u8; 32] = self.nullifier[..].try_into().map_err(|_| ())?;
         Option::from(orchard::note::Nullifier::from_bytes(&nf_bytes)).ok_or(())
@@ -232,9 +219,7 @@ impl compact_formats::CompactOrchardAction {
 
     /// Returns the ephemeral public key for the output of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.ephemeral_key`].
-    ///
-    /// [`CompactOrchardAction.ephemeral_key`]: #structfield.ephemeral_key
+    /// A convenience method that parses [`field@Self::ephemeral_key`].
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
         self.ephemeral_key[..]
             .try_into()
@@ -281,7 +266,7 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.sapling_activation_height` is not
+    /// This function will panic if [`field@Self::sapling_activation_height`] is not
     /// representable within a `u32`.
     pub fn sapling_activation_height(&self) -> BlockHeight {
         self.sapling_activation_height
@@ -305,8 +290,8 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.block_height` is not representable within
-    /// a `u32`.
+    /// This function will panic if [`field@Self::block_height`] is not representable
+    /// within a `u32`.
     pub fn block_height(&self) -> BlockHeight {
         self.block_height
             .try_into()
@@ -320,7 +305,7 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.estimated_height` is not representable
+    /// This function will panic if [`field@Self::estimated_height`] is not representable
     /// within a `u32`.
     pub fn estimated_height(&self) -> BlockHeight {
         self.estimated_height
