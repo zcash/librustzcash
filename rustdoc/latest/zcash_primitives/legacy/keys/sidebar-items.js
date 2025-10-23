@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["AccountPrivKey","AccountPubKey","EphemeralIvk","ExternalIvk","ExternalOvk","InternalIvk","InternalOvk","NonHardenedChildIndex","NonHardenedChildIter","NonHardenedChildRange","TransparentKeyScope"],"trait":["IncomingViewingKey"]};

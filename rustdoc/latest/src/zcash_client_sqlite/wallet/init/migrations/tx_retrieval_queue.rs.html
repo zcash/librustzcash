@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/tx_retrieval_queue.rs`."><title>tx_retrieval_queue.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>tx_retrieval_queue.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/tx_retrieval_queue.rs`."><title>tx_retrieval_queue.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>tx_retrieval_queue.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>rusqlite::{named_params, Transaction};
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
@@ -255,7 +255,7 @@
 <a href=#255 id=255 data-nosnippet>255</a>            <span class="comment">// queue the transparent inputs for enhancement
 <a href=#256 id=256 data-nosnippet>256</a>            </span>queue_tx_retrieval(
 <a href=#257 id=257 data-nosnippet>257</a>                conn,
-<a href=#258 id=258 data-nosnippet>258</a>                b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout.txid()),
+<a href=#258 id=258 data-nosnippet>258</a>                b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout().txid()),
 <a href=#259 id=259 data-nosnippet>259</a>                <span class="prelude-val">Some</span>(tx_ref),
 <a href=#260 id=260 data-nosnippet>260</a>            )<span class="question-mark">?</span>;
 <a href=#261 id=261 data-nosnippet>261</a>        }
@@ -387,28 +387,29 @@
 <a href=#387 id=387 data-nosnippet>387</a>            BranchId::Nu5,
 <a href=#388 id=388 data-nosnippet>388</a>            <span class="number">0</span>,
 <a href=#389 id=389 data-nosnippet>389</a>            <span class="number">12345678</span>.into(),
-<a href=#390 id=390 data-nosnippet>390</a>            <span class="prelude-val">Some</span>(transparent::bundle::Bundle {
-<a href=#391 id=391 data-nosnippet>391</a>                vin: <span class="macro">vec!</span>[TxIn {
-<a href=#392 id=392 data-nosnippet>392</a>                    prevout: OutPoint::fake(),
-<a href=#393 id=393 data-nosnippet>393</a>                    script_sig: Script(<span class="macro">vec!</span>[]),
-<a href=#394 id=394 data-nosnippet>394</a>                    sequence: <span class="number">0</span>,
-<a href=#395 id=395 data-nosnippet>395</a>                }],
-<a href=#396 id=396 data-nosnippet>396</a>                vout: <span class="macro">vec!</span>[TxOut {
-<a href=#397 id=397 data-nosnippet>397</a>                    value: Zatoshis::const_from_u64(<span class="number">10_000</span>),
-<a href=#398 id=398 data-nosnippet>398</a>                    script_pubkey: TransparentAddress::PublicKeyHash([<span class="number">7</span>; <span class="number">20</span>]).script(),
-<a href=#399 id=399 data-nosnippet>399</a>                }],
-<a href=#400 id=400 data-nosnippet>400</a>                authorization: transparent::bundle::Authorized,
-<a href=#401 id=401 data-nosnippet>401</a>            }),
-<a href=#402 id=402 data-nosnippet>402</a>            <span class="prelude-val">None</span>,
+<a href=#390 id=390 data-nosnippet>390</a>            <span class="attr">#[cfg(all(
+<a href=#391 id=391 data-nosnippet>391</a>                any(zcash_unstable = <span class="string">"nu7"</span>, zcash_unstable = <span class="string">"zfuture"</span>),
+<a href=#392 id=392 data-nosnippet>392</a>                feature = <span class="string">"zip-233"
+<a href=#393 id=393 data-nosnippet>393</a>            </span>))]
+<a href=#394 id=394 data-nosnippet>394</a>            </span>Zatoshis::ZERO,
+<a href=#395 id=395 data-nosnippet>395</a>            <span class="prelude-val">Some</span>(transparent::bundle::Bundle {
+<a href=#396 id=396 data-nosnippet>396</a>                vin: <span class="macro">vec!</span>[TxIn::from_parts(OutPoint::fake(), Script::default(), <span class="number">0</span>)],
+<a href=#397 id=397 data-nosnippet>397</a>                vout: <span class="macro">vec!</span>[TxOut::new(
+<a href=#398 id=398 data-nosnippet>398</a>                    Zatoshis::const_from_u64(<span class="number">10_000</span>),
+<a href=#399 id=399 data-nosnippet>399</a>                    TransparentAddress::PublicKeyHash([<span class="number">7</span>; <span class="number">20</span>]).script().into(),
+<a href=#400 id=400 data-nosnippet>400</a>                )],
+<a href=#401 id=401 data-nosnippet>401</a>                authorization: transparent::bundle::Authorized,
+<a href=#402 id=402 data-nosnippet>402</a>            }),
 <a href=#403 id=403 data-nosnippet>403</a>            <span class="prelude-val">None</span>,
 <a href=#404 id=404 data-nosnippet>404</a>            <span class="prelude-val">None</span>,
-<a href=#405 id=405 data-nosnippet>405</a>        ));
-<a href=#406 id=406 data-nosnippet>406</a>
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="comment">// Check that we can apply this migration.
-<a href=#408 id=408 data-nosnippet>408</a>        </span>WalletMigrator::new()
-<a href=#409 id=409 data-nosnippet>409</a>            .with_seed(Secret::new(seed_bytes))
-<a href=#410 id=410 data-nosnippet>410</a>            .ignore_seed_relevance()
-<a href=#411 id=411 data-nosnippet>411</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[MIGRATION_ID])
-<a href=#412 id=412 data-nosnippet>412</a>            .unwrap();
-<a href=#413 id=413 data-nosnippet>413</a>    }
-<a href=#414 id=414 data-nosnippet>414</a>}</code></pre></div></section></main></body></html>
+<a href=#405 id=405 data-nosnippet>405</a>            <span class="prelude-val">None</span>,
+<a href=#406 id=406 data-nosnippet>406</a>        ));
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>        <span class="comment">// Check that we can apply this migration.
+<a href=#409 id=409 data-nosnippet>409</a>        </span>WalletMigrator::new()
+<a href=#410 id=410 data-nosnippet>410</a>            .with_seed(Secret::new(seed_bytes))
+<a href=#411 id=411 data-nosnippet>411</a>            .ignore_seed_relevance()
+<a href=#412 id=412 data-nosnippet>412</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[MIGRATION_ID])
+<a href=#413 id=413 data-nosnippet>413</a>            .unwrap();
+<a href=#414 id=414 data-nosnippet>414</a>    }
+<a href=#415 id=415 data-nosnippet>415</a>}</code></pre></div></section></main></body></html>

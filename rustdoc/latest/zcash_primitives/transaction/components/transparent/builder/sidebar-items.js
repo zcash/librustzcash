@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Error"],"struct":["TransparentBuilder","TransparentInputInfo","TransparentSigningSet","Unauthorized"]};
+window.SIDEBAR_ITEMS = {"enum":["Error"],"struct":["TransparentBuilder","TransparentInputInfo","TransparentSignatureContext","TransparentSigningSet","Unauthorized"]};

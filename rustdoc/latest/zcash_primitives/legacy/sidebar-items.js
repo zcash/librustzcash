@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["TransparentAddress"],"mod":["keys","testing"],"struct":["Script"]};

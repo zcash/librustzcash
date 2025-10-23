@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/add_transaction_views.rs`."><title>add_transaction_views.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>add_transaction_views.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/add_transaction_views.rs`."><title>add_transaction_views.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>add_transaction_views.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="kw">use </span>std::collections::HashSet;
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>rusqlite::{<span class="self">self</span>, params, types::ToSql, OptionalExtension};
@@ -282,153 +282,153 @@
 <a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">use </span>{
 <a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">crate</span>::wallet::init::migrations::{ufvk_support, utxos_table},
 <a href=#284 id=284 data-nosnippet>284</a>        ::transparent::{
-<a href=#285 id=285 data-nosnippet>285</a>            address::Script,
-<a href=#286 id=286 data-nosnippet>286</a>            bundle::{<span class="self">self </span><span class="kw">as </span>transparent, Authorized, OutPoint, TxIn, TxOut},
-<a href=#287 id=287 data-nosnippet>287</a>            keys::IncomingViewingKey,
-<a href=#288 id=288 data-nosnippet>288</a>        },
-<a href=#289 id=289 data-nosnippet>289</a>        zcash_keys::encoding::AddressCodec,
-<a href=#290 id=290 data-nosnippet>290</a>        zcash_primitives::transaction::{TransactionData, TxVersion},
-<a href=#291 id=291 data-nosnippet>291</a>        zcash_protocol::{
-<a href=#292 id=292 data-nosnippet>292</a>            consensus::{BlockHeight, BranchId},
-<a href=#293 id=293 data-nosnippet>293</a>            value::ZatBalance,
-<a href=#294 id=294 data-nosnippet>294</a>        },
-<a href=#295 id=295 data-nosnippet>295</a>    };
-<a href=#296 id=296 data-nosnippet>296</a>
-<a href=#297 id=297 data-nosnippet>297</a>    <span class="attr">#[test]
-<a href=#298 id=298 data-nosnippet>298</a>    </span><span class="kw">fn </span>transaction_views() {
-<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>network = Network::TestNetwork;
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
-<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data =
-<a href=#302 id=302 data-nosnippet>302</a>            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
-<a href=#303 id=303 data-nosnippet>303</a>        WalletMigrator::new()
-<a href=#304 id=304 data-nosnippet>304</a>            .ignore_seed_relevance()
-<a href=#305 id=305 data-nosnippet>305</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[addresses_table::MIGRATION_ID])
-<a href=#306 id=306 data-nosnippet>306</a>            .unwrap();
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>network, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO).unwrap();
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
-<a href=#309 id=309 data-nosnippet>309</a>
-<a href=#310 id=310 data-nosnippet>310</a>        db_data
-<a href=#311 id=311 data-nosnippet>311</a>            .conn
-<a href=#312 id=312 data-nosnippet>312</a>            .execute(
-<a href=#313 id=313 data-nosnippet>313</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
-<a href=#314 id=314 data-nosnippet>314</a>                <span class="macro">params!</span>[ufvk.encode(<span class="kw-2">&amp;</span>network)],
-<a href=#315 id=315 data-nosnippet>315</a>            )
-<a href=#316 id=316 data-nosnippet>316</a>            .unwrap();
-<a href=#317 id=317 data-nosnippet>317</a>
-<a href=#318 id=318 data-nosnippet>318</a>        db_data.conn.execute_batch(
-<a href=#319 id=319 data-nosnippet>319</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
-<a href=#320 id=320 data-nosnippet>320</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
-<a href=#323 id=323 data-nosnippet>323</a>            VALUES (0, 2, 0, 0, '', 2);
-<a href=#324 id=324 data-nosnippet>324</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-<a href=#325 id=325 data-nosnippet>325</a>            VALUES (0, 2, 1, 0, '', 3, X'61');
-<a href=#326 id=326 data-nosnippet>326</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-<a href=#327 id=327 data-nosnippet>327</a>            VALUES (0, 2, 2, 0, '', 0, X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
-<a href=#328 id=328 data-nosnippet>328</a>
-<a href=#329 id=329 data-nosnippet>329</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-<a href=#330 id=330 data-nosnippet>330</a>            VALUES (0, 0, 0, '', 2, '', 'a', false);
-<a href=#331 id=331 data-nosnippet>331</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-<a href=#332 id=332 data-nosnippet>332</a>            VALUES (0, 3, 0, '', 5, '', 'b', false, X'62');
-<a href=#333 id=333 data-nosnippet>333</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-<a href=#334 id=334 data-nosnippet>334</a>            VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');"</span>,
-<a href=#335 id=335 data-nosnippet>335</a>        ).unwrap();
-<a href=#336 id=336 data-nosnippet>336</a>
-<a href=#337 id=337 data-nosnippet>337</a>        WalletMigrator::new()
-<a href=#338 id=338 data-nosnippet>338</a>            .ignore_seed_relevance()
-<a href=#339 id=339 data-nosnippet>339</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID])
-<a href=#340 id=340 data-nosnippet>340</a>            .unwrap();
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
-<a href=#343 id=343 data-nosnippet>343</a>            .conn
-<a href=#344 id=344 data-nosnippet>344</a>            .prepare(<span class="string">"SELECT received_total, received_note_count, memo_count FROM v_tx_received"</span>)
-<a href=#345 id=345 data-nosnippet>345</a>            .unwrap();
-<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
-<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
-<a href=#349 id=349 data-nosnippet>349</a>            row_count += <span class="number">1</span>;
-<a href=#350 id=350 data-nosnippet>350</a>            <span class="kw">let </span>total: i64 = row.get(<span class="number">0</span>).unwrap();
-<a href=#351 id=351 data-nosnippet>351</a>            <span class="kw">let </span>count: i64 = row.get(<span class="number">1</span>).unwrap();
-<a href=#352 id=352 data-nosnippet>352</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="macro">assert_eq!</span>(total, <span class="number">14</span>);
-<a href=#354 id=354 data-nosnippet>354</a>            <span class="macro">assert_eq!</span>(count, <span class="number">3</span>);
-<a href=#355 id=355 data-nosnippet>355</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">2</span>);
-<a href=#356 id=356 data-nosnippet>356</a>        }
-<a href=#357 id=357 data-nosnippet>357</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
-<a href=#358 id=358 data-nosnippet>358</a>
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
-<a href=#360 id=360 data-nosnippet>360</a>            .conn
-<a href=#361 id=361 data-nosnippet>361</a>            .prepare(<span class="string">"SELECT sent_total, sent_note_count, memo_count FROM v_tx_sent"</span>)
-<a href=#362 id=362 data-nosnippet>362</a>            .unwrap();
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
-<a href=#364 id=364 data-nosnippet>364</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
-<a href=#366 id=366 data-nosnippet>366</a>            row_count += <span class="number">1</span>;
-<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">let </span>total: i64 = row.get(<span class="number">0</span>).unwrap();
-<a href=#368 id=368 data-nosnippet>368</a>            <span class="kw">let </span>count: i64 = row.get(<span class="number">1</span>).unwrap();
-<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
-<a href=#370 id=370 data-nosnippet>370</a>            <span class="macro">assert_eq!</span>(total, <span class="number">5</span>);
-<a href=#371 id=371 data-nosnippet>371</a>            <span class="macro">assert_eq!</span>(count, <span class="number">3</span>);
-<a href=#372 id=372 data-nosnippet>372</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">1</span>);
-<a href=#373 id=373 data-nosnippet>373</a>        }
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
-<a href=#375 id=375 data-nosnippet>375</a>
-<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
-<a href=#377 id=377 data-nosnippet>377</a>            .conn
-<a href=#378 id=378 data-nosnippet>378</a>            .prepare(<span class="string">"SELECT net_value, has_change, memo_count FROM v_transactions"</span>)
-<a href=#379 id=379 data-nosnippet>379</a>            .unwrap();
-<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
-<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
-<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
-<a href=#383 id=383 data-nosnippet>383</a>            row_count += <span class="number">1</span>;
-<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">let </span>net_value: i64 = row.get(<span class="number">0</span>).unwrap();
-<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">let </span>has_change: bool = row.get(<span class="number">1</span>).unwrap();
-<a href=#386 id=386 data-nosnippet>386</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
-<a href=#387 id=387 data-nosnippet>387</a>            <span class="macro">assert_eq!</span>(net_value, <span class="number">2</span>);
-<a href=#388 id=388 data-nosnippet>388</a>            <span class="macro">assert!</span>(has_change);
-<a href=#389 id=389 data-nosnippet>389</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">3</span>);
-<a href=#390 id=390 data-nosnippet>390</a>        }
-<a href=#391 id=391 data-nosnippet>391</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
-<a href=#392 id=392 data-nosnippet>392</a>    }
-<a href=#393 id=393 data-nosnippet>393</a>
-<a href=#394 id=394 data-nosnippet>394</a>    <span class="attr">#[test]
-<a href=#395 id=395 data-nosnippet>395</a>    #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#396 id=396 data-nosnippet>396</a>    </span><span class="kw">fn </span>migrate_from_wm2() {
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">use </span>::transparent::keys::NonHardenedChildIndex;
-<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">use </span>zcash_client_backend::keys::UnifiedAddressRequest;
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">use </span>zcash_keys::keys::ReceiverRequirement::<span class="kw-2">*</span>;
-<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">use </span>zcash_protocol::value::Zatoshis;
-<a href=#401 id=401 data-nosnippet>401</a>
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">use </span><span class="kw">crate</span>::UA_TRANSPARENT;
-<a href=#403 id=403 data-nosnippet>403</a>
-<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>network = Network::TestNetwork;
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data =
-<a href=#407 id=407 data-nosnippet>407</a>            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
-<a href=#408 id=408 data-nosnippet>408</a>        WalletMigrator::new()
-<a href=#409 id=409 data-nosnippet>409</a>            .ignore_seed_relevance()
-<a href=#410 id=410 data-nosnippet>410</a>            .init_or_migrate_to(
-<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw-2">&amp;mut </span>db_data,
-<a href=#412 id=412 data-nosnippet>412</a>                <span class="kw-2">&amp;</span>[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
-<a href=#413 id=413 data-nosnippet>413</a>            )
-<a href=#414 id=414 data-nosnippet>414</a>            .unwrap();
-<a href=#415 id=415 data-nosnippet>415</a>
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="comment">// create a UTXO to spend
-<a href=#417 id=417 data-nosnippet>417</a>        </span><span class="kw">let </span>tx = TransactionData::from_parts(
-<a href=#418 id=418 data-nosnippet>418</a>            TxVersion::V4,
-<a href=#419 id=419 data-nosnippet>419</a>            BranchId::Canopy,
-<a href=#420 id=420 data-nosnippet>420</a>            <span class="number">0</span>,
-<a href=#421 id=421 data-nosnippet>421</a>            BlockHeight::from(<span class="number">3</span>),
-<a href=#422 id=422 data-nosnippet>422</a>            <span class="prelude-val">Some</span>(transparent::Bundle {
-<a href=#423 id=423 data-nosnippet>423</a>                vin: <span class="macro">vec!</span>[TxIn {
-<a href=#424 id=424 data-nosnippet>424</a>                    prevout: OutPoint::fake(),
-<a href=#425 id=425 data-nosnippet>425</a>                    script_sig: Script(<span class="macro">vec!</span>[]),
-<a href=#426 id=426 data-nosnippet>426</a>                    sequence: <span class="number">0</span>,
-<a href=#427 id=427 data-nosnippet>427</a>                }],
-<a href=#428 id=428 data-nosnippet>428</a>                vout: <span class="macro">vec!</span>[TxOut {
-<a href=#429 id=429 data-nosnippet>429</a>                    value: Zatoshis::const_from_u64(<span class="number">1100000000</span>),
-<a href=#430 id=430 data-nosnippet>430</a>                    script_pubkey: Script(<span class="macro">vec!</span>[]),
-<a href=#431 id=431 data-nosnippet>431</a>                }],
+<a href=#285 id=285 data-nosnippet>285</a>            bundle::{<span class="self">self </span><span class="kw">as </span>transparent, Authorized, OutPoint, TxIn, TxOut},
+<a href=#286 id=286 data-nosnippet>286</a>            keys::IncomingViewingKey,
+<a href=#287 id=287 data-nosnippet>287</a>        },
+<a href=#288 id=288 data-nosnippet>288</a>        zcash_keys::encoding::AddressCodec,
+<a href=#289 id=289 data-nosnippet>289</a>        zcash_primitives::transaction::{TransactionData, TxVersion},
+<a href=#290 id=290 data-nosnippet>290</a>        zcash_protocol::{
+<a href=#291 id=291 data-nosnippet>291</a>            consensus::{BlockHeight, BranchId},
+<a href=#292 id=292 data-nosnippet>292</a>            value::ZatBalance,
+<a href=#293 id=293 data-nosnippet>293</a>        },
+<a href=#294 id=294 data-nosnippet>294</a>    };
+<a href=#295 id=295 data-nosnippet>295</a>
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="attr">#[test]
+<a href=#297 id=297 data-nosnippet>297</a>    </span><span class="kw">fn </span>transaction_views() {
+<a href=#298 id=298 data-nosnippet>298</a>        <span class="kw">let </span>network = Network::TestNetwork;
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data =
+<a href=#301 id=301 data-nosnippet>301</a>            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+<a href=#302 id=302 data-nosnippet>302</a>        WalletMigrator::new()
+<a href=#303 id=303 data-nosnippet>303</a>            .ignore_seed_relevance()
+<a href=#304 id=304 data-nosnippet>304</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[addresses_table::MIGRATION_ID])
+<a href=#305 id=305 data-nosnippet>305</a>            .unwrap();
+<a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>network, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO).unwrap();
+<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a>        db_data
+<a href=#310 id=310 data-nosnippet>310</a>            .conn
+<a href=#311 id=311 data-nosnippet>311</a>            .execute(
+<a href=#312 id=312 data-nosnippet>312</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
+<a href=#313 id=313 data-nosnippet>313</a>                <span class="macro">params!</span>[ufvk.encode(<span class="kw-2">&amp;</span>network)],
+<a href=#314 id=314 data-nosnippet>314</a>            )
+<a href=#315 id=315 data-nosnippet>315</a>            .unwrap();
+<a href=#316 id=316 data-nosnippet>316</a>
+<a href=#317 id=317 data-nosnippet>317</a>        db_data.conn.execute_batch(
+<a href=#318 id=318 data-nosnippet>318</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
+<a href=#319 id=319 data-nosnippet>319</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
+<a href=#322 id=322 data-nosnippet>322</a>            VALUES (0, 2, 0, 0, '', 2);
+<a href=#323 id=323 data-nosnippet>323</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+<a href=#324 id=324 data-nosnippet>324</a>            VALUES (0, 2, 1, 0, '', 3, X'61');
+<a href=#325 id=325 data-nosnippet>325</a>            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+<a href=#326 id=326 data-nosnippet>326</a>            VALUES (0, 2, 2, 0, '', 0, X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
+<a href=#327 id=327 data-nosnippet>327</a>
+<a href=#328 id=328 data-nosnippet>328</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+<a href=#329 id=329 data-nosnippet>329</a>            VALUES (0, 0, 0, '', 2, '', 'a', false);
+<a href=#330 id=330 data-nosnippet>330</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
+<a href=#331 id=331 data-nosnippet>331</a>            VALUES (0, 3, 0, '', 5, '', 'b', false, X'62');
+<a href=#332 id=332 data-nosnippet>332</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
+<a href=#333 id=333 data-nosnippet>333</a>            VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');"</span>,
+<a href=#334 id=334 data-nosnippet>334</a>        ).unwrap();
+<a href=#335 id=335 data-nosnippet>335</a>
+<a href=#336 id=336 data-nosnippet>336</a>        WalletMigrator::new()
+<a href=#337 id=337 data-nosnippet>337</a>            .ignore_seed_relevance()
+<a href=#338 id=338 data-nosnippet>338</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID])
+<a href=#339 id=339 data-nosnippet>339</a>            .unwrap();
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
+<a href=#342 id=342 data-nosnippet>342</a>            .conn
+<a href=#343 id=343 data-nosnippet>343</a>            .prepare(<span class="string">"SELECT received_total, received_note_count, memo_count FROM v_tx_received"</span>)
+<a href=#344 id=344 data-nosnippet>344</a>            .unwrap();
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
+<a href=#348 id=348 data-nosnippet>348</a>            row_count += <span class="number">1</span>;
+<a href=#349 id=349 data-nosnippet>349</a>            <span class="kw">let </span>total: i64 = row.get(<span class="number">0</span>).unwrap();
+<a href=#350 id=350 data-nosnippet>350</a>            <span class="kw">let </span>count: i64 = row.get(<span class="number">1</span>).unwrap();
+<a href=#351 id=351 data-nosnippet>351</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
+<a href=#352 id=352 data-nosnippet>352</a>            <span class="macro">assert_eq!</span>(total, <span class="number">14</span>);
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="macro">assert_eq!</span>(count, <span class="number">3</span>);
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">2</span>);
+<a href=#355 id=355 data-nosnippet>355</a>        }
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
+<a href=#357 id=357 data-nosnippet>357</a>
+<a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
+<a href=#359 id=359 data-nosnippet>359</a>            .conn
+<a href=#360 id=360 data-nosnippet>360</a>            .prepare(<span class="string">"SELECT sent_total, sent_note_count, memo_count FROM v_tx_sent"</span>)
+<a href=#361 id=361 data-nosnippet>361</a>            .unwrap();
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
+<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
+<a href=#364 id=364 data-nosnippet>364</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
+<a href=#365 id=365 data-nosnippet>365</a>            row_count += <span class="number">1</span>;
+<a href=#366 id=366 data-nosnippet>366</a>            <span class="kw">let </span>total: i64 = row.get(<span class="number">0</span>).unwrap();
+<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">let </span>count: i64 = row.get(<span class="number">1</span>).unwrap();
+<a href=#368 id=368 data-nosnippet>368</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
+<a href=#369 id=369 data-nosnippet>369</a>            <span class="macro">assert_eq!</span>(total, <span class="number">5</span>);
+<a href=#370 id=370 data-nosnippet>370</a>            <span class="macro">assert_eq!</span>(count, <span class="number">3</span>);
+<a href=#371 id=371 data-nosnippet>371</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">1</span>);
+<a href=#372 id=372 data-nosnippet>372</a>        }
+<a href=#373 id=373 data-nosnippet>373</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
+<a href=#376 id=376 data-nosnippet>376</a>            .conn
+<a href=#377 id=377 data-nosnippet>377</a>            .prepare(<span class="string">"SELECT net_value, has_change, memo_count FROM v_transactions"</span>)
+<a href=#378 id=378 data-nosnippet>378</a>            .unwrap();
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
+<a href=#382 id=382 data-nosnippet>382</a>            row_count += <span class="number">1</span>;
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">let </span>net_value: i64 = row.get(<span class="number">0</span>).unwrap();
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">let </span>has_change: bool = row.get(<span class="number">1</span>).unwrap();
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">2</span>).unwrap();
+<a href=#386 id=386 data-nosnippet>386</a>            <span class="macro">assert_eq!</span>(net_value, <span class="number">2</span>);
+<a href=#387 id=387 data-nosnippet>387</a>            <span class="macro">assert!</span>(has_change);
+<a href=#388 id=388 data-nosnippet>388</a>            <span class="macro">assert_eq!</span>(memo_count, <span class="number">3</span>);
+<a href=#389 id=389 data-nosnippet>389</a>        }
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
+<a href=#391 id=391 data-nosnippet>391</a>    }
+<a href=#392 id=392 data-nosnippet>392</a>
+<a href=#393 id=393 data-nosnippet>393</a>    <span class="attr">#[test]
+<a href=#394 id=394 data-nosnippet>394</a>    #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#395 id=395 data-nosnippet>395</a>    </span><span class="kw">fn </span>migrate_from_wm2() {
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">use </span>::transparent::{address::Script, keys::NonHardenedChildIndex};
+<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">use </span>zcash_client_backend::keys::UnifiedAddressRequest;
+<a href=#398 id=398 data-nosnippet>398</a>        <span class="kw">use </span>zcash_keys::keys::ReceiverRequirement::<span class="kw-2">*</span>;
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">use </span>zcash_protocol::value::Zatoshis;
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">use </span><span class="kw">crate</span>::UA_TRANSPARENT;
+<a href=#402 id=402 data-nosnippet>402</a>
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">let </span>network = Network::TestNetwork;
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data =
+<a href=#406 id=406 data-nosnippet>406</a>            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+<a href=#407 id=407 data-nosnippet>407</a>        WalletMigrator::new()
+<a href=#408 id=408 data-nosnippet>408</a>            .ignore_seed_relevance()
+<a href=#409 id=409 data-nosnippet>409</a>            .init_or_migrate_to(
+<a href=#410 id=410 data-nosnippet>410</a>                <span class="kw-2">&amp;mut </span>db_data,
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw-2">&amp;</span>[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+<a href=#412 id=412 data-nosnippet>412</a>            )
+<a href=#413 id=413 data-nosnippet>413</a>            .unwrap();
+<a href=#414 id=414 data-nosnippet>414</a>
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="comment">// create a UTXO to spend
+<a href=#416 id=416 data-nosnippet>416</a>        </span><span class="kw">let </span>tx = TransactionData::from_parts(
+<a href=#417 id=417 data-nosnippet>417</a>            TxVersion::V4,
+<a href=#418 id=418 data-nosnippet>418</a>            BranchId::Canopy,
+<a href=#419 id=419 data-nosnippet>419</a>            <span class="number">0</span>,
+<a href=#420 id=420 data-nosnippet>420</a>            BlockHeight::from(<span class="number">3</span>),
+<a href=#421 id=421 data-nosnippet>421</a>            <span class="attr">#[cfg(all(
+<a href=#422 id=422 data-nosnippet>422</a>                any(zcash_unstable = <span class="string">"nu7"</span>, zcash_unstable = <span class="string">"zfuture"</span>),
+<a href=#423 id=423 data-nosnippet>423</a>                feature = <span class="string">"zip-233"
+<a href=#424 id=424 data-nosnippet>424</a>            </span>))]
+<a href=#425 id=425 data-nosnippet>425</a>            </span>Zatoshis::ZERO,
+<a href=#426 id=426 data-nosnippet>426</a>            <span class="prelude-val">Some</span>(transparent::Bundle {
+<a href=#427 id=427 data-nosnippet>427</a>                vin: <span class="macro">vec!</span>[TxIn::from_parts(OutPoint::fake(), Script::default(), <span class="number">0</span>)],
+<a href=#428 id=428 data-nosnippet>428</a>                vout: <span class="macro">vec!</span>[TxOut::new(
+<a href=#429 id=429 data-nosnippet>429</a>                    Zatoshis::const_from_u64(<span class="number">1100000000</span>),
+<a href=#430 id=430 data-nosnippet>430</a>                    Script::default(),
+<a href=#431 id=431 data-nosnippet>431</a>                )],
 <a href=#432 id=432 data-nosnippet>432</a>                authorization: Authorized,
 <a href=#433 id=433 data-nosnippet>433</a>            }),
 <a href=#434 id=434 data-nosnippet>434</a>            <span class="prelude-val">None</span>,

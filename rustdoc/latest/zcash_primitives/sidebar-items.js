@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["block","consensus","constants","legacy","memo","merkle_tree","transaction","zip32"]};
+window.SIDEBAR_ITEMS = {"mod":["block","merkle_tree","transaction"]};

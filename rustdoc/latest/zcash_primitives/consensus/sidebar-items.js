@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["H0","MAIN_NETWORK","TEST_NETWORK","ZIP212_GRACE_PERIOD"],"enum":["BranchId","Network","NetworkType","NetworkUpgrade"],"mod":["testing"],"struct":["BlockHeight","MainNetwork","TestNetwork"],"trait":["NetworkConstants","Parameters"]};

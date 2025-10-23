@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/receiving_key_scopes.rs`."><title>receiving_key_scopes.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>receiving_key_scopes.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! This migration adds decryption key scope to persisted information about received notes.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/receiving_key_scopes.rs`."><title>receiving_key_scopes.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>receiving_key_scopes.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! This migration adds decryption key scope to persisted information about received notes.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::collections::HashSet;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -277,11 +277,11 @@
 <a href=#277 id=277 data-nosnippet>277</a></span><span class="kw">mod </span>tests {
 <a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">use </span>std::convert::Infallible;
 <a href=#279 id=279 data-nosnippet>279</a>
-<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">use </span>incrementalmerkletree::Position;
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">use </span>maybe_rayon::{
-<a href=#282 id=282 data-nosnippet>282</a>        iter::{IndexedParallelIterator, ParallelIterator},
-<a href=#283 id=283 data-nosnippet>283</a>        slice::ParallelSliceMut,
-<a href=#284 id=284 data-nosnippet>284</a>    };
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">use </span><span class="kw">crate</span>::ParallelSliceMut;
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="attr">#[cfg(feature = <span class="string">"multicore"</span>)]
+<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">use </span>maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">use </span>incrementalmerkletree::Position;
 <a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">use </span>rand_core::OsRng;
 <a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">use </span>rusqlite::{named_params, params, Connection, OptionalExtension};
 <a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">use </span>tempfile::NamedTempFile;
@@ -377,17 +377,17 @@
 <a href=#377 id=377 data-nosnippet>377</a>                        .unwrap(),
 <a href=#378 id=378 data-nosnippet>378</a>                ),
 <a href=#379 id=379 data-nosnippet>379</a>                transparent::OutPoint::fake(),
-<a href=#380 id=380 data-nosnippet>380</a>                transparent::TxOut {
-<a href=#381 id=381 data-nosnippet>381</a>                    value: Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
-<a href=#382 id=382 data-nosnippet>382</a>                    script_pubkey: usk0
-<a href=#383 id=383 data-nosnippet>383</a>                        .transparent()
-<a href=#384 id=384 data-nosnippet>384</a>                        .to_account_pubkey()
-<a href=#385 id=385 data-nosnippet>385</a>                        .derive_external_ivk()
-<a href=#386 id=386 data-nosnippet>386</a>                        .unwrap()
-<a href=#387 id=387 data-nosnippet>387</a>                        .default_address()
-<a href=#388 id=388 data-nosnippet>388</a>                        .<span class="number">0
-<a href=#389 id=389 data-nosnippet>389</a>                        </span>.script(),
-<a href=#390 id=390 data-nosnippet>390</a>                },
+<a href=#380 id=380 data-nosnippet>380</a>                transparent::TxOut::new(
+<a href=#381 id=381 data-nosnippet>381</a>                    Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
+<a href=#382 id=382 data-nosnippet>382</a>                    usk0.transparent()
+<a href=#383 id=383 data-nosnippet>383</a>                        .to_account_pubkey()
+<a href=#384 id=384 data-nosnippet>384</a>                        .derive_external_ivk()
+<a href=#385 id=385 data-nosnippet>385</a>                        .unwrap()
+<a href=#386 id=386 data-nosnippet>386</a>                        .default_address()
+<a href=#387 id=387 data-nosnippet>387</a>                        .<span class="number">0
+<a href=#388 id=388 data-nosnippet>388</a>                        </span>.script()
+<a href=#389 id=389 data-nosnippet>389</a>                        .into(),
+<a href=#390 id=390 data-nosnippet>390</a>                ),
 <a href=#391 id=391 data-nosnippet>391</a>            )
 <a href=#392 id=392 data-nosnippet>392</a>            .unwrap();
 <a href=#393 id=393 data-nosnippet>393</a>        builder

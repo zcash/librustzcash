@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/transparent_gap_limit_handling.rs`."><title>transparent_gap_limit_handling.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>transparent_gap_limit_handling.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Add support for general transparent gap limit handling, and unify the `addresses` and
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/transparent_gap_limit_handling.rs`."><title>transparent_gap_limit_handling.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>transparent_gap_limit_handling.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Add support for general transparent gap limit handling, and unify the `addresses` and
 <a href=#2 id=2 data-nosnippet>2</a>//! `ephemeral_addresses` tables.
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a></span><span class="kw">use </span>rand_core::RngCore;
@@ -110,668 +110,671 @@
 <a href=#110 id=110 data-nosnippet>110</a>        <span class="string">":key_scope_external"</span>: KeyScope::EXTERNAL.encode()
 <a href=#111 id=111 data-nosnippet>111</a>    ])<span class="question-mark">?</span>;
 <a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = min_addr_rows.next()<span class="question-mark">? </span>{
-<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>uivk = decode_uivk(params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>ufvk = decode_ufvk(params, row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;String&gt;&gt;(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#116 id=116 data-nosnippet>116</a>
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>min_transparent_idx = row
-<a href=#118 id=118 data-nosnippet>118</a>            .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"transparent_child_index"</span>)<span class="question-mark">?
-<a href=#119 id=119 data-nosnippet>119</a>            </span>.map(|i| {
-<a href=#120 id=120 data-nosnippet>120</a>                NonHardenedChildIndex::from_index(i).ok_or(WalletMigrationError::CorruptedData(
-<a href=#121 id=121 data-nosnippet>121</a>                    <span class="macro">format!</span>(<span class="string">"{i} is not a valid transparent child index."</span>),
-<a href=#122 id=122 data-nosnippet>122</a>                ))
-<a href=#123 id=123 data-nosnippet>123</a>            })
-<a href=#124 id=124 data-nosnippet>124</a>            .transpose()<span class="question-mark">?</span>;
-<a href=#125 id=125 data-nosnippet>125</a>
-<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">let </span>min_diversifier_idx = row
-<a href=#127 id=127 data-nosnippet>127</a>            .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt;&gt;(<span class="string">"diversifier_index_be"</span>)<span class="question-mark">?
-<a href=#128 id=128 data-nosnippet>128</a>            </span>.map(|b| decode_diversifier_index_be(<span class="kw-2">&amp;</span>b[..]))
-<a href=#129 id=129 data-nosnippet>129</a>            .transpose()<span class="question-mark">?
-<a href=#130 id=130 data-nosnippet>130</a>            </span>.and_then(|di| NonHardenedChildIndex::try_from(di).ok());
-<a href=#131 id=131 data-nosnippet>131</a>
-<a href=#132 id=132 data-nosnippet>132</a>        <span class="comment">// Ensure that there is an address for each possible external address index prior to the
-<a href=#133 id=133 data-nosnippet>133</a>        // default UA for the account. If the default address has a diversifier index greater than
-<a href=#134 id=134 data-nosnippet>134</a>        // the gap limit, we generate transparent addresses up to that index but not beyond.
-<a href=#135 id=135 data-nosnippet>135</a>        </span><span class="kw">let </span>start = NonHardenedChildIndex::const_from_index(<span class="number">0</span>);
-<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">let </span>end = std::cmp::min(
-<a href=#137 id=137 data-nosnippet>137</a>            min_transparent_idx
-<a href=#138 id=138 data-nosnippet>138</a>                .or(min_diversifier_idx)
-<a href=#139 id=139 data-nosnippet>139</a>                <span class="comment">// guarantee that we have an entry at index 0; this address will have previously
-<a href=#140 id=140 data-nosnippet>140</a>                // been provided explicitly as one of the wallet's addresses in response to a call
-<a href=#141 id=141 data-nosnippet>141</a>                // to `get_transparent_receivers, even if we have no other addresses generated
-<a href=#142 id=142 data-nosnippet>142</a>                // (which shouldn't ordinarily be the case anyway)
-<a href=#143 id=143 data-nosnippet>143</a>                </span>.unwrap_or(NonHardenedChildIndex::const_from_index(<span class="number">1</span>)),
-<a href=#144 id=144 data-nosnippet>144</a>            NonHardenedChildIndex::from_index(GapLimits::default().external())
-<a href=#145 id=145 data-nosnippet>145</a>                .expect(<span class="string">"default external gap limit fits in non-hardened child index space."</span>),
-<a href=#146 id=146 data-nosnippet>146</a>        );
-<a href=#147 id=147 data-nosnippet>147</a>
-<a href=#148 id=148 data-nosnippet>148</a>        generate_address_range_internal(
-<a href=#149 id=149 data-nosnippet>149</a>            conn,
-<a href=#150 id=150 data-nosnippet>150</a>            params,
-<a href=#151 id=151 data-nosnippet>151</a>            account_id,
-<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw-2">&amp;</span>uivk,
-<a href=#153 id=153 data-nosnippet>153</a>            ufvk.as_ref(),
-<a href=#154 id=154 data-nosnippet>154</a>            KeyScope::EXTERNAL,
-<a href=#155 id=155 data-nosnippet>155</a>            UnifiedAddressRequest::ALLOW_ALL,
-<a href=#156 id=156 data-nosnippet>156</a>            start..end,
-<a href=#157 id=157 data-nosnippet>157</a>            <span class="bool-val">false</span>,
-<a href=#158 id=158 data-nosnippet>158</a>        )<span class="question-mark">?</span>;
-<a href=#159 id=159 data-nosnippet>159</a>    }
-<a href=#160 id=160 data-nosnippet>160</a>
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="prelude-val">Ok</span>(())
-<a href=#162 id=162 data-nosnippet>162</a>}
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a><span class="kw">impl</span>&lt;P: consensus::Parameters, C: Clock, R: RngCore&gt; RusqliteMigration <span class="kw">for </span>Migration&lt;P, C, R&gt; {
-<a href=#165 id=165 data-nosnippet>165</a>    <span class="kw">type </span>Error = WalletMigrationError;
-<a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">fn </span>up(<span class="kw-2">&amp;</span><span class="self">self</span>, conn: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
-<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">let </span>external_scope_code = KeyScope::EXTERNAL.encode();
-<a href=#169 id=169 data-nosnippet>169</a>
-<a href=#170 id=170 data-nosnippet>170</a>        conn.execute_batch(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#171 id=171 data-nosnippet>171</a>            <span class="string">r#"
-<a href=#172 id=172 data-nosnippet>172</a>            ALTER TABLE addresses ADD COLUMN key_scope INTEGER NOT NULL DEFAULT {external_scope_code};
-<a href=#173 id=173 data-nosnippet>173</a>            ALTER TABLE addresses ADD COLUMN transparent_child_index INTEGER;
-<a href=#174 id=174 data-nosnippet>174</a>            ALTER TABLE addresses ADD COLUMN exposed_at_height INTEGER;
-<a href=#175 id=175 data-nosnippet>175</a>            ALTER TABLE addresses ADD COLUMN receiver_flags INTEGER;
-<a href=#176 id=176 data-nosnippet>176</a>            "#
-<a href=#177 id=177 data-nosnippet>177</a>        </span>))<span class="question-mark">?</span>;
-<a href=#178 id=178 data-nosnippet>178</a>
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="kw">let </span><span class="kw-2">mut </span>account_ids = HashMap::new();
-<a href=#180 id=180 data-nosnippet>180</a>
-<a href=#181 id=181 data-nosnippet>181</a>        {
-<a href=#182 id=182 data-nosnippet>182</a>            <span class="comment">// If the diversifier index is in the valid range of non-hardened child indices, set
-<a href=#183 id=183 data-nosnippet>183</a>            // `transparent_child_index` so that we can use it for gap limit handling.
-<a href=#184 id=184 data-nosnippet>184</a>            // No `DISTINCT` is necessary here due to the preexisting UNIQUE(account_id,
-<a href=#185 id=185 data-nosnippet>185</a>            // diversifier_index_be) constraint.
-<a href=#186 id=186 data-nosnippet>186</a>            </span><span class="kw">let </span><span class="kw-2">mut </span>di_query = conn.prepare(
-<a href=#187 id=187 data-nosnippet>187</a>                <span class="string">r#"
-<a href=#188 id=188 data-nosnippet>188</a>                SELECT
-<a href=#189 id=189 data-nosnippet>189</a>                    account_id,
-<a href=#190 id=190 data-nosnippet>190</a>                    address,
-<a href=#191 id=191 data-nosnippet>191</a>                    accounts.uivk AS uivk,
-<a href=#192 id=192 data-nosnippet>192</a>                    accounts.ufvk AS ufvk,
-<a href=#193 id=193 data-nosnippet>193</a>                    diversifier_index_be,
-<a href=#194 id=194 data-nosnippet>194</a>                    accounts.birthday_height
-<a href=#195 id=195 data-nosnippet>195</a>                FROM addresses
-<a href=#196 id=196 data-nosnippet>196</a>                JOIN accounts ON accounts.id = account_id
-<a href=#197 id=197 data-nosnippet>197</a>                "#</span>,
-<a href=#198 id=198 data-nosnippet>198</a>            )<span class="question-mark">?</span>;
-<a href=#199 id=199 data-nosnippet>199</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = di_query.query([])<span class="question-mark">?</span>;
-<a href=#200 id=200 data-nosnippet>200</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-<a href=#201 id=201 data-nosnippet>201</a>                <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
-<a href=#202 id=202 data-nosnippet>202</a>                <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#203 id=203 data-nosnippet>203</a>                <span class="kw">let </span>ufvk = decode_ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#204 id=204 data-nosnippet>204</a>                account_ids.insert(account_id, (uivk.clone(), ufvk));
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a>                <span class="kw">let </span>addr_str: String = row.get(<span class="string">"address"</span>)<span class="question-mark">?</span>;
-<a href=#207 id=207 data-nosnippet>207</a>                <span class="kw">let </span>address = ZcashAddress::try_from_encoded(<span class="kw-2">&amp;</span>addr_str).map_err(|e| {
-<a href=#208 id=208 data-nosnippet>208</a>                    WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
-<a href=#209 id=209 data-nosnippet>209</a>                        <span class="string">"Encoded address {addr_str} is not a valid zcash address: {e}"
-<a href=#210 id=210 data-nosnippet>210</a>                    </span>))
-<a href=#211 id=211 data-nosnippet>211</a>                })<span class="question-mark">?</span>;
-<a href=#212 id=212 data-nosnippet>212</a>                <span class="kw">let </span>receiver_flags = address.convert::&lt;ReceiverFlags&gt;().map_err(|<span class="kw">_</span>| {
-<a href=#213 id=213 data-nosnippet>213</a>                    WalletMigrationError::CorruptedData(<span class="string">"Unexpected address type"</span>.to_string())
-<a href=#214 id=214 data-nosnippet>214</a>                })<span class="question-mark">?</span>;
-<a href=#215 id=215 data-nosnippet>215</a>                <span class="kw">let </span>di_be: Vec&lt;u8&gt; = row.get(<span class="string">"diversifier_index_be"</span>)<span class="question-mark">?</span>;
-<a href=#216 id=216 data-nosnippet>216</a>                <span class="kw">let </span>account_birthday: i64 = row.get(<span class="string">"birthday_height"</span>)<span class="question-mark">?</span>;
-<a href=#217 id=217 data-nosnippet>217</a>
-<a href=#218 id=218 data-nosnippet>218</a>                <span class="kw">let </span>update_without_taddr = || {
-<a href=#219 id=219 data-nosnippet>219</a>                    conn.execute(
-<a href=#220 id=220 data-nosnippet>220</a>                        <span class="string">r#"
-<a href=#221 id=221 data-nosnippet>221</a>                        UPDATE addresses
-<a href=#222 id=222 data-nosnippet>222</a>                        SET exposed_at_height = :account_birthday,
-<a href=#223 id=223 data-nosnippet>223</a>                            receiver_flags = :receiver_flags
-<a href=#224 id=224 data-nosnippet>224</a>                        WHERE account_id = :account_id
-<a href=#225 id=225 data-nosnippet>225</a>                        AND diversifier_index_be = :diversifier_index_be
-<a href=#226 id=226 data-nosnippet>226</a>                        "#</span>,
-<a href=#227 id=227 data-nosnippet>227</a>                        <span class="macro">named_params!</span> {
-<a href=#228 id=228 data-nosnippet>228</a>                            <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
-<a href=#229 id=229 data-nosnippet>229</a>                            <span class="string">":diversifier_index_be"</span>: <span class="kw-2">&amp;</span>di_be[..],
-<a href=#230 id=230 data-nosnippet>230</a>                            <span class="string">":account_birthday"</span>: account_birthday,
-<a href=#231 id=231 data-nosnippet>231</a>                            <span class="string">":receiver_flags"</span>: receiver_flags.bits(),
-<a href=#232 id=232 data-nosnippet>232</a>                        },
-<a href=#233 id=233 data-nosnippet>233</a>                    )
-<a href=#234 id=234 data-nosnippet>234</a>                };
-<a href=#235 id=235 data-nosnippet>235</a>
-<a href=#236 id=236 data-nosnippet>236</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#237 id=237 data-nosnippet>237</a>                </span>{
-<a href=#238 id=238 data-nosnippet>238</a>                    <span class="kw">let </span>diversifier_index = decode_diversifier_index_be(<span class="kw-2">&amp;</span>di_be)<span class="question-mark">?</span>;
-<a href=#239 id=239 data-nosnippet>239</a>                    <span class="kw">let </span>transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
-<a href=#240 id=240 data-nosnippet>240</a>                        .ok()
-<a href=#241 id=241 data-nosnippet>241</a>                        .and_then(|idx| {
-<a href=#242 id=242 data-nosnippet>242</a>                            uivk.transparent()
-<a href=#243 id=243 data-nosnippet>243</a>                                .as_ref()
-<a href=#244 id=244 data-nosnippet>244</a>                                .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
-<a href=#245 id=245 data-nosnippet>245</a>                                .map(|t_addr| (idx, t_addr.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params)))
-<a href=#246 id=246 data-nosnippet>246</a>                        });
-<a href=#247 id=247 data-nosnippet>247</a>
-<a href=#248 id=248 data-nosnippet>248</a>                    <span class="comment">// Add transparent address index metadata and the transparent address corresponding
-<a href=#249 id=249 data-nosnippet>249</a>                    // to the index to the addresses table. We unconditionally set the cached
-<a href=#250 id=250 data-nosnippet>250</a>                    // transparent receiver address in order to simplify gap limit handling; even if a
-<a href=#251 id=251 data-nosnippet>251</a>                    // unified address is generated without a transparent receiver, we still assume
-<a href=#252 id=252 data-nosnippet>252</a>                    // that a transparent-only wallet for which we have imported the seed may have
-<a href=#253 id=253 data-nosnippet>253</a>                    // generated an address at that index.
-<a href=#254 id=254 data-nosnippet>254</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((idx, t_addr)) = transparent_external {
-<a href=#255 id=255 data-nosnippet>255</a>                        conn.execute(
-<a href=#256 id=256 data-nosnippet>256</a>                            <span class="string">r#"
-<a href=#257 id=257 data-nosnippet>257</a>                            UPDATE addresses
-<a href=#258 id=258 data-nosnippet>258</a>                            SET transparent_child_index = :transparent_child_index,
-<a href=#259 id=259 data-nosnippet>259</a>                                cached_transparent_receiver_address = :t_addr,
-<a href=#260 id=260 data-nosnippet>260</a>                                exposed_at_height = :account_birthday,
-<a href=#261 id=261 data-nosnippet>261</a>                                receiver_flags = :receiver_flags
-<a href=#262 id=262 data-nosnippet>262</a>                            WHERE account_id = :account_id
-<a href=#263 id=263 data-nosnippet>263</a>                            AND diversifier_index_be = :diversifier_index_be
-<a href=#264 id=264 data-nosnippet>264</a>                            "#</span>,
-<a href=#265 id=265 data-nosnippet>265</a>                            <span class="macro">named_params!</span> {
-<a href=#266 id=266 data-nosnippet>266</a>                                <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
-<a href=#267 id=267 data-nosnippet>267</a>                                <span class="string">":diversifier_index_be"</span>: <span class="kw-2">&amp;</span>di_be[..],
-<a href=#268 id=268 data-nosnippet>268</a>                                <span class="string">":transparent_child_index"</span>: idx.index(),
-<a href=#269 id=269 data-nosnippet>269</a>                                <span class="string">":t_addr"</span>: t_addr,
-<a href=#270 id=270 data-nosnippet>270</a>                                <span class="string">":account_birthday"</span>: account_birthday,
-<a href=#271 id=271 data-nosnippet>271</a>                                <span class="string">":receiver_flags"</span>: receiver_flags.bits(),
-<a href=#272 id=272 data-nosnippet>272</a>                            },
-<a href=#273 id=273 data-nosnippet>273</a>                        )<span class="question-mark">?</span>;
-<a href=#274 id=274 data-nosnippet>274</a>                    } <span class="kw">else </span>{
-<a href=#275 id=275 data-nosnippet>275</a>                        update_without_taddr()<span class="question-mark">?</span>;
-<a href=#276 id=276 data-nosnippet>276</a>                    }
-<a href=#277 id=277 data-nosnippet>277</a>                }
-<a href=#278 id=278 data-nosnippet>278</a>
-<a href=#279 id=279 data-nosnippet>279</a>                <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#280 id=280 data-nosnippet>280</a>                </span>{
-<a href=#281 id=281 data-nosnippet>281</a>                    update_without_taddr()<span class="question-mark">?</span>;
-<a href=#282 id=282 data-nosnippet>282</a>                }
-<a href=#283 id=283 data-nosnippet>283</a>            }
-<a href=#284 id=284 data-nosnippet>284</a>        };
-<a href=#285 id=285 data-nosnippet>285</a>
-<a href=#286 id=286 data-nosnippet>286</a>        <span class="comment">// We now have to re-create the `addresses` table in order to fix the constraints. Note
-<a href=#287 id=287 data-nosnippet>287</a>        // that we do not include the `seen_in_tx` column as this is duplicative of information
-<a href=#288 id=288 data-nosnippet>288</a>        // that can be discovered via joins with the various `*_received_{notes|outputs}` tables,
-<a href=#289 id=289 data-nosnippet>289</a>        // which we will create a view to perform below. The `used_in_tx` column data is used only
-<a href=#290 id=290 data-nosnippet>290</a>        // to determine the height at which the address was exposed (for which we use the target
-<a href=#291 id=291 data-nosnippet>291</a>        // height for the transaction.)
-<a href=#292 id=292 data-nosnippet>292</a>        </span>conn.execute_batch(<span class="string">r#"
-<a href=#293 id=293 data-nosnippet>293</a>            CREATE TABLE addresses_new (
-<a href=#294 id=294 data-nosnippet>294</a>                id INTEGER NOT NULL PRIMARY KEY,
-<a href=#295 id=295 data-nosnippet>295</a>                account_id INTEGER NOT NULL,
-<a href=#296 id=296 data-nosnippet>296</a>                key_scope INTEGER NOT NULL,
-<a href=#297 id=297 data-nosnippet>297</a>                diversifier_index_be BLOB NOT NULL,
-<a href=#298 id=298 data-nosnippet>298</a>                address TEXT NOT NULL,
-<a href=#299 id=299 data-nosnippet>299</a>                transparent_child_index INTEGER,
-<a href=#300 id=300 data-nosnippet>300</a>                cached_transparent_receiver_address TEXT,
-<a href=#301 id=301 data-nosnippet>301</a>                exposed_at_height INTEGER,
-<a href=#302 id=302 data-nosnippet>302</a>                receiver_flags INTEGER NOT NULL,
-<a href=#303 id=303 data-nosnippet>303</a>                transparent_receiver_next_check_time INTEGER,
-<a href=#304 id=304 data-nosnippet>304</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
-<a href=#305 id=305 data-nosnippet>305</a>                CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
-<a href=#306 id=306 data-nosnippet>306</a>                CONSTRAINT transparent_index_consistency CHECK (
-<a href=#307 id=307 data-nosnippet>307</a>                    (transparent_child_index IS NOT NULL) == (cached_transparent_receiver_address IS NOT NULL)
-<a href=#308 id=308 data-nosnippet>308</a>                )
-<a href=#309 id=309 data-nosnippet>309</a>            );
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a>            -- we will only set `transparent_receiver_next_check_time` for ephemeral addresses
-<a href=#312 id=312 data-nosnippet>312</a>            INSERT INTO addresses_new (
-<a href=#313 id=313 data-nosnippet>313</a>                account_id, key_scope, diversifier_index_be, address,
-<a href=#314 id=314 data-nosnippet>314</a>                transparent_child_index, cached_transparent_receiver_address,
-<a href=#315 id=315 data-nosnippet>315</a>                exposed_at_height, receiver_flags
-<a href=#316 id=316 data-nosnippet>316</a>            )
-<a href=#317 id=317 data-nosnippet>317</a>            SELECT
-<a href=#318 id=318 data-nosnippet>318</a>                account_id, key_scope, diversifier_index_be, address,
-<a href=#319 id=319 data-nosnippet>319</a>                transparent_child_index, cached_transparent_receiver_address,
-<a href=#320 id=320 data-nosnippet>320</a>                exposed_at_height, receiver_flags
-<a href=#321 id=321 data-nosnippet>321</a>            FROM addresses;
-<a href=#322 id=322 data-nosnippet>322</a>            "#</span>)<span class="question-mark">?</span>;
-<a href=#323 id=323 data-nosnippet>323</a>
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="comment">// Now, we add the ephemeral addresses to the newly unified `addresses` table.
-<a href=#325 id=325 data-nosnippet>325</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#326 id=326 data-nosnippet>326</a>        </span>{
-<a href=#327 id=327 data-nosnippet>327</a>            <span class="kw">let </span><span class="kw-2">mut </span>ea_insert = conn.prepare(
-<a href=#328 id=328 data-nosnippet>328</a>                <span class="string">r#"
-<a href=#329 id=329 data-nosnippet>329</a>                INSERT INTO addresses_new (
-<a href=#330 id=330 data-nosnippet>330</a>                    account_id, key_scope, diversifier_index_be, address,
-<a href=#331 id=331 data-nosnippet>331</a>                    transparent_child_index, cached_transparent_receiver_address,
-<a href=#332 id=332 data-nosnippet>332</a>                    exposed_at_height, receiver_flags,
-<a href=#333 id=333 data-nosnippet>333</a>                    transparent_receiver_next_check_time
-<a href=#334 id=334 data-nosnippet>334</a>                ) VALUES (
-<a href=#335 id=335 data-nosnippet>335</a>                    :account_id, :key_scope, :diversifier_index_be, :address,
-<a href=#336 id=336 data-nosnippet>336</a>                    :transparent_child_index, :cached_transparent_receiver_address,
-<a href=#337 id=337 data-nosnippet>337</a>                    :exposed_at_height, :receiver_flags,
-<a href=#338 id=338 data-nosnippet>338</a>                    :transparent_receiver_next_check_time
-<a href=#339 id=339 data-nosnippet>339</a>                )
-<a href=#340 id=340 data-nosnippet>340</a>                "#</span>,
-<a href=#341 id=341 data-nosnippet>341</a>            )<span class="question-mark">?</span>;
-<a href=#342 id=342 data-nosnippet>342</a>
-<a href=#343 id=343 data-nosnippet>343</a>            <span class="kw">let </span><span class="kw-2">mut </span>ea_query = conn.prepare(
-<a href=#344 id=344 data-nosnippet>344</a>                <span class="string">r#"
-<a href=#345 id=345 data-nosnippet>345</a>                SELECT
-<a href=#346 id=346 data-nosnippet>346</a>                    account_id, accounts.uivk, accounts.ufvk, address_index, address,
-<a href=#347 id=347 data-nosnippet>347</a>                    t.expiry_height - :expiry_delta AS exposed_at_height
-<a href=#348 id=348 data-nosnippet>348</a>                FROM ephemeral_addresses ea
-<a href=#349 id=349 data-nosnippet>349</a>                JOIN accounts ON accounts.id = account_id
-<a href=#350 id=350 data-nosnippet>350</a>                LEFT OUTER JOIN transactions t ON t.id_tx = ea.used_in_tx
-<a href=#351 id=351 data-nosnippet>351</a>                "#</span>,
-<a href=#352 id=352 data-nosnippet>352</a>            )<span class="question-mark">?</span>;
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">let </span>rows = ea_query
-<a href=#354 id=354 data-nosnippet>354</a>                .query_and_then(
-<a href=#355 id=355 data-nosnippet>355</a>                    <span class="macro">named_params!</span> {<span class="string">":expiry_delta"</span>: DEFAULT_TX_EXPIRY_DELTA },
-<a href=#356 id=356 data-nosnippet>356</a>                    |row| {
-<a href=#357 id=357 data-nosnippet>357</a>                        <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
-<a href=#358 id=358 data-nosnippet>358</a>                        <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#359 id=359 data-nosnippet>359</a>                        <span class="kw">let </span>ufvk = decode_ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#360 id=360 data-nosnippet>360</a>                        <span class="kw">let </span>transparent_child_index = row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="string">"address_index"</span>)<span class="question-mark">?</span>;
-<a href=#361 id=361 data-nosnippet>361</a>                        <span class="kw">let </span>diversifier_index = DiversifierIndex::from(
-<a href=#362 id=362 data-nosnippet>362</a>                            u32::try_from(transparent_child_index)
-<a href=#363 id=363 data-nosnippet>363</a>                                .ok()
-<a href=#364 id=364 data-nosnippet>364</a>                                .and_then(NonHardenedChildIndex::from_index)
-<a href=#365 id=365 data-nosnippet>365</a>                                .ok_or(WalletMigrationError::CorruptedData(
-<a href=#366 id=366 data-nosnippet>366</a>                                    <span class="string">"ephemeral address indices must be in the range of `u31`"
-<a href=#367 id=367 data-nosnippet>367</a>                                        </span>.to_owned(),
-<a href=#368 id=368 data-nosnippet>368</a>                                ))<span class="question-mark">?
-<a href=#369 id=369 data-nosnippet>369</a>                                </span>.index(),
-<a href=#370 id=370 data-nosnippet>370</a>                        );
-<a href=#371 id=371 data-nosnippet>371</a>                        <span class="kw">let </span>address: String = row.get(<span class="string">"address"</span>)<span class="question-mark">?</span>;
-<a href=#372 id=372 data-nosnippet>372</a>                        <span class="kw">let </span>exposed_at_height: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="string">"exposed_at_height"</span>)<span class="question-mark">?</span>;
-<a href=#373 id=373 data-nosnippet>373</a>                        <span class="prelude-val">Ok</span>((
-<a href=#374 id=374 data-nosnippet>374</a>                            account_id,
-<a href=#375 id=375 data-nosnippet>375</a>                            uivk,
-<a href=#376 id=376 data-nosnippet>376</a>                            ufvk,
-<a href=#377 id=377 data-nosnippet>377</a>                            diversifier_index,
-<a href=#378 id=378 data-nosnippet>378</a>                            transparent_child_index,
-<a href=#379 id=379 data-nosnippet>379</a>                            address,
-<a href=#380 id=380 data-nosnippet>380</a>                            exposed_at_height,
-<a href=#381 id=381 data-nosnippet>381</a>                        ))
-<a href=#382 id=382 data-nosnippet>382</a>                    },
-<a href=#383 id=383 data-nosnippet>383</a>                )<span class="question-mark">?
-<a href=#384 id=384 data-nosnippet>384</a>                </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, WalletMigrationError&gt;&gt;()<span class="question-mark">?</span>;
-<a href=#385 id=385 data-nosnippet>385</a>
-<a href=#386 id=386 data-nosnippet>386</a>            <span class="kw">let </span>ephemeral_address_count =
-<a href=#387 id=387 data-nosnippet>387</a>                u32::try_from(rows.len()).expect(<span class="string">"number of ephemeral addrs fits into u32"</span>);
-<a href=#388 id=388 data-nosnippet>388</a>            <span class="kw">let </span><span class="kw-2">mut </span>check_time = <span class="self">self</span>._clock.now();
-<a href=#389 id=389 data-nosnippet>389</a>            <span class="kw">for </span>(
-<a href=#390 id=390 data-nosnippet>390</a>                account_id,
-<a href=#391 id=391 data-nosnippet>391</a>                uivk,
-<a href=#392 id=392 data-nosnippet>392</a>                ufvk,
-<a href=#393 id=393 data-nosnippet>393</a>                diversifier_index,
-<a href=#394 id=394 data-nosnippet>394</a>                transparent_child_index,
-<a href=#395 id=395 data-nosnippet>395</a>                address,
-<a href=#396 id=396 data-nosnippet>396</a>                exposed_at_height,
-<a href=#397 id=397 data-nosnippet>397</a>            ) <span class="kw">in </span>rows
-<a href=#398 id=398 data-nosnippet>398</a>            {
-<a href=#399 id=399 data-nosnippet>399</a>                <span class="comment">// Compute a next check time for the address such that, when considered in the
-<a href=#400 id=400 data-nosnippet>400</a>                // context of all other allocated ephemeral addresses, it will be checked once per
-<a href=#401 id=401 data-nosnippet>401</a>                // day.
-<a href=#402 id=402 data-nosnippet>402</a>                </span><span class="kw">let </span>next_check_time = {
-<a href=#403 id=403 data-nosnippet>403</a>                    <span class="kw">let </span>rng = <span class="self">self
-<a href=#404 id=404 data-nosnippet>404</a>                        </span>._rng
-<a href=#405 id=405 data-nosnippet>405</a>                        .lock()
-<a href=#406 id=406 data-nosnippet>406</a>                        .expect(<span class="string">"can obtain write lock to shared rng"</span>);
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a>                    next_check_time(rng, check_time, (<span class="number">24 </span>* <span class="number">60 </span>* <span class="number">60</span>) / ephemeral_address_count)
-<a href=#409 id=409 data-nosnippet>409</a>                        .expect(<span class="string">"computed next check time is valid"</span>)
-<a href=#410 id=410 data-nosnippet>410</a>                };
-<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw">let </span>next_check_epoch_seconds = epoch_seconds(next_check_time).unwrap();
-<a href=#412 id=412 data-nosnippet>412</a>
-<a href=#413 id=413 data-nosnippet>413</a>                <span class="comment">// We set both the `address` column and the `cached_transparent_receiver_address`
-<a href=#414 id=414 data-nosnippet>414</a>                // column to the same value here; there is no Unified address that corresponds to
-<a href=#415 id=415 data-nosnippet>415</a>                // this transparent address.
-<a href=#416 id=416 data-nosnippet>416</a>                </span>ea_insert.execute(<span class="macro">named_params!</span> {
-<a href=#417 id=417 data-nosnippet>417</a>                    <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
-<a href=#418 id=418 data-nosnippet>418</a>                    <span class="string">":key_scope"</span>: KeyScope::Ephemeral.encode(),
-<a href=#419 id=419 data-nosnippet>419</a>                    <span class="string">":diversifier_index_be"</span>: encode_diversifier_index_be(diversifier_index),
-<a href=#420 id=420 data-nosnippet>420</a>                    <span class="string">":address"</span>: address,
-<a href=#421 id=421 data-nosnippet>421</a>                    <span class="string">":transparent_child_index"</span>: transparent_child_index,
-<a href=#422 id=422 data-nosnippet>422</a>                    <span class="string">":cached_transparent_receiver_address"</span>: address,
-<a href=#423 id=423 data-nosnippet>423</a>                    <span class="string">":exposed_at_height"</span>: exposed_at_height,
-<a href=#424 id=424 data-nosnippet>424</a>                    <span class="string">":receiver_flags"</span>: ReceiverFlags::P2PKH.bits(),
-<a href=#425 id=425 data-nosnippet>425</a>                    <span class="string">":transparent_receiver_next_check_time"</span>: next_check_epoch_seconds
-<a href=#426 id=426 data-nosnippet>426</a>                })<span class="question-mark">?</span>;
-<a href=#427 id=427 data-nosnippet>427</a>
-<a href=#428 id=428 data-nosnippet>428</a>                account_ids.insert(account_id, (uivk, ufvk));
-<a href=#429 id=429 data-nosnippet>429</a>                check_time = next_check_time;
-<a href=#430 id=430 data-nosnippet>430</a>            }
-<a href=#431 id=431 data-nosnippet>431</a>        }
-<a href=#432 id=432 data-nosnippet>432</a>
-<a href=#433 id=433 data-nosnippet>433</a>        conn.execute_batch(
-<a href=#434 id=434 data-nosnippet>434</a>            <span class="string">r#"
-<a href=#435 id=435 data-nosnippet>435</a>            PRAGMA legacy_alter_table = ON;
-<a href=#436 id=436 data-nosnippet>436</a>
-<a href=#437 id=437 data-nosnippet>437</a>            DROP TABLE addresses;
-<a href=#438 id=438 data-nosnippet>438</a>            ALTER TABLE addresses_new RENAME TO addresses;
-<a href=#439 id=439 data-nosnippet>439</a>            CREATE INDEX idx_addresses_accounts ON addresses (
-<a href=#440 id=440 data-nosnippet>440</a>                account_id ASC
-<a href=#441 id=441 data-nosnippet>441</a>            );
-<a href=#442 id=442 data-nosnippet>442</a>            CREATE INDEX idx_addresses_indices ON addresses (
-<a href=#443 id=443 data-nosnippet>443</a>                diversifier_index_be ASC
-<a href=#444 id=444 data-nosnippet>444</a>            );
-<a href=#445 id=445 data-nosnippet>445</a>            CREATE INDEX idx_addresses_t_indices ON addresses (
-<a href=#446 id=446 data-nosnippet>446</a>                transparent_child_index ASC
-<a href=#447 id=447 data-nosnippet>447</a>            );
-<a href=#448 id=448 data-nosnippet>448</a>
-<a href=#449 id=449 data-nosnippet>449</a>            DROP TABLE ephemeral_addresses;
-<a href=#450 id=450 data-nosnippet>450</a>
-<a href=#451 id=451 data-nosnippet>451</a>            PRAGMA legacy_alter_table = OFF;
-<a href=#452 id=452 data-nosnippet>452</a>            "#</span>,
-<a href=#453 id=453 data-nosnippet>453</a>        )<span class="question-mark">?</span>;
-<a href=#454 id=454 data-nosnippet>454</a>
-<a href=#455 id=455 data-nosnippet>455</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#456 id=456 data-nosnippet>456</a>        </span>insert_initial_transparent_addrs(conn, <span class="kw-2">&amp;</span><span class="self">self</span>.params)<span class="question-mark">?</span>;
-<a href=#457 id=457 data-nosnippet>457</a>
-<a href=#458 id=458 data-nosnippet>458</a>        <span class="comment">// Add foreign key references from the *_received_{notes|outputs} tables to the addresses
-<a href=#459 id=459 data-nosnippet>459</a>        // table to make it possible to identify which address was involved. These foreign key
-<a href=#460 id=460 data-nosnippet>460</a>        // columns must be nullable as for shielded account-internal. Ideally the foreign key
-<a href=#461 id=461 data-nosnippet>461</a>        // relationship between `transparent_received_outputs` and `addresses` would not be
-<a href=#462 id=462 data-nosnippet>462</a>        // nullable, but we allow it to be so here in order to avoid having to re-create that
-<a href=#463 id=463 data-nosnippet>463</a>        // table.
-<a href=#464 id=464 data-nosnippet>464</a>        //
-<a href=#465 id=465 data-nosnippet>465</a>        // While it would be possible to only add the address reference to
-<a href=#466 id=466 data-nosnippet>466</a>        // `transparent_received_outputs`, that would mean that a note received at a shielded
-<a href=#467 id=467 data-nosnippet>467</a>        // component of a diversified Unified Address would not update the position of the
-<a href=#468 id=468 data-nosnippet>468</a>        // transparent "address gap". Since we will include shielded address indices in the gap
-<a href=#469 id=469 data-nosnippet>469</a>        // computation, transparent-only wallets may not be able to discover all transparent funds,
-<a href=#470 id=470 data-nosnippet>470</a>        // but users of shielded wallets will be guaranteed to be able to recover all of their
-<a href=#471 id=471 data-nosnippet>471</a>        // funds.
-<a href=#472 id=472 data-nosnippet>472</a>        </span>conn.execute_batch(
-<a href=#473 id=473 data-nosnippet>473</a>            <span class="string">r#"
-<a href=#474 id=474 data-nosnippet>474</a>            ALTER TABLE orchard_received_notes
-<a href=#475 id=475 data-nosnippet>475</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
-<a href=#476 id=476 data-nosnippet>476</a>            ALTER TABLE sapling_received_notes
-<a href=#477 id=477 data-nosnippet>477</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
-<a href=#478 id=478 data-nosnippet>478</a>            ALTER TABLE transparent_received_outputs
-<a href=#479 id=479 data-nosnippet>479</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
-<a href=#480 id=480 data-nosnippet>480</a>            "#</span>,
-<a href=#481 id=481 data-nosnippet>481</a>        )<span class="question-mark">?</span>;
-<a href=#482 id=482 data-nosnippet>482</a>
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="comment">// Ensure that an address exists for each received Orchard note, and populate the
-<a href=#484 id=484 data-nosnippet>484</a>        // `address_id` column.
-<a href=#485 id=485 data-nosnippet>485</a>        </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#486 id=486 data-nosnippet>486</a>        </span>{
-<a href=#487 id=487 data-nosnippet>487</a>            <span class="kw">let </span><span class="kw-2">mut </span>stmt_rn_diversifiers = conn.prepare(
-<a href=#488 id=488 data-nosnippet>488</a>                <span class="string">r#"
-<a href=#489 id=489 data-nosnippet>489</a>                SELECT orn.id, orn.account_id, accounts.uivk,
-<a href=#490 id=490 data-nosnippet>490</a>                       orn.recipient_key_scope, orn.diversifier, t.mined_height
-<a href=#491 id=491 data-nosnippet>491</a>                FROM orchard_received_notes orn
-<a href=#492 id=492 data-nosnippet>492</a>                JOIN accounts ON accounts.id = account_id
-<a href=#493 id=493 data-nosnippet>493</a>                JOIN transactions t on t.id_tx = orn.tx
-<a href=#494 id=494 data-nosnippet>494</a>                "#</span>,
-<a href=#495 id=495 data-nosnippet>495</a>            )<span class="question-mark">?</span>;
-<a href=#496 id=496 data-nosnippet>496</a>
-<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_rn_diversifiers.query([])<span class="question-mark">?</span>;
-<a href=#498 id=498 data-nosnippet>498</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-<a href=#499 id=499 data-nosnippet>499</a>                <span class="kw">let </span>scope = KeyScope::decode(row.get(<span class="string">"recipient_key_scope"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#500 id=500 data-nosnippet>500</a>                <span class="comment">// for Orchard and Sapling, we only store addresses for externally-scoped keys.
-<a href=#501 id=501 data-nosnippet>501</a>                </span><span class="kw">if </span>scope == KeyScope::EXTERNAL {
-<a href=#502 id=502 data-nosnippet>502</a>                    <span class="kw">let </span>row_id: i64 = row.get(<span class="string">"id"</span>)<span class="question-mark">?</span>;
-<a href=#503 id=503 data-nosnippet>503</a>                    <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
-<a href=#504 id=504 data-nosnippet>504</a>                    <span class="kw">let </span>mined_height = row
-<a href=#505 id=505 data-nosnippet>505</a>                        .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
-<a href=#506 id=506 data-nosnippet>506</a>                        </span>.map(BlockHeight::from);
-<a href=#507 id=507 data-nosnippet>507</a>
-<a href=#508 id=508 data-nosnippet>508</a>                    <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#509 id=509 data-nosnippet>509</a>                    <span class="kw">let </span>diversifier =
-<a href=#510 id=510 data-nosnippet>510</a>                        orchard::keys::Diversifier::from_bytes(row.get(<span class="string">"diversifier"</span>)<span class="question-mark">?</span>);
-<a href=#511 id=511 data-nosnippet>511</a>
-<a href=#512 id=512 data-nosnippet>512</a>                    <span class="comment">// TODO: It's annoying that `IncomingViewingKey` doesn't expose the ability to
-<a href=#513 id=513 data-nosnippet>513</a>                    // decrypt the diversifier to find the index directly, and doesn't provide an
-<a href=#514 id=514 data-nosnippet>514</a>                    // accessor for `dk`. We already know we have the right IVK.
-<a href=#515 id=515 data-nosnippet>515</a>                    </span><span class="kw">let </span>ivk = uivk
-<a href=#516 id=516 data-nosnippet>516</a>                        .orchard()
-<a href=#517 id=517 data-nosnippet>517</a>                        .as_ref()
-<a href=#518 id=518 data-nosnippet>518</a>                        .expect(<span class="string">"previously received an Orchard output"</span>);
-<a href=#519 id=519 data-nosnippet>519</a>                    <span class="kw">let </span>di = ivk
-<a href=#520 id=520 data-nosnippet>520</a>                        .diversifier_index(<span class="kw-2">&amp;</span>ivk.address(diversifier))
-<a href=#521 id=521 data-nosnippet>521</a>                        .expect(<span class="string">"roundtrip"</span>);
-<a href=#522 id=522 data-nosnippet>522</a>                    <span class="kw">let </span>ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)<span class="question-mark">?</span>;
-<a href=#523 id=523 data-nosnippet>523</a>                    <span class="kw">let </span>address_id = wallet::upsert_address(
-<a href=#524 id=524 data-nosnippet>524</a>                        conn,
-<a href=#525 id=525 data-nosnippet>525</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
-<a href=#526 id=526 data-nosnippet>526</a>                        account_id,
-<a href=#527 id=527 data-nosnippet>527</a>                        di,
-<a href=#528 id=528 data-nosnippet>528</a>                        <span class="kw-2">&amp;</span>ua,
-<a href=#529 id=529 data-nosnippet>529</a>                        mined_height,
-<a href=#530 id=530 data-nosnippet>530</a>                        <span class="bool-val">false</span>,
-<a href=#531 id=531 data-nosnippet>531</a>                    )<span class="question-mark">?</span>;
-<a href=#532 id=532 data-nosnippet>532</a>
-<a href=#533 id=533 data-nosnippet>533</a>                    conn.execute(
-<a href=#534 id=534 data-nosnippet>534</a>                        <span class="string">"UPDATE orchard_received_notes
-<a href=#535 id=535 data-nosnippet>535</a>                         SET address_id = :address_id
-<a href=#536 id=536 data-nosnippet>536</a>                         WHERE id = :row_id"</span>,
-<a href=#537 id=537 data-nosnippet>537</a>                        <span class="macro">named_params!</span> {
-<a href=#538 id=538 data-nosnippet>538</a>                            <span class="string">":address_id"</span>: address_id.<span class="number">0</span>,
-<a href=#539 id=539 data-nosnippet>539</a>                            <span class="string">":row_id"</span>: row_id
-<a href=#540 id=540 data-nosnippet>540</a>                        },
-<a href=#541 id=541 data-nosnippet>541</a>                    )<span class="question-mark">?</span>;
-<a href=#542 id=542 data-nosnippet>542</a>                }
-<a href=#543 id=543 data-nosnippet>543</a>            }
-<a href=#544 id=544 data-nosnippet>544</a>        }
-<a href=#545 id=545 data-nosnippet>545</a>
-<a href=#546 id=546 data-nosnippet>546</a>        <span class="comment">// Ensure that an address exists for each received Sapling note, and populate the
-<a href=#547 id=547 data-nosnippet>547</a>        // `address_id` column.
-<a href=#548 id=548 data-nosnippet>548</a>        </span>{
-<a href=#549 id=549 data-nosnippet>549</a>            <span class="kw">let </span><span class="kw-2">mut </span>stmt_rn_diversifiers = conn.prepare(
-<a href=#550 id=550 data-nosnippet>550</a>                <span class="string">r#"
-<a href=#551 id=551 data-nosnippet>551</a>                SELECT srn.id, srn.account_id, accounts.uivk,
-<a href=#552 id=552 data-nosnippet>552</a>                       srn.recipient_key_scope, srn.diversifier, t.mined_height
-<a href=#553 id=553 data-nosnippet>553</a>                FROM sapling_received_notes srn
-<a href=#554 id=554 data-nosnippet>554</a>                JOIN accounts ON accounts.id = account_id
-<a href=#555 id=555 data-nosnippet>555</a>                JOIN transactions t ON t.id_tx = srn.tx
-<a href=#556 id=556 data-nosnippet>556</a>                "#</span>,
-<a href=#557 id=557 data-nosnippet>557</a>            )<span class="question-mark">?</span>;
-<a href=#558 id=558 data-nosnippet>558</a>
-<a href=#559 id=559 data-nosnippet>559</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_rn_diversifiers.query([])<span class="question-mark">?</span>;
-<a href=#560 id=560 data-nosnippet>560</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-<a href=#561 id=561 data-nosnippet>561</a>                <span class="kw">let </span>scope = KeyScope::decode(row.get(<span class="string">"recipient_key_scope"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#562 id=562 data-nosnippet>562</a>                <span class="comment">// for Orchard and Sapling, we only store addresses for externally-scoped keys.
-<a href=#563 id=563 data-nosnippet>563</a>                </span><span class="kw">if </span>scope == KeyScope::EXTERNAL {
-<a href=#564 id=564 data-nosnippet>564</a>                    <span class="kw">let </span>row_id: i64 = row.get(<span class="string">"id"</span>)<span class="question-mark">?</span>;
-<a href=#565 id=565 data-nosnippet>565</a>                    <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
-<a href=#566 id=566 data-nosnippet>566</a>                    <span class="kw">let </span>mined_height = row
-<a href=#567 id=567 data-nosnippet>567</a>                        .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
-<a href=#568 id=568 data-nosnippet>568</a>                        </span>.map(BlockHeight::from);
-<a href=#569 id=569 data-nosnippet>569</a>
-<a href=#570 id=570 data-nosnippet>570</a>                    <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-<a href=#571 id=571 data-nosnippet>571</a>                    <span class="kw">let </span>diversifier = sapling::Diversifier(row.get(<span class="string">"diversifier"</span>)<span class="question-mark">?</span>);
-<a href=#572 id=572 data-nosnippet>572</a>
-<a href=#573 id=573 data-nosnippet>573</a>                    <span class="comment">// TODO: It's annoying that `IncomingViewingKey` doesn't expose the ability to
-<a href=#574 id=574 data-nosnippet>574</a>                    // decrypt the diversifier to find the index directly, and doesn't provide an
-<a href=#575 id=575 data-nosnippet>575</a>                    // accessor for `dk`. We already know we have the right IVK.
-<a href=#576 id=576 data-nosnippet>576</a>                    </span><span class="kw">let </span>ivk = uivk
-<a href=#577 id=577 data-nosnippet>577</a>                        .sapling()
-<a href=#578 id=578 data-nosnippet>578</a>                        .as_ref()
-<a href=#579 id=579 data-nosnippet>579</a>                        .expect(<span class="string">"previously received a Sapling output"</span>);
-<a href=#580 id=580 data-nosnippet>580</a>                    <span class="kw">let </span>di = ivk
-<a href=#581 id=581 data-nosnippet>581</a>                        .decrypt_diversifier(
-<a href=#582 id=582 data-nosnippet>582</a>                            <span class="kw-2">&amp;</span>ivk.address(diversifier)
-<a href=#583 id=583 data-nosnippet>583</a>                                .expect(<span class="string">"previously generated an address"</span>),
-<a href=#584 id=584 data-nosnippet>584</a>                        )
-<a href=#585 id=585 data-nosnippet>585</a>                        .expect(<span class="string">"roundtrip"</span>);
-<a href=#586 id=586 data-nosnippet>586</a>                    <span class="kw">let </span>ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)<span class="question-mark">?</span>;
-<a href=#587 id=587 data-nosnippet>587</a>                    <span class="kw">let </span>address_id = wallet::upsert_address(
-<a href=#588 id=588 data-nosnippet>588</a>                        conn,
-<a href=#589 id=589 data-nosnippet>589</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
-<a href=#590 id=590 data-nosnippet>590</a>                        account_id,
-<a href=#591 id=591 data-nosnippet>591</a>                        di,
-<a href=#592 id=592 data-nosnippet>592</a>                        <span class="kw-2">&amp;</span>ua,
-<a href=#593 id=593 data-nosnippet>593</a>                        mined_height,
-<a href=#594 id=594 data-nosnippet>594</a>                        <span class="bool-val">false</span>,
-<a href=#595 id=595 data-nosnippet>595</a>                    )<span class="question-mark">?</span>;
-<a href=#596 id=596 data-nosnippet>596</a>
-<a href=#597 id=597 data-nosnippet>597</a>                    conn.execute(
-<a href=#598 id=598 data-nosnippet>598</a>                        <span class="string">"UPDATE sapling_received_notes
-<a href=#599 id=599 data-nosnippet>599</a>                         SET address_id = :address_id
-<a href=#600 id=600 data-nosnippet>600</a>                         WHERE id = :row_id"</span>,
-<a href=#601 id=601 data-nosnippet>601</a>                        <span class="macro">named_params!</span> {
-<a href=#602 id=602 data-nosnippet>602</a>                            <span class="string">":address_id"</span>: address_id.<span class="number">0</span>,
-<a href=#603 id=603 data-nosnippet>603</a>                            <span class="string">":row_id"</span>: row_id
-<a href=#604 id=604 data-nosnippet>604</a>                        },
-<a href=#605 id=605 data-nosnippet>605</a>                    )<span class="question-mark">?</span>;
-<a href=#606 id=606 data-nosnippet>606</a>                }
-<a href=#607 id=607 data-nosnippet>607</a>            }
-<a href=#608 id=608 data-nosnippet>608</a>        }
-<a href=#609 id=609 data-nosnippet>609</a>
-<a href=#610 id=610 data-nosnippet>610</a>        <span class="comment">// At this point, every address on which we've received a transparent output should have a
-<a href=#611 id=611 data-nosnippet>611</a>        // corresponding row in the `addresses` table with a valid
-<a href=#612 id=612 data-nosnippet>612</a>        // `cached_transparent_receiver_address` entry, because we will only have queried the light
-<a href=#613 id=613 data-nosnippet>613</a>        // wallet server for outputs from exactly these addresses. So for transparent outputs, we
-<a href=#614 id=614 data-nosnippet>614</a>        // join to the addresses table using the address itself in order to obtain the address index.
-<a href=#615 id=615 data-nosnippet>615</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#616 id=616 data-nosnippet>616</a>        </span>{
-<a href=#617 id=617 data-nosnippet>617</a>            conn.execute_batch(
-<a href=#618 id=618 data-nosnippet>618</a>                <span class="string">r#"
-<a href=#619 id=619 data-nosnippet>619</a>                PRAGMA legacy_alter_table = ON;
-<a href=#620 id=620 data-nosnippet>620</a>
-<a href=#621 id=621 data-nosnippet>621</a>                UPDATE transparent_received_outputs
-<a href=#622 id=622 data-nosnippet>622</a>                SET address_id = addresses.id
-<a href=#623 id=623 data-nosnippet>623</a>                FROM addresses
-<a href=#624 id=624 data-nosnippet>624</a>                WHERE addresses.cached_transparent_receiver_address = transparent_received_outputs.address;
-<a href=#625 id=625 data-nosnippet>625</a>
-<a href=#626 id=626 data-nosnippet>626</a>                CREATE TABLE transparent_received_outputs_new (
-<a href=#627 id=627 data-nosnippet>627</a>                    id INTEGER PRIMARY KEY,
-<a href=#628 id=628 data-nosnippet>628</a>                    transaction_id INTEGER NOT NULL,
-<a href=#629 id=629 data-nosnippet>629</a>                    output_index INTEGER NOT NULL,
-<a href=#630 id=630 data-nosnippet>630</a>                    account_id INTEGER NOT NULL,
-<a href=#631 id=631 data-nosnippet>631</a>                    address TEXT NOT NULL,
-<a href=#632 id=632 data-nosnippet>632</a>                    script BLOB NOT NULL,
-<a href=#633 id=633 data-nosnippet>633</a>                    value_zat INTEGER NOT NULL,
-<a href=#634 id=634 data-nosnippet>634</a>                    max_observed_unspent_height INTEGER,
-<a href=#635 id=635 data-nosnippet>635</a>                    address_id INTEGER NOT NULL REFERENCES addresses(id),
-<a href=#636 id=636 data-nosnippet>636</a>                    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
-<a href=#637 id=637 data-nosnippet>637</a>                    FOREIGN KEY (account_id) REFERENCES accounts(id),
-<a href=#638 id=638 data-nosnippet>638</a>                    CONSTRAINT transparent_output_unique UNIQUE (transaction_id, output_index)
-<a href=#639 id=639 data-nosnippet>639</a>                );
-<a href=#640 id=640 data-nosnippet>640</a>                INSERT INTO transparent_received_outputs_new SELECT * FROM transparent_received_outputs;
-<a href=#641 id=641 data-nosnippet>641</a>
-<a href=#642 id=642 data-nosnippet>642</a>                DROP TABLE transparent_received_outputs;
-<a href=#643 id=643 data-nosnippet>643</a>                ALTER TABLE transparent_received_outputs_new RENAME TO transparent_received_outputs;
-<a href=#644 id=644 data-nosnippet>644</a>
-<a href=#645 id=645 data-nosnippet>645</a>                PRAGMA legacy_alter_table = OFF;
-<a href=#646 id=646 data-nosnippet>646</a>                "#</span>,
-<a href=#647 id=647 data-nosnippet>647</a>            )<span class="question-mark">?</span>;
-<a href=#648 id=648 data-nosnippet>648</a>        }
-<a href=#649 id=649 data-nosnippet>649</a>
-<a href=#650 id=650 data-nosnippet>650</a>        <span class="comment">// Construct a view that identifies the minimum block height at which each address was
-<a href=#651 id=651 data-nosnippet>651</a>        // first used
-<a href=#652 id=652 data-nosnippet>652</a>        </span>conn.execute_batch(
-<a href=#653 id=653 data-nosnippet>653</a>            <span class="string">r#"
-<a href=#654 id=654 data-nosnippet>654</a>            CREATE VIEW v_address_uses AS
-<a href=#655 id=655 data-nosnippet>655</a>                SELECT orn.address_id, orn.account_id, orn.tx AS transaction_id, t.mined_height,
-<a href=#656 id=656 data-nosnippet>656</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#657 id=657 data-nosnippet>657</a>                FROM orchard_received_notes orn
-<a href=#658 id=658 data-nosnippet>658</a>                JOIN addresses a ON a.id = orn.address_id
-<a href=#659 id=659 data-nosnippet>659</a>                JOIN transactions t ON t.id_tx = orn.tx
-<a href=#660 id=660 data-nosnippet>660</a>            UNION
-<a href=#661 id=661 data-nosnippet>661</a>                SELECT srn.address_id, srn.account_id, srn.tx AS transaction_id, t.mined_height,
-<a href=#662 id=662 data-nosnippet>662</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#663 id=663 data-nosnippet>663</a>                FROM sapling_received_notes srn
-<a href=#664 id=664 data-nosnippet>664</a>                JOIN addresses a ON a.id = srn.address_id
-<a href=#665 id=665 data-nosnippet>665</a>                JOIN transactions t ON t.id_tx = srn.tx
-<a href=#666 id=666 data-nosnippet>666</a>            UNION
-<a href=#667 id=667 data-nosnippet>667</a>                SELECT tro.address_id, tro.account_id, tro.transaction_id, t.mined_height,
-<a href=#668 id=668 data-nosnippet>668</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#669 id=669 data-nosnippet>669</a>                FROM transparent_received_outputs tro
-<a href=#670 id=670 data-nosnippet>670</a>                JOIN addresses a ON a.id = tro.address_id
-<a href=#671 id=671 data-nosnippet>671</a>                JOIN transactions t ON t.id_tx = tro.transaction_id;
-<a href=#672 id=672 data-nosnippet>672</a>
-<a href=#673 id=673 data-nosnippet>673</a>            CREATE VIEW v_address_first_use AS
-<a href=#674 id=674 data-nosnippet>674</a>            SELECT
-<a href=#675 id=675 data-nosnippet>675</a>                address_id,
-<a href=#676 id=676 data-nosnippet>676</a>                account_id,
-<a href=#677 id=677 data-nosnippet>677</a>                key_scope,
-<a href=#678 id=678 data-nosnippet>678</a>                diversifier_index_be,
-<a href=#679 id=679 data-nosnippet>679</a>                transparent_child_index,
-<a href=#680 id=680 data-nosnippet>680</a>                MIN(mined_height) AS first_use_height
-<a href=#681 id=681 data-nosnippet>681</a>            FROM v_address_uses
-<a href=#682 id=682 data-nosnippet>682</a>            GROUP BY
-<a href=#683 id=683 data-nosnippet>683</a>                address_id, account_id, key_scope,
-<a href=#684 id=684 data-nosnippet>684</a>                diversifier_index_be, transparent_child_index;
-<a href=#685 id=685 data-nosnippet>685</a>
-<a href=#686 id=686 data-nosnippet>686</a>            DROP VIEW v_received_outputs;
-<a href=#687 id=687 data-nosnippet>687</a>            CREATE VIEW v_received_outputs AS
-<a href=#688 id=688 data-nosnippet>688</a>                SELECT
-<a href=#689 id=689 data-nosnippet>689</a>                    sapling_received_notes.id AS id_within_pool_table,
-<a href=#690 id=690 data-nosnippet>690</a>                    sapling_received_notes.tx AS transaction_id,
-<a href=#691 id=691 data-nosnippet>691</a>                    2 AS pool,
-<a href=#692 id=692 data-nosnippet>692</a>                    sapling_received_notes.output_index,
-<a href=#693 id=693 data-nosnippet>693</a>                    account_id,
-<a href=#694 id=694 data-nosnippet>694</a>                    sapling_received_notes.value,
-<a href=#695 id=695 data-nosnippet>695</a>                    is_change,
-<a href=#696 id=696 data-nosnippet>696</a>                    sapling_received_notes.memo,
-<a href=#697 id=697 data-nosnippet>697</a>                    sent_notes.id AS sent_note_id,
-<a href=#698 id=698 data-nosnippet>698</a>                    sapling_received_notes.address_id
-<a href=#699 id=699 data-nosnippet>699</a>                FROM sapling_received_notes
-<a href=#700 id=700 data-nosnippet>700</a>                LEFT JOIN sent_notes
-<a href=#701 id=701 data-nosnippet>701</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#702 id=702 data-nosnippet>702</a>                   (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-<a href=#703 id=703 data-nosnippet>703</a>            UNION
-<a href=#704 id=704 data-nosnippet>704</a>                SELECT
-<a href=#705 id=705 data-nosnippet>705</a>                    orchard_received_notes.id AS id_within_pool_table,
-<a href=#706 id=706 data-nosnippet>706</a>                    orchard_received_notes.tx AS transaction_id,
-<a href=#707 id=707 data-nosnippet>707</a>                    3 AS pool,
-<a href=#708 id=708 data-nosnippet>708</a>                    orchard_received_notes.action_index AS output_index,
-<a href=#709 id=709 data-nosnippet>709</a>                    account_id,
-<a href=#710 id=710 data-nosnippet>710</a>                    orchard_received_notes.value,
-<a href=#711 id=711 data-nosnippet>711</a>                    is_change,
-<a href=#712 id=712 data-nosnippet>712</a>                    orchard_received_notes.memo,
-<a href=#713 id=713 data-nosnippet>713</a>                    sent_notes.id AS sent_note_id,
-<a href=#714 id=714 data-nosnippet>714</a>                    orchard_received_notes.address_id
-<a href=#715 id=715 data-nosnippet>715</a>                FROM orchard_received_notes
-<a href=#716 id=716 data-nosnippet>716</a>                LEFT JOIN sent_notes
-<a href=#717 id=717 data-nosnippet>717</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#718 id=718 data-nosnippet>718</a>                   (orchard_received_notes.tx, 3, orchard_received_notes.action_index)
-<a href=#719 id=719 data-nosnippet>719</a>            UNION
-<a href=#720 id=720 data-nosnippet>720</a>                SELECT
-<a href=#721 id=721 data-nosnippet>721</a>                    u.id AS id_within_pool_table,
-<a href=#722 id=722 data-nosnippet>722</a>                    u.transaction_id,
-<a href=#723 id=723 data-nosnippet>723</a>                    0 AS pool,
-<a href=#724 id=724 data-nosnippet>724</a>                    u.output_index,
-<a href=#725 id=725 data-nosnippet>725</a>                    u.account_id,
-<a href=#726 id=726 data-nosnippet>726</a>                    u.value_zat AS value,
-<a href=#727 id=727 data-nosnippet>727</a>                    0 AS is_change,
-<a href=#728 id=728 data-nosnippet>728</a>                    NULL AS memo,
-<a href=#729 id=729 data-nosnippet>729</a>                    sent_notes.id AS sent_note_id,
-<a href=#730 id=730 data-nosnippet>730</a>                    u.address_id
-<a href=#731 id=731 data-nosnippet>731</a>                FROM transparent_received_outputs u
-<a href=#732 id=732 data-nosnippet>732</a>                LEFT JOIN sent_notes
-<a href=#733 id=733 data-nosnippet>733</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#734 id=734 data-nosnippet>734</a>                   (u.transaction_id, 0, u.output_index);
-<a href=#735 id=735 data-nosnippet>735</a>            "#</span>,
-<a href=#736 id=736 data-nosnippet>736</a>        )<span class="question-mark">?</span>;
-<a href=#737 id=737 data-nosnippet>737</a>
-<a href=#738 id=738 data-nosnippet>738</a>        <span class="comment">// At this point, we have completed updating the infrastructure for gap limit handling,
-<a href=#739 id=739 data-nosnippet>739</a>        // so we can regenerate the gap limit worth of addresses for each account that we
-<a href=#740 id=740 data-nosnippet>740</a>        // recorded. The body of this method duplicates thje logic in `generate_gap_addresses`
-<a href=#741 id=741 data-nosnippet>741</a>        // in order to avoid the `get_account_internal` call, since we already have the internal
-<a href=#742 id=742 data-nosnippet>742</a>        // account id in each iteration of the loop.
-<a href=#743 id=743 data-nosnippet>743</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#744 id=744 data-nosnippet>744</a>        </span><span class="kw">for </span>(account_id, (uivk, ufvk)) <span class="kw">in </span>account_ids {
-<a href=#745 id=745 data-nosnippet>745</a>            <span class="kw">for </span>key_scope <span class="kw">in </span>[KeyScope::EXTERNAL, KeyScope::INTERNAL] {
-<a href=#746 id=746 data-nosnippet>746</a>                <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
-<a href=#747 id=747 data-nosnippet>747</a>                <span class="kw">let </span>gap_limit = <span class="kw">match </span>key_scope {
-<a href=#748 id=748 data-nosnippet>748</a>                    KeyScope::Zip32(zip32::Scope::External) =&gt; GapLimits::default().external(),
-<a href=#749 id=749 data-nosnippet>749</a>                    KeyScope::Zip32(zip32::Scope::Internal) =&gt; GapLimits::default().internal(),
-<a href=#750 id=750 data-nosnippet>750</a>                    KeyScope::Ephemeral =&gt; {
-<a href=#751 id=751 data-nosnippet>751</a>                        <span class="macro">unreachable!</span>(<span class="string">"Ephemeral keys are omitted by the enclosing context."</span>)
-<a href=#752 id=752 data-nosnippet>752</a>                    }
-<a href=#753 id=753 data-nosnippet>753</a>                };
-<a href=#754 id=754 data-nosnippet>754</a>
-<a href=#755 id=755 data-nosnippet>755</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)<span class="question-mark">? </span>{
-<a href=#756 id=756 data-nosnippet>756</a>                    generate_address_range_internal(
-<a href=#757 id=757 data-nosnippet>757</a>                        conn,
-<a href=#758 id=758 data-nosnippet>758</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
-<a href=#759 id=759 data-nosnippet>759</a>                        account_id,
-<a href=#760 id=760 data-nosnippet>760</a>                        <span class="kw-2">&amp;</span>uivk,
-<a href=#761 id=761 data-nosnippet>761</a>                        ufvk.as_ref(),
-<a href=#762 id=762 data-nosnippet>762</a>                        key_scope,
-<a href=#763 id=763 data-nosnippet>763</a>                        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-<a href=#764 id=764 data-nosnippet>764</a>                        gap_start..gap_start.saturating_add(gap_limit),
-<a href=#765 id=765 data-nosnippet>765</a>                        <span class="bool-val">false</span>,
-<a href=#766 id=766 data-nosnippet>766</a>                    )<span class="question-mark">?</span>;
-<a href=#767 id=767 data-nosnippet>767</a>                }
-<a href=#768 id=768 data-nosnippet>768</a>            }
-<a href=#769 id=769 data-nosnippet>769</a>        }
-<a href=#770 id=770 data-nosnippet>770</a>
-<a href=#771 id=771 data-nosnippet>771</a>        <span class="prelude-val">Ok</span>(())
-<a href=#772 id=772 data-nosnippet>772</a>    }
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">use </span>transparent::keys::TransparentKeyScope;
+<a href=#114 id=114 data-nosnippet>114</a>
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>uivk = decode_uivk(params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>ufvk = decode_ufvk(params, row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;String&gt;&gt;(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#118 id=118 data-nosnippet>118</a>
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>min_transparent_idx = row
+<a href=#120 id=120 data-nosnippet>120</a>            .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"transparent_child_index"</span>)<span class="question-mark">?
+<a href=#121 id=121 data-nosnippet>121</a>            </span>.map(|i| {
+<a href=#122 id=122 data-nosnippet>122</a>                NonHardenedChildIndex::from_index(i).ok_or(WalletMigrationError::CorruptedData(
+<a href=#123 id=123 data-nosnippet>123</a>                    <span class="macro">format!</span>(<span class="string">"{i} is not a valid transparent child index."</span>),
+<a href=#124 id=124 data-nosnippet>124</a>                ))
+<a href=#125 id=125 data-nosnippet>125</a>            })
+<a href=#126 id=126 data-nosnippet>126</a>            .transpose()<span class="question-mark">?</span>;
+<a href=#127 id=127 data-nosnippet>127</a>
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="kw">let </span>min_diversifier_idx = decode_diversifier_index_be(row.get(<span class="string">"diversifier_index_be"</span>)<span class="question-mark">?</span>)<span class="question-mark">?
+<a href=#129 id=129 data-nosnippet>129</a>            </span>.and_then(|di| NonHardenedChildIndex::try_from(di).ok());
+<a href=#130 id=130 data-nosnippet>130</a>
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="comment">// Ensure that there is an address for each possible external address index prior to the
+<a href=#132 id=132 data-nosnippet>132</a>        // default UA for the account. If the default address has a diversifier index greater than
+<a href=#133 id=133 data-nosnippet>133</a>        // the gap limit, we generate transparent addresses up to that index but not beyond.
+<a href=#134 id=134 data-nosnippet>134</a>        </span><span class="kw">let </span>start = NonHardenedChildIndex::const_from_index(<span class="number">0</span>);
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>end = std::cmp::min(
+<a href=#136 id=136 data-nosnippet>136</a>            min_transparent_idx
+<a href=#137 id=137 data-nosnippet>137</a>                .or(min_diversifier_idx)
+<a href=#138 id=138 data-nosnippet>138</a>                <span class="comment">// guarantee that we have an entry at index 0; this address will have previously
+<a href=#139 id=139 data-nosnippet>139</a>                // been provided explicitly as one of the wallet's addresses in response to a call
+<a href=#140 id=140 data-nosnippet>140</a>                // to `get_transparent_receivers, even if we have no other addresses generated
+<a href=#141 id=141 data-nosnippet>141</a>                // (which shouldn't ordinarily be the case anyway)
+<a href=#142 id=142 data-nosnippet>142</a>                </span>.unwrap_or(NonHardenedChildIndex::const_from_index(<span class="number">1</span>)),
+<a href=#143 id=143 data-nosnippet>143</a>            NonHardenedChildIndex::from_index(GapLimits::default().external())
+<a href=#144 id=144 data-nosnippet>144</a>                .expect(<span class="string">"default external gap limit fits in non-hardened child index space."</span>),
+<a href=#145 id=145 data-nosnippet>145</a>        );
+<a href=#146 id=146 data-nosnippet>146</a>
+<a href=#147 id=147 data-nosnippet>147</a>        generate_address_range_internal(
+<a href=#148 id=148 data-nosnippet>148</a>            conn,
+<a href=#149 id=149 data-nosnippet>149</a>            params,
+<a href=#150 id=150 data-nosnippet>150</a>            account_id,
+<a href=#151 id=151 data-nosnippet>151</a>            <span class="kw-2">&amp;</span>uivk,
+<a href=#152 id=152 data-nosnippet>152</a>            ufvk.as_ref(),
+<a href=#153 id=153 data-nosnippet>153</a>            TransparentKeyScope::EXTERNAL,
+<a href=#154 id=154 data-nosnippet>154</a>            UnifiedAddressRequest::ALLOW_ALL,
+<a href=#155 id=155 data-nosnippet>155</a>            start..end,
+<a href=#156 id=156 data-nosnippet>156</a>            <span class="bool-val">false</span>,
+<a href=#157 id=157 data-nosnippet>157</a>        )<span class="question-mark">?</span>;
+<a href=#158 id=158 data-nosnippet>158</a>    }
+<a href=#159 id=159 data-nosnippet>159</a>
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="prelude-val">Ok</span>(())
+<a href=#161 id=161 data-nosnippet>161</a>}
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a><span class="kw">impl</span>&lt;P: consensus::Parameters, C: Clock, R: RngCore&gt; RusqliteMigration <span class="kw">for </span>Migration&lt;P, C, R&gt; {
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">type </span>Error = WalletMigrationError;
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">fn </span>up(<span class="kw-2">&amp;</span><span class="self">self</span>, conn: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span>external_scope_code = KeyScope::EXTERNAL.encode();
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>        conn.execute_batch(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#170 id=170 data-nosnippet>170</a>            <span class="string">r#"
+<a href=#171 id=171 data-nosnippet>171</a>            ALTER TABLE addresses ADD COLUMN key_scope INTEGER NOT NULL DEFAULT {external_scope_code};
+<a href=#172 id=172 data-nosnippet>172</a>            ALTER TABLE addresses ADD COLUMN transparent_child_index INTEGER;
+<a href=#173 id=173 data-nosnippet>173</a>            ALTER TABLE addresses ADD COLUMN exposed_at_height INTEGER;
+<a href=#174 id=174 data-nosnippet>174</a>            ALTER TABLE addresses ADD COLUMN receiver_flags INTEGER;
+<a href=#175 id=175 data-nosnippet>175</a>            "#
+<a href=#176 id=176 data-nosnippet>176</a>        </span>))<span class="question-mark">?</span>;
+<a href=#177 id=177 data-nosnippet>177</a>
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span><span class="kw-2">mut </span>account_ids = HashMap::new();
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>        {
+<a href=#181 id=181 data-nosnippet>181</a>            <span class="comment">// If the diversifier index is in the valid range of non-hardened child indices, set
+<a href=#182 id=182 data-nosnippet>182</a>            // `transparent_child_index` so that we can use it for gap limit handling.
+<a href=#183 id=183 data-nosnippet>183</a>            // No `DISTINCT` is necessary here due to the preexisting UNIQUE(account_id,
+<a href=#184 id=184 data-nosnippet>184</a>            // diversifier_index_be) constraint.
+<a href=#185 id=185 data-nosnippet>185</a>            </span><span class="kw">let </span><span class="kw-2">mut </span>di_query = conn.prepare(
+<a href=#186 id=186 data-nosnippet>186</a>                <span class="string">r#"
+<a href=#187 id=187 data-nosnippet>187</a>                SELECT
+<a href=#188 id=188 data-nosnippet>188</a>                    account_id,
+<a href=#189 id=189 data-nosnippet>189</a>                    address,
+<a href=#190 id=190 data-nosnippet>190</a>                    accounts.uivk AS uivk,
+<a href=#191 id=191 data-nosnippet>191</a>                    accounts.ufvk AS ufvk,
+<a href=#192 id=192 data-nosnippet>192</a>                    diversifier_index_be,
+<a href=#193 id=193 data-nosnippet>193</a>                    accounts.birthday_height
+<a href=#194 id=194 data-nosnippet>194</a>                FROM addresses
+<a href=#195 id=195 data-nosnippet>195</a>                JOIN accounts ON accounts.id = account_id
+<a href=#196 id=196 data-nosnippet>196</a>                "#</span>,
+<a href=#197 id=197 data-nosnippet>197</a>            )<span class="question-mark">?</span>;
+<a href=#198 id=198 data-nosnippet>198</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = di_query.query([])<span class="question-mark">?</span>;
+<a href=#199 id=199 data-nosnippet>199</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+<a href=#200 id=200 data-nosnippet>200</a>                <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
+<a href=#201 id=201 data-nosnippet>201</a>                <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#202 id=202 data-nosnippet>202</a>                <span class="kw">let </span>ufvk = decode_ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#203 id=203 data-nosnippet>203</a>                account_ids.insert(account_id, (uivk.clone(), ufvk));
+<a href=#204 id=204 data-nosnippet>204</a>
+<a href=#205 id=205 data-nosnippet>205</a>                <span class="kw">let </span>addr_str: String = row.get(<span class="string">"address"</span>)<span class="question-mark">?</span>;
+<a href=#206 id=206 data-nosnippet>206</a>                <span class="kw">let </span>address = ZcashAddress::try_from_encoded(<span class="kw-2">&amp;</span>addr_str).map_err(|e| {
+<a href=#207 id=207 data-nosnippet>207</a>                    WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
+<a href=#208 id=208 data-nosnippet>208</a>                        <span class="string">"Encoded address {addr_str} is not a valid zcash address: {e}"
+<a href=#209 id=209 data-nosnippet>209</a>                    </span>))
+<a href=#210 id=210 data-nosnippet>210</a>                })<span class="question-mark">?</span>;
+<a href=#211 id=211 data-nosnippet>211</a>                <span class="kw">let </span>receiver_flags = address.convert::&lt;ReceiverFlags&gt;().map_err(|<span class="kw">_</span>| {
+<a href=#212 id=212 data-nosnippet>212</a>                    WalletMigrationError::CorruptedData(<span class="string">"Unexpected address type"</span>.to_string())
+<a href=#213 id=213 data-nosnippet>213</a>                })<span class="question-mark">?</span>;
+<a href=#214 id=214 data-nosnippet>214</a>                <span class="kw">let </span>di_be: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = row.get(<span class="string">"diversifier_index_be"</span>)<span class="question-mark">?</span>;
+<a href=#215 id=215 data-nosnippet>215</a>                <span class="kw">let </span>account_birthday: i64 = row.get(<span class="string">"birthday_height"</span>)<span class="question-mark">?</span>;
+<a href=#216 id=216 data-nosnippet>216</a>
+<a href=#217 id=217 data-nosnippet>217</a>                <span class="kw">let </span>update_without_taddr = || {
+<a href=#218 id=218 data-nosnippet>218</a>                    conn.execute(
+<a href=#219 id=219 data-nosnippet>219</a>                        <span class="string">r#"
+<a href=#220 id=220 data-nosnippet>220</a>                        UPDATE addresses
+<a href=#221 id=221 data-nosnippet>221</a>                        SET exposed_at_height = :account_birthday,
+<a href=#222 id=222 data-nosnippet>222</a>                            receiver_flags = :receiver_flags
+<a href=#223 id=223 data-nosnippet>223</a>                        WHERE account_id = :account_id
+<a href=#224 id=224 data-nosnippet>224</a>                        AND diversifier_index_be = :diversifier_index_be
+<a href=#225 id=225 data-nosnippet>225</a>                        "#</span>,
+<a href=#226 id=226 data-nosnippet>226</a>                        <span class="macro">named_params!</span> {
+<a href=#227 id=227 data-nosnippet>227</a>                            <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
+<a href=#228 id=228 data-nosnippet>228</a>                            <span class="string">":diversifier_index_be"</span>: <span class="kw-2">&amp;</span>di_be,
+<a href=#229 id=229 data-nosnippet>229</a>                            <span class="string">":account_birthday"</span>: account_birthday,
+<a href=#230 id=230 data-nosnippet>230</a>                            <span class="string">":receiver_flags"</span>: receiver_flags.bits(),
+<a href=#231 id=231 data-nosnippet>231</a>                        },
+<a href=#232 id=232 data-nosnippet>232</a>                    )
+<a href=#233 id=233 data-nosnippet>233</a>                };
+<a href=#234 id=234 data-nosnippet>234</a>
+<a href=#235 id=235 data-nosnippet>235</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#236 id=236 data-nosnippet>236</a>                </span>{
+<a href=#237 id=237 data-nosnippet>237</a>                    <span class="kw">let </span>diversifier_index = decode_diversifier_index_be(di_be.clone())<span class="question-mark">?</span>;
+<a href=#238 id=238 data-nosnippet>238</a>                    <span class="kw">let </span>transparent_external = diversifier_index
+<a href=#239 id=239 data-nosnippet>239</a>                        .and_then(|di| NonHardenedChildIndex::try_from(di).ok())
+<a href=#240 id=240 data-nosnippet>240</a>                        .and_then(|idx| {
+<a href=#241 id=241 data-nosnippet>241</a>                            uivk.transparent()
+<a href=#242 id=242 data-nosnippet>242</a>                                .as_ref()
+<a href=#243 id=243 data-nosnippet>243</a>                                .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
+<a href=#244 id=244 data-nosnippet>244</a>                                .map(|t_addr| (idx, t_addr.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params)))
+<a href=#245 id=245 data-nosnippet>245</a>                        });
+<a href=#246 id=246 data-nosnippet>246</a>
+<a href=#247 id=247 data-nosnippet>247</a>                    <span class="comment">// Add transparent address index metadata and the transparent address corresponding
+<a href=#248 id=248 data-nosnippet>248</a>                    // to the index to the addresses table. We unconditionally set the cached
+<a href=#249 id=249 data-nosnippet>249</a>                    // transparent receiver address in order to simplify gap limit handling; even if a
+<a href=#250 id=250 data-nosnippet>250</a>                    // unified address is generated without a transparent receiver, we still assume
+<a href=#251 id=251 data-nosnippet>251</a>                    // that a transparent-only wallet for which we have imported the seed may have
+<a href=#252 id=252 data-nosnippet>252</a>                    // generated an address at that index.
+<a href=#253 id=253 data-nosnippet>253</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((idx, t_addr)) = transparent_external {
+<a href=#254 id=254 data-nosnippet>254</a>                        conn.execute(
+<a href=#255 id=255 data-nosnippet>255</a>                            <span class="string">r#"
+<a href=#256 id=256 data-nosnippet>256</a>                            UPDATE addresses
+<a href=#257 id=257 data-nosnippet>257</a>                            SET transparent_child_index = :transparent_child_index,
+<a href=#258 id=258 data-nosnippet>258</a>                                cached_transparent_receiver_address = :t_addr,
+<a href=#259 id=259 data-nosnippet>259</a>                                exposed_at_height = :account_birthday,
+<a href=#260 id=260 data-nosnippet>260</a>                                receiver_flags = :receiver_flags
+<a href=#261 id=261 data-nosnippet>261</a>                            WHERE account_id = :account_id
+<a href=#262 id=262 data-nosnippet>262</a>                            AND diversifier_index_be = :diversifier_index_be
+<a href=#263 id=263 data-nosnippet>263</a>                            "#</span>,
+<a href=#264 id=264 data-nosnippet>264</a>                            <span class="macro">named_params!</span> {
+<a href=#265 id=265 data-nosnippet>265</a>                                <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
+<a href=#266 id=266 data-nosnippet>266</a>                                <span class="string">":diversifier_index_be"</span>: di_be,
+<a href=#267 id=267 data-nosnippet>267</a>                                <span class="string">":transparent_child_index"</span>: idx.index(),
+<a href=#268 id=268 data-nosnippet>268</a>                                <span class="string">":t_addr"</span>: t_addr,
+<a href=#269 id=269 data-nosnippet>269</a>                                <span class="string">":account_birthday"</span>: account_birthday,
+<a href=#270 id=270 data-nosnippet>270</a>                                <span class="string">":receiver_flags"</span>: receiver_flags.bits(),
+<a href=#271 id=271 data-nosnippet>271</a>                            },
+<a href=#272 id=272 data-nosnippet>272</a>                        )<span class="question-mark">?</span>;
+<a href=#273 id=273 data-nosnippet>273</a>                    } <span class="kw">else </span>{
+<a href=#274 id=274 data-nosnippet>274</a>                        update_without_taddr()<span class="question-mark">?</span>;
+<a href=#275 id=275 data-nosnippet>275</a>                    }
+<a href=#276 id=276 data-nosnippet>276</a>                }
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a>                <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#279 id=279 data-nosnippet>279</a>                </span>{
+<a href=#280 id=280 data-nosnippet>280</a>                    update_without_taddr()<span class="question-mark">?</span>;
+<a href=#281 id=281 data-nosnippet>281</a>                }
+<a href=#282 id=282 data-nosnippet>282</a>            }
+<a href=#283 id=283 data-nosnippet>283</a>        };
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="comment">// We now have to re-create the `addresses` table in order to fix the constraints. Note
+<a href=#286 id=286 data-nosnippet>286</a>        // that we do not include the `seen_in_tx` column as this is duplicative of information
+<a href=#287 id=287 data-nosnippet>287</a>        // that can be discovered via joins with the various `*_received_{notes|outputs}` tables,
+<a href=#288 id=288 data-nosnippet>288</a>        // which we will create a view to perform below. The `used_in_tx` column data is used only
+<a href=#289 id=289 data-nosnippet>289</a>        // to determine the height at which the address was exposed (for which we use the target
+<a href=#290 id=290 data-nosnippet>290</a>        // height for the transaction.)
+<a href=#291 id=291 data-nosnippet>291</a>        </span>conn.execute_batch(<span class="string">r#"
+<a href=#292 id=292 data-nosnippet>292</a>            CREATE TABLE addresses_new (
+<a href=#293 id=293 data-nosnippet>293</a>                id INTEGER NOT NULL PRIMARY KEY,
+<a href=#294 id=294 data-nosnippet>294</a>                account_id INTEGER NOT NULL,
+<a href=#295 id=295 data-nosnippet>295</a>                key_scope INTEGER NOT NULL,
+<a href=#296 id=296 data-nosnippet>296</a>                diversifier_index_be BLOB NOT NULL,
+<a href=#297 id=297 data-nosnippet>297</a>                address TEXT NOT NULL,
+<a href=#298 id=298 data-nosnippet>298</a>                transparent_child_index INTEGER,
+<a href=#299 id=299 data-nosnippet>299</a>                cached_transparent_receiver_address TEXT,
+<a href=#300 id=300 data-nosnippet>300</a>                exposed_at_height INTEGER,
+<a href=#301 id=301 data-nosnippet>301</a>                receiver_flags INTEGER NOT NULL,
+<a href=#302 id=302 data-nosnippet>302</a>                transparent_receiver_next_check_time INTEGER,
+<a href=#303 id=303 data-nosnippet>303</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
+<a href=#304 id=304 data-nosnippet>304</a>                CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
+<a href=#305 id=305 data-nosnippet>305</a>                CONSTRAINT transparent_index_consistency CHECK (
+<a href=#306 id=306 data-nosnippet>306</a>                    (transparent_child_index IS NOT NULL) == (cached_transparent_receiver_address IS NOT NULL)
+<a href=#307 id=307 data-nosnippet>307</a>                )
+<a href=#308 id=308 data-nosnippet>308</a>            );
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a>            -- we will only set `transparent_receiver_next_check_time` for ephemeral addresses
+<a href=#311 id=311 data-nosnippet>311</a>            INSERT INTO addresses_new (
+<a href=#312 id=312 data-nosnippet>312</a>                account_id, key_scope, diversifier_index_be, address,
+<a href=#313 id=313 data-nosnippet>313</a>                transparent_child_index, cached_transparent_receiver_address,
+<a href=#314 id=314 data-nosnippet>314</a>                exposed_at_height, receiver_flags
+<a href=#315 id=315 data-nosnippet>315</a>            )
+<a href=#316 id=316 data-nosnippet>316</a>            SELECT
+<a href=#317 id=317 data-nosnippet>317</a>                account_id, key_scope, diversifier_index_be, address,
+<a href=#318 id=318 data-nosnippet>318</a>                transparent_child_index, cached_transparent_receiver_address,
+<a href=#319 id=319 data-nosnippet>319</a>                exposed_at_height, receiver_flags
+<a href=#320 id=320 data-nosnippet>320</a>            FROM addresses;
+<a href=#321 id=321 data-nosnippet>321</a>            "#</span>)<span class="question-mark">?</span>;
+<a href=#322 id=322 data-nosnippet>322</a>
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="comment">// Now, we add the ephemeral addresses to the newly unified `addresses` table.
+<a href=#324 id=324 data-nosnippet>324</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#325 id=325 data-nosnippet>325</a>        </span>{
+<a href=#326 id=326 data-nosnippet>326</a>            <span class="kw">let </span><span class="kw-2">mut </span>ea_insert = conn.prepare(
+<a href=#327 id=327 data-nosnippet>327</a>                <span class="string">r#"
+<a href=#328 id=328 data-nosnippet>328</a>                INSERT INTO addresses_new (
+<a href=#329 id=329 data-nosnippet>329</a>                    account_id, key_scope, diversifier_index_be, address,
+<a href=#330 id=330 data-nosnippet>330</a>                    transparent_child_index, cached_transparent_receiver_address,
+<a href=#331 id=331 data-nosnippet>331</a>                    exposed_at_height, receiver_flags,
+<a href=#332 id=332 data-nosnippet>332</a>                    transparent_receiver_next_check_time
+<a href=#333 id=333 data-nosnippet>333</a>                ) VALUES (
+<a href=#334 id=334 data-nosnippet>334</a>                    :account_id, :key_scope, :diversifier_index_be, :address,
+<a href=#335 id=335 data-nosnippet>335</a>                    :transparent_child_index, :cached_transparent_receiver_address,
+<a href=#336 id=336 data-nosnippet>336</a>                    :exposed_at_height, :receiver_flags,
+<a href=#337 id=337 data-nosnippet>337</a>                    :transparent_receiver_next_check_time
+<a href=#338 id=338 data-nosnippet>338</a>                )
+<a href=#339 id=339 data-nosnippet>339</a>                "#</span>,
+<a href=#340 id=340 data-nosnippet>340</a>            )<span class="question-mark">?</span>;
+<a href=#341 id=341 data-nosnippet>341</a>
+<a href=#342 id=342 data-nosnippet>342</a>            <span class="kw">let </span><span class="kw-2">mut </span>ea_query = conn.prepare(
+<a href=#343 id=343 data-nosnippet>343</a>                <span class="string">r#"
+<a href=#344 id=344 data-nosnippet>344</a>                SELECT
+<a href=#345 id=345 data-nosnippet>345</a>                    account_id, accounts.uivk, accounts.ufvk, address_index, address,
+<a href=#346 id=346 data-nosnippet>346</a>                    t.expiry_height - :expiry_delta AS exposed_at_height
+<a href=#347 id=347 data-nosnippet>347</a>                FROM ephemeral_addresses ea
+<a href=#348 id=348 data-nosnippet>348</a>                JOIN accounts ON accounts.id = account_id
+<a href=#349 id=349 data-nosnippet>349</a>                LEFT OUTER JOIN transactions t ON t.id_tx = ea.used_in_tx
+<a href=#350 id=350 data-nosnippet>350</a>                "#</span>,
+<a href=#351 id=351 data-nosnippet>351</a>            )<span class="question-mark">?</span>;
+<a href=#352 id=352 data-nosnippet>352</a>            <span class="kw">let </span>rows = ea_query
+<a href=#353 id=353 data-nosnippet>353</a>                .query_and_then(
+<a href=#354 id=354 data-nosnippet>354</a>                    <span class="macro">named_params!</span> {<span class="string">":expiry_delta"</span>: DEFAULT_TX_EXPIRY_DELTA },
+<a href=#355 id=355 data-nosnippet>355</a>                    |row| {
+<a href=#356 id=356 data-nosnippet>356</a>                        <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
+<a href=#357 id=357 data-nosnippet>357</a>                        <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#358 id=358 data-nosnippet>358</a>                        <span class="kw">let </span>ufvk = decode_ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#359 id=359 data-nosnippet>359</a>                        <span class="kw">let </span>transparent_child_index = row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="string">"address_index"</span>)<span class="question-mark">?</span>;
+<a href=#360 id=360 data-nosnippet>360</a>                        <span class="kw">let </span>diversifier_index = DiversifierIndex::from(
+<a href=#361 id=361 data-nosnippet>361</a>                            u32::try_from(transparent_child_index)
+<a href=#362 id=362 data-nosnippet>362</a>                                .ok()
+<a href=#363 id=363 data-nosnippet>363</a>                                .and_then(NonHardenedChildIndex::from_index)
+<a href=#364 id=364 data-nosnippet>364</a>                                .ok_or(WalletMigrationError::CorruptedData(
+<a href=#365 id=365 data-nosnippet>365</a>                                    <span class="string">"ephemeral address indices must be in the range of `u31`"
+<a href=#366 id=366 data-nosnippet>366</a>                                        </span>.to_owned(),
+<a href=#367 id=367 data-nosnippet>367</a>                                ))<span class="question-mark">?
+<a href=#368 id=368 data-nosnippet>368</a>                                </span>.index(),
+<a href=#369 id=369 data-nosnippet>369</a>                        );
+<a href=#370 id=370 data-nosnippet>370</a>                        <span class="kw">let </span>address: String = row.get(<span class="string">"address"</span>)<span class="question-mark">?</span>;
+<a href=#371 id=371 data-nosnippet>371</a>                        <span class="kw">let </span>exposed_at_height: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="string">"exposed_at_height"</span>)<span class="question-mark">?</span>;
+<a href=#372 id=372 data-nosnippet>372</a>                        <span class="prelude-val">Ok</span>((
+<a href=#373 id=373 data-nosnippet>373</a>                            account_id,
+<a href=#374 id=374 data-nosnippet>374</a>                            uivk,
+<a href=#375 id=375 data-nosnippet>375</a>                            ufvk,
+<a href=#376 id=376 data-nosnippet>376</a>                            diversifier_index,
+<a href=#377 id=377 data-nosnippet>377</a>                            transparent_child_index,
+<a href=#378 id=378 data-nosnippet>378</a>                            address,
+<a href=#379 id=379 data-nosnippet>379</a>                            exposed_at_height,
+<a href=#380 id=380 data-nosnippet>380</a>                        ))
+<a href=#381 id=381 data-nosnippet>381</a>                    },
+<a href=#382 id=382 data-nosnippet>382</a>                )<span class="question-mark">?
+<a href=#383 id=383 data-nosnippet>383</a>                </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, WalletMigrationError&gt;&gt;()<span class="question-mark">?</span>;
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">let </span>ephemeral_address_count =
+<a href=#386 id=386 data-nosnippet>386</a>                u32::try_from(rows.len()).expect(<span class="string">"number of ephemeral addrs fits into u32"</span>);
+<a href=#387 id=387 data-nosnippet>387</a>            <span class="kw">let </span><span class="kw-2">mut </span>check_time = <span class="self">self</span>._clock.now();
+<a href=#388 id=388 data-nosnippet>388</a>            <span class="kw">for </span>(
+<a href=#389 id=389 data-nosnippet>389</a>                account_id,
+<a href=#390 id=390 data-nosnippet>390</a>                uivk,
+<a href=#391 id=391 data-nosnippet>391</a>                ufvk,
+<a href=#392 id=392 data-nosnippet>392</a>                diversifier_index,
+<a href=#393 id=393 data-nosnippet>393</a>                transparent_child_index,
+<a href=#394 id=394 data-nosnippet>394</a>                address,
+<a href=#395 id=395 data-nosnippet>395</a>                exposed_at_height,
+<a href=#396 id=396 data-nosnippet>396</a>            ) <span class="kw">in </span>rows
+<a href=#397 id=397 data-nosnippet>397</a>            {
+<a href=#398 id=398 data-nosnippet>398</a>                <span class="comment">// Compute a next check time for the address such that, when considered in the
+<a href=#399 id=399 data-nosnippet>399</a>                // context of all other allocated ephemeral addresses, it will be checked once per
+<a href=#400 id=400 data-nosnippet>400</a>                // day.
+<a href=#401 id=401 data-nosnippet>401</a>                </span><span class="kw">let </span>next_check_time = {
+<a href=#402 id=402 data-nosnippet>402</a>                    <span class="kw">let </span>rng = <span class="self">self
+<a href=#403 id=403 data-nosnippet>403</a>                        </span>._rng
+<a href=#404 id=404 data-nosnippet>404</a>                        .lock()
+<a href=#405 id=405 data-nosnippet>405</a>                        .expect(<span class="string">"can obtain write lock to shared rng"</span>);
+<a href=#406 id=406 data-nosnippet>406</a>
+<a href=#407 id=407 data-nosnippet>407</a>                    next_check_time(rng, check_time, (<span class="number">24 </span>* <span class="number">60 </span>* <span class="number">60</span>) / ephemeral_address_count)
+<a href=#408 id=408 data-nosnippet>408</a>                        .expect(<span class="string">"computed next check time is valid"</span>)
+<a href=#409 id=409 data-nosnippet>409</a>                };
+<a href=#410 id=410 data-nosnippet>410</a>                <span class="kw">let </span>next_check_epoch_seconds = epoch_seconds(next_check_time).unwrap();
+<a href=#411 id=411 data-nosnippet>411</a>
+<a href=#412 id=412 data-nosnippet>412</a>                <span class="comment">// We set both the `address` column and the `cached_transparent_receiver_address`
+<a href=#413 id=413 data-nosnippet>413</a>                // column to the same value here; there is no Unified address that corresponds to
+<a href=#414 id=414 data-nosnippet>414</a>                // this transparent address.
+<a href=#415 id=415 data-nosnippet>415</a>                </span>ea_insert.execute(<span class="macro">named_params!</span> {
+<a href=#416 id=416 data-nosnippet>416</a>                    <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
+<a href=#417 id=417 data-nosnippet>417</a>                    <span class="string">":key_scope"</span>: KeyScope::Ephemeral.encode(),
+<a href=#418 id=418 data-nosnippet>418</a>                    <span class="string">":diversifier_index_be"</span>: encode_diversifier_index_be(diversifier_index),
+<a href=#419 id=419 data-nosnippet>419</a>                    <span class="string">":address"</span>: address,
+<a href=#420 id=420 data-nosnippet>420</a>                    <span class="string">":transparent_child_index"</span>: transparent_child_index,
+<a href=#421 id=421 data-nosnippet>421</a>                    <span class="string">":cached_transparent_receiver_address"</span>: address,
+<a href=#422 id=422 data-nosnippet>422</a>                    <span class="string">":exposed_at_height"</span>: exposed_at_height,
+<a href=#423 id=423 data-nosnippet>423</a>                    <span class="string">":receiver_flags"</span>: ReceiverFlags::P2PKH.bits(),
+<a href=#424 id=424 data-nosnippet>424</a>                    <span class="string">":transparent_receiver_next_check_time"</span>: next_check_epoch_seconds
+<a href=#425 id=425 data-nosnippet>425</a>                })<span class="question-mark">?</span>;
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a>                account_ids.insert(account_id, (uivk, ufvk));
+<a href=#428 id=428 data-nosnippet>428</a>                check_time = next_check_time;
+<a href=#429 id=429 data-nosnippet>429</a>            }
+<a href=#430 id=430 data-nosnippet>430</a>        }
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a>        conn.execute_batch(
+<a href=#433 id=433 data-nosnippet>433</a>            <span class="string">r#"
+<a href=#434 id=434 data-nosnippet>434</a>            PRAGMA legacy_alter_table = ON;
+<a href=#435 id=435 data-nosnippet>435</a>
+<a href=#436 id=436 data-nosnippet>436</a>            DROP TABLE addresses;
+<a href=#437 id=437 data-nosnippet>437</a>            ALTER TABLE addresses_new RENAME TO addresses;
+<a href=#438 id=438 data-nosnippet>438</a>            CREATE INDEX idx_addresses_accounts ON addresses (
+<a href=#439 id=439 data-nosnippet>439</a>                account_id ASC
+<a href=#440 id=440 data-nosnippet>440</a>            );
+<a href=#441 id=441 data-nosnippet>441</a>            CREATE INDEX idx_addresses_indices ON addresses (
+<a href=#442 id=442 data-nosnippet>442</a>                diversifier_index_be ASC
+<a href=#443 id=443 data-nosnippet>443</a>            );
+<a href=#444 id=444 data-nosnippet>444</a>            CREATE INDEX idx_addresses_t_indices ON addresses (
+<a href=#445 id=445 data-nosnippet>445</a>                transparent_child_index ASC
+<a href=#446 id=446 data-nosnippet>446</a>            );
+<a href=#447 id=447 data-nosnippet>447</a>
+<a href=#448 id=448 data-nosnippet>448</a>            DROP TABLE ephemeral_addresses;
+<a href=#449 id=449 data-nosnippet>449</a>
+<a href=#450 id=450 data-nosnippet>450</a>            PRAGMA legacy_alter_table = OFF;
+<a href=#451 id=451 data-nosnippet>451</a>            "#</span>,
+<a href=#452 id=452 data-nosnippet>452</a>        )<span class="question-mark">?</span>;
+<a href=#453 id=453 data-nosnippet>453</a>
+<a href=#454 id=454 data-nosnippet>454</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#455 id=455 data-nosnippet>455</a>        </span>insert_initial_transparent_addrs(conn, <span class="kw-2">&amp;</span><span class="self">self</span>.params)<span class="question-mark">?</span>;
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a>        <span class="comment">// Add foreign key references from the *_received_{notes|outputs} tables to the addresses
+<a href=#458 id=458 data-nosnippet>458</a>        // table to make it possible to identify which address was involved. These foreign key
+<a href=#459 id=459 data-nosnippet>459</a>        // columns must be nullable as for shielded account-internal. Ideally the foreign key
+<a href=#460 id=460 data-nosnippet>460</a>        // relationship between `transparent_received_outputs` and `addresses` would not be
+<a href=#461 id=461 data-nosnippet>461</a>        // nullable, but we allow it to be so here in order to avoid having to re-create that
+<a href=#462 id=462 data-nosnippet>462</a>        // table.
+<a href=#463 id=463 data-nosnippet>463</a>        //
+<a href=#464 id=464 data-nosnippet>464</a>        // While it would be possible to only add the address reference to
+<a href=#465 id=465 data-nosnippet>465</a>        // `transparent_received_outputs`, that would mean that a note received at a shielded
+<a href=#466 id=466 data-nosnippet>466</a>        // component of a diversified Unified Address would not update the position of the
+<a href=#467 id=467 data-nosnippet>467</a>        // transparent "address gap". Since we will include shielded address indices in the gap
+<a href=#468 id=468 data-nosnippet>468</a>        // computation, transparent-only wallets may not be able to discover all transparent funds,
+<a href=#469 id=469 data-nosnippet>469</a>        // but users of shielded wallets will be guaranteed to be able to recover all of their
+<a href=#470 id=470 data-nosnippet>470</a>        // funds.
+<a href=#471 id=471 data-nosnippet>471</a>        </span>conn.execute_batch(
+<a href=#472 id=472 data-nosnippet>472</a>            <span class="string">r#"
+<a href=#473 id=473 data-nosnippet>473</a>            ALTER TABLE orchard_received_notes
+<a href=#474 id=474 data-nosnippet>474</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
+<a href=#475 id=475 data-nosnippet>475</a>            ALTER TABLE sapling_received_notes
+<a href=#476 id=476 data-nosnippet>476</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
+<a href=#477 id=477 data-nosnippet>477</a>            ALTER TABLE transparent_received_outputs
+<a href=#478 id=478 data-nosnippet>478</a>                ADD COLUMN address_id INTEGER REFERENCES addresses(id);
+<a href=#479 id=479 data-nosnippet>479</a>            "#</span>,
+<a href=#480 id=480 data-nosnippet>480</a>        )<span class="question-mark">?</span>;
+<a href=#481 id=481 data-nosnippet>481</a>
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="comment">// Ensure that an address exists for each received Orchard note, and populate the
+<a href=#483 id=483 data-nosnippet>483</a>        // `address_id` column.
+<a href=#484 id=484 data-nosnippet>484</a>        </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#485 id=485 data-nosnippet>485</a>        </span>{
+<a href=#486 id=486 data-nosnippet>486</a>            <span class="kw">let </span><span class="kw-2">mut </span>stmt_rn_diversifiers = conn.prepare(
+<a href=#487 id=487 data-nosnippet>487</a>                <span class="string">r#"
+<a href=#488 id=488 data-nosnippet>488</a>                SELECT orn.id, orn.account_id, accounts.uivk,
+<a href=#489 id=489 data-nosnippet>489</a>                       orn.recipient_key_scope, orn.diversifier, t.mined_height
+<a href=#490 id=490 data-nosnippet>490</a>                FROM orchard_received_notes orn
+<a href=#491 id=491 data-nosnippet>491</a>                JOIN accounts ON accounts.id = account_id
+<a href=#492 id=492 data-nosnippet>492</a>                JOIN transactions t on t.id_tx = orn.tx
+<a href=#493 id=493 data-nosnippet>493</a>                "#</span>,
+<a href=#494 id=494 data-nosnippet>494</a>            )<span class="question-mark">?</span>;
+<a href=#495 id=495 data-nosnippet>495</a>
+<a href=#496 id=496 data-nosnippet>496</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_rn_diversifiers.query([])<span class="question-mark">?</span>;
+<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+<a href=#498 id=498 data-nosnippet>498</a>                <span class="kw">let </span>scope = KeyScope::decode(row.get(<span class="string">"recipient_key_scope"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#499 id=499 data-nosnippet>499</a>                <span class="comment">// for Orchard and Sapling, we only store addresses for externally-scoped keys.
+<a href=#500 id=500 data-nosnippet>500</a>                </span><span class="kw">if </span>scope == KeyScope::EXTERNAL {
+<a href=#501 id=501 data-nosnippet>501</a>                    <span class="kw">let </span>row_id: i64 = row.get(<span class="string">"id"</span>)<span class="question-mark">?</span>;
+<a href=#502 id=502 data-nosnippet>502</a>                    <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
+<a href=#503 id=503 data-nosnippet>503</a>                    <span class="kw">let </span>mined_height = row
+<a href=#504 id=504 data-nosnippet>504</a>                        .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
+<a href=#505 id=505 data-nosnippet>505</a>                        </span>.map(BlockHeight::from);
+<a href=#506 id=506 data-nosnippet>506</a>
+<a href=#507 id=507 data-nosnippet>507</a>                    <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#508 id=508 data-nosnippet>508</a>                    <span class="kw">let </span>diversifier =
+<a href=#509 id=509 data-nosnippet>509</a>                        orchard::keys::Diversifier::from_bytes(row.get(<span class="string">"diversifier"</span>)<span class="question-mark">?</span>);
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a>                    <span class="comment">// TODO: It's annoying that `IncomingViewingKey` doesn't expose the ability to
+<a href=#512 id=512 data-nosnippet>512</a>                    // decrypt the diversifier to find the index directly, and doesn't provide an
+<a href=#513 id=513 data-nosnippet>513</a>                    // accessor for `dk`. We already know we have the right IVK.
+<a href=#514 id=514 data-nosnippet>514</a>                    </span><span class="kw">let </span>ivk = uivk
+<a href=#515 id=515 data-nosnippet>515</a>                        .orchard()
+<a href=#516 id=516 data-nosnippet>516</a>                        .as_ref()
+<a href=#517 id=517 data-nosnippet>517</a>                        .expect(<span class="string">"previously received an Orchard output"</span>);
+<a href=#518 id=518 data-nosnippet>518</a>                    <span class="kw">let </span>di = ivk
+<a href=#519 id=519 data-nosnippet>519</a>                        .diversifier_index(<span class="kw-2">&amp;</span>ivk.address(diversifier))
+<a href=#520 id=520 data-nosnippet>520</a>                        .expect(<span class="string">"roundtrip"</span>);
+<a href=#521 id=521 data-nosnippet>521</a>                    <span class="kw">let </span>ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)<span class="question-mark">?</span>;
+<a href=#522 id=522 data-nosnippet>522</a>                    <span class="kw">let </span>address_id = wallet::upsert_address(
+<a href=#523 id=523 data-nosnippet>523</a>                        conn,
+<a href=#524 id=524 data-nosnippet>524</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
+<a href=#525 id=525 data-nosnippet>525</a>                        account_id,
+<a href=#526 id=526 data-nosnippet>526</a>                        di,
+<a href=#527 id=527 data-nosnippet>527</a>                        <span class="kw-2">&amp;</span>ua,
+<a href=#528 id=528 data-nosnippet>528</a>                        mined_height,
+<a href=#529 id=529 data-nosnippet>529</a>                        <span class="bool-val">false</span>,
+<a href=#530 id=530 data-nosnippet>530</a>                    )<span class="question-mark">?</span>;
+<a href=#531 id=531 data-nosnippet>531</a>
+<a href=#532 id=532 data-nosnippet>532</a>                    conn.execute(
+<a href=#533 id=533 data-nosnippet>533</a>                        <span class="string">"UPDATE orchard_received_notes
+<a href=#534 id=534 data-nosnippet>534</a>                         SET address_id = :address_id
+<a href=#535 id=535 data-nosnippet>535</a>                         WHERE id = :row_id"</span>,
+<a href=#536 id=536 data-nosnippet>536</a>                        <span class="macro">named_params!</span> {
+<a href=#537 id=537 data-nosnippet>537</a>                            <span class="string">":address_id"</span>: address_id.<span class="number">0</span>,
+<a href=#538 id=538 data-nosnippet>538</a>                            <span class="string">":row_id"</span>: row_id
+<a href=#539 id=539 data-nosnippet>539</a>                        },
+<a href=#540 id=540 data-nosnippet>540</a>                    )<span class="question-mark">?</span>;
+<a href=#541 id=541 data-nosnippet>541</a>                }
+<a href=#542 id=542 data-nosnippet>542</a>            }
+<a href=#543 id=543 data-nosnippet>543</a>        }
+<a href=#544 id=544 data-nosnippet>544</a>
+<a href=#545 id=545 data-nosnippet>545</a>        <span class="comment">// Ensure that an address exists for each received Sapling note, and populate the
+<a href=#546 id=546 data-nosnippet>546</a>        // `address_id` column.
+<a href=#547 id=547 data-nosnippet>547</a>        </span>{
+<a href=#548 id=548 data-nosnippet>548</a>            <span class="kw">let </span><span class="kw-2">mut </span>stmt_rn_diversifiers = conn.prepare(
+<a href=#549 id=549 data-nosnippet>549</a>                <span class="string">r#"
+<a href=#550 id=550 data-nosnippet>550</a>                SELECT srn.id, srn.account_id, accounts.uivk,
+<a href=#551 id=551 data-nosnippet>551</a>                       srn.recipient_key_scope, srn.diversifier, t.mined_height
+<a href=#552 id=552 data-nosnippet>552</a>                FROM sapling_received_notes srn
+<a href=#553 id=553 data-nosnippet>553</a>                JOIN accounts ON accounts.id = account_id
+<a href=#554 id=554 data-nosnippet>554</a>                JOIN transactions t ON t.id_tx = srn.tx
+<a href=#555 id=555 data-nosnippet>555</a>                "#</span>,
+<a href=#556 id=556 data-nosnippet>556</a>            )<span class="question-mark">?</span>;
+<a href=#557 id=557 data-nosnippet>557</a>
+<a href=#558 id=558 data-nosnippet>558</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_rn_diversifiers.query([])<span class="question-mark">?</span>;
+<a href=#559 id=559 data-nosnippet>559</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+<a href=#560 id=560 data-nosnippet>560</a>                <span class="kw">let </span>scope = KeyScope::decode(row.get(<span class="string">"recipient_key_scope"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#561 id=561 data-nosnippet>561</a>                <span class="comment">// for Orchard and Sapling, we only store addresses for externally-scoped keys.
+<a href=#562 id=562 data-nosnippet>562</a>                </span><span class="kw">if </span>scope == KeyScope::EXTERNAL {
+<a href=#563 id=563 data-nosnippet>563</a>                    <span class="kw">let </span>row_id: i64 = row.get(<span class="string">"id"</span>)<span class="question-mark">?</span>;
+<a href=#564 id=564 data-nosnippet>564</a>                    <span class="kw">let </span>account_id = AccountRef(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>);
+<a href=#565 id=565 data-nosnippet>565</a>                    <span class="kw">let </span>mined_height = row
+<a href=#566 id=566 data-nosnippet>566</a>                        .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
+<a href=#567 id=567 data-nosnippet>567</a>                        </span>.map(BlockHeight::from);
+<a href=#568 id=568 data-nosnippet>568</a>
+<a href=#569 id=569 data-nosnippet>569</a>                    <span class="kw">let </span>uivk = decode_uivk(<span class="kw-2">&amp;</span><span class="self">self</span>.params, row.get(<span class="string">"uivk"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#570 id=570 data-nosnippet>570</a>                    <span class="kw">let </span>diversifier = sapling::Diversifier(row.get(<span class="string">"diversifier"</span>)<span class="question-mark">?</span>);
+<a href=#571 id=571 data-nosnippet>571</a>
+<a href=#572 id=572 data-nosnippet>572</a>                    <span class="comment">// TODO: It's annoying that `IncomingViewingKey` doesn't expose the ability to
+<a href=#573 id=573 data-nosnippet>573</a>                    // decrypt the diversifier to find the index directly, and doesn't provide an
+<a href=#574 id=574 data-nosnippet>574</a>                    // accessor for `dk`. We already know we have the right IVK.
+<a href=#575 id=575 data-nosnippet>575</a>                    </span><span class="kw">let </span>ivk = uivk
+<a href=#576 id=576 data-nosnippet>576</a>                        .sapling()
+<a href=#577 id=577 data-nosnippet>577</a>                        .as_ref()
+<a href=#578 id=578 data-nosnippet>578</a>                        .expect(<span class="string">"previously received a Sapling output"</span>);
+<a href=#579 id=579 data-nosnippet>579</a>                    <span class="kw">let </span>di = ivk
+<a href=#580 id=580 data-nosnippet>580</a>                        .decrypt_diversifier(
+<a href=#581 id=581 data-nosnippet>581</a>                            <span class="kw-2">&amp;</span>ivk.address(diversifier)
+<a href=#582 id=582 data-nosnippet>582</a>                                .expect(<span class="string">"previously generated an address"</span>),
+<a href=#583 id=583 data-nosnippet>583</a>                        )
+<a href=#584 id=584 data-nosnippet>584</a>                        .expect(<span class="string">"roundtrip"</span>);
+<a href=#585 id=585 data-nosnippet>585</a>                    <span class="kw">let </span>ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)<span class="question-mark">?</span>;
+<a href=#586 id=586 data-nosnippet>586</a>                    <span class="kw">let </span>address_id = wallet::upsert_address(
+<a href=#587 id=587 data-nosnippet>587</a>                        conn,
+<a href=#588 id=588 data-nosnippet>588</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
+<a href=#589 id=589 data-nosnippet>589</a>                        account_id,
+<a href=#590 id=590 data-nosnippet>590</a>                        di,
+<a href=#591 id=591 data-nosnippet>591</a>                        <span class="kw-2">&amp;</span>ua,
+<a href=#592 id=592 data-nosnippet>592</a>                        mined_height,
+<a href=#593 id=593 data-nosnippet>593</a>                        <span class="bool-val">false</span>,
+<a href=#594 id=594 data-nosnippet>594</a>                    )<span class="question-mark">?</span>;
+<a href=#595 id=595 data-nosnippet>595</a>
+<a href=#596 id=596 data-nosnippet>596</a>                    conn.execute(
+<a href=#597 id=597 data-nosnippet>597</a>                        <span class="string">"UPDATE sapling_received_notes
+<a href=#598 id=598 data-nosnippet>598</a>                         SET address_id = :address_id
+<a href=#599 id=599 data-nosnippet>599</a>                         WHERE id = :row_id"</span>,
+<a href=#600 id=600 data-nosnippet>600</a>                        <span class="macro">named_params!</span> {
+<a href=#601 id=601 data-nosnippet>601</a>                            <span class="string">":address_id"</span>: address_id.<span class="number">0</span>,
+<a href=#602 id=602 data-nosnippet>602</a>                            <span class="string">":row_id"</span>: row_id
+<a href=#603 id=603 data-nosnippet>603</a>                        },
+<a href=#604 id=604 data-nosnippet>604</a>                    )<span class="question-mark">?</span>;
+<a href=#605 id=605 data-nosnippet>605</a>                }
+<a href=#606 id=606 data-nosnippet>606</a>            }
+<a href=#607 id=607 data-nosnippet>607</a>        }
+<a href=#608 id=608 data-nosnippet>608</a>
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="comment">// At this point, every address on which we've received a transparent output should have a
+<a href=#610 id=610 data-nosnippet>610</a>        // corresponding row in the `addresses` table with a valid
+<a href=#611 id=611 data-nosnippet>611</a>        // `cached_transparent_receiver_address` entry, because we will only have queried the light
+<a href=#612 id=612 data-nosnippet>612</a>        // wallet server for outputs from exactly these addresses. So for transparent outputs, we
+<a href=#613 id=613 data-nosnippet>613</a>        // join to the addresses table using the address itself in order to obtain the address index.
+<a href=#614 id=614 data-nosnippet>614</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#615 id=615 data-nosnippet>615</a>        </span>{
+<a href=#616 id=616 data-nosnippet>616</a>            conn.execute_batch(
+<a href=#617 id=617 data-nosnippet>617</a>                <span class="string">r#"
+<a href=#618 id=618 data-nosnippet>618</a>                PRAGMA legacy_alter_table = ON;
+<a href=#619 id=619 data-nosnippet>619</a>
+<a href=#620 id=620 data-nosnippet>620</a>                UPDATE transparent_received_outputs
+<a href=#621 id=621 data-nosnippet>621</a>                SET address_id = addresses.id
+<a href=#622 id=622 data-nosnippet>622</a>                FROM addresses
+<a href=#623 id=623 data-nosnippet>623</a>                WHERE addresses.cached_transparent_receiver_address = transparent_received_outputs.address;
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a>                CREATE TABLE transparent_received_outputs_new (
+<a href=#626 id=626 data-nosnippet>626</a>                    id INTEGER PRIMARY KEY,
+<a href=#627 id=627 data-nosnippet>627</a>                    transaction_id INTEGER NOT NULL,
+<a href=#628 id=628 data-nosnippet>628</a>                    output_index INTEGER NOT NULL,
+<a href=#629 id=629 data-nosnippet>629</a>                    account_id INTEGER NOT NULL,
+<a href=#630 id=630 data-nosnippet>630</a>                    address TEXT NOT NULL,
+<a href=#631 id=631 data-nosnippet>631</a>                    script BLOB NOT NULL,
+<a href=#632 id=632 data-nosnippet>632</a>                    value_zat INTEGER NOT NULL,
+<a href=#633 id=633 data-nosnippet>633</a>                    max_observed_unspent_height INTEGER,
+<a href=#634 id=634 data-nosnippet>634</a>                    address_id INTEGER NOT NULL REFERENCES addresses(id),
+<a href=#635 id=635 data-nosnippet>635</a>                    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+<a href=#636 id=636 data-nosnippet>636</a>                    FOREIGN KEY (account_id) REFERENCES accounts(id),
+<a href=#637 id=637 data-nosnippet>637</a>                    CONSTRAINT transparent_output_unique UNIQUE (transaction_id, output_index)
+<a href=#638 id=638 data-nosnippet>638</a>                );
+<a href=#639 id=639 data-nosnippet>639</a>                INSERT INTO transparent_received_outputs_new SELECT * FROM transparent_received_outputs;
+<a href=#640 id=640 data-nosnippet>640</a>
+<a href=#641 id=641 data-nosnippet>641</a>                DROP TABLE transparent_received_outputs;
+<a href=#642 id=642 data-nosnippet>642</a>                ALTER TABLE transparent_received_outputs_new RENAME TO transparent_received_outputs;
+<a href=#643 id=643 data-nosnippet>643</a>
+<a href=#644 id=644 data-nosnippet>644</a>                PRAGMA legacy_alter_table = OFF;
+<a href=#645 id=645 data-nosnippet>645</a>                "#</span>,
+<a href=#646 id=646 data-nosnippet>646</a>            )<span class="question-mark">?</span>;
+<a href=#647 id=647 data-nosnippet>647</a>        }
+<a href=#648 id=648 data-nosnippet>648</a>
+<a href=#649 id=649 data-nosnippet>649</a>        <span class="comment">// Construct a view that identifies the minimum block height at which each address was
+<a href=#650 id=650 data-nosnippet>650</a>        // first used
+<a href=#651 id=651 data-nosnippet>651</a>        </span>conn.execute_batch(
+<a href=#652 id=652 data-nosnippet>652</a>            <span class="string">r#"
+<a href=#653 id=653 data-nosnippet>653</a>            CREATE VIEW v_address_uses AS
+<a href=#654 id=654 data-nosnippet>654</a>                SELECT orn.address_id, orn.account_id, orn.tx AS transaction_id, t.mined_height,
+<a href=#655 id=655 data-nosnippet>655</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
+<a href=#656 id=656 data-nosnippet>656</a>                FROM orchard_received_notes orn
+<a href=#657 id=657 data-nosnippet>657</a>                JOIN addresses a ON a.id = orn.address_id
+<a href=#658 id=658 data-nosnippet>658</a>                JOIN transactions t ON t.id_tx = orn.tx
+<a href=#659 id=659 data-nosnippet>659</a>            UNION
+<a href=#660 id=660 data-nosnippet>660</a>                SELECT srn.address_id, srn.account_id, srn.tx AS transaction_id, t.mined_height,
+<a href=#661 id=661 data-nosnippet>661</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
+<a href=#662 id=662 data-nosnippet>662</a>                FROM sapling_received_notes srn
+<a href=#663 id=663 data-nosnippet>663</a>                JOIN addresses a ON a.id = srn.address_id
+<a href=#664 id=664 data-nosnippet>664</a>                JOIN transactions t ON t.id_tx = srn.tx
+<a href=#665 id=665 data-nosnippet>665</a>            UNION
+<a href=#666 id=666 data-nosnippet>666</a>                SELECT tro.address_id, tro.account_id, tro.transaction_id, t.mined_height,
+<a href=#667 id=667 data-nosnippet>667</a>                       a.key_scope, a.diversifier_index_be, a.transparent_child_index
+<a href=#668 id=668 data-nosnippet>668</a>                FROM transparent_received_outputs tro
+<a href=#669 id=669 data-nosnippet>669</a>                JOIN addresses a ON a.id = tro.address_id
+<a href=#670 id=670 data-nosnippet>670</a>                JOIN transactions t ON t.id_tx = tro.transaction_id;
+<a href=#671 id=671 data-nosnippet>671</a>
+<a href=#672 id=672 data-nosnippet>672</a>            CREATE VIEW v_address_first_use AS
+<a href=#673 id=673 data-nosnippet>673</a>            SELECT
+<a href=#674 id=674 data-nosnippet>674</a>                address_id,
+<a href=#675 id=675 data-nosnippet>675</a>                account_id,
+<a href=#676 id=676 data-nosnippet>676</a>                key_scope,
+<a href=#677 id=677 data-nosnippet>677</a>                diversifier_index_be,
+<a href=#678 id=678 data-nosnippet>678</a>                transparent_child_index,
+<a href=#679 id=679 data-nosnippet>679</a>                MIN(mined_height) AS first_use_height
+<a href=#680 id=680 data-nosnippet>680</a>            FROM v_address_uses
+<a href=#681 id=681 data-nosnippet>681</a>            GROUP BY
+<a href=#682 id=682 data-nosnippet>682</a>                address_id, account_id, key_scope,
+<a href=#683 id=683 data-nosnippet>683</a>                diversifier_index_be, transparent_child_index;
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a>            DROP VIEW v_received_outputs;
+<a href=#686 id=686 data-nosnippet>686</a>            CREATE VIEW v_received_outputs AS
+<a href=#687 id=687 data-nosnippet>687</a>                SELECT
+<a href=#688 id=688 data-nosnippet>688</a>                    sapling_received_notes.id AS id_within_pool_table,
+<a href=#689 id=689 data-nosnippet>689</a>                    sapling_received_notes.tx AS transaction_id,
+<a href=#690 id=690 data-nosnippet>690</a>                    2 AS pool,
+<a href=#691 id=691 data-nosnippet>691</a>                    sapling_received_notes.output_index,
+<a href=#692 id=692 data-nosnippet>692</a>                    account_id,
+<a href=#693 id=693 data-nosnippet>693</a>                    sapling_received_notes.value,
+<a href=#694 id=694 data-nosnippet>694</a>                    is_change,
+<a href=#695 id=695 data-nosnippet>695</a>                    sapling_received_notes.memo,
+<a href=#696 id=696 data-nosnippet>696</a>                    sent_notes.id AS sent_note_id,
+<a href=#697 id=697 data-nosnippet>697</a>                    sapling_received_notes.address_id
+<a href=#698 id=698 data-nosnippet>698</a>                FROM sapling_received_notes
+<a href=#699 id=699 data-nosnippet>699</a>                LEFT JOIN sent_notes
+<a href=#700 id=700 data-nosnippet>700</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#701 id=701 data-nosnippet>701</a>                   (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+<a href=#702 id=702 data-nosnippet>702</a>            UNION
+<a href=#703 id=703 data-nosnippet>703</a>                SELECT
+<a href=#704 id=704 data-nosnippet>704</a>                    orchard_received_notes.id AS id_within_pool_table,
+<a href=#705 id=705 data-nosnippet>705</a>                    orchard_received_notes.tx AS transaction_id,
+<a href=#706 id=706 data-nosnippet>706</a>                    3 AS pool,
+<a href=#707 id=707 data-nosnippet>707</a>                    orchard_received_notes.action_index AS output_index,
+<a href=#708 id=708 data-nosnippet>708</a>                    account_id,
+<a href=#709 id=709 data-nosnippet>709</a>                    orchard_received_notes.value,
+<a href=#710 id=710 data-nosnippet>710</a>                    is_change,
+<a href=#711 id=711 data-nosnippet>711</a>                    orchard_received_notes.memo,
+<a href=#712 id=712 data-nosnippet>712</a>                    sent_notes.id AS sent_note_id,
+<a href=#713 id=713 data-nosnippet>713</a>                    orchard_received_notes.address_id
+<a href=#714 id=714 data-nosnippet>714</a>                FROM orchard_received_notes
+<a href=#715 id=715 data-nosnippet>715</a>                LEFT JOIN sent_notes
+<a href=#716 id=716 data-nosnippet>716</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#717 id=717 data-nosnippet>717</a>                   (orchard_received_notes.tx, 3, orchard_received_notes.action_index)
+<a href=#718 id=718 data-nosnippet>718</a>            UNION
+<a href=#719 id=719 data-nosnippet>719</a>                SELECT
+<a href=#720 id=720 data-nosnippet>720</a>                    u.id AS id_within_pool_table,
+<a href=#721 id=721 data-nosnippet>721</a>                    u.transaction_id,
+<a href=#722 id=722 data-nosnippet>722</a>                    0 AS pool,
+<a href=#723 id=723 data-nosnippet>723</a>                    u.output_index,
+<a href=#724 id=724 data-nosnippet>724</a>                    u.account_id,
+<a href=#725 id=725 data-nosnippet>725</a>                    u.value_zat AS value,
+<a href=#726 id=726 data-nosnippet>726</a>                    0 AS is_change,
+<a href=#727 id=727 data-nosnippet>727</a>                    NULL AS memo,
+<a href=#728 id=728 data-nosnippet>728</a>                    sent_notes.id AS sent_note_id,
+<a href=#729 id=729 data-nosnippet>729</a>                    u.address_id
+<a href=#730 id=730 data-nosnippet>730</a>                FROM transparent_received_outputs u
+<a href=#731 id=731 data-nosnippet>731</a>                LEFT JOIN sent_notes
+<a href=#732 id=732 data-nosnippet>732</a>                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#733 id=733 data-nosnippet>733</a>                   (u.transaction_id, 0, u.output_index);
+<a href=#734 id=734 data-nosnippet>734</a>            "#</span>,
+<a href=#735 id=735 data-nosnippet>735</a>        )<span class="question-mark">?</span>;
+<a href=#736 id=736 data-nosnippet>736</a>
+<a href=#737 id=737 data-nosnippet>737</a>        <span class="comment">// At this point, we have completed updating the infrastructure for gap limit handling,
+<a href=#738 id=738 data-nosnippet>738</a>        // so we can regenerate the gap limit worth of addresses for each account that we
+<a href=#739 id=739 data-nosnippet>739</a>        // recorded. The body of this method duplicates thje logic in `generate_gap_addresses`
+<a href=#740 id=740 data-nosnippet>740</a>        // in order to avoid the `get_account_internal` call, since we already have the internal
+<a href=#741 id=741 data-nosnippet>741</a>        // account id in each iteration of the loop.
+<a href=#742 id=742 data-nosnippet>742</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#743 id=743 data-nosnippet>743</a>        </span><span class="kw">for </span>(account_id, (uivk, ufvk)) <span class="kw">in </span>account_ids {
+<a href=#744 id=744 data-nosnippet>744</a>            <span class="kw">use </span>transparent::keys::TransparentKeyScope;
+<a href=#745 id=745 data-nosnippet>745</a>
+<a href=#746 id=746 data-nosnippet>746</a>            <span class="kw">for </span>key_scope <span class="kw">in </span>[TransparentKeyScope::EXTERNAL, TransparentKeyScope::INTERNAL] {
+<a href=#747 id=747 data-nosnippet>747</a>                <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+<a href=#748 id=748 data-nosnippet>748</a>                <span class="kw">let </span>gap_limit = <span class="kw">match </span>key_scope {
+<a href=#749 id=749 data-nosnippet>749</a>                    TransparentKeyScope::EXTERNAL =&gt; GapLimits::default().external(),
+<a href=#750 id=750 data-nosnippet>750</a>                    TransparentKeyScope::INTERNAL =&gt; GapLimits::default().internal(),
+<a href=#751 id=751 data-nosnippet>751</a>                    <span class="kw">_ </span>=&gt; {
+<a href=#752 id=752 data-nosnippet>752</a>                        <span class="macro">unreachable!</span>(
+<a href=#753 id=753 data-nosnippet>753</a>                            <span class="string">"Ephemeral and Foreign keys are omitted by the enclosing context."
+<a href=#754 id=754 data-nosnippet>754</a>                        </span>)
+<a href=#755 id=755 data-nosnippet>755</a>                    }
+<a href=#756 id=756 data-nosnippet>756</a>                };
+<a href=#757 id=757 data-nosnippet>757</a>
+<a href=#758 id=758 data-nosnippet>758</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)<span class="question-mark">? </span>{
+<a href=#759 id=759 data-nosnippet>759</a>                    generate_address_range_internal(
+<a href=#760 id=760 data-nosnippet>760</a>                        conn,
+<a href=#761 id=761 data-nosnippet>761</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
+<a href=#762 id=762 data-nosnippet>762</a>                        account_id,
+<a href=#763 id=763 data-nosnippet>763</a>                        <span class="kw-2">&amp;</span>uivk,
+<a href=#764 id=764 data-nosnippet>764</a>                        ufvk.as_ref(),
+<a href=#765 id=765 data-nosnippet>765</a>                        key_scope,
+<a href=#766 id=766 data-nosnippet>766</a>                        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+<a href=#767 id=767 data-nosnippet>767</a>                        gap_start..gap_start.saturating_add(gap_limit),
+<a href=#768 id=768 data-nosnippet>768</a>                        <span class="bool-val">false</span>,
+<a href=#769 id=769 data-nosnippet>769</a>                    )<span class="question-mark">?</span>;
+<a href=#770 id=770 data-nosnippet>770</a>                }
+<a href=#771 id=771 data-nosnippet>771</a>            }
+<a href=#772 id=772 data-nosnippet>772</a>        }
 <a href=#773 id=773 data-nosnippet>773</a>
-<a href=#774 id=774 data-nosnippet>774</a>    <span class="kw">fn </span>down(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
-<a href=#775 id=775 data-nosnippet>775</a>        <span class="prelude-val">Err</span>(WalletMigrationError::CannotRevert(MIGRATION_ID))
-<a href=#776 id=776 data-nosnippet>776</a>    }
-<a href=#777 id=777 data-nosnippet>777</a>}</code></pre></div></section></main></body></html>
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="prelude-val">Ok</span>(())
+<a href=#775 id=775 data-nosnippet>775</a>    }
+<a href=#776 id=776 data-nosnippet>776</a>
+<a href=#777 id=777 data-nosnippet>777</a>    <span class="kw">fn </span>down(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
+<a href=#778 id=778 data-nosnippet>778</a>        <span class="prelude-val">Err</span>(WalletMigrationError::CannotRevert(MIGRATION_ID))
+<a href=#779 id=779 data-nosnippet>779</a>    }
+<a href=#780 id=780 data-nosnippet>780</a>}</code></pre></div></section></main></body></html>

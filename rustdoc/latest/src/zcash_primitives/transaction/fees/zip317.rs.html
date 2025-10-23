@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! [`FeeRule`]: crate::transaction::fees::FeeRule
 <a href=#4 id=4 data-nosnippet>4</a>//! [ZIP 317]: https//zips.z.cash/zip-0317
@@ -126,9 +126,9 @@
 <a href=#126 id=126 data-nosnippet>126</a></span><span class="kw">pub enum </span>FeeError {
 <a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// An overflow or underflow of amount computation occurred.
 <a href=#128 id=128 data-nosnippet>128</a>    </span>Balance(BalanceError),
-<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Transparent inputs provided to the fee calculation included coins that do not pay to
-<a href=#130 id=130 data-nosnippet>130</a>    /// standard P2pkh scripts.
-<a href=#131 id=131 data-nosnippet>131</a>    </span>NonP2pkhInputs(Vec&lt;OutPoint&gt;),
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Transparent inputs provided to the fee calculation included coins that pay to
+<a href=#130 id=130 data-nosnippet>130</a>    /// unknown P2SH redeem scripts.
+<a href=#131 id=131 data-nosnippet>131</a>    </span>UnknownP2shInputs(Vec&lt;OutPoint&gt;),
 <a href=#132 id=132 data-nosnippet>132</a>}
 <a href=#133 id=133 data-nosnippet>133</a>
 <a href=#134 id=134 data-nosnippet>134</a><span class="kw">impl </span>From&lt;BalanceError&gt; <span class="kw">for </span>FeeError {
@@ -144,52 +144,54 @@
 <a href=#144 id=144 data-nosnippet>144</a>                f,
 <a href=#145 id=145 data-nosnippet>145</a>                <span class="string">"A balance calculation violated amount validity bounds: {e}."
 <a href=#146 id=146 data-nosnippet>146</a>            </span>),
-<a href=#147 id=147 data-nosnippet>147</a>            FeeError::NonP2pkhInputs(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">"Only P2PKH inputs are supported."</span>),
-<a href=#148 id=148 data-nosnippet>148</a>        }
-<a href=#149 id=149 data-nosnippet>149</a>    }
-<a href=#150 id=150 data-nosnippet>150</a>}
-<a href=#151 id=151 data-nosnippet>151</a>
-<a href=#152 id=152 data-nosnippet>152</a><span class="kw">impl </span><span class="kw">super</span>::FeeRule <span class="kw">for </span>FeeRule {
-<a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">type </span>Error = FeeError;
-<a href=#154 id=154 data-nosnippet>154</a>
-<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">fn </span>fee_required&lt;P: consensus::Parameters&gt;(
-<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#157 id=157 data-nosnippet>157</a>        _params: <span class="kw-2">&amp;</span>P,
-<a href=#158 id=158 data-nosnippet>158</a>        _target_height: BlockHeight,
-<a href=#159 id=159 data-nosnippet>159</a>        transparent_input_sizes: <span class="kw">impl </span>IntoIterator&lt;Item = transparent::InputSize&gt;,
-<a href=#160 id=160 data-nosnippet>160</a>        transparent_output_sizes: <span class="kw">impl </span>IntoIterator&lt;Item = usize&gt;,
-<a href=#161 id=161 data-nosnippet>161</a>        sapling_input_count: usize,
-<a href=#162 id=162 data-nosnippet>162</a>        sapling_output_count: usize,
-<a href=#163 id=163 data-nosnippet>163</a>        orchard_action_count: usize,
-<a href=#164 id=164 data-nosnippet>164</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, <span class="self">Self</span>::Error&gt; {
-<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span><span class="kw-2">mut </span>t_in_total_size: usize = <span class="number">0</span>;
-<a href=#166 id=166 data-nosnippet>166</a>        <span class="kw">let </span><span class="kw-2">mut </span>non_p2pkh_outpoints = <span class="macro">vec!</span>[];
-<a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">for </span>sz <span class="kw">in </span>transparent_input_sizes.into_iter() {
-<a href=#168 id=168 data-nosnippet>168</a>            <span class="kw">match </span>sz {
-<a href=#169 id=169 data-nosnippet>169</a>                transparent::InputSize::Known(s) =&gt; {
-<a href=#170 id=170 data-nosnippet>170</a>                    t_in_total_size += s;
-<a href=#171 id=171 data-nosnippet>171</a>                }
-<a href=#172 id=172 data-nosnippet>172</a>                transparent::InputSize::Unknown(outpoint) =&gt; {
-<a href=#173 id=173 data-nosnippet>173</a>                    non_p2pkh_outpoints.push(outpoint.clone());
-<a href=#174 id=174 data-nosnippet>174</a>                }
-<a href=#175 id=175 data-nosnippet>175</a>            }
-<a href=#176 id=176 data-nosnippet>176</a>        }
-<a href=#177 id=177 data-nosnippet>177</a>
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">if </span>!non_p2pkh_outpoints.is_empty() {
-<a href=#179 id=179 data-nosnippet>179</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(FeeError::NonP2pkhInputs(non_p2pkh_outpoints));
-<a href=#180 id=180 data-nosnippet>180</a>        }
-<a href=#181 id=181 data-nosnippet>181</a>
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>t_out_total_size = transparent_output_sizes.into_iter().sum();
+<a href=#147 id=147 data-nosnippet>147</a>            FeeError::UnknownP2shInputs(<span class="kw">_</span>) =&gt; {
+<a href=#148 id=148 data-nosnippet>148</a>                <span class="macro">write!</span>(f, <span class="string">"Only P2PKH or known-P2SH inputs are supported."</span>)
+<a href=#149 id=149 data-nosnippet>149</a>            }
+<a href=#150 id=150 data-nosnippet>150</a>        }
+<a href=#151 id=151 data-nosnippet>151</a>    }
+<a href=#152 id=152 data-nosnippet>152</a>}
+<a href=#153 id=153 data-nosnippet>153</a>
+<a href=#154 id=154 data-nosnippet>154</a><span class="kw">impl </span><span class="kw">super</span>::FeeRule <span class="kw">for </span>FeeRule {
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">type </span>Error = FeeError;
+<a href=#156 id=156 data-nosnippet>156</a>
+<a href=#157 id=157 data-nosnippet>157</a>    <span class="kw">fn </span>fee_required&lt;P: consensus::Parameters&gt;(
+<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#159 id=159 data-nosnippet>159</a>        _params: <span class="kw-2">&amp;</span>P,
+<a href=#160 id=160 data-nosnippet>160</a>        _target_height: BlockHeight,
+<a href=#161 id=161 data-nosnippet>161</a>        transparent_input_sizes: <span class="kw">impl </span>IntoIterator&lt;Item = transparent::InputSize&gt;,
+<a href=#162 id=162 data-nosnippet>162</a>        transparent_output_sizes: <span class="kw">impl </span>IntoIterator&lt;Item = usize&gt;,
+<a href=#163 id=163 data-nosnippet>163</a>        sapling_input_count: usize,
+<a href=#164 id=164 data-nosnippet>164</a>        sapling_output_count: usize,
+<a href=#165 id=165 data-nosnippet>165</a>        orchard_action_count: usize,
+<a href=#166 id=166 data-nosnippet>166</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, <span class="self">Self</span>::Error&gt; {
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span><span class="kw-2">mut </span>t_in_total_size: usize = <span class="number">0</span>;
+<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">let </span><span class="kw-2">mut </span>unknown_p2sh_outpoints = <span class="macro">vec!</span>[];
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">for </span>sz <span class="kw">in </span>transparent_input_sizes.into_iter() {
+<a href=#170 id=170 data-nosnippet>170</a>            <span class="kw">match </span>sz {
+<a href=#171 id=171 data-nosnippet>171</a>                transparent::InputSize::Known(s) =&gt; {
+<a href=#172 id=172 data-nosnippet>172</a>                    t_in_total_size += s;
+<a href=#173 id=173 data-nosnippet>173</a>                }
+<a href=#174 id=174 data-nosnippet>174</a>                transparent::InputSize::Unknown(outpoint) =&gt; {
+<a href=#175 id=175 data-nosnippet>175</a>                    unknown_p2sh_outpoints.push(outpoint.clone());
+<a href=#176 id=176 data-nosnippet>176</a>                }
+<a href=#177 id=177 data-nosnippet>177</a>            }
+<a href=#178 id=178 data-nosnippet>178</a>        }
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">if </span>!unknown_p2sh_outpoints.is_empty() {
+<a href=#181 id=181 data-nosnippet>181</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(FeeError::UnknownP2shInputs(unknown_p2sh_outpoints));
+<a href=#182 id=182 data-nosnippet>182</a>        }
 <a href=#183 id=183 data-nosnippet>183</a>
-<a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">let </span>ceildiv = |num: usize, den: usize| num.div_ceil(den);
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">let </span>t_out_total_size = transparent_output_sizes.into_iter().sum();
 <a href=#185 id=185 data-nosnippet>185</a>
-<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">let </span>logical_actions = max(
-<a href=#187 id=187 data-nosnippet>187</a>            ceildiv(t_in_total_size, <span class="self">self</span>.p2pkh_standard_input_size),
-<a href=#188 id=188 data-nosnippet>188</a>            ceildiv(t_out_total_size, <span class="self">self</span>.p2pkh_standard_output_size),
-<a href=#189 id=189 data-nosnippet>189</a>        ) + max(sapling_input_count, sapling_output_count)
-<a href=#190 id=190 data-nosnippet>190</a>            + orchard_action_count;
-<a href=#191 id=191 data-nosnippet>191</a>
-<a href=#192 id=192 data-nosnippet>192</a>        (<span class="self">self</span>.marginal_fee * max(<span class="self">self</span>.grace_actions, logical_actions))
-<a href=#193 id=193 data-nosnippet>193</a>            .ok_or_else(|| BalanceError::Overflow.into())
-<a href=#194 id=194 data-nosnippet>194</a>    }
-<a href=#195 id=195 data-nosnippet>195</a>}</code></pre></div></section></main></body></html>
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">let </span>ceildiv = |num: usize, den: usize| num.div_ceil(den);
+<a href=#187 id=187 data-nosnippet>187</a>
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw">let </span>logical_actions = max(
+<a href=#189 id=189 data-nosnippet>189</a>            ceildiv(t_in_total_size, <span class="self">self</span>.p2pkh_standard_input_size),
+<a href=#190 id=190 data-nosnippet>190</a>            ceildiv(t_out_total_size, <span class="self">self</span>.p2pkh_standard_output_size),
+<a href=#191 id=191 data-nosnippet>191</a>        ) + max(sapling_input_count, sapling_output_count)
+<a href=#192 id=192 data-nosnippet>192</a>            + orchard_action_count;
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a>        (<span class="self">self</span>.marginal_fee * max(<span class="self">self</span>.grace_actions, logical_actions))
+<a href=#195 id=195 data-nosnippet>195</a>            .ok_or_else(|| BalanceError::Overflow.into())
+<a href=#196 id=196 data-nosnippet>196</a>    }
+<a href=#197 id=197 data-nosnippet>197</a>}</code></pre></div></section></main></body></html>

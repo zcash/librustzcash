@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["AddressGenerationError","DecodingError","DerivationError","Era","ReceiverRequirement","UnifiedAddressRequest"],"mod":["sapling","testing"],"struct":["ReceiverRequirements","UnifiedFullViewingKey","UnifiedIncomingViewingKey","UnifiedSpendingKey"]};
+window.SIDEBAR_ITEMS = {"enum":["AddressGenerationError","DecodingError","DerivationError","Era","ReceiverRequirement","UnifiedAddressRequest"],"mod":["sapling","testing","transparent"],"struct":["ReceiverRequirements","UnifiedFullViewingKey","UnifiedIncomingViewingKey","UnifiedSpendingKey"]};

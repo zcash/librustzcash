@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["arb_branch_id","arb_height"]};

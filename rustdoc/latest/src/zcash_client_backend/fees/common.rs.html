@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (3048886e5 2025-07-30)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../static.files/storage-68b7e25d.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-eebb9057.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>core::cmp::{max, min, Ordering};
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>core::cmp::{max, min, Ordering};
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>std::num::{NonZeroU64, NonZeroUsize};
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>zcash_primitives::transaction::fees::{
@@ -11,7 +11,7 @@
 <a href=#11 id=11 data-nosnippet>11</a>    ShieldedProtocol,
 <a href=#12 id=12 data-nosnippet>12</a>};
 <a href=#13 id=13 data-nosnippet>13</a>
-<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span><span class="kw">crate</span>::data_api::AccountMeta;
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span><span class="kw">crate</span>::data_api::{wallet::TargetHeight, AccountMeta};
 <a href=#15 id=15 data-nosnippet>15</a>
 <a href=#16 id=16 data-nosnippet>16</a><span class="kw">use super</span>::{
 <a href=#17 id=17 data-nosnippet>17</a>    sapling <span class="kw">as </span>sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
@@ -52,7 +52,7 @@
 <a href=#52 id=52 data-nosnippet>52</a>    transparent_outputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::OutputView],
 <a href=#53 id=53 data-nosnippet>53</a>    sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
 <a href=#54 id=54 data-nosnippet>54</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
-<a href=#55 id=55 data-nosnippet>55</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
+<a href=#55 id=55 data-nosnippet>55</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;EphemeralBalance&gt;,
 <a href=#56 id=56 data-nosnippet>56</a>) -&gt; <span class="prelude-ty">Result</span>&lt;NetFlows, ChangeError&lt;E, NoteRefT&gt;&gt;
 <a href=#57 id=57 data-nosnippet>57</a><span class="kw">where
 <a href=#58 id=58 data-nosnippet>58</a>    </span>E: From&lt;F::Error&gt; + From&lt;BalanceError&gt;,
@@ -61,7 +61,7 @@
 <a href=#61 id=61 data-nosnippet>61</a>
 <a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">let </span>t_in = transparent_inputs
 <a href=#63 id=63 data-nosnippet>63</a>        .iter()
-<a href=#64 id=64 data-nosnippet>64</a>        .map(|t_in| t_in.coin().value)
+<a href=#64 id=64 data-nosnippet>64</a>        .map(|t_in| t_in.coin().value())
 <a href=#65 id=65 data-nosnippet>65</a>        .chain(ephemeral_balance.and_then(|b| b.ephemeral_input_amount()))
 <a href=#66 id=66 data-nosnippet>66</a>        .sum::&lt;<span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt;&gt;()
 <a href=#67 id=67 data-nosnippet>67</a>        .ok_or_else(overflow)<span class="question-mark">?</span>;
@@ -204,13 +204,13 @@
 <a href=#204 id=204 data-nosnippet>204</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>single_pool_output_balance&lt;P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E&gt;(
 <a href=#205 id=205 data-nosnippet>205</a>    cfg: SinglePoolBalanceConfig&lt;P, F&gt;,
 <a href=#206 id=206 data-nosnippet>206</a>    wallet_meta: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>AccountMeta&gt;,
-<a href=#207 id=207 data-nosnippet>207</a>    target_height: BlockHeight,
+<a href=#207 id=207 data-nosnippet>207</a>    target_height: TargetHeight,
 <a href=#208 id=208 data-nosnippet>208</a>    transparent_inputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::InputView],
 <a href=#209 id=209 data-nosnippet>209</a>    transparent_outputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::OutputView],
 <a href=#210 id=210 data-nosnippet>210</a>    sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
 <a href=#211 id=211 data-nosnippet>211</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
 <a href=#212 id=212 data-nosnippet>212</a>    change_memo: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;,
-<a href=#213 id=213 data-nosnippet>213</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
+<a href=#213 id=213 data-nosnippet>213</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;EphemeralBalance&gt;,
 <a href=#214 id=214 data-nosnippet>214</a>) -&gt; <span class="prelude-ty">Result</span>&lt;TransactionBalance, ChangeError&lt;E, NoteRefT&gt;&gt;
 <a href=#215 id=215 data-nosnippet>215</a><span class="kw">where
 <a href=#216 id=216 data-nosnippet>216</a>    </span>E: From&lt;F::Error&gt; + From&lt;BalanceError&gt;,
@@ -372,7 +372,7 @@
 <a href=#372 id=372 data-nosnippet>372</a>        .fee_rule
 <a href=#373 id=373 data-nosnippet>373</a>        .fee_required(
 <a href=#374 id=374 data-nosnippet>374</a>            cfg.params,
-<a href=#375 id=375 data-nosnippet>375</a>            target_height,
+<a href=#375 id=375 data-nosnippet>375</a>            BlockHeight::from(target_height),
 <a href=#376 id=376 data-nosnippet>376</a>            transparent_input_sizes.clone(),
 <a href=#377 id=377 data-nosnippet>377</a>            transparent_output_sizes.clone(),
 <a href=#378 id=378 data-nosnippet>378</a>            sapling_input_count,
@@ -404,7 +404,7 @@
 <a href=#404 id=404 data-nosnippet>404</a>                cfg.fee_rule
 <a href=#405 id=405 data-nosnippet>405</a>                    .fee_required(
 <a href=#406 id=406 data-nosnippet>406</a>                        cfg.params,
-<a href=#407 id=407 data-nosnippet>407</a>                        target_height,
+<a href=#407 id=407 data-nosnippet>407</a>                        BlockHeight::from(target_height),
 <a href=#408 id=408 data-nosnippet>408</a>                        transparent_input_sizes.clone(),
 <a href=#409 id=409 data-nosnippet>409</a>                        transparent_output_sizes.clone(),
 <a href=#410 id=410 data-nosnippet>410</a>                        sapling_input_count,
@@ -435,7 +435,7 @@
 <a href=#435 id=435 data-nosnippet>435</a>                cfg.fee_rule
 <a href=#436 id=436 data-nosnippet>436</a>                    .fee_required(
 <a href=#437 id=437 data-nosnippet>437</a>                        cfg.params,
-<a href=#438 id=438 data-nosnippet>438</a>                        target_height,
+<a href=#438 id=438 data-nosnippet>438</a>                        BlockHeight::from(target_height),
 <a href=#439 id=439 data-nosnippet>439</a>                        transparent_input_sizes,
 <a href=#440 id=440 data-nosnippet>440</a>                        transparent_output_sizes,
 <a href=#441 id=441 data-nosnippet>441</a>                        sapling_input_count,
@@ -579,14 +579,14 @@
 <a href=#579 id=579 data-nosnippet>579</a>    marginal_fee: Zatoshis,
 <a href=#580 id=580 data-nosnippet>580</a>    grace_actions: usize,
 <a href=#581 id=581 data-nosnippet>581</a>    possible_change: <span class="kw-2">&amp;</span>[OutputManifest],
-<a href=#582 id=582 data-nosnippet>582</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
+<a href=#582 id=582 data-nosnippet>582</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;EphemeralBalance&gt;,
 <a href=#583 id=583 data-nosnippet>583</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ChangeError&lt;E, NoteRefT&gt;&gt; {
 <a href=#584 id=584 data-nosnippet>584</a>    <span class="kw">let </span><span class="kw-2">mut </span>t_dust: Vec&lt;<span class="kw">_</span>&gt; = transparent_inputs
 <a href=#585 id=585 data-nosnippet>585</a>        .iter()
 <a href=#586 id=586 data-nosnippet>586</a>        .filter_map(|i| {
 <a href=#587 id=587 data-nosnippet>587</a>            <span class="comment">// For now, we're just assuming P2PKH inputs, so we don't check the
 <a href=#588 id=588 data-nosnippet>588</a>            // size of the input script.
-<a href=#589 id=589 data-nosnippet>589</a>            </span><span class="kw">if </span>i.coin().value &lt;= marginal_fee {
+<a href=#589 id=589 data-nosnippet>589</a>            </span><span class="kw">if </span>i.coin().value() &lt;= marginal_fee {
 <a href=#590 id=590 data-nosnippet>590</a>                <span class="prelude-val">Some</span>(i.outpoint().clone())
 <a href=#591 id=591 data-nosnippet>591</a>            } <span class="kw">else </span>{
 <a href=#592 id=592 data-nosnippet>592</a>                <span class="prelude-val">None
