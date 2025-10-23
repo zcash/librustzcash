@@ -80,7 +80,7 @@ paths for previous Sapling notes.</p>
 <a href="struct.Builder.html#method.build" title="method zcash_primitives::transaction::builder::Builder::build"><code>Self::build</code></a>, which will return an error.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.add_transparent_output" class="method"><a class="src rightside" href="../../../src/zcash_primitives/transaction/builder.rs.html#544-550">Source</a><h4 class="code-header">pub fn <a href="#method.add_transparent_output" class="fn">add_transparent_output</a>(
     &amp;mut self,
-    to: &amp;TransparentAddress,
+    to: &amp;<a class="enum" href="../../../zcash_transparent/address/enum.TransparentAddress.html" title="enum zcash_transparent::address::TransparentAddress">TransparentAddress</a>,
     value: Zatoshis,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="../components/transparent/builder/enum.Error.html" title="enum zcash_primitives::transaction::components::transparent::builder::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Adds a transparent address to send funds to.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.add_transparent_null_data_output" class="method"><a class="src rightside" href="../../../src/zcash_primitives/transaction/builder.rs.html#553-557">Source</a><h4 class="code-header">pub fn <a href="#method.add_transparent_null_data_output" class="fn">add_transparent_null_data_output</a>&lt;FE&gt;(

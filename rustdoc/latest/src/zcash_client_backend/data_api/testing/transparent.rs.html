@@ -59,7 +59,7 @@
 <a href=#59 id=59 data-nosnippet>59</a>            .unwrap()
 <a href=#60 id=60 data-nosnippet>60</a>            .get(taddr)
 <a href=#61 id=61 data-nosnippet>61</a>            .cloned()
-<a href=#62 id=62 data-nosnippet>62</a>            .map_or(Zatoshis::ZERO, |b| b.spendable_value()),
+<a href=#62 id=62 data-nosnippet>62</a>            .map_or(Zatoshis::ZERO, |(<span class="kw">_</span>, b)| b.spendable_value()),
 <a href=#63 id=63 data-nosnippet>63</a>        expected.total(),
 <a href=#64 id=64 data-nosnippet>64</a>    );
 <a href=#65 id=65 data-nosnippet>65</a>    <span class="macro">assert_eq!</span>(
@@ -170,7 +170,7 @@
 <a href=#170 id=170 data-nosnippet>170</a>            TargetHeight::from(height_2 + <span class="number">1</span>),
 <a href=#171 id=171 data-nosnippet>171</a>            ConfirmationsPolicy::MIN
 <a href=#172 id=172 data-nosnippet>172</a>        ),
-<a href=#173 id=173 data-nosnippet>173</a>        <span class="prelude-val">Ok</span>(h) <span class="kw">if </span>h.get(taddr).map(|b| b.spendable_value()) == <span class="prelude-val">Some</span>(value)
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="prelude-val">Ok</span>(h) <span class="kw">if </span>h.get(taddr).map(|(<span class="kw">_</span>, b)| b.spendable_value()) == <span class="prelude-val">Some</span>(value)
 <a href=#174 id=174 data-nosnippet>174</a>    );
 <a href=#175 id=175 data-nosnippet>175</a>}
 <a href=#176 id=176 data-nosnippet>176</a>
