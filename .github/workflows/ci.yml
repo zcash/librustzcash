@@ -486,6 +486,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
+  # docs.rs and in `.github/workflows/book.yml` as closely as possible.
   doc-links:
     name: Intra-doc links
     runs-on: ubuntu-latest
@@ -495,14 +497,22 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: dtolnay/rust-toolchain@nightly
+        id: toolchain
+      - run: rustup override set "${TOOLCHAIN}"
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - run: cargo fetch
       # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
         run: >
           cargo doc
-          --all
+          --no-deps
+          --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --document-private-items
+        env:
+          RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
 
   fmt:
     name: Rustfmt
