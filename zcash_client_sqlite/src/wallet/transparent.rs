@@ -963,7 +963,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          AND u.value_zat > 0
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent",
-        tx_unexpired_condition("t"),
+        tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause()
     ))?;
 
