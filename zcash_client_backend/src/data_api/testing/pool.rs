@@ -86,6 +86,9 @@ use {
     zcash_proofs::prover::LocalTxProver,
 };
 
+pub mod dsl;
+use dsl::TestDsl;
+
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
 ///
@@ -203,9 +206,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -387,9 +388,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     cache: impl TestCache,
     input_trust: InputTrust,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
     let starting_balance = Zatoshis::const_from_u64(60_000);
@@ -486,9 +485,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -527,11 +524,12 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
+    let addy = to.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to.to_zcash_address(st.network()),
+            addy,
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::MaxSpendable,
             confirmation_policy,
@@ -650,9 +648,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -685,11 +681,12 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
+    let addy = to.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to.to_zcash_address(st.network()),
+            addy,
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
@@ -804,9 +801,7 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
 ) {
     use crate::data_api::MaxSpendMode;
 
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -841,11 +836,12 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
 
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
+    let addy = to.to_zcash_address(st.network());
     assert_matches!(
         st.propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to.to_zcash_address(st.network()),
+            addy,
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN
@@ -870,9 +866,7 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -916,11 +910,12 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
 
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
+    let addy = to.to_zcash_address(st.network());
     assert_matches!(
         st.propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to.to_zcash_address(st.network()),
+            addy,
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::Everything,
             ConfirmationsPolicy::new_symmetrical_unchecked(
@@ -950,9 +945,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -996,11 +989,12 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
 
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
+    let addy = to.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account.id(),
             &fee_rule,
-            to.to_zcash_address(st.network()),
+            addy,
             Some(MemoBytes::from(send_max_memo.clone())),
             MaxSpendMode::MaxSpendable,
             ConfirmationsPolicy::new_symmetrical_unchecked(
@@ -1116,10 +1110,8 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
 {
     use crate::data_api::{testing::transparent::GapLimits, MaxSpendMode, OutputOfSentTx};
 
-    let gap_limits = GapLimits::new(10, 5, 3);
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .with_gap_limits(gap_limits)
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache)
+        .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1172,11 +1164,12 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
 
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
+    let addy = tex_addr.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
-            tex_addr.to_zcash_address(st.network()),
+            addy,
             None,
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
@@ -1290,10 +1283,8 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
 {
     use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
 
-    let gap_limits = GapLimits::new(10, 5, 3);
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .with_gap_limits(gap_limits)
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache)
+        .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1348,11 +1339,12 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
 
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
+    let addy = tex_addr.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
-            tex_addr.to_zcash_address(st.network()),
+            addy,
             None,
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
@@ -1462,10 +1454,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 {
     use crate::data_api::{testing::transparent::GapLimits, MaxSpendMode, OutputOfSentTx};
 
-    let gap_limits = GapLimits::new(10, 5, 3);
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .with_gap_limits(gap_limits)
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache)
+        .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1522,11 +1512,12 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
 
     // We use `st.propose_standard_transfer` here in order to also test round-trip
     // serialization of the proposal.
+    let addy = tex_addr.to_zcash_address(st.network());
     let proposal = st
         .propose_send_max_transfer(
             account_id,
             &fee_rule,
-            tex_addr.to_zcash_address(st.network()),
+            addy,
             None,
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN,
@@ -1628,9 +1619,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -1820,9 +1809,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     };
 
     let gap_limits = GapLimits::new(10, 5, 3);
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .with_gap_limits(gap_limits)
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache)
+        .map(|builder| builder.with_gap_limits(gap_limits))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -2171,9 +2159,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -2344,10 +2330,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 {
     use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
 
-    let gap_limits = GapLimits::new(10, 5, 3);
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .with_gap_limits(gap_limits)
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache)
+        .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -2502,9 +2486,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
 ) where
     Dsf: DataStoreFactory,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -2583,9 +2565,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
 pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     ds_factory: Dsf,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, ())
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, ()).build();
     let dfvk = T::test_account_fvk(&st);
     let to = T::fvk_default_address(&dfvk);
 
@@ -2622,9 +2602,7 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, ())
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, ()).build();
 
     let account_id = st.test_account().unwrap().id();
     let dfvk = T::test_account_fvk(&st);
@@ -2653,9 +2631,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -2845,9 +2821,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -2992,9 +2966,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -3082,9 +3054,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -3130,9 +3100,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -3482,9 +3450,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
@@ -3581,9 +3547,7 @@ where
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -3828,9 +3792,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -3847,6 +3809,8 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     // belong to us so that we can get a checkpoint in the tree.
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = Zatoshis::const_from_u64(10000);
+    let sapling_end_size = st.latest_cached_block().unwrap().sapling_end_size();
+    let orchard_end_size = st.latest_cached_block().unwrap().orchard_end_size();
     st.generate_block_at(
         account.birthday().height() + 10,
         BlockHash([0; 32]),
@@ -3855,8 +3819,8 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
             AddressType::DefaultExternal,
             not_our_value,
         )],
-        st.latest_cached_block().unwrap().sapling_end_size(),
-        st.latest_cached_block().unwrap().orchard_end_size(),
+        sapling_end_size,
+        orchard_end_size,
         false,
     );
 
@@ -3914,10 +3878,8 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        // TODO: Allow for Orchard activation after Sapling
-        .build();
+    // TODO: Allow for Orchard activation after Sapling
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
 
@@ -4004,10 +3966,8 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        // TODO: Allow for Orchard activation after Sapling
-        .build();
+    // TODO: Allow for Orchard activation after Sapling
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
 
@@ -4096,10 +4056,8 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        // TODO: Allow for Orchard activation after Sapling
-        .build();
+    // TODO: Allow for Orchard activation after Sapling
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
 
@@ -4188,10 +4146,8 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        // TODO: Allow for Orchard activation after Sapling
-        .build();
+    // TODO: Allow for Orchard activation after Sapling
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let acct_id = account.id();
@@ -4359,10 +4315,8 @@ pub fn multi_pool_checkpoints_with_pruning<P0: ShieldedPoolTester, P1: ShieldedP
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        // TODO: Allow for Orchard activation after Sapling
-        .build();
+    // TODO: Allow for Orchard activation after Sapling
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
 
@@ -4391,9 +4345,7 @@ pub fn valid_chain_states<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let dfvk = T::test_account_fvk(&st);
 
@@ -4427,9 +4379,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let dfvk = T::test_account_fvk(&st);
 
@@ -4484,9 +4434,7 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -4548,9 +4496,7 @@ where
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
     C: TestCache,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
 
@@ -4684,9 +4630,7 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -4741,9 +4685,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, Dsf>(
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -4789,9 +4731,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, Dsf>(
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -4833,9 +4773,7 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, Dsf
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -4881,9 +4819,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
     TC: TestCache,
 {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -5089,9 +5025,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
 ) {
     use secrecy::ExposeSecret;
 
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(ds_factory, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build();
 
     let seed = Secret::new(st.test_seed().unwrap().expose_secret().clone());
     let source_account = st.test_account().cloned().unwrap();
@@ -5240,9 +5174,7 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_standard_sapling_account(dsf, cache)
-        .build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
@@ -5257,7 +5189,10 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
 
     // `st.generate_next_block` with multiple outputs.
     let pre_activation_block = CachedBlock::none(st.sapling_activation_height() - 1);
-    let prior_cached_block = st.latest_cached_block().unwrap_or(&pre_activation_block);
+    let prior_cached_block = st
+        .latest_cached_block()
+        .unwrap_or(&pre_activation_block)
+        .clone();
     let h = prior_cached_block.height() + 1;
     st.generate_block_at(
         h,
