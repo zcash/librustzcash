@@ -60,8 +60,6 @@ use super::{
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
-#[cfg(feature = "transparent-inputs")]
-use crate::data_api::Balance;
 use crate::{
     data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
     fees::{
@@ -78,8 +76,8 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
-    crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
+    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
+    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     transparent::GapLimits,
 };
 
@@ -2736,7 +2734,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         Ok(HashMap::new())
     }
 

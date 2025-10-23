@@ -52,13 +52,6 @@ use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
 use util::Clock;
 use uuid::Uuid;
-#[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::WalletUtxo;
-#[cfg(feature = "transparent-inputs")]
-use {
-    std::time::SystemTime, transparent::keys::TransparentKeyScope,
-    zcash_client_backend::data_api::Balance,
-};
 
 use zcash_client_backend::{
     data_api::{
@@ -89,7 +82,6 @@ use zcash_protocol::{
     memo::Memo,
     ShieldedProtocol,
 };
-
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
@@ -112,10 +104,16 @@ use {
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
-    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
+    ::transparent::{
+        address::TransparentAddress,
+        bundle::OutPoint,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
     std::collections::BTreeSet,
+    std::time::SystemTime,
     zcash_client_backend::{
-        data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
+        data_api::{Balance, TransactionsInvolvingAddress, WalletUtxo},
+        wallet::TransparentAddressMetadata,
     },
     zcash_keys::encoding::AddressCodec,
 };
@@ -1015,7 +1013,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,

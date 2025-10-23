@@ -1812,16 +1812,15 @@ pub trait WalletRead {
     }
 
     /// Returns a mapping from each transparent receiver associated with the specified account
-    /// to the balance of funds given the specified target height and confirmations policy.
-    ///
-    /// Balances of ephemeral transparent addresses will not be included.
+    /// to the key scope for that address and the balance of funds given the specified target
+    /// height and confirmations policy.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         unimplemented!("WalletRead::get_transparent_balances must be overridden for wallets to use the `transparent-inputs` feature")
     }
 

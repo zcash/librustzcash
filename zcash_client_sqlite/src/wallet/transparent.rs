@@ -1086,7 +1086,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-) -> Result<HashMap<TransparentAddress, Balance>, SqliteClientError> {
+) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, SqliteClientError> {
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
     let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
@@ -1098,10 +1098,11 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(&format!(
-        "SELECT u.address, u.value_zat
+        "SELECT u.address, u.value_zat, a.key_scope
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN addresses a ON a.id = u.address_id
          WHERE accounts.uuid = :account_uuid
          -- the transaction that created the output is mined or is definitely unexpired
          AND (
@@ -1128,15 +1129,24 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     ])?;
 
     while let Some(row) = rows.next()? {
-        let taddr_str: String = row.get(0)?;
+        let taddr_str: String = row.get("address")?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
-        let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
+        let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
+        let key_scope_code: i64 = row.get("key_scope")?;
+        let key_scope = KeyScope::decode(key_scope_code)?
+            .as_transparent()
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!(
+                    "Invalid key scope code for transparent received output: {}",
+                    key_scope_code
+                ))
+            })?;
 
-        let entry = result.entry(taddr).or_insert(Balance::ZERO);
+        let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
         if value < zip317::MARGINAL_FEE {
-            entry.add_uneconomic_value(value)?;
+            entry.1.add_uneconomic_value(value)?;
         } else {
-            entry.add_spendable_value(value)?;
+            entry.1.add_spendable_value(value)?;
         }
     }
 
@@ -1145,10 +1155,11 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     // appear in the spendable balance and we don't want to double-count it.
     if min_confirmations > 0 {
         let mut stmt_address_balances = conn.prepare(&format!(
-            "SELECT u.address, u.value_zat
+            "SELECT u.address, u.value_zat, a.key_scope
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
+             JOIN addresses a ON a.id = u.address_id
              WHERE accounts.uuid = :account_uuid
              -- the transaction that created the output is mined or is definitely unexpired
              AND (
@@ -1175,15 +1186,24 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         ])?;
 
         while let Some(row) = rows.next()? {
-            let taddr_str: String = row.get(0)?;
+            let taddr_str: String = row.get("address")?;
             let taddr = TransparentAddress::decode(params, &taddr_str)?;
-            let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
+            let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
+            let key_scope_code: i64 = row.get("key_scope")?;
+            let key_scope = KeyScope::decode(key_scope_code)?
+                .as_transparent()
+                .ok_or_else(|| {
+                    SqliteClientError::CorruptedData(format!(
+                        "Invalid key scope code for transparent received output: {}",
+                        key_scope_code
+                    ))
+                })?;
 
-            let entry = result.entry(taddr).or_insert(Balance::ZERO);
+            let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
             if value < zip317::MARGINAL_FEE {
-                entry.add_uneconomic_value(value)?;
+                entry.1.add_uneconomic_value(value)?;
             } else {
-                entry.add_spendable_value(value)?;
+                entry.1.add_spendable_value(value)?;
             }
         }
     }
