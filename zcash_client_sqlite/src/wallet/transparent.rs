@@ -952,7 +952,7 @@ pub(crate) fn spent_utxos_clause() -> String {
 /// - `tx` must be set to the alias for the `transactions` table in the enclosing scope.
 /// - `accounts` must be set to the alias for the `accounts` table in the enclosing scope.
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
-pub(crate) fn tx_account_internal_clause(tx: &str, accounts: &str) -> String {
+pub(crate) fn tx_spends_account_outputs_condition(tx: &str, accounts: &str) -> String {
     format!(
         r#"
         {tx}.id_tx IN (
@@ -1006,7 +1006,7 @@ pub(crate) fn get_wallet_transparent_output(
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
-        tx_account_internal_clause("t", "accounts")
+        tx_spends_account_outputs_condition("t", "accounts")
     ))?;
 
     let result: Result<Option<WalletUtxo>, SqliteClientError> = stmt_select_utxo
@@ -1081,7 +1081,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
             AND {} -- the transaction that created the txo spends account-internal outputs
          )",
         spent_utxos_clause(),
-        tx_account_internal_clause("t", "accounts")
+        tx_spends_account_outputs_condition("t", "accounts")
     ))?;
 
     let addr_str = address.encode(params);
@@ -1163,7 +1163,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             AND {} -- the transaction that created the txo spends account-internal outputs
          )",
         spent_utxos_clause(),
-        tx_account_internal_clause("t", "accounts")
+        tx_spends_account_outputs_condition("t", "accounts")
     ))?;
 
     let mut rows = stmt_address_balances.query(named_params![
@@ -1228,7 +1228,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
                 AND {} -- the transaction that created the txo spends account-internal outputs
              )",
             spent_utxos_clause(),
-            tx_account_internal_clause("t", "accounts")
+            tx_spends_account_outputs_condition("t", "accounts")
         ))?;
 
         let mut rows = stmt_address_balances.query(named_params![
@@ -1307,7 +1307,7 @@ pub(crate) fn add_transparent_account_balances(
          )
          GROUP BY accounts.uuid",
         spent_utxos_clause(),
-        tx_account_internal_clause("t", "accounts")
+        tx_spends_account_outputs_condition("t", "accounts")
     ))?;
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
@@ -1362,7 +1362,7 @@ pub(crate) fn add_transparent_account_balances(
              )
              GROUP BY accounts.uuid",
             spent_utxos_clause(),
-            tx_account_internal_clause("t", "accounts")
+            tx_spends_account_outputs_condition("t", "accounts")
         ))?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
