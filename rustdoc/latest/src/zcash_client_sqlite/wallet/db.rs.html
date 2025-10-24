@@ -876,415 +876,421 @@
 <a href=#876 id=876 data-nosnippet>876</a>CREATE VIEW v_received_output_spends AS
 <a href=#877 id=877 data-nosnippet>877</a>SELECT
 <a href=#878 id=878 data-nosnippet>878</a>    2 AS pool,
-<a href=#879 id=879 data-nosnippet>879</a>    sapling_received_note_id AS received_output_id,
-<a href=#880 id=880 data-nosnippet>880</a>    transaction_id
-<a href=#881 id=881 data-nosnippet>881</a>FROM sapling_received_note_spends
-<a href=#882 id=882 data-nosnippet>882</a>UNION
-<a href=#883 id=883 data-nosnippet>883</a>SELECT
-<a href=#884 id=884 data-nosnippet>884</a>    3 AS pool,
-<a href=#885 id=885 data-nosnippet>885</a>    orchard_received_note_id AS received_output_id,
-<a href=#886 id=886 data-nosnippet>886</a>    transaction_id
-<a href=#887 id=887 data-nosnippet>887</a>FROM orchard_received_note_spends
-<a href=#888 id=888 data-nosnippet>888</a>UNION
-<a href=#889 id=889 data-nosnippet>889</a>SELECT
-<a href=#890 id=890 data-nosnippet>890</a>    0 AS pool,
-<a href=#891 id=891 data-nosnippet>891</a>    transparent_received_output_id AS received_output_id,
-<a href=#892 id=892 data-nosnippet>892</a>    transaction_id
-<a href=#893 id=893 data-nosnippet>893</a>FROM transparent_received_output_spends"</span>;
-<a href=#894 id=894 data-nosnippet>894</a>
-<a href=#895 id=895 data-nosnippet>895</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_TRANSACTIONS: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#896 id=896 data-nosnippet>896</a>CREATE VIEW v_transactions AS
-<a href=#897 id=897 data-nosnippet>897</a>WITH
-<a href=#898 id=898 data-nosnippet>898</a>notes AS (
-<a href=#899 id=899 data-nosnippet>899</a>    -- Outputs received in this transaction
-<a href=#900 id=900 data-nosnippet>900</a>    SELECT ro.account_id              AS account_id,
-<a href=#901 id=901 data-nosnippet>901</a>           transactions.mined_height  AS mined_height,
-<a href=#902 id=902 data-nosnippet>902</a>           transactions.txid          AS txid,
-<a href=#903 id=903 data-nosnippet>903</a>           ro.pool                    AS pool,
-<a href=#904 id=904 data-nosnippet>904</a>           id_within_pool_table,
-<a href=#905 id=905 data-nosnippet>905</a>           ro.value                   AS value,
-<a href=#906 id=906 data-nosnippet>906</a>           ro.value                   AS received_value,
-<a href=#907 id=907 data-nosnippet>907</a>           0                          AS spent_value,
-<a href=#908 id=908 data-nosnippet>908</a>           0                          AS spent_note_count,
-<a href=#909 id=909 data-nosnippet>909</a>           CASE
-<a href=#910 id=910 data-nosnippet>910</a>                WHEN ro.is_change THEN 1
-<a href=#911 id=911 data-nosnippet>911</a>                ELSE 0
-<a href=#912 id=912 data-nosnippet>912</a>           END AS change_note_count,
-<a href=#913 id=913 data-nosnippet>913</a>           CASE
-<a href=#914 id=914 data-nosnippet>914</a>                WHEN ro.is_change THEN 0
-<a href=#915 id=915 data-nosnippet>915</a>                ELSE 1
-<a href=#916 id=916 data-nosnippet>916</a>           END AS received_count,
-<a href=#917 id=917 data-nosnippet>917</a>           CASE
-<a href=#918 id=918 data-nosnippet>918</a>             WHEN (ro.memo IS NULL OR ro.memo = X'F6')
-<a href=#919 id=919 data-nosnippet>919</a>               THEN 0
-<a href=#920 id=920 data-nosnippet>920</a>             ELSE 1
-<a href=#921 id=921 data-nosnippet>921</a>           END AS memo_present,
-<a href=#922 id=922 data-nosnippet>922</a>           -- The wallet cannot receive transparent outputs in shielding transactions.
+<a href=#879 id=879 data-nosnippet>879</a>    s.sapling_received_note_id AS received_output_id,
+<a href=#880 id=880 data-nosnippet>880</a>    s.transaction_id,
+<a href=#881 id=881 data-nosnippet>881</a>    rn.account_id
+<a href=#882 id=882 data-nosnippet>882</a>FROM sapling_received_note_spends s
+<a href=#883 id=883 data-nosnippet>883</a>JOIN sapling_received_notes rn ON rn.id = s.sapling_received_note_id
+<a href=#884 id=884 data-nosnippet>884</a>UNION
+<a href=#885 id=885 data-nosnippet>885</a>SELECT
+<a href=#886 id=886 data-nosnippet>886</a>    3 AS pool,
+<a href=#887 id=887 data-nosnippet>887</a>    s.orchard_received_note_id AS received_output_id,
+<a href=#888 id=888 data-nosnippet>888</a>    s.transaction_id,
+<a href=#889 id=889 data-nosnippet>889</a>    rn.account_id
+<a href=#890 id=890 data-nosnippet>890</a>FROM orchard_received_note_spends s
+<a href=#891 id=891 data-nosnippet>891</a>JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
+<a href=#892 id=892 data-nosnippet>892</a>UNION
+<a href=#893 id=893 data-nosnippet>893</a>SELECT
+<a href=#894 id=894 data-nosnippet>894</a>    0 AS pool,
+<a href=#895 id=895 data-nosnippet>895</a>    s.transparent_received_output_id AS received_output_id,
+<a href=#896 id=896 data-nosnippet>896</a>    s.transaction_id,
+<a href=#897 id=897 data-nosnippet>897</a>    rn.account_id
+<a href=#898 id=898 data-nosnippet>898</a>FROM transparent_received_output_spends s
+<a href=#899 id=899 data-nosnippet>899</a>JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id"</span>;
+<a href=#900 id=900 data-nosnippet>900</a>
+<a href=#901 id=901 data-nosnippet>901</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_TRANSACTIONS: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#902 id=902 data-nosnippet>902</a>CREATE VIEW v_transactions AS
+<a href=#903 id=903 data-nosnippet>903</a>WITH
+<a href=#904 id=904 data-nosnippet>904</a>notes AS (
+<a href=#905 id=905 data-nosnippet>905</a>    -- Outputs received in this transaction
+<a href=#906 id=906 data-nosnippet>906</a>    SELECT ro.account_id              AS account_id,
+<a href=#907 id=907 data-nosnippet>907</a>           transactions.mined_height  AS mined_height,
+<a href=#908 id=908 data-nosnippet>908</a>           transactions.txid          AS txid,
+<a href=#909 id=909 data-nosnippet>909</a>           ro.pool                    AS pool,
+<a href=#910 id=910 data-nosnippet>910</a>           id_within_pool_table,
+<a href=#911 id=911 data-nosnippet>911</a>           ro.value                   AS value,
+<a href=#912 id=912 data-nosnippet>912</a>           ro.value                   AS received_value,
+<a href=#913 id=913 data-nosnippet>913</a>           0                          AS spent_value,
+<a href=#914 id=914 data-nosnippet>914</a>           0                          AS spent_note_count,
+<a href=#915 id=915 data-nosnippet>915</a>           CASE
+<a href=#916 id=916 data-nosnippet>916</a>                WHEN ro.is_change THEN 1
+<a href=#917 id=917 data-nosnippet>917</a>                ELSE 0
+<a href=#918 id=918 data-nosnippet>918</a>           END AS change_note_count,
+<a href=#919 id=919 data-nosnippet>919</a>           CASE
+<a href=#920 id=920 data-nosnippet>920</a>                WHEN ro.is_change THEN 0
+<a href=#921 id=921 data-nosnippet>921</a>                ELSE 1
+<a href=#922 id=922 data-nosnippet>922</a>           END AS received_count,
 <a href=#923 id=923 data-nosnippet>923</a>           CASE
-<a href=#924 id=924 data-nosnippet>924</a>             WHEN ro.pool = 0
-<a href=#925 id=925 data-nosnippet>925</a>               THEN 1
-<a href=#926 id=926 data-nosnippet>926</a>             ELSE 0
-<a href=#927 id=927 data-nosnippet>927</a>           END AS does_not_match_shielding
-<a href=#928 id=928 data-nosnippet>928</a>    FROM v_received_outputs ro
-<a href=#929 id=929 data-nosnippet>929</a>    JOIN transactions
-<a href=#930 id=930 data-nosnippet>930</a>         ON transactions.id_tx = ro.transaction_id
-<a href=#931 id=931 data-nosnippet>931</a>    UNION
-<a href=#932 id=932 data-nosnippet>932</a>    -- Outputs spent in this transaction
-<a href=#933 id=933 data-nosnippet>933</a>    SELECT ro.account_id              AS account_id,
-<a href=#934 id=934 data-nosnippet>934</a>           transactions.mined_height  AS mined_height,
-<a href=#935 id=935 data-nosnippet>935</a>           transactions.txid          AS txid,
-<a href=#936 id=936 data-nosnippet>936</a>           ro.pool                    AS pool,
-<a href=#937 id=937 data-nosnippet>937</a>           id_within_pool_table,
-<a href=#938 id=938 data-nosnippet>938</a>           -ro.value                  AS value,
-<a href=#939 id=939 data-nosnippet>939</a>           0                          AS received_value,
-<a href=#940 id=940 data-nosnippet>940</a>           ro.value                   AS spent_value,
-<a href=#941 id=941 data-nosnippet>941</a>           1                          AS spent_note_count,
-<a href=#942 id=942 data-nosnippet>942</a>           0                          AS change_note_count,
-<a href=#943 id=943 data-nosnippet>943</a>           0                          AS received_count,
-<a href=#944 id=944 data-nosnippet>944</a>           0                          AS memo_present,
-<a href=#945 id=945 data-nosnippet>945</a>           -- The wallet cannot spend shielded outputs in shielding transactions.
-<a href=#946 id=946 data-nosnippet>946</a>           CASE
-<a href=#947 id=947 data-nosnippet>947</a>             WHEN ro.pool != 0
-<a href=#948 id=948 data-nosnippet>948</a>               THEN 1
-<a href=#949 id=949 data-nosnippet>949</a>             ELSE 0
-<a href=#950 id=950 data-nosnippet>950</a>           END AS does_not_match_shielding
-<a href=#951 id=951 data-nosnippet>951</a>    FROM v_received_outputs ro
-<a href=#952 id=952 data-nosnippet>952</a>    JOIN v_received_output_spends ros
-<a href=#953 id=953 data-nosnippet>953</a>         ON ros.pool = ro.pool
-<a href=#954 id=954 data-nosnippet>954</a>         AND ros.received_output_id = ro.id_within_pool_table
-<a href=#955 id=955 data-nosnippet>955</a>    JOIN transactions
-<a href=#956 id=956 data-nosnippet>956</a>         ON transactions.id_tx = ros.transaction_id
-<a href=#957 id=957 data-nosnippet>957</a>),
-<a href=#958 id=958 data-nosnippet>958</a>-- Obtain a count of the notes that the wallet created in each transaction,
-<a href=#959 id=959 data-nosnippet>959</a>-- not counting change notes.
-<a href=#960 id=960 data-nosnippet>960</a>sent_note_counts AS (
-<a href=#961 id=961 data-nosnippet>961</a>    SELECT sent_notes.from_account_id     AS account_id,
-<a href=#962 id=962 data-nosnippet>962</a>           transactions.txid              AS txid,
-<a href=#963 id=963 data-nosnippet>963</a>           COUNT(DISTINCT sent_notes.id)  AS sent_notes,
-<a href=#964 id=964 data-nosnippet>964</a>           SUM(
-<a href=#965 id=965 data-nosnippet>965</a>             CASE
-<a href=#966 id=966 data-nosnippet>966</a>               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR ro.transaction_id IS NOT NULL)
-<a href=#967 id=967 data-nosnippet>967</a>                 THEN 0
-<a href=#968 id=968 data-nosnippet>968</a>               ELSE 1
-<a href=#969 id=969 data-nosnippet>969</a>             END
-<a href=#970 id=970 data-nosnippet>970</a>           ) AS memo_count
-<a href=#971 id=971 data-nosnippet>971</a>    FROM sent_notes
-<a href=#972 id=972 data-nosnippet>972</a>    JOIN transactions
-<a href=#973 id=973 data-nosnippet>973</a>         ON transactions.id_tx = sent_notes.tx
-<a href=#974 id=974 data-nosnippet>974</a>    LEFT JOIN v_received_outputs ro
-<a href=#975 id=975 data-nosnippet>975</a>         ON sent_notes.id = ro.sent_note_id
-<a href=#976 id=976 data-nosnippet>976</a>    WHERE COALESCE(ro.is_change, 0) = 0
-<a href=#977 id=977 data-nosnippet>977</a>    GROUP BY account_id, txid
-<a href=#978 id=978 data-nosnippet>978</a>),
-<a href=#979 id=979 data-nosnippet>979</a>blocks_max_height AS (
-<a href=#980 id=980 data-nosnippet>980</a>    SELECT MAX(blocks.height) AS max_height FROM blocks
-<a href=#981 id=981 data-nosnippet>981</a>)
-<a href=#982 id=982 data-nosnippet>982</a>SELECT accounts.uuid                AS account_uuid,
-<a href=#983 id=983 data-nosnippet>983</a>       notes.mined_height           AS mined_height,
-<a href=#984 id=984 data-nosnippet>984</a>       notes.txid                   AS txid,
-<a href=#985 id=985 data-nosnippet>985</a>       transactions.tx_index        AS tx_index,
-<a href=#986 id=986 data-nosnippet>986</a>       transactions.expiry_height   AS expiry_height,
-<a href=#987 id=987 data-nosnippet>987</a>       transactions.raw             AS raw,
-<a href=#988 id=988 data-nosnippet>988</a>       SUM(notes.value)             AS account_balance_delta,
-<a href=#989 id=989 data-nosnippet>989</a>       SUM(notes.spent_value)       AS total_spent,
-<a href=#990 id=990 data-nosnippet>990</a>       SUM(notes.received_value)    AS total_received,
-<a href=#991 id=991 data-nosnippet>991</a>       transactions.fee             AS fee_paid,
-<a href=#992 id=992 data-nosnippet>992</a>       SUM(notes.change_note_count) &gt; 0  AS has_change,
-<a href=#993 id=993 data-nosnippet>993</a>       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-<a href=#994 id=994 data-nosnippet>994</a>       SUM(notes.received_count)         AS received_note_count,
-<a href=#995 id=995 data-nosnippet>995</a>       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-<a href=#996 id=996 data-nosnippet>996</a>       blocks.time                       AS block_time,
-<a href=#997 id=997 data-nosnippet>997</a>       (
-<a href=#998 id=998 data-nosnippet>998</a>            notes.mined_height IS NULL
-<a href=#999 id=999 data-nosnippet>999</a>            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-<a href=#1000 id=1000 data-nosnippet>1000</a>       ) AS expired_unmined,
-<a href=#1001 id=1001 data-nosnippet>1001</a>       SUM(notes.spent_note_count) AS spent_note_count,
-<a href=#1002 id=1002 data-nosnippet>1002</a>       (
-<a href=#1003 id=1003 data-nosnippet>1003</a>            -- All of the wallet-spent and wallet-received notes are consistent with a
-<a href=#1004 id=1004 data-nosnippet>1004</a>            -- shielding transaction.
-<a href=#1005 id=1005 data-nosnippet>1005</a>            SUM(notes.does_not_match_shielding) = 0
-<a href=#1006 id=1006 data-nosnippet>1006</a>            -- The transaction contains at least one wallet-spent output.
-<a href=#1007 id=1007 data-nosnippet>1007</a>            AND SUM(notes.spent_note_count) &gt; 0
-<a href=#1008 id=1008 data-nosnippet>1008</a>            -- The transaction contains at least one wallet-received note.
-<a href=#1009 id=1009 data-nosnippet>1009</a>            AND (SUM(notes.received_count) + SUM(notes.change_note_count)) &gt; 0
-<a href=#1010 id=1010 data-nosnippet>1010</a>            -- We do not know about any external outputs of the transaction.
-<a href=#1011 id=1011 data-nosnippet>1011</a>            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
-<a href=#1012 id=1012 data-nosnippet>1012</a>       ) AS is_shielding
-<a href=#1013 id=1013 data-nosnippet>1013</a>FROM notes
-<a href=#1014 id=1014 data-nosnippet>1014</a>LEFT JOIN accounts ON accounts.id = notes.account_id
-<a href=#1015 id=1015 data-nosnippet>1015</a>LEFT JOIN transactions
-<a href=#1016 id=1016 data-nosnippet>1016</a>     ON notes.txid = transactions.txid
-<a href=#1017 id=1017 data-nosnippet>1017</a>LEFT JOIN blocks_max_height
-<a href=#1018 id=1018 data-nosnippet>1018</a>LEFT JOIN blocks ON blocks.height = notes.mined_height
-<a href=#1019 id=1019 data-nosnippet>1019</a>LEFT JOIN sent_note_counts
-<a href=#1020 id=1020 data-nosnippet>1020</a>     ON sent_note_counts.account_id = notes.account_id
-<a href=#1021 id=1021 data-nosnippet>1021</a>     AND sent_note_counts.txid = notes.txid
-<a href=#1022 id=1022 data-nosnippet>1022</a>GROUP BY notes.account_id, notes.txid"</span>;
-<a href=#1023 id=1023 data-nosnippet>1023</a>
-<a href=#1024 id=1024 data-nosnippet>1024</a><span class="doccomment">/// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
-<a href=#1025 id=1025 data-nosnippet>1025</a>/// external recipients.
-<a href=#1026 id=1026 data-nosnippet>1026</a>///
-<a href=#1027 id=1027 data-nosnippet>1027</a>/// This will contain:
-<a href=#1028 id=1028 data-nosnippet>1028</a>/// * Outputs received from external recipients
-<a href=#1029 id=1029 data-nosnippet>1029</a>/// * Outputs sent to external recipients
-<a href=#1030 id=1030 data-nosnippet>1030</a>/// * Outputs received as part of a wallet-internal operation, including
-<a href=#1031 id=1031 data-nosnippet>1031</a>///   both outputs received as a consequence of wallet-internal transfers
-<a href=#1032 id=1032 data-nosnippet>1032</a>///   and as change.
-<a href=#1033 id=1033 data-nosnippet>1033</a>///
-<a href=#1034 id=1034 data-nosnippet>1034</a>/// # Columns
-<a href=#1035 id=1035 data-nosnippet>1035</a>/// - `txid`: The id of the transaction in which the output was sent or received.
-<a href=#1036 id=1036 data-nosnippet>1036</a>/// - `output_pool`: The value pool for the transaction; valid values for this are:
-<a href=#1037 id=1037 data-nosnippet>1037</a>///   - 0: Transparent
-<a href=#1038 id=1038 data-nosnippet>1038</a>///   - 2: Sapling
-<a href=#1039 id=1039 data-nosnippet>1039</a>///   - 3: Orchard
-<a href=#1040 id=1040 data-nosnippet>1040</a>/// - `output_index`: The index of the output within the transaction bundle associated with
-<a href=#1041 id=1041 data-nosnippet>1041</a>///   the `output_pool` value; that is, within `vout` for transparent, the vector of
-<a href=#1042 id=1042 data-nosnippet>1042</a>///   Sapling `OutputDescription` values, or the vector of Orchard actions.
-<a href=#1043 id=1043 data-nosnippet>1043</a>/// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
-<a href=#1044 id=1044 data-nosnippet>1044</a>///   spent notes in creating the transaction. Note that if multiple accounts in the wallet
-<a href=#1045 id=1045 data-nosnippet>1045</a>///   contributed funds in creating the associated transaction, redundant rows will exist in the
-<a href=#1046 id=1046 data-nosnippet>1046</a>///   output of this view, one for each such account.
-<a href=#1047 id=1047 data-nosnippet>1047</a>/// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
-<a href=#1048 id=1048 data-nosnippet>1048</a>///   outgoing transaction outputs this will be `NULL`.
-<a href=#1049 id=1049 data-nosnippet>1049</a>/// - `address`: The address to which the output was sent; for received outputs, this is the
-<a href=#1050 id=1050 data-nosnippet>1050</a>///   address at which the output was received, or `NULL` for wallet-internal outputs.
-<a href=#1051 id=1051 data-nosnippet>1051</a>/// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
-<a href=#1052 id=1052 data-nosnippet>1052</a>///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
-<a href=#1053 id=1053 data-nosnippet>1053</a>///   address. This will be `NULL` for outgoing transaction outputs.
-<a href=#1054 id=1054 data-nosnippet>1054</a>/// - `value`: The value of the output, in zatoshis.
-<a href=#1055 id=1055 data-nosnippet>1055</a>/// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
-<a href=#1056 id=1056 data-nosnippet>1056</a>///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
-<a href=#1057 id=1057 data-nosnippet>1057</a>///   for whether or not the output should be considered change, and may not be correct for
-<a href=#1058 id=1058 data-nosnippet>1058</a>///   cross-account internal transactions, shielding transactions, or outputs explicitly sent from
-<a href=#1059 id=1059 data-nosnippet>1059</a>///   the wallet to itself. The determination of what counts as change is somewhat subjective and
-<a href=#1060 id=1060 data-nosnippet>1060</a>///   the value of this column should be used with caution.
-<a href=#1061 id=1061 data-nosnippet>1061</a>/// - `memo`: The binary content of the memo associated with the output, if the output is a
-<a href=#1062 id=1062 data-nosnippet>1062</a>///   shielded output and the memo was received by the wallet, sent by the wallet or was able to be
-<a href=#1063 id=1063 data-nosnippet>1063</a>///   decrypted with the wallet's outgoing viewing key.
-<a href=#1064 id=1064 data-nosnippet>1064</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_TX_OUTPUTS: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#1065 id=1065 data-nosnippet>1065</a>CREATE VIEW v_tx_outputs AS
-<a href=#1066 id=1066 data-nosnippet>1066</a>WITH unioned AS (
-<a href=#1067 id=1067 data-nosnippet>1067</a>    -- select all outputs received by the wallet
-<a href=#1068 id=1068 data-nosnippet>1068</a>    SELECT transactions.txid            AS txid,
-<a href=#1069 id=1069 data-nosnippet>1069</a>           ro.pool                      AS output_pool,
-<a href=#1070 id=1070 data-nosnippet>1070</a>           ro.output_index              AS output_index,
-<a href=#1071 id=1071 data-nosnippet>1071</a>           from_account.uuid            AS from_account_uuid,
-<a href=#1072 id=1072 data-nosnippet>1072</a>           to_account.uuid              AS to_account_uuid,
-<a href=#1073 id=1073 data-nosnippet>1073</a>           a.address                    AS to_address,
-<a href=#1074 id=1074 data-nosnippet>1074</a>           a.diversifier_index_be       AS diversifier_index_be,
-<a href=#1075 id=1075 data-nosnippet>1075</a>           ro.value                     AS value,
-<a href=#1076 id=1076 data-nosnippet>1076</a>           ro.is_change                 AS is_change,
-<a href=#1077 id=1077 data-nosnippet>1077</a>           ro.memo                      AS memo
-<a href=#1078 id=1078 data-nosnippet>1078</a>    FROM v_received_outputs ro
-<a href=#1079 id=1079 data-nosnippet>1079</a>    JOIN transactions
-<a href=#1080 id=1080 data-nosnippet>1080</a>        ON transactions.id_tx = ro.transaction_id
-<a href=#1081 id=1081 data-nosnippet>1081</a>    LEFT JOIN addresses a ON a.id = ro.address_id
-<a href=#1082 id=1082 data-nosnippet>1082</a>    -- join to the sent_notes table to obtain `from_account_id`
-<a href=#1083 id=1083 data-nosnippet>1083</a>    LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
-<a href=#1084 id=1084 data-nosnippet>1084</a>    -- join on the accounts table to obtain account UUIDs
-<a href=#1085 id=1085 data-nosnippet>1085</a>    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
-<a href=#1086 id=1086 data-nosnippet>1086</a>    LEFT JOIN accounts to_account ON to_account.id = ro.account_id
-<a href=#1087 id=1087 data-nosnippet>1087</a>    UNION ALL
-<a href=#1088 id=1088 data-nosnippet>1088</a>    -- select all outputs sent from the wallet to external recipients
-<a href=#1089 id=1089 data-nosnippet>1089</a>    SELECT transactions.txid            AS txid,
-<a href=#1090 id=1090 data-nosnippet>1090</a>           sent_notes.output_pool       AS output_pool,
-<a href=#1091 id=1091 data-nosnippet>1091</a>           sent_notes.output_index      AS output_index,
-<a href=#1092 id=1092 data-nosnippet>1092</a>           from_account.uuid            AS from_account_uuid,
-<a href=#1093 id=1093 data-nosnippet>1093</a>           NULL                         AS to_account_uuid,
-<a href=#1094 id=1094 data-nosnippet>1094</a>           sent_notes.to_address        AS to_address,
-<a href=#1095 id=1095 data-nosnippet>1095</a>           NULL                         AS diversifier_index_be,
-<a href=#1096 id=1096 data-nosnippet>1096</a>           sent_notes.value             AS value,
-<a href=#1097 id=1097 data-nosnippet>1097</a>           0                            AS is_change,
-<a href=#1098 id=1098 data-nosnippet>1098</a>           sent_notes.memo              AS memo
-<a href=#1099 id=1099 data-nosnippet>1099</a>    FROM sent_notes
-<a href=#1100 id=1100 data-nosnippet>1100</a>    JOIN transactions
-<a href=#1101 id=1101 data-nosnippet>1101</a>        ON transactions.id_tx = sent_notes.tx
-<a href=#1102 id=1102 data-nosnippet>1102</a>    LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
-<a href=#1103 id=1103 data-nosnippet>1103</a>    -- join on the accounts table to obtain account UUIDs
-<a href=#1104 id=1104 data-nosnippet>1104</a>    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
-<a href=#1105 id=1105 data-nosnippet>1105</a>)
-<a href=#1106 id=1106 data-nosnippet>1106</a>-- merge duplicate rows while retaining maximum information
-<a href=#1107 id=1107 data-nosnippet>1107</a>SELECT
-<a href=#1108 id=1108 data-nosnippet>1108</a>    txid,
-<a href=#1109 id=1109 data-nosnippet>1109</a>    output_pool,
-<a href=#1110 id=1110 data-nosnippet>1110</a>    output_index,
-<a href=#1111 id=1111 data-nosnippet>1111</a>    max(from_account_uuid) AS from_account_uuid,
-<a href=#1112 id=1112 data-nosnippet>1112</a>    max(to_account_uuid) AS to_account_uuid,
-<a href=#1113 id=1113 data-nosnippet>1113</a>    max(to_address) AS to_address,
-<a href=#1114 id=1114 data-nosnippet>1114</a>    max(value) AS value,
-<a href=#1115 id=1115 data-nosnippet>1115</a>    max(is_change) AS is_change,
-<a href=#1116 id=1116 data-nosnippet>1116</a>    max(memo) AS memo
-<a href=#1117 id=1117 data-nosnippet>1117</a>FROM unioned
-<a href=#1118 id=1118 data-nosnippet>1118</a>GROUP BY txid, output_pool, output_index"</span>;
-<a href=#1119 id=1119 data-nosnippet>1119</a>
-<a href=#1120 id=1120 data-nosnippet>1120</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_sapling_shard_scan_ranges&lt;P: Parameters&gt;(params: <span class="kw-2">&amp;</span>P) -&gt; String {
-<a href=#1121 id=1121 data-nosnippet>1121</a>    <span class="macro">format!</span>(
-<a href=#1122 id=1122 data-nosnippet>1122</a>        <span class="string">"CREATE VIEW v_sapling_shard_scan_ranges AS
-<a href=#1123 id=1123 data-nosnippet>1123</a>        SELECT
-<a href=#1124 id=1124 data-nosnippet>1124</a>            shard.shard_index,
-<a href=#1125 id=1125 data-nosnippet>1125</a>            shard.shard_index &lt;&lt; 16 AS start_position,
-<a href=#1126 id=1126 data-nosnippet>1126</a>            (shard.shard_index + 1) &lt;&lt; 16 AS end_position_exclusive,
-<a href=#1127 id=1127 data-nosnippet>1127</a>            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-<a href=#1128 id=1128 data-nosnippet>1128</a>            shard.subtree_end_height,
-<a href=#1129 id=1129 data-nosnippet>1129</a>            shard.contains_marked,
-<a href=#1130 id=1130 data-nosnippet>1130</a>            scan_queue.block_range_start,
-<a href=#1131 id=1131 data-nosnippet>1131</a>            scan_queue.block_range_end,
-<a href=#1132 id=1132 data-nosnippet>1132</a>            scan_queue.priority
-<a href=#1133 id=1133 data-nosnippet>1133</a>        FROM sapling_tree_shards shard
-<a href=#1134 id=1134 data-nosnippet>1134</a>        LEFT OUTER JOIN sapling_tree_shards prev_shard
-<a href=#1135 id=1135 data-nosnippet>1135</a>            ON shard.shard_index = prev_shard.shard_index + 1
-<a href=#1136 id=1136 data-nosnippet>1136</a>        -- Join with scan ranges that overlap with the subtree's involved blocks.
-<a href=#1137 id=1137 data-nosnippet>1137</a>        INNER JOIN scan_queue ON (
-<a href=#1138 id=1138 data-nosnippet>1138</a>            subtree_start_height &lt; scan_queue.block_range_end AND
-<a href=#1139 id=1139 data-nosnippet>1139</a>            (
-<a href=#1140 id=1140 data-nosnippet>1140</a>                scan_queue.block_range_start &lt;= shard.subtree_end_height OR
-<a href=#1141 id=1141 data-nosnippet>1141</a>                shard.subtree_end_height IS NULL
-<a href=#1142 id=1142 data-nosnippet>1142</a>            )
-<a href=#1143 id=1143 data-nosnippet>1143</a>        )"</span>,
-<a href=#1144 id=1144 data-nosnippet>1144</a>        u32::from(params.activation_height(NetworkUpgrade::Sapling).unwrap()),
-<a href=#1145 id=1145 data-nosnippet>1145</a>    )
-<a href=#1146 id=1146 data-nosnippet>1146</a>}
-<a href=#1147 id=1147 data-nosnippet>1147</a>
-<a href=#1148 id=1148 data-nosnippet>1148</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_sapling_shard_unscanned_ranges() -&gt; String {
-<a href=#1149 id=1149 data-nosnippet>1149</a>    <span class="macro">format!</span>(
-<a href=#1150 id=1150 data-nosnippet>1150</a>        <span class="string">"CREATE VIEW v_sapling_shard_unscanned_ranges AS
-<a href=#1151 id=1151 data-nosnippet>1151</a>        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-<a href=#1152 id=1152 data-nosnippet>1152</a>        SELECT
-<a href=#1153 id=1153 data-nosnippet>1153</a>            shard_index,
-<a href=#1154 id=1154 data-nosnippet>1154</a>            start_position,
-<a href=#1155 id=1155 data-nosnippet>1155</a>            end_position_exclusive,
-<a href=#1156 id=1156 data-nosnippet>1156</a>            subtree_start_height,
-<a href=#1157 id=1157 data-nosnippet>1157</a>            subtree_end_height,
-<a href=#1158 id=1158 data-nosnippet>1158</a>            contains_marked,
-<a href=#1159 id=1159 data-nosnippet>1159</a>            block_range_start,
-<a href=#1160 id=1160 data-nosnippet>1160</a>            block_range_end,
-<a href=#1161 id=1161 data-nosnippet>1161</a>            priority
-<a href=#1162 id=1162 data-nosnippet>1162</a>        FROM v_sapling_shard_scan_ranges
-<a href=#1163 id=1163 data-nosnippet>1163</a>        INNER JOIN wallet_birthday
-<a href=#1164 id=1164 data-nosnippet>1164</a>        WHERE priority &gt; {}
-<a href=#1165 id=1165 data-nosnippet>1165</a>        AND block_range_end &gt; wallet_birthday.height"</span>,
-<a href=#1166 id=1166 data-nosnippet>1166</a>        priority_code(<span class="kw-2">&amp;</span>ScanPriority::Scanned)
-<a href=#1167 id=1167 data-nosnippet>1167</a>    )
-<a href=#1168 id=1168 data-nosnippet>1168</a>}
-<a href=#1169 id=1169 data-nosnippet>1169</a>
-<a href=#1170 id=1170 data-nosnippet>1170</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_SAPLING_SHARDS_SCAN_STATE: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#1171 id=1171 data-nosnippet>1171</a>CREATE VIEW v_sapling_shards_scan_state AS
-<a href=#1172 id=1172 data-nosnippet>1172</a>SELECT
-<a href=#1173 id=1173 data-nosnippet>1173</a>    shard_index,
-<a href=#1174 id=1174 data-nosnippet>1174</a>    start_position,
-<a href=#1175 id=1175 data-nosnippet>1175</a>    end_position_exclusive,
-<a href=#1176 id=1176 data-nosnippet>1176</a>    subtree_start_height,
-<a href=#1177 id=1177 data-nosnippet>1177</a>    subtree_end_height,
-<a href=#1178 id=1178 data-nosnippet>1178</a>    contains_marked,
-<a href=#1179 id=1179 data-nosnippet>1179</a>    MAX(priority) AS max_priority
-<a href=#1180 id=1180 data-nosnippet>1180</a>FROM v_sapling_shard_scan_ranges
-<a href=#1181 id=1181 data-nosnippet>1181</a>GROUP BY
-<a href=#1182 id=1182 data-nosnippet>1182</a>    shard_index,
-<a href=#1183 id=1183 data-nosnippet>1183</a>    start_position,
-<a href=#1184 id=1184 data-nosnippet>1184</a>    end_position_exclusive,
-<a href=#1185 id=1185 data-nosnippet>1185</a>    subtree_start_height,
-<a href=#1186 id=1186 data-nosnippet>1186</a>    subtree_end_height,
-<a href=#1187 id=1187 data-nosnippet>1187</a>    contains_marked"</span>;
-<a href=#1188 id=1188 data-nosnippet>1188</a>
-<a href=#1189 id=1189 data-nosnippet>1189</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_orchard_shard_scan_ranges&lt;P: Parameters&gt;(params: <span class="kw-2">&amp;</span>P) -&gt; String {
-<a href=#1190 id=1190 data-nosnippet>1190</a>    <span class="macro">format!</span>(
-<a href=#1191 id=1191 data-nosnippet>1191</a>        <span class="string">"CREATE VIEW v_orchard_shard_scan_ranges AS
-<a href=#1192 id=1192 data-nosnippet>1192</a>        SELECT
-<a href=#1193 id=1193 data-nosnippet>1193</a>            shard.shard_index,
-<a href=#1194 id=1194 data-nosnippet>1194</a>            shard.shard_index &lt;&lt; 16 AS start_position,
-<a href=#1195 id=1195 data-nosnippet>1195</a>            (shard.shard_index + 1) &lt;&lt; 16 AS end_position_exclusive,
-<a href=#1196 id=1196 data-nosnippet>1196</a>            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-<a href=#1197 id=1197 data-nosnippet>1197</a>            shard.subtree_end_height,
-<a href=#1198 id=1198 data-nosnippet>1198</a>            shard.contains_marked,
-<a href=#1199 id=1199 data-nosnippet>1199</a>            scan_queue.block_range_start,
-<a href=#1200 id=1200 data-nosnippet>1200</a>            scan_queue.block_range_end,
-<a href=#1201 id=1201 data-nosnippet>1201</a>            scan_queue.priority
-<a href=#1202 id=1202 data-nosnippet>1202</a>        FROM orchard_tree_shards shard
-<a href=#1203 id=1203 data-nosnippet>1203</a>        LEFT OUTER JOIN orchard_tree_shards prev_shard
-<a href=#1204 id=1204 data-nosnippet>1204</a>            ON shard.shard_index = prev_shard.shard_index + 1
-<a href=#1205 id=1205 data-nosnippet>1205</a>        -- Join with scan ranges that overlap with the subtree's involved blocks.
-<a href=#1206 id=1206 data-nosnippet>1206</a>        INNER JOIN scan_queue ON (
-<a href=#1207 id=1207 data-nosnippet>1207</a>            subtree_start_height &lt; scan_queue.block_range_end AND
-<a href=#1208 id=1208 data-nosnippet>1208</a>            (
-<a href=#1209 id=1209 data-nosnippet>1209</a>                scan_queue.block_range_start &lt;= shard.subtree_end_height OR
-<a href=#1210 id=1210 data-nosnippet>1210</a>                shard.subtree_end_height IS NULL
-<a href=#1211 id=1211 data-nosnippet>1211</a>            )
-<a href=#1212 id=1212 data-nosnippet>1212</a>        )"</span>,
-<a href=#1213 id=1213 data-nosnippet>1213</a>        u32::from(params.activation_height(NetworkUpgrade::Nu5).unwrap()),
-<a href=#1214 id=1214 data-nosnippet>1214</a>    )
-<a href=#1215 id=1215 data-nosnippet>1215</a>}
-<a href=#1216 id=1216 data-nosnippet>1216</a>
-<a href=#1217 id=1217 data-nosnippet>1217</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_orchard_shard_unscanned_ranges() -&gt; String {
-<a href=#1218 id=1218 data-nosnippet>1218</a>    <span class="macro">format!</span>(
-<a href=#1219 id=1219 data-nosnippet>1219</a>        <span class="string">"CREATE VIEW v_orchard_shard_unscanned_ranges AS
-<a href=#1220 id=1220 data-nosnippet>1220</a>        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-<a href=#1221 id=1221 data-nosnippet>1221</a>        SELECT
-<a href=#1222 id=1222 data-nosnippet>1222</a>            shard_index,
-<a href=#1223 id=1223 data-nosnippet>1223</a>            start_position,
-<a href=#1224 id=1224 data-nosnippet>1224</a>            end_position_exclusive,
-<a href=#1225 id=1225 data-nosnippet>1225</a>            subtree_start_height,
-<a href=#1226 id=1226 data-nosnippet>1226</a>            subtree_end_height,
-<a href=#1227 id=1227 data-nosnippet>1227</a>            contains_marked,
-<a href=#1228 id=1228 data-nosnippet>1228</a>            block_range_start,
-<a href=#1229 id=1229 data-nosnippet>1229</a>            block_range_end,
-<a href=#1230 id=1230 data-nosnippet>1230</a>            priority
-<a href=#1231 id=1231 data-nosnippet>1231</a>        FROM v_orchard_shard_scan_ranges
-<a href=#1232 id=1232 data-nosnippet>1232</a>        INNER JOIN wallet_birthday
-<a href=#1233 id=1233 data-nosnippet>1233</a>        WHERE priority &gt; {}
-<a href=#1234 id=1234 data-nosnippet>1234</a>        AND block_range_end &gt; wallet_birthday.height"</span>,
-<a href=#1235 id=1235 data-nosnippet>1235</a>        priority_code(<span class="kw-2">&amp;</span>ScanPriority::Scanned),
-<a href=#1236 id=1236 data-nosnippet>1236</a>    )
-<a href=#1237 id=1237 data-nosnippet>1237</a>}
-<a href=#1238 id=1238 data-nosnippet>1238</a>
-<a href=#1239 id=1239 data-nosnippet>1239</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ORCHARD_SHARDS_SCAN_STATE: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#1240 id=1240 data-nosnippet>1240</a>CREATE VIEW v_orchard_shards_scan_state AS
-<a href=#1241 id=1241 data-nosnippet>1241</a>SELECT
-<a href=#1242 id=1242 data-nosnippet>1242</a>    shard_index,
-<a href=#1243 id=1243 data-nosnippet>1243</a>    start_position,
-<a href=#1244 id=1244 data-nosnippet>1244</a>    end_position_exclusive,
-<a href=#1245 id=1245 data-nosnippet>1245</a>    subtree_start_height,
-<a href=#1246 id=1246 data-nosnippet>1246</a>    subtree_end_height,
-<a href=#1247 id=1247 data-nosnippet>1247</a>    contains_marked,
-<a href=#1248 id=1248 data-nosnippet>1248</a>    MAX(priority) AS max_priority
-<a href=#1249 id=1249 data-nosnippet>1249</a>FROM v_orchard_shard_scan_ranges
-<a href=#1250 id=1250 data-nosnippet>1250</a>GROUP BY
-<a href=#1251 id=1251 data-nosnippet>1251</a>    shard_index,
-<a href=#1252 id=1252 data-nosnippet>1252</a>    start_position,
-<a href=#1253 id=1253 data-nosnippet>1253</a>    end_position_exclusive,
-<a href=#1254 id=1254 data-nosnippet>1254</a>    subtree_start_height,
-<a href=#1255 id=1255 data-nosnippet>1255</a>    subtree_end_height,
-<a href=#1256 id=1256 data-nosnippet>1256</a>    contains_marked"</span>;
-<a href=#1257 id=1257 data-nosnippet>1257</a>
-<a href=#1258 id=1258 data-nosnippet>1258</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ADDRESS_USES: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#1259 id=1259 data-nosnippet>1259</a>CREATE VIEW v_address_uses AS
-<a href=#1260 id=1260 data-nosnippet>1260</a>    SELECT orn.address_id, orn.account_id, orn.tx AS transaction_id, t.mined_height,
-<a href=#1261 id=1261 data-nosnippet>1261</a>           a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#1262 id=1262 data-nosnippet>1262</a>    FROM orchard_received_notes orn
-<a href=#1263 id=1263 data-nosnippet>1263</a>    JOIN addresses a ON a.id = orn.address_id
-<a href=#1264 id=1264 data-nosnippet>1264</a>    JOIN transactions t ON t.id_tx = orn.tx
-<a href=#1265 id=1265 data-nosnippet>1265</a>UNION
-<a href=#1266 id=1266 data-nosnippet>1266</a>    SELECT srn.address_id, srn.account_id, srn.tx AS transaction_id, t.mined_height,
+<a href=#924 id=924 data-nosnippet>924</a>             WHEN (ro.memo IS NULL OR ro.memo = X'F6')
+<a href=#925 id=925 data-nosnippet>925</a>               THEN 0
+<a href=#926 id=926 data-nosnippet>926</a>             ELSE 1
+<a href=#927 id=927 data-nosnippet>927</a>           END AS memo_present,
+<a href=#928 id=928 data-nosnippet>928</a>           -- The wallet cannot receive transparent outputs in shielding transactions.
+<a href=#929 id=929 data-nosnippet>929</a>           CASE
+<a href=#930 id=930 data-nosnippet>930</a>             WHEN ro.pool = 0
+<a href=#931 id=931 data-nosnippet>931</a>               THEN 1
+<a href=#932 id=932 data-nosnippet>932</a>             ELSE 0
+<a href=#933 id=933 data-nosnippet>933</a>           END AS does_not_match_shielding
+<a href=#934 id=934 data-nosnippet>934</a>    FROM v_received_outputs ro
+<a href=#935 id=935 data-nosnippet>935</a>    JOIN transactions
+<a href=#936 id=936 data-nosnippet>936</a>         ON transactions.id_tx = ro.transaction_id
+<a href=#937 id=937 data-nosnippet>937</a>    UNION
+<a href=#938 id=938 data-nosnippet>938</a>    -- Outputs spent in this transaction
+<a href=#939 id=939 data-nosnippet>939</a>    SELECT ro.account_id              AS account_id,
+<a href=#940 id=940 data-nosnippet>940</a>           transactions.mined_height  AS mined_height,
+<a href=#941 id=941 data-nosnippet>941</a>           transactions.txid          AS txid,
+<a href=#942 id=942 data-nosnippet>942</a>           ro.pool                    AS pool,
+<a href=#943 id=943 data-nosnippet>943</a>           id_within_pool_table,
+<a href=#944 id=944 data-nosnippet>944</a>           -ro.value                  AS value,
+<a href=#945 id=945 data-nosnippet>945</a>           0                          AS received_value,
+<a href=#946 id=946 data-nosnippet>946</a>           ro.value                   AS spent_value,
+<a href=#947 id=947 data-nosnippet>947</a>           1                          AS spent_note_count,
+<a href=#948 id=948 data-nosnippet>948</a>           0                          AS change_note_count,
+<a href=#949 id=949 data-nosnippet>949</a>           0                          AS received_count,
+<a href=#950 id=950 data-nosnippet>950</a>           0                          AS memo_present,
+<a href=#951 id=951 data-nosnippet>951</a>           -- The wallet cannot spend shielded outputs in shielding transactions.
+<a href=#952 id=952 data-nosnippet>952</a>           CASE
+<a href=#953 id=953 data-nosnippet>953</a>             WHEN ro.pool != 0
+<a href=#954 id=954 data-nosnippet>954</a>               THEN 1
+<a href=#955 id=955 data-nosnippet>955</a>             ELSE 0
+<a href=#956 id=956 data-nosnippet>956</a>           END AS does_not_match_shielding
+<a href=#957 id=957 data-nosnippet>957</a>    FROM v_received_outputs ro
+<a href=#958 id=958 data-nosnippet>958</a>    JOIN v_received_output_spends ros
+<a href=#959 id=959 data-nosnippet>959</a>         ON ros.pool = ro.pool
+<a href=#960 id=960 data-nosnippet>960</a>         AND ros.received_output_id = ro.id_within_pool_table
+<a href=#961 id=961 data-nosnippet>961</a>    JOIN transactions
+<a href=#962 id=962 data-nosnippet>962</a>         ON transactions.id_tx = ros.transaction_id
+<a href=#963 id=963 data-nosnippet>963</a>),
+<a href=#964 id=964 data-nosnippet>964</a>-- Obtain a count of the notes that the wallet created in each transaction,
+<a href=#965 id=965 data-nosnippet>965</a>-- not counting change notes.
+<a href=#966 id=966 data-nosnippet>966</a>sent_note_counts AS (
+<a href=#967 id=967 data-nosnippet>967</a>    SELECT sent_notes.from_account_id     AS account_id,
+<a href=#968 id=968 data-nosnippet>968</a>           transactions.txid              AS txid,
+<a href=#969 id=969 data-nosnippet>969</a>           COUNT(DISTINCT sent_notes.id)  AS sent_notes,
+<a href=#970 id=970 data-nosnippet>970</a>           SUM(
+<a href=#971 id=971 data-nosnippet>971</a>             CASE
+<a href=#972 id=972 data-nosnippet>972</a>               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR ro.transaction_id IS NOT NULL)
+<a href=#973 id=973 data-nosnippet>973</a>                 THEN 0
+<a href=#974 id=974 data-nosnippet>974</a>               ELSE 1
+<a href=#975 id=975 data-nosnippet>975</a>             END
+<a href=#976 id=976 data-nosnippet>976</a>           ) AS memo_count
+<a href=#977 id=977 data-nosnippet>977</a>    FROM sent_notes
+<a href=#978 id=978 data-nosnippet>978</a>    JOIN transactions
+<a href=#979 id=979 data-nosnippet>979</a>         ON transactions.id_tx = sent_notes.tx
+<a href=#980 id=980 data-nosnippet>980</a>    LEFT JOIN v_received_outputs ro
+<a href=#981 id=981 data-nosnippet>981</a>         ON sent_notes.id = ro.sent_note_id
+<a href=#982 id=982 data-nosnippet>982</a>    WHERE COALESCE(ro.is_change, 0) = 0
+<a href=#983 id=983 data-nosnippet>983</a>    GROUP BY account_id, txid
+<a href=#984 id=984 data-nosnippet>984</a>),
+<a href=#985 id=985 data-nosnippet>985</a>blocks_max_height AS (
+<a href=#986 id=986 data-nosnippet>986</a>    SELECT MAX(blocks.height) AS max_height FROM blocks
+<a href=#987 id=987 data-nosnippet>987</a>)
+<a href=#988 id=988 data-nosnippet>988</a>SELECT accounts.uuid                AS account_uuid,
+<a href=#989 id=989 data-nosnippet>989</a>       notes.mined_height           AS mined_height,
+<a href=#990 id=990 data-nosnippet>990</a>       notes.txid                   AS txid,
+<a href=#991 id=991 data-nosnippet>991</a>       transactions.tx_index        AS tx_index,
+<a href=#992 id=992 data-nosnippet>992</a>       transactions.expiry_height   AS expiry_height,
+<a href=#993 id=993 data-nosnippet>993</a>       transactions.raw             AS raw,
+<a href=#994 id=994 data-nosnippet>994</a>       SUM(notes.value)             AS account_balance_delta,
+<a href=#995 id=995 data-nosnippet>995</a>       SUM(notes.spent_value)       AS total_spent,
+<a href=#996 id=996 data-nosnippet>996</a>       SUM(notes.received_value)    AS total_received,
+<a href=#997 id=997 data-nosnippet>997</a>       transactions.fee             AS fee_paid,
+<a href=#998 id=998 data-nosnippet>998</a>       SUM(notes.change_note_count) &gt; 0  AS has_change,
+<a href=#999 id=999 data-nosnippet>999</a>       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+<a href=#1000 id=1000 data-nosnippet>1000</a>       SUM(notes.received_count)         AS received_note_count,
+<a href=#1001 id=1001 data-nosnippet>1001</a>       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+<a href=#1002 id=1002 data-nosnippet>1002</a>       blocks.time                       AS block_time,
+<a href=#1003 id=1003 data-nosnippet>1003</a>       (
+<a href=#1004 id=1004 data-nosnippet>1004</a>            notes.mined_height IS NULL
+<a href=#1005 id=1005 data-nosnippet>1005</a>            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
+<a href=#1006 id=1006 data-nosnippet>1006</a>       ) AS expired_unmined,
+<a href=#1007 id=1007 data-nosnippet>1007</a>       SUM(notes.spent_note_count) AS spent_note_count,
+<a href=#1008 id=1008 data-nosnippet>1008</a>       (
+<a href=#1009 id=1009 data-nosnippet>1009</a>            -- All of the wallet-spent and wallet-received notes are consistent with a
+<a href=#1010 id=1010 data-nosnippet>1010</a>            -- shielding transaction.
+<a href=#1011 id=1011 data-nosnippet>1011</a>            SUM(notes.does_not_match_shielding) = 0
+<a href=#1012 id=1012 data-nosnippet>1012</a>            -- The transaction contains at least one wallet-spent output.
+<a href=#1013 id=1013 data-nosnippet>1013</a>            AND SUM(notes.spent_note_count) &gt; 0
+<a href=#1014 id=1014 data-nosnippet>1014</a>            -- The transaction contains at least one wallet-received note.
+<a href=#1015 id=1015 data-nosnippet>1015</a>            AND (SUM(notes.received_count) + SUM(notes.change_note_count)) &gt; 0
+<a href=#1016 id=1016 data-nosnippet>1016</a>            -- We do not know about any external outputs of the transaction.
+<a href=#1017 id=1017 data-nosnippet>1017</a>            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+<a href=#1018 id=1018 data-nosnippet>1018</a>       ) AS is_shielding
+<a href=#1019 id=1019 data-nosnippet>1019</a>FROM notes
+<a href=#1020 id=1020 data-nosnippet>1020</a>LEFT JOIN accounts ON accounts.id = notes.account_id
+<a href=#1021 id=1021 data-nosnippet>1021</a>LEFT JOIN transactions
+<a href=#1022 id=1022 data-nosnippet>1022</a>     ON notes.txid = transactions.txid
+<a href=#1023 id=1023 data-nosnippet>1023</a>LEFT JOIN blocks_max_height
+<a href=#1024 id=1024 data-nosnippet>1024</a>LEFT JOIN blocks ON blocks.height = notes.mined_height
+<a href=#1025 id=1025 data-nosnippet>1025</a>LEFT JOIN sent_note_counts
+<a href=#1026 id=1026 data-nosnippet>1026</a>     ON sent_note_counts.account_id = notes.account_id
+<a href=#1027 id=1027 data-nosnippet>1027</a>     AND sent_note_counts.txid = notes.txid
+<a href=#1028 id=1028 data-nosnippet>1028</a>GROUP BY notes.account_id, notes.txid"</span>;
+<a href=#1029 id=1029 data-nosnippet>1029</a>
+<a href=#1030 id=1030 data-nosnippet>1030</a><span class="doccomment">/// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
+<a href=#1031 id=1031 data-nosnippet>1031</a>/// external recipients.
+<a href=#1032 id=1032 data-nosnippet>1032</a>///
+<a href=#1033 id=1033 data-nosnippet>1033</a>/// This will contain:
+<a href=#1034 id=1034 data-nosnippet>1034</a>/// * Outputs received from external recipients
+<a href=#1035 id=1035 data-nosnippet>1035</a>/// * Outputs sent to external recipients
+<a href=#1036 id=1036 data-nosnippet>1036</a>/// * Outputs received as part of a wallet-internal operation, including
+<a href=#1037 id=1037 data-nosnippet>1037</a>///   both outputs received as a consequence of wallet-internal transfers
+<a href=#1038 id=1038 data-nosnippet>1038</a>///   and as change.
+<a href=#1039 id=1039 data-nosnippet>1039</a>///
+<a href=#1040 id=1040 data-nosnippet>1040</a>/// # Columns
+<a href=#1041 id=1041 data-nosnippet>1041</a>/// - `txid`: The id of the transaction in which the output was sent or received.
+<a href=#1042 id=1042 data-nosnippet>1042</a>/// - `output_pool`: The value pool for the transaction; valid values for this are:
+<a href=#1043 id=1043 data-nosnippet>1043</a>///   - 0: Transparent
+<a href=#1044 id=1044 data-nosnippet>1044</a>///   - 2: Sapling
+<a href=#1045 id=1045 data-nosnippet>1045</a>///   - 3: Orchard
+<a href=#1046 id=1046 data-nosnippet>1046</a>/// - `output_index`: The index of the output within the transaction bundle associated with
+<a href=#1047 id=1047 data-nosnippet>1047</a>///   the `output_pool` value; that is, within `vout` for transparent, the vector of
+<a href=#1048 id=1048 data-nosnippet>1048</a>///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+<a href=#1049 id=1049 data-nosnippet>1049</a>/// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
+<a href=#1050 id=1050 data-nosnippet>1050</a>///   spent notes in creating the transaction. Note that if multiple accounts in the wallet
+<a href=#1051 id=1051 data-nosnippet>1051</a>///   contributed funds in creating the associated transaction, redundant rows will exist in the
+<a href=#1052 id=1052 data-nosnippet>1052</a>///   output of this view, one for each such account.
+<a href=#1053 id=1053 data-nosnippet>1053</a>/// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
+<a href=#1054 id=1054 data-nosnippet>1054</a>///   outgoing transaction outputs this will be `NULL`.
+<a href=#1055 id=1055 data-nosnippet>1055</a>/// - `address`: The address to which the output was sent; for received outputs, this is the
+<a href=#1056 id=1056 data-nosnippet>1056</a>///   address at which the output was received, or `NULL` for wallet-internal outputs.
+<a href=#1057 id=1057 data-nosnippet>1057</a>/// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
+<a href=#1058 id=1058 data-nosnippet>1058</a>///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
+<a href=#1059 id=1059 data-nosnippet>1059</a>///   address. This will be `NULL` for outgoing transaction outputs.
+<a href=#1060 id=1060 data-nosnippet>1060</a>/// - `value`: The value of the output, in zatoshis.
+<a href=#1061 id=1061 data-nosnippet>1061</a>/// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
+<a href=#1062 id=1062 data-nosnippet>1062</a>///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
+<a href=#1063 id=1063 data-nosnippet>1063</a>///   for whether or not the output should be considered change, and may not be correct for
+<a href=#1064 id=1064 data-nosnippet>1064</a>///   cross-account internal transactions, shielding transactions, or outputs explicitly sent from
+<a href=#1065 id=1065 data-nosnippet>1065</a>///   the wallet to itself. The determination of what counts as change is somewhat subjective and
+<a href=#1066 id=1066 data-nosnippet>1066</a>///   the value of this column should be used with caution.
+<a href=#1067 id=1067 data-nosnippet>1067</a>/// - `memo`: The binary content of the memo associated with the output, if the output is a
+<a href=#1068 id=1068 data-nosnippet>1068</a>///   shielded output and the memo was received by the wallet, sent by the wallet or was able to be
+<a href=#1069 id=1069 data-nosnippet>1069</a>///   decrypted with the wallet's outgoing viewing key.
+<a href=#1070 id=1070 data-nosnippet>1070</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_TX_OUTPUTS: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#1071 id=1071 data-nosnippet>1071</a>CREATE VIEW v_tx_outputs AS
+<a href=#1072 id=1072 data-nosnippet>1072</a>WITH unioned AS (
+<a href=#1073 id=1073 data-nosnippet>1073</a>    -- select all outputs received by the wallet
+<a href=#1074 id=1074 data-nosnippet>1074</a>    SELECT transactions.txid            AS txid,
+<a href=#1075 id=1075 data-nosnippet>1075</a>           ro.pool                      AS output_pool,
+<a href=#1076 id=1076 data-nosnippet>1076</a>           ro.output_index              AS output_index,
+<a href=#1077 id=1077 data-nosnippet>1077</a>           from_account.uuid            AS from_account_uuid,
+<a href=#1078 id=1078 data-nosnippet>1078</a>           to_account.uuid              AS to_account_uuid,
+<a href=#1079 id=1079 data-nosnippet>1079</a>           a.address                    AS to_address,
+<a href=#1080 id=1080 data-nosnippet>1080</a>           a.diversifier_index_be       AS diversifier_index_be,
+<a href=#1081 id=1081 data-nosnippet>1081</a>           ro.value                     AS value,
+<a href=#1082 id=1082 data-nosnippet>1082</a>           ro.is_change                 AS is_change,
+<a href=#1083 id=1083 data-nosnippet>1083</a>           ro.memo                      AS memo
+<a href=#1084 id=1084 data-nosnippet>1084</a>    FROM v_received_outputs ro
+<a href=#1085 id=1085 data-nosnippet>1085</a>    JOIN transactions
+<a href=#1086 id=1086 data-nosnippet>1086</a>        ON transactions.id_tx = ro.transaction_id
+<a href=#1087 id=1087 data-nosnippet>1087</a>    LEFT JOIN addresses a ON a.id = ro.address_id
+<a href=#1088 id=1088 data-nosnippet>1088</a>    -- join to the sent_notes table to obtain `from_account_id`
+<a href=#1089 id=1089 data-nosnippet>1089</a>    LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+<a href=#1090 id=1090 data-nosnippet>1090</a>    -- join on the accounts table to obtain account UUIDs
+<a href=#1091 id=1091 data-nosnippet>1091</a>    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+<a href=#1092 id=1092 data-nosnippet>1092</a>    LEFT JOIN accounts to_account ON to_account.id = ro.account_id
+<a href=#1093 id=1093 data-nosnippet>1093</a>    UNION ALL
+<a href=#1094 id=1094 data-nosnippet>1094</a>    -- select all outputs sent from the wallet to external recipients
+<a href=#1095 id=1095 data-nosnippet>1095</a>    SELECT transactions.txid            AS txid,
+<a href=#1096 id=1096 data-nosnippet>1096</a>           sent_notes.output_pool       AS output_pool,
+<a href=#1097 id=1097 data-nosnippet>1097</a>           sent_notes.output_index      AS output_index,
+<a href=#1098 id=1098 data-nosnippet>1098</a>           from_account.uuid            AS from_account_uuid,
+<a href=#1099 id=1099 data-nosnippet>1099</a>           NULL                         AS to_account_uuid,
+<a href=#1100 id=1100 data-nosnippet>1100</a>           sent_notes.to_address        AS to_address,
+<a href=#1101 id=1101 data-nosnippet>1101</a>           NULL                         AS diversifier_index_be,
+<a href=#1102 id=1102 data-nosnippet>1102</a>           sent_notes.value             AS value,
+<a href=#1103 id=1103 data-nosnippet>1103</a>           0                            AS is_change,
+<a href=#1104 id=1104 data-nosnippet>1104</a>           sent_notes.memo              AS memo
+<a href=#1105 id=1105 data-nosnippet>1105</a>    FROM sent_notes
+<a href=#1106 id=1106 data-nosnippet>1106</a>    JOIN transactions
+<a href=#1107 id=1107 data-nosnippet>1107</a>        ON transactions.id_tx = sent_notes.tx
+<a href=#1108 id=1108 data-nosnippet>1108</a>    LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+<a href=#1109 id=1109 data-nosnippet>1109</a>    -- join on the accounts table to obtain account UUIDs
+<a href=#1110 id=1110 data-nosnippet>1110</a>    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+<a href=#1111 id=1111 data-nosnippet>1111</a>)
+<a href=#1112 id=1112 data-nosnippet>1112</a>-- merge duplicate rows while retaining maximum information
+<a href=#1113 id=1113 data-nosnippet>1113</a>SELECT
+<a href=#1114 id=1114 data-nosnippet>1114</a>    txid,
+<a href=#1115 id=1115 data-nosnippet>1115</a>    output_pool,
+<a href=#1116 id=1116 data-nosnippet>1116</a>    output_index,
+<a href=#1117 id=1117 data-nosnippet>1117</a>    max(from_account_uuid) AS from_account_uuid,
+<a href=#1118 id=1118 data-nosnippet>1118</a>    max(to_account_uuid) AS to_account_uuid,
+<a href=#1119 id=1119 data-nosnippet>1119</a>    max(to_address) AS to_address,
+<a href=#1120 id=1120 data-nosnippet>1120</a>    max(value) AS value,
+<a href=#1121 id=1121 data-nosnippet>1121</a>    max(is_change) AS is_change,
+<a href=#1122 id=1122 data-nosnippet>1122</a>    max(memo) AS memo
+<a href=#1123 id=1123 data-nosnippet>1123</a>FROM unioned
+<a href=#1124 id=1124 data-nosnippet>1124</a>GROUP BY txid, output_pool, output_index"</span>;
+<a href=#1125 id=1125 data-nosnippet>1125</a>
+<a href=#1126 id=1126 data-nosnippet>1126</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_sapling_shard_scan_ranges&lt;P: Parameters&gt;(params: <span class="kw-2">&amp;</span>P) -&gt; String {
+<a href=#1127 id=1127 data-nosnippet>1127</a>    <span class="macro">format!</span>(
+<a href=#1128 id=1128 data-nosnippet>1128</a>        <span class="string">"CREATE VIEW v_sapling_shard_scan_ranges AS
+<a href=#1129 id=1129 data-nosnippet>1129</a>        SELECT
+<a href=#1130 id=1130 data-nosnippet>1130</a>            shard.shard_index,
+<a href=#1131 id=1131 data-nosnippet>1131</a>            shard.shard_index &lt;&lt; 16 AS start_position,
+<a href=#1132 id=1132 data-nosnippet>1132</a>            (shard.shard_index + 1) &lt;&lt; 16 AS end_position_exclusive,
+<a href=#1133 id=1133 data-nosnippet>1133</a>            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+<a href=#1134 id=1134 data-nosnippet>1134</a>            shard.subtree_end_height,
+<a href=#1135 id=1135 data-nosnippet>1135</a>            shard.contains_marked,
+<a href=#1136 id=1136 data-nosnippet>1136</a>            scan_queue.block_range_start,
+<a href=#1137 id=1137 data-nosnippet>1137</a>            scan_queue.block_range_end,
+<a href=#1138 id=1138 data-nosnippet>1138</a>            scan_queue.priority
+<a href=#1139 id=1139 data-nosnippet>1139</a>        FROM sapling_tree_shards shard
+<a href=#1140 id=1140 data-nosnippet>1140</a>        LEFT OUTER JOIN sapling_tree_shards prev_shard
+<a href=#1141 id=1141 data-nosnippet>1141</a>            ON shard.shard_index = prev_shard.shard_index + 1
+<a href=#1142 id=1142 data-nosnippet>1142</a>        -- Join with scan ranges that overlap with the subtree's involved blocks.
+<a href=#1143 id=1143 data-nosnippet>1143</a>        INNER JOIN scan_queue ON (
+<a href=#1144 id=1144 data-nosnippet>1144</a>            subtree_start_height &lt; scan_queue.block_range_end AND
+<a href=#1145 id=1145 data-nosnippet>1145</a>            (
+<a href=#1146 id=1146 data-nosnippet>1146</a>                scan_queue.block_range_start &lt;= shard.subtree_end_height OR
+<a href=#1147 id=1147 data-nosnippet>1147</a>                shard.subtree_end_height IS NULL
+<a href=#1148 id=1148 data-nosnippet>1148</a>            )
+<a href=#1149 id=1149 data-nosnippet>1149</a>        )"</span>,
+<a href=#1150 id=1150 data-nosnippet>1150</a>        u32::from(params.activation_height(NetworkUpgrade::Sapling).unwrap()),
+<a href=#1151 id=1151 data-nosnippet>1151</a>    )
+<a href=#1152 id=1152 data-nosnippet>1152</a>}
+<a href=#1153 id=1153 data-nosnippet>1153</a>
+<a href=#1154 id=1154 data-nosnippet>1154</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_sapling_shard_unscanned_ranges() -&gt; String {
+<a href=#1155 id=1155 data-nosnippet>1155</a>    <span class="macro">format!</span>(
+<a href=#1156 id=1156 data-nosnippet>1156</a>        <span class="string">"CREATE VIEW v_sapling_shard_unscanned_ranges AS
+<a href=#1157 id=1157 data-nosnippet>1157</a>        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+<a href=#1158 id=1158 data-nosnippet>1158</a>        SELECT
+<a href=#1159 id=1159 data-nosnippet>1159</a>            shard_index,
+<a href=#1160 id=1160 data-nosnippet>1160</a>            start_position,
+<a href=#1161 id=1161 data-nosnippet>1161</a>            end_position_exclusive,
+<a href=#1162 id=1162 data-nosnippet>1162</a>            subtree_start_height,
+<a href=#1163 id=1163 data-nosnippet>1163</a>            subtree_end_height,
+<a href=#1164 id=1164 data-nosnippet>1164</a>            contains_marked,
+<a href=#1165 id=1165 data-nosnippet>1165</a>            block_range_start,
+<a href=#1166 id=1166 data-nosnippet>1166</a>            block_range_end,
+<a href=#1167 id=1167 data-nosnippet>1167</a>            priority
+<a href=#1168 id=1168 data-nosnippet>1168</a>        FROM v_sapling_shard_scan_ranges
+<a href=#1169 id=1169 data-nosnippet>1169</a>        INNER JOIN wallet_birthday
+<a href=#1170 id=1170 data-nosnippet>1170</a>        WHERE priority &gt; {}
+<a href=#1171 id=1171 data-nosnippet>1171</a>        AND block_range_end &gt; wallet_birthday.height"</span>,
+<a href=#1172 id=1172 data-nosnippet>1172</a>        priority_code(<span class="kw-2">&amp;</span>ScanPriority::Scanned)
+<a href=#1173 id=1173 data-nosnippet>1173</a>    )
+<a href=#1174 id=1174 data-nosnippet>1174</a>}
+<a href=#1175 id=1175 data-nosnippet>1175</a>
+<a href=#1176 id=1176 data-nosnippet>1176</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_SAPLING_SHARDS_SCAN_STATE: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#1177 id=1177 data-nosnippet>1177</a>CREATE VIEW v_sapling_shards_scan_state AS
+<a href=#1178 id=1178 data-nosnippet>1178</a>SELECT
+<a href=#1179 id=1179 data-nosnippet>1179</a>    shard_index,
+<a href=#1180 id=1180 data-nosnippet>1180</a>    start_position,
+<a href=#1181 id=1181 data-nosnippet>1181</a>    end_position_exclusive,
+<a href=#1182 id=1182 data-nosnippet>1182</a>    subtree_start_height,
+<a href=#1183 id=1183 data-nosnippet>1183</a>    subtree_end_height,
+<a href=#1184 id=1184 data-nosnippet>1184</a>    contains_marked,
+<a href=#1185 id=1185 data-nosnippet>1185</a>    MAX(priority) AS max_priority
+<a href=#1186 id=1186 data-nosnippet>1186</a>FROM v_sapling_shard_scan_ranges
+<a href=#1187 id=1187 data-nosnippet>1187</a>GROUP BY
+<a href=#1188 id=1188 data-nosnippet>1188</a>    shard_index,
+<a href=#1189 id=1189 data-nosnippet>1189</a>    start_position,
+<a href=#1190 id=1190 data-nosnippet>1190</a>    end_position_exclusive,
+<a href=#1191 id=1191 data-nosnippet>1191</a>    subtree_start_height,
+<a href=#1192 id=1192 data-nosnippet>1192</a>    subtree_end_height,
+<a href=#1193 id=1193 data-nosnippet>1193</a>    contains_marked"</span>;
+<a href=#1194 id=1194 data-nosnippet>1194</a>
+<a href=#1195 id=1195 data-nosnippet>1195</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_orchard_shard_scan_ranges&lt;P: Parameters&gt;(params: <span class="kw-2">&amp;</span>P) -&gt; String {
+<a href=#1196 id=1196 data-nosnippet>1196</a>    <span class="macro">format!</span>(
+<a href=#1197 id=1197 data-nosnippet>1197</a>        <span class="string">"CREATE VIEW v_orchard_shard_scan_ranges AS
+<a href=#1198 id=1198 data-nosnippet>1198</a>        SELECT
+<a href=#1199 id=1199 data-nosnippet>1199</a>            shard.shard_index,
+<a href=#1200 id=1200 data-nosnippet>1200</a>            shard.shard_index &lt;&lt; 16 AS start_position,
+<a href=#1201 id=1201 data-nosnippet>1201</a>            (shard.shard_index + 1) &lt;&lt; 16 AS end_position_exclusive,
+<a href=#1202 id=1202 data-nosnippet>1202</a>            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+<a href=#1203 id=1203 data-nosnippet>1203</a>            shard.subtree_end_height,
+<a href=#1204 id=1204 data-nosnippet>1204</a>            shard.contains_marked,
+<a href=#1205 id=1205 data-nosnippet>1205</a>            scan_queue.block_range_start,
+<a href=#1206 id=1206 data-nosnippet>1206</a>            scan_queue.block_range_end,
+<a href=#1207 id=1207 data-nosnippet>1207</a>            scan_queue.priority
+<a href=#1208 id=1208 data-nosnippet>1208</a>        FROM orchard_tree_shards shard
+<a href=#1209 id=1209 data-nosnippet>1209</a>        LEFT OUTER JOIN orchard_tree_shards prev_shard
+<a href=#1210 id=1210 data-nosnippet>1210</a>            ON shard.shard_index = prev_shard.shard_index + 1
+<a href=#1211 id=1211 data-nosnippet>1211</a>        -- Join with scan ranges that overlap with the subtree's involved blocks.
+<a href=#1212 id=1212 data-nosnippet>1212</a>        INNER JOIN scan_queue ON (
+<a href=#1213 id=1213 data-nosnippet>1213</a>            subtree_start_height &lt; scan_queue.block_range_end AND
+<a href=#1214 id=1214 data-nosnippet>1214</a>            (
+<a href=#1215 id=1215 data-nosnippet>1215</a>                scan_queue.block_range_start &lt;= shard.subtree_end_height OR
+<a href=#1216 id=1216 data-nosnippet>1216</a>                shard.subtree_end_height IS NULL
+<a href=#1217 id=1217 data-nosnippet>1217</a>            )
+<a href=#1218 id=1218 data-nosnippet>1218</a>        )"</span>,
+<a href=#1219 id=1219 data-nosnippet>1219</a>        u32::from(params.activation_height(NetworkUpgrade::Nu5).unwrap()),
+<a href=#1220 id=1220 data-nosnippet>1220</a>    )
+<a href=#1221 id=1221 data-nosnippet>1221</a>}
+<a href=#1222 id=1222 data-nosnippet>1222</a>
+<a href=#1223 id=1223 data-nosnippet>1223</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_orchard_shard_unscanned_ranges() -&gt; String {
+<a href=#1224 id=1224 data-nosnippet>1224</a>    <span class="macro">format!</span>(
+<a href=#1225 id=1225 data-nosnippet>1225</a>        <span class="string">"CREATE VIEW v_orchard_shard_unscanned_ranges AS
+<a href=#1226 id=1226 data-nosnippet>1226</a>        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+<a href=#1227 id=1227 data-nosnippet>1227</a>        SELECT
+<a href=#1228 id=1228 data-nosnippet>1228</a>            shard_index,
+<a href=#1229 id=1229 data-nosnippet>1229</a>            start_position,
+<a href=#1230 id=1230 data-nosnippet>1230</a>            end_position_exclusive,
+<a href=#1231 id=1231 data-nosnippet>1231</a>            subtree_start_height,
+<a href=#1232 id=1232 data-nosnippet>1232</a>            subtree_end_height,
+<a href=#1233 id=1233 data-nosnippet>1233</a>            contains_marked,
+<a href=#1234 id=1234 data-nosnippet>1234</a>            block_range_start,
+<a href=#1235 id=1235 data-nosnippet>1235</a>            block_range_end,
+<a href=#1236 id=1236 data-nosnippet>1236</a>            priority
+<a href=#1237 id=1237 data-nosnippet>1237</a>        FROM v_orchard_shard_scan_ranges
+<a href=#1238 id=1238 data-nosnippet>1238</a>        INNER JOIN wallet_birthday
+<a href=#1239 id=1239 data-nosnippet>1239</a>        WHERE priority &gt; {}
+<a href=#1240 id=1240 data-nosnippet>1240</a>        AND block_range_end &gt; wallet_birthday.height"</span>,
+<a href=#1241 id=1241 data-nosnippet>1241</a>        priority_code(<span class="kw-2">&amp;</span>ScanPriority::Scanned),
+<a href=#1242 id=1242 data-nosnippet>1242</a>    )
+<a href=#1243 id=1243 data-nosnippet>1243</a>}
+<a href=#1244 id=1244 data-nosnippet>1244</a>
+<a href=#1245 id=1245 data-nosnippet>1245</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ORCHARD_SHARDS_SCAN_STATE: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#1246 id=1246 data-nosnippet>1246</a>CREATE VIEW v_orchard_shards_scan_state AS
+<a href=#1247 id=1247 data-nosnippet>1247</a>SELECT
+<a href=#1248 id=1248 data-nosnippet>1248</a>    shard_index,
+<a href=#1249 id=1249 data-nosnippet>1249</a>    start_position,
+<a href=#1250 id=1250 data-nosnippet>1250</a>    end_position_exclusive,
+<a href=#1251 id=1251 data-nosnippet>1251</a>    subtree_start_height,
+<a href=#1252 id=1252 data-nosnippet>1252</a>    subtree_end_height,
+<a href=#1253 id=1253 data-nosnippet>1253</a>    contains_marked,
+<a href=#1254 id=1254 data-nosnippet>1254</a>    MAX(priority) AS max_priority
+<a href=#1255 id=1255 data-nosnippet>1255</a>FROM v_orchard_shard_scan_ranges
+<a href=#1256 id=1256 data-nosnippet>1256</a>GROUP BY
+<a href=#1257 id=1257 data-nosnippet>1257</a>    shard_index,
+<a href=#1258 id=1258 data-nosnippet>1258</a>    start_position,
+<a href=#1259 id=1259 data-nosnippet>1259</a>    end_position_exclusive,
+<a href=#1260 id=1260 data-nosnippet>1260</a>    subtree_start_height,
+<a href=#1261 id=1261 data-nosnippet>1261</a>    subtree_end_height,
+<a href=#1262 id=1262 data-nosnippet>1262</a>    contains_marked"</span>;
+<a href=#1263 id=1263 data-nosnippet>1263</a>
+<a href=#1264 id=1264 data-nosnippet>1264</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ADDRESS_USES: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#1265 id=1265 data-nosnippet>1265</a>CREATE VIEW v_address_uses AS
+<a href=#1266 id=1266 data-nosnippet>1266</a>    SELECT orn.address_id, orn.account_id, orn.tx AS transaction_id, t.mined_height,
 <a href=#1267 id=1267 data-nosnippet>1267</a>           a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#1268 id=1268 data-nosnippet>1268</a>    FROM sapling_received_notes srn
-<a href=#1269 id=1269 data-nosnippet>1269</a>    JOIN addresses a ON a.id = srn.address_id
-<a href=#1270 id=1270 data-nosnippet>1270</a>    JOIN transactions t ON t.id_tx = srn.tx
+<a href=#1268 id=1268 data-nosnippet>1268</a>    FROM orchard_received_notes orn
+<a href=#1269 id=1269 data-nosnippet>1269</a>    JOIN addresses a ON a.id = orn.address_id
+<a href=#1270 id=1270 data-nosnippet>1270</a>    JOIN transactions t ON t.id_tx = orn.tx
 <a href=#1271 id=1271 data-nosnippet>1271</a>UNION
-<a href=#1272 id=1272 data-nosnippet>1272</a>    SELECT tro.address_id, tro.account_id, tro.transaction_id, t.mined_height,
+<a href=#1272 id=1272 data-nosnippet>1272</a>    SELECT srn.address_id, srn.account_id, srn.tx AS transaction_id, t.mined_height,
 <a href=#1273 id=1273 data-nosnippet>1273</a>           a.key_scope, a.diversifier_index_be, a.transparent_child_index
-<a href=#1274 id=1274 data-nosnippet>1274</a>    FROM transparent_received_outputs tro
-<a href=#1275 id=1275 data-nosnippet>1275</a>    JOIN addresses a ON a.id = tro.address_id
-<a href=#1276 id=1276 data-nosnippet>1276</a>    JOIN transactions t ON t.id_tx = tro.transaction_id"</span>;
-<a href=#1277 id=1277 data-nosnippet>1277</a>
-<a href=#1278 id=1278 data-nosnippet>1278</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ADDRESS_FIRST_USE: <span class="kw-2">&amp;</span>str = <span class="string">"
-<a href=#1279 id=1279 data-nosnippet>1279</a>    CREATE VIEW v_address_first_use AS
-<a href=#1280 id=1280 data-nosnippet>1280</a>    SELECT
-<a href=#1281 id=1281 data-nosnippet>1281</a>        address_id,
-<a href=#1282 id=1282 data-nosnippet>1282</a>        account_id,
-<a href=#1283 id=1283 data-nosnippet>1283</a>        key_scope,
-<a href=#1284 id=1284 data-nosnippet>1284</a>        diversifier_index_be,
-<a href=#1285 id=1285 data-nosnippet>1285</a>        transparent_child_index,
-<a href=#1286 id=1286 data-nosnippet>1286</a>        MIN(mined_height) AS first_use_height
-<a href=#1287 id=1287 data-nosnippet>1287</a>    FROM v_address_uses
-<a href=#1288 id=1288 data-nosnippet>1288</a>    GROUP BY
-<a href=#1289 id=1289 data-nosnippet>1289</a>        address_id, account_id, key_scope,
-<a href=#1290 id=1290 data-nosnippet>1290</a>        diversifier_index_be, transparent_child_index"</span>;</code></pre></div></section></main></body></html>
+<a href=#1274 id=1274 data-nosnippet>1274</a>    FROM sapling_received_notes srn
+<a href=#1275 id=1275 data-nosnippet>1275</a>    JOIN addresses a ON a.id = srn.address_id
+<a href=#1276 id=1276 data-nosnippet>1276</a>    JOIN transactions t ON t.id_tx = srn.tx
+<a href=#1277 id=1277 data-nosnippet>1277</a>UNION
+<a href=#1278 id=1278 data-nosnippet>1278</a>    SELECT tro.address_id, tro.account_id, tro.transaction_id, t.mined_height,
+<a href=#1279 id=1279 data-nosnippet>1279</a>           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+<a href=#1280 id=1280 data-nosnippet>1280</a>    FROM transparent_received_outputs tro
+<a href=#1281 id=1281 data-nosnippet>1281</a>    JOIN addresses a ON a.id = tro.address_id
+<a href=#1282 id=1282 data-nosnippet>1282</a>    JOIN transactions t ON t.id_tx = tro.transaction_id"</span>;
+<a href=#1283 id=1283 data-nosnippet>1283</a>
+<a href=#1284 id=1284 data-nosnippet>1284</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_ADDRESS_FIRST_USE: <span class="kw-2">&amp;</span>str = <span class="string">"
+<a href=#1285 id=1285 data-nosnippet>1285</a>    CREATE VIEW v_address_first_use AS
+<a href=#1286 id=1286 data-nosnippet>1286</a>    SELECT
+<a href=#1287 id=1287 data-nosnippet>1287</a>        address_id,
+<a href=#1288 id=1288 data-nosnippet>1288</a>        account_id,
+<a href=#1289 id=1289 data-nosnippet>1289</a>        key_scope,
+<a href=#1290 id=1290 data-nosnippet>1290</a>        diversifier_index_be,
+<a href=#1291 id=1291 data-nosnippet>1291</a>        transparent_child_index,
+<a href=#1292 id=1292 data-nosnippet>1292</a>        MIN(mined_height) AS first_use_height
+<a href=#1293 id=1293 data-nosnippet>1293</a>    FROM v_address_uses
+<a href=#1294 id=1294 data-nosnippet>1294</a>    GROUP BY
+<a href=#1295 id=1295 data-nosnippet>1295</a>        address_id, account_id, key_scope,
+<a href=#1296 id=1296 data-nosnippet>1296</a>        diversifier_index_be, transparent_child_index"</span>;</code></pre></div></section></main></body></html>
