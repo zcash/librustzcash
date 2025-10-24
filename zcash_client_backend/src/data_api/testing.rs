@@ -1475,7 +1475,7 @@ impl Default for TestBuilder<(), ()> {
 
 impl<A> TestBuilder<(), A> {
     /// Adds a block cache to the test environment.
-    pub fn with_block_cache<C: TestCache>(self, cache: C) -> TestBuilder<C, A> {
+    pub fn with_block_cache<C>(self, cache: C) -> TestBuilder<C, A> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
