@@ -20,6 +20,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+sapling.workspace = true
+
 # - Logging and metrics
 memuse = { workspace = true, optional = true }
 
@@ -31,6 +33,7 @@ document-features = { workspace = true, optional = true }
 # - Encodings
 core2.workspace = true
 hex.workspace = true
+wasabi_leb128 = "0.4"
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
