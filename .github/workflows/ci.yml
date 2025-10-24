@@ -313,11 +313,18 @@ jobs:
       matrix:
         target:
           - wasm32-wasi
+        include:
+          - target: wasm32-wasi
+            build_deps: >
+              gcc-multilib
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
           path: crates
+      - name: Install linux build dependencies
+        run: sudo apt update && sudo apt install ${{ matrix.build_deps }}
+        if: matrix.build_deps != ''
       # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
       # be incompatible with some of these targets.
       - name: Copy Rust toolchain into the root for use in synthetic crate setup
