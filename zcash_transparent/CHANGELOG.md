@@ -10,11 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-10-27
+
 ### Added
 - `zcash_transparent::address::TransparentAddress::to_zcash_address`
 - `zcash_transparent::pczt`:
   - `Bip32Derivation::extract_zip_48_fields`
-- `zcash_transparent::zip48` module.
+- `zcash_transparent::zip48` module, behind the `transparent-inputs` feature flag.
 
 ## [0.6.0] - 2025-10-02
 
