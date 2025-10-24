@@ -12,6 +12,8 @@ pub mod bundle;
 pub mod keys;
 pub mod pczt;
 pub mod sighash;
+#[cfg(feature = "transparent-inputs")]
+pub mod zip48;
 
 #[cfg(test)]
 mod test_vectors;
