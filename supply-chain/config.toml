@@ -519,10 +519,6 @@ criteria = "safe-to-run"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.fixedbitset]]
-version = "0.4.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.fluid-let]]
 version = "1.0.0"
 criteria = "safe-to-deploy"

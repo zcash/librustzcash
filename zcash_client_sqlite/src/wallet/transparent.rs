@@ -933,6 +933,11 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     })
 }
 
+// Generates a SQL expression that returns the identifiers of all spent UTXOS in the wallet.
+///
+/// # Usage requirements
+/// - The parent must provide `:target_height` as a named argument.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
 pub(crate) fn spent_utxos_clause() -> String {
     format!(
         r#"
@@ -942,6 +947,31 @@ pub(crate) fn spent_utxos_clause() -> String {
         WHERE {}
         "#,
         super::common::tx_unexpired_condition("stx")
+    )
+}
+
+/// Generates an SQL condition that a transaction is mined with at least a required number of
+/// confirmations, or is unexpired if UTXOS are spendable with zero confirmations.
+///
+/// # Usage requirements
+/// - `tx` must be set to the SQL variable name for the transaction in the parent.
+/// - The parent must provide `:target_height` as a named argument.
+/// - The parent must provide `:min_confirmations` as a named argument.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+pub(crate) fn tx_unexpired_condition_minconf_0(tx: &str) -> String {
+    format!(
+        r#"
+        -- tx is mined and has at least min_confirmations
+        (
+            {tx}.mined_height < :target_height -- tx is mined
+            AND :target_height - {tx}.mined_height >= :min_confirmations
+        )
+        -- or outputs may be spent with zero confirmations and the transaction is unexpired
+        OR (
+            :min_confirmations = 0
+            AND ({tx}.expiry_height = 0 OR {tx}.expiry_height >= :target_height)
+        )
+        "#
     )
 }
 
@@ -1060,26 +1090,16 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
          WHERE u.address = :address
-         AND (
-            -- tx is mined and has at least min_confirmations
-            (
-                t.mined_height < :target_height -- tx is mined
-                AND :target_height - t.mined_height >= :min_confirmations
-            )
-            -- or the utxo can be spent with zero confirmations and is definitely unexpired
-            OR (
-                :min_confirmations = 0
-                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
-            )
-         )
-         -- and the output is unspent
-         AND u.id NOT IN ({})
+         AND u.value_zat >= :min_value
+         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the output is unspent
          -- excluding received txos where the address is an ephemeral address and the
          -- transaction that produced the TXO spent outputs belonging to the same account.
          AND NOT (
             addresses.key_scope = :ephemeral_key_scope
             AND {} -- the transaction that created the txo spends account-internal outputs
          )",
+        tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         tx_spends_account_outputs_condition("t", "accounts")
     ))?;
@@ -1098,6 +1118,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":address": addr_str,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE),
         ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
     ])?;
 
@@ -1141,27 +1162,16 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN addresses ON addresses.id = u.address_id
          WHERE accounts.uuid = :account_uuid
-         -- the transaction that created the output is mined or is definitely unexpired
-         AND (
-            -- tx is mined and has at least min_confirmations
-            (
-                t.mined_height < :target_height -- tx is mined
-                AND :target_height - t.mined_height >= :min_confirmations
-            )
-            -- or the utxo can be spent with zero confirmations and is definitely unexpired
-            OR (
-                :min_confirmations = 0
-                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
-            )
-         )
-         -- and the output is unspent
-         AND u.id NOT IN ({})
+         AND u.value_zat > 0
+         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the output is unspent
          -- excluding received txos where the address is an ephemeral address and the
          -- transaction that produced the TXO spent outputs belonging to the same account.
          AND NOT (
             addresses.key_scope = :ephemeral_key_scope
             AND {} -- the transaction that created the txo spends account-internal outputs
          )",
+        tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         tx_spends_account_outputs_condition("t", "accounts")
     ))?;
@@ -1206,6 +1216,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
              JOIN transactions t ON t.id_tx = u.transaction_id
              JOIN addresses ON addresses.id = u.address_id
              WHERE accounts.uuid = :account_uuid
+             AND u.value_zat > 0
              -- the transaction that created the output is mined or is definitely unexpired
              AND (
                  -- the transaction that created the output is mined with not enough confirmations
@@ -1285,20 +1296,8 @@ pub(crate) fn add_transparent_account_balances(
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN addresses ON addresses.id = u.address_id
-         WHERE (
-            -- tx is mined and has at least min_confirmations
-            (
-                t.mined_height < :target_height -- tx is mined
-                AND :target_height - t.mined_height >= :min_confirmations
-            )
-            -- or the utxo can be spent with zero confirmations and is definitely unexpired
-            OR (
-                :min_confirmations = 0
-                AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
-            )
-         )
-         -- and the received txo is unspent
-         AND u.id NOT IN ({})
+         WHERE ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the received txo is unspent
          -- excluding received txos where the address is an ephemeral address and the
          -- transaction that produced the TXO spent outputs belonging to the same account.
          AND NOT (
@@ -1306,6 +1305,7 @@ pub(crate) fn add_transparent_account_balances(
             AND {} -- the transaction that created the txo spends account-internal outputs
          )
          GROUP BY accounts.uuid",
+        tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         tx_spends_account_outputs_condition("t", "accounts")
     ))?;
@@ -1326,7 +1326,13 @@ pub(crate) fn add_transparent_account_balances(
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| bal.add_spendable_value(value))?;
+            .with_unshielded_balance_mut(|bal| {
+                if value >= zip317::MARGINAL_FEE {
+                    bal.add_spendable_value(value)
+                } else {
+                    bal.add_uneconomic_value(value)
+                }
+            })?;
     }
 
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
@@ -1381,7 +1387,13 @@ pub(crate) fn add_transparent_account_balances(
             account_balances
                 .entry(account)
                 .or_insert(AccountBalance::ZERO)
-                .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+                .with_unshielded_balance_mut(|bal| {
+                    if value >= zip317::MARGINAL_FEE {
+                        bal.add_pending_spendable_value(value)
+                    } else {
+                        bal.add_uneconomic_value(value)
+                    }
+                })?;
         }
     }
     Ok(())
