@@ -7,17 +7,17 @@ use incrementalmerkletree::Position;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 
-use shardtree::{store::ShardStore, ShardTree};
+use shardtree::{ShardTree, store::ShardStore};
 use uuid::Uuid;
 
 use sapling::{
-    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey, Zip212Enforcement},
-    zip32::DiversifiableFullViewingKey,
     Diversifier, Node, Rseed,
+    note_encryption::{PreparedIncomingViewingKey, Zip212Enforcement, try_sapling_note_decryption},
+    zip32::DiversifiableFullViewingKey,
 };
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
+use zcash_primitives::transaction::{Transaction, components::sapling::zip212_enforcement};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId},
     value::Zatoshis,
@@ -25,13 +25,12 @@ use zcash_protocol::{
 use zip32::Scope;
 
 use crate::{
-    wallet::{
-        chain_tip_height,
-        commitment_tree::SqliteShardStore,
-        init::{migrations::shardtree_support, WalletMigrationError},
-        KeyScope,
-    },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
+    wallet::{
+        KeyScope, chain_tip_height,
+        commitment_tree::SqliteShardStore,
+        init::{WalletMigrationError, migrations::shardtree_support},
+    },
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
@@ -283,7 +282,7 @@ mod tests {
 
     use incrementalmerkletree::Position;
     use rand_core::OsRng;
-    use rusqlite::{named_params, params, Connection, OptionalExtension};
+    use rusqlite::{Connection, OptionalExtension, named_params, params};
     use tempfile::NamedTempFile;
 
     use ::transparent::{
@@ -292,20 +291,20 @@ mod tests {
         keys::{IncomingViewingKey, NonHardenedChildIndex},
     };
     use zcash_client_backend::{
-        data_api::{BlockMetadata, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT},
+        TransferType,
+        data_api::{BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees},
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
-        scanning::{scan_block, Nullifiers, ScanningKeys},
+        scanning::{Nullifiers, ScanningKeys, scan_block},
         wallet::WalletTx,
-        TransferType,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
         block::BlockHash,
         transaction::{
+            Transaction,
             builder::{BuildConfig, BuildResult, Builder},
             fees::fixed,
-            Transaction,
         },
     };
     use zcash_proofs::prover::LocalTxProver;
@@ -317,18 +316,18 @@ mod tests {
     use zip32::Scope;
 
     use crate::{
+        AccountRef, TxRef, WalletDb,
         error::SqliteClientError,
         testing::db::{test_clock, test_rng},
         wallet::{
+            KeyScope,
             init::{
-                migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
                 WalletMigrator,
+                migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
             },
             memo_repr,
             sapling::ReceivedSaplingOutput,
-            KeyScope,
         },
-        AccountRef, TxRef, WalletDb,
     };
 
     // These must be different.

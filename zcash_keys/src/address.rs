@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use transparent::address::TransparentAddress;
 use zcash_address::{
-    unified::{self, Container, Encoding, Typecode},
     ConversionError, ToAddress, TryFromAddress, ZcashAddress,
+    unified::{self, Container, Encoding, Typecode},
 };
 use zcash_protocol::consensus::{self, NetworkType};
 
@@ -509,7 +509,7 @@ pub mod testing {
     use proptest::prelude::*;
     use zcash_protocol::consensus::Network;
 
-    use crate::keys::{testing::arb_unified_spending_key, UnifiedAddressRequest};
+    use crate::keys::{UnifiedAddressRequest, testing::arb_unified_spending_key};
 
     use super::{Address, UnifiedAddress};
 

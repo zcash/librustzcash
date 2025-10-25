@@ -3,7 +3,7 @@
 mod serialization;
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     num::NonZeroU32,
     ops::{Range, RangeInclusive},
 };
@@ -14,27 +14,27 @@ use ::transparent::keys::NonHardenedChildIndex;
 use incrementalmerkletree::{Address, Level, Marking, Position, Retention};
 use scanning::ScanQueue;
 use shardtree::{
-    store::{memory::MemoryShardStore, ShardStore},
     ShardTree,
+    store::{ShardStore, memory::MemoryShardStore},
 };
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::wallet::TransparentAddressMetadata;
 use zcash_client_backend::{
     data_api::{
+        Account as _, AccountBirthday, AccountSource, InputSource, Ratio, SAPLING_SHARD_HEIGHT,
+        TransactionStatus, WalletRead,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
-        Account as _, AccountBirthday, AccountSource, InputSource, Ratio, TransactionStatus,
-        WalletRead, SAPLING_SHARD_HEIGHT,
     },
     wallet::{NoteId, WalletSaplingOutput},
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
     ShieldedProtocol, TxId,
+    consensus::{self, BlockHeight, NetworkUpgrade},
 };
-use zip32::{fingerprint::SeedFingerprint, Scope};
+use zip32::{Scope, fingerprint::SeedFingerprint};
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};

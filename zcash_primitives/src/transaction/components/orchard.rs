@@ -8,11 +8,11 @@ use core2::io::{self, Read, Write};
 use nonempty::NonEmpty;
 
 use orchard::{
+    Action, Anchor,
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
-    Action, Anchor,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_protocol::value::ZatBalance;
@@ -276,10 +276,10 @@ pub mod testing {
     use proptest::prelude::*;
 
     use orchard::bundle::{
-        testing::{self as t_orch},
         Authorized, Bundle,
+        testing::{self as t_orch},
     };
-    use zcash_protocol::value::{testing::arb_zat_balance, ZatBalance};
+    use zcash_protocol::value::{ZatBalance, testing::arb_zat_balance};
 
     use crate::transaction::TxVersion;
 

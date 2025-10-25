@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use bip32::ChildNumber;
-use zcash_protocol::{value::Zatoshis, TxId};
+use zcash_protocol::{TxId, value::Zatoshis};
 use zcash_script::script;
 
 use crate::sighash::SighashType;

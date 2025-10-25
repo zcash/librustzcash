@@ -5,18 +5,18 @@ use std::{
 
 use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
+    FeeRule,
     transparent::{self, InputSize},
     zip317::{self as prim_zip317},
-    FeeRule,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
-    PoolType, ShieldedProtocol,
 };
 
-use crate::data_api::{wallet::TargetHeight, InputSource};
+use crate::data_api::{InputSource, wallet::TargetHeight};
 
 pub mod common;
 #[cfg(feature = "non-standard-fees")]

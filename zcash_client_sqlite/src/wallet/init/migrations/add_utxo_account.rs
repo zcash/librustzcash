@@ -15,7 +15,7 @@ use {
         address::TransparentAddress,
         keys::{IncomingViewingKey, NonHardenedChildIndex},
     },
-    rusqlite::{named_params, OptionalExtension},
+    rusqlite::{OptionalExtension, named_params},
     std::collections::HashMap,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},

@@ -12,7 +12,7 @@ use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Uri};
 use tower::Service;
 use tracing::debug;
 
-use super::{http, Client, Error};
+use super::{Client, Error, http};
 use crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient;
 
 impl Client {

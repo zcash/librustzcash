@@ -631,7 +631,7 @@ impl ExternalOvk {
 mod tests {
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
-    use zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK};
+    use zcash_protocol::consensus::{MAIN_NETWORK, NetworkConstants};
 
     use super::AccountPubKey;
     use super::NonHardenedChildIndex;
@@ -780,10 +780,12 @@ mod tests {
     #[test]
     fn nonhardened_index_next() {
         assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
-        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
-            .unwrap()
-            .next()
-            .is_none());
+        assert!(
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .next()
+                .is_none()
+        );
     }
 
     #[test]

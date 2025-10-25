@@ -2,7 +2,7 @@ mod received;
 mod sent;
 
 pub(crate) use received::{
-    to_spendable_notes, ReceievedNoteSpends, ReceivedNote, ReceivedNoteTable,
+    ReceievedNoteSpends, ReceivedNote, ReceivedNoteTable, to_spendable_notes,
 };
 #[cfg(test)]
 pub(crate) use sent::SentNoteId;
@@ -28,7 +28,9 @@ mod serialization {
                         proto::PoolType::ShieldedOrchard.into()
                     }
                     #[cfg(not(feature = "orchard"))]
-                    zcash_protocol::ShieldedProtocol::Orchard => panic!("Attempting to deserialize orchard supporting wallet using library built without orchard feature"),
+                    zcash_protocol::ShieldedProtocol::Orchard => panic!(
+                        "Attempting to deserialize orchard supporting wallet using library built without orchard feature"
+                    ),
                 },
                 output_index: note_id.output_index() as u32,
             }

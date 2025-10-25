@@ -10,7 +10,7 @@ use ::transparent::{
 use transparent::keys::TransparentKeyScope;
 use zcash_client_backend::wallet::WalletTransparentOutput;
 
-use zcash_protocol::{consensus::BlockHeight, TxId};
+use zcash_protocol::{TxId, consensus::BlockHeight};
 
 use super::AccountId;
 use crate::Error;
@@ -198,7 +198,7 @@ mod serialization {
     impl From<TxOut> for proto::TxOut {
         fn from(txout: TxOut) -> Self {
             Self {
-                script: txout.script_pubkey().0 .0.clone(),
+                script: txout.script_pubkey().0.0.clone(),
                 value: u64::from(txout.value()),
             }
         }

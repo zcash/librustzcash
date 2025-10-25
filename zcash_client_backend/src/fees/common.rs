@@ -1,21 +1,21 @@
-use core::cmp::{max, min, Ordering};
+use core::cmp::{Ordering, max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::transaction::fees::{
-    transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
+    FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    ShieldedProtocol,
 };
 
-use crate::data_api::{wallet::TargetHeight, AccountMeta};
+use crate::data_api::{AccountMeta, wallet::TargetHeight};
 
 use super::{
-    sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    EphemeralBalance, SplitPolicy, TransactionBalance,
+    ChangeError, ChangeValue, DustAction, DustOutputPolicy, EphemeralBalance, SplitPolicy,
+    TransactionBalance, sapling as sapling_fees,
 };
 
 #[cfg(feature = "orchard")]

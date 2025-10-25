@@ -3,8 +3,8 @@
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
 use crate::{
-    testing::{db::TestDbFactory, BlockCache},
     SAPLING_TABLES_PREFIX,
+    testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::testing::{
     pool::ShieldedPoolTester, sapling::SaplingPoolTester,

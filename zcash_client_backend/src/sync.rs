@@ -26,14 +26,14 @@ use zcash_protocol::consensus::{BlockHeight, Parameters};
 
 use crate::{
     data_api::{
+        WalletCommitmentTrees, WalletRead, WalletWrite,
         chain::{
-            error::Error as ChainError, scan_cached_blocks, BlockCache, ChainState,
-            CommitmentTreeRoot,
+            BlockCache, ChainState, CommitmentTreeRoot, error::Error as ChainError,
+            scan_cached_blocks,
         },
         scanning::{ScanPriority, ScanRange},
-        WalletCommitmentTrees, WalletRead, WalletWrite,
     },
-    proto::service::{self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId},
+    proto::service::{self, BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
     scanning::ScanError,
 };
 

@@ -7,7 +7,7 @@ use zcash_protocol::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{error::SqliteClientError, BlockDb};
+use crate::{BlockDb, error::SqliteClientError};
 
 #[cfg(feature = "unstable")]
 use {
@@ -166,11 +166,13 @@ pub(crate) fn blockmetadb_insert(
             match conn.execute("ROLLBACK", []) {
                 Ok(_) => Err(error),
                 Err(e) =>
-                    // Panicking here is probably the right thing to do, because it
-                    // means the database is corrupt.
+                // Panicking here is probably the right thing to do, because it
+                // means the database is corrupt.
+                {
                     panic!(
                         "Rollback failed with error {e} while attempting to recover from error {error}; database is likely corrupt."
                     )
+                }
             }
         }
     }

@@ -5,9 +5,9 @@ use core2::io::{self, Read, Write};
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use incrementalmerkletree::{
+    Address, Hashable, Level, MerklePath, Position,
     frontier::{CommitmentTree, Frontier, NonEmptyFrontier},
     witness::IncrementalWitness,
-    Address, Hashable, Level, MerklePath, Position,
 };
 use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
@@ -337,17 +337,17 @@ mod tests {
     use alloc::vec::Vec;
     use assert_matches::assert_matches;
     use incrementalmerkletree::{
-        frontier::{testing::arb_commitment_tree, Frontier, PathFiller},
-        witness::IncrementalWitness,
         Hashable,
+        frontier::{Frontier, PathFiller, testing::arb_commitment_tree},
+        witness::IncrementalWitness,
     };
     use proptest::prelude::*;
     use proptest::strategy::Strategy;
 
     use super::{
-        merkle_path_from_slice, read_commitment_tree, read_frontier_v0, read_frontier_v1,
-        read_incremental_witness, write_commitment_tree, write_frontier_v1,
-        write_incremental_witness, CommitmentTree, HashSer,
+        CommitmentTree, HashSer, merkle_path_from_slice, read_commitment_tree, read_frontier_v0,
+        read_frontier_v1, read_incremental_witness, write_commitment_tree, write_frontier_v1,
+        write_incremental_witness,
     };
     use ::sapling::{self, Node};
 

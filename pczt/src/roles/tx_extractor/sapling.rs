@@ -1,9 +1,9 @@
 use rand_core::OsRng;
 use sapling::{
+    BatchValidator, Bundle,
     bundle::Authorized,
     circuit::{OutputVerifyingKey, SpendVerifyingKey},
     pczt::Unbound,
-    BatchValidator, Bundle,
 };
 use zcash_protocol::value::ZatBalance;
 

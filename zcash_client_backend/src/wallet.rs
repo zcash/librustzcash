@@ -10,11 +10,11 @@ use ::transparent::{
 };
 use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
-use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
+use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::BlockHeight,
     value::{BalanceError, Zatoshis},
-    PoolType, ShieldedProtocol,
 };
 use zip32::Scope;
 

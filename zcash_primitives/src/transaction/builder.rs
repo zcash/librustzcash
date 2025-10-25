@@ -4,7 +4,7 @@ use core::cmp::Ordering;
 use core::fmt;
 use rand::{CryptoRng, RngCore};
 
-use ::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
+use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
 use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -13,11 +13,11 @@ use zcash_protocol::{
 };
 
 use crate::transaction::{
-    fees::{
-        transparent::{InputView, OutputView},
-        FeeRule,
-    },
     Transaction, TxVersion,
+    fees::{
+        FeeRule,
+        transparent::{InputView, OutputView},
+    },
 };
 
 #[cfg(feature = "std")]
@@ -26,9 +26,9 @@ use std::sync::mpsc::Sender;
 #[cfg(feature = "circuits")]
 use {
     crate::transaction::{
-        sighash::{signature_hash, SignableInput},
-        txid::TxIdDigester,
         TransactionData, Unauthorized,
+        sighash::{SignableInput, signature_hash},
+        txid::TxIdDigester,
     },
     ::sapling::prover::{OutputProver, SpendProver},
     ::transparent::builder::TransparentSigningSet,
@@ -1123,7 +1123,7 @@ mod tests {
     use super::{Builder, Error};
     use crate::transaction::builder::BuildConfig;
 
-    use ::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+    use ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
     use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_protocol::{
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
@@ -1137,7 +1137,7 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+        crate::transaction::{OutPoint, TxOut, builder::DEFAULT_TX_EXPIRY_DELTA},
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::AccountId,
     };

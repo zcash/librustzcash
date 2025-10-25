@@ -5,7 +5,7 @@
 //!   independent Signers; each can receive a PCZT with just the information they need
 //!   to sign, but (e.g.) not the `alpha` values for other Signers.
 
-use crate::{common::Global, Pczt};
+use crate::{Pczt, common::Global};
 
 pub mod orchard;
 pub mod sapling;
