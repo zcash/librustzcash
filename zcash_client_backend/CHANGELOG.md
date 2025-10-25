@@ -29,7 +29,7 @@ workspace.
 ### Changed
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`,
-  `tonic 0.14`.
+  `arti-client 0.30`, `tonic 0.14`.
 - `zcash_client_backend::data_api`:
   - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
     `select_unspent_notes`.
