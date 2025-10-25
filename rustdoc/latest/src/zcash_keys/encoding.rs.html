@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/encoding.rs`."><title>encoding.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>encoding.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Encoding and decoding functions for Zcash key and address structs.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/encoding.rs`."><title>encoding.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>encoding.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Encoding and decoding functions for Zcash key and address structs.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
 <a href=#4 id=4 data-nosnippet>4</a>//! [zcash_protocol::constants] module.
@@ -17,8 +17,8 @@
 <a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">use </span>{
 <a href=#18 id=18 data-nosnippet>18</a>    alloc::vec::Vec,
 <a href=#19 id=19 data-nosnippet>19</a>    bech32::{
-<a href=#20 id=20 data-nosnippet>20</a>        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
-<a href=#21 id=21 data-nosnippet>21</a>        Bech32, Hrp,
+<a href=#20 id=20 data-nosnippet>20</a>        Bech32, Hrp,
+<a href=#21 id=21 data-nosnippet>21</a>        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
 <a href=#22 id=22 data-nosnippet>22</a>    },
 <a href=#23 id=23 data-nosnippet>23</a>    core2::io::{<span class="self">self</span>, Write},
 <a href=#24 id=24 data-nosnippet>24</a>    sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -495,11 +495,11 @@
 <a href=#495 id=495 data-nosnippet>495</a>#[cfg(feature = <span class="string">"sapling"</span>)]
 <a href=#496 id=496 data-nosnippet>496</a></span><span class="kw">mod </span>tests_sapling {
 <a href=#497 id=497 data-nosnippet>497</a>    <span class="kw">use super</span>::{
-<a href=#498 id=498 data-nosnippet>498</a>        decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
-<a href=#499 id=499 data-nosnippet>499</a>        encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address,
-<a href=#500 id=500 data-nosnippet>500</a>        Bech32DecodeError,
+<a href=#498 id=498 data-nosnippet>498</a>        Bech32DecodeError, decode_extended_full_viewing_key, decode_extended_spending_key,
+<a href=#499 id=499 data-nosnippet>499</a>        decode_payment_address, encode_extended_full_viewing_key, encode_extended_spending_key,
+<a href=#500 id=500 data-nosnippet>500</a>        encode_payment_address,
 <a href=#501 id=501 data-nosnippet>501</a>    };
-<a href=#502 id=502 data-nosnippet>502</a>    <span class="kw">use </span>sapling::{zip32::ExtendedSpendingKey, PaymentAddress};
+<a href=#502 id=502 data-nosnippet>502</a>    <span class="kw">use </span>sapling::{PaymentAddress, zip32::ExtendedSpendingKey};
 <a href=#503 id=503 data-nosnippet>503</a>    <span class="kw">use </span>zcash_protocol::constants;
 <a href=#504 id=504 data-nosnippet>504</a>
 <a href=#505 id=505 data-nosnippet>505</a>    <span class="attr">#[test]
@@ -604,66 +604,64 @@
 <a href=#604 id=604 data-nosnippet>604</a>
 <a href=#605 id=605 data-nosnippet>605</a>        <span class="kw">let </span>encoded_main =
 <a href=#606 id=606 data-nosnippet>606</a>            <span class="string">"zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z"</span>;
-<a href=#607 id=607 data-nosnippet>607</a>        <span class="kw">let </span>encoded_test =
-<a href=#608 id=608 data-nosnippet>608</a>            <span class="string">"ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk"</span>;
-<a href=#609 id=609 data-nosnippet>609</a>        <span class="kw">let </span>encoded_regtest =
-<a href=#610 id=610 data-nosnippet>610</a>            <span class="string">"zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3"</span>;
-<a href=#611 id=611 data-nosnippet>611</a>
-<a href=#612 id=612 data-nosnippet>612</a>        <span class="macro">assert_eq!</span>(
-<a href=#613 id=613 data-nosnippet>613</a>            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
-<a href=#614 id=614 data-nosnippet>614</a>            encoded_main
-<a href=#615 id=615 data-nosnippet>615</a>        );
-<a href=#616 id=616 data-nosnippet>616</a>
-<a href=#617 id=617 data-nosnippet>617</a>        <span class="macro">assert_eq!</span>(
-<a href=#618 id=618 data-nosnippet>618</a>            decode_payment_address(
-<a href=#619 id=619 data-nosnippet>619</a>                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-<a href=#620 id=620 data-nosnippet>620</a>                encoded_main
-<a href=#621 id=621 data-nosnippet>621</a>            )
-<a href=#622 id=622 data-nosnippet>622</a>            .unwrap(),
-<a href=#623 id=623 data-nosnippet>623</a>            addr
-<a href=#624 id=624 data-nosnippet>624</a>        );
-<a href=#625 id=625 data-nosnippet>625</a>
-<a href=#626 id=626 data-nosnippet>626</a>        <span class="macro">assert_eq!</span>(
-<a href=#627 id=627 data-nosnippet>627</a>            encode_payment_address(constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
-<a href=#628 id=628 data-nosnippet>628</a>            encoded_test
-<a href=#629 id=629 data-nosnippet>629</a>        );
-<a href=#630 id=630 data-nosnippet>630</a>
-<a href=#631 id=631 data-nosnippet>631</a>        <span class="macro">assert_eq!</span>(
-<a href=#632 id=632 data-nosnippet>632</a>            encode_payment_address(constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
-<a href=#633 id=633 data-nosnippet>633</a>            encoded_regtest
-<a href=#634 id=634 data-nosnippet>634</a>        );
-<a href=#635 id=635 data-nosnippet>635</a>
-<a href=#636 id=636 data-nosnippet>636</a>        <span class="macro">assert_eq!</span>(
-<a href=#637 id=637 data-nosnippet>637</a>            decode_payment_address(
-<a href=#638 id=638 data-nosnippet>638</a>                constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-<a href=#639 id=639 data-nosnippet>639</a>                encoded_test
-<a href=#640 id=640 data-nosnippet>640</a>            )
-<a href=#641 id=641 data-nosnippet>641</a>            .unwrap(),
-<a href=#642 id=642 data-nosnippet>642</a>            addr
-<a href=#643 id=643 data-nosnippet>643</a>        );
-<a href=#644 id=644 data-nosnippet>644</a>
-<a href=#645 id=645 data-nosnippet>645</a>        <span class="macro">assert_eq!</span>(
-<a href=#646 id=646 data-nosnippet>646</a>            decode_payment_address(
-<a href=#647 id=647 data-nosnippet>647</a>                constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
-<a href=#648 id=648 data-nosnippet>648</a>                encoded_regtest
-<a href=#649 id=649 data-nosnippet>649</a>            )
-<a href=#650 id=650 data-nosnippet>650</a>            .unwrap(),
-<a href=#651 id=651 data-nosnippet>651</a>            addr
-<a href=#652 id=652 data-nosnippet>652</a>        );
-<a href=#653 id=653 data-nosnippet>653</a>    }
-<a href=#654 id=654 data-nosnippet>654</a>
-<a href=#655 id=655 data-nosnippet>655</a>    <span class="attr">#[test]
-<a href=#656 id=656 data-nosnippet>656</a>    </span><span class="kw">fn </span>invalid_diversifier() {
-<a href=#657 id=657 data-nosnippet>657</a>        <span class="comment">// Has a diversifier of `[1u8; 11]`.
-<a href=#658 id=658 data-nosnippet>658</a>        </span><span class="kw">let </span>encoded_main =
-<a href=#659 id=659 data-nosnippet>659</a>            <span class="string">"zs1qyqszqgpqyqszqgpqycguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ugum9p"</span>;
-<a href=#660 id=660 data-nosnippet>660</a>
-<a href=#661 id=661 data-nosnippet>661</a>        <span class="macro">assert_eq!</span>(
-<a href=#662 id=662 data-nosnippet>662</a>            decode_payment_address(
-<a href=#663 id=663 data-nosnippet>663</a>                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-<a href=#664 id=664 data-nosnippet>664</a>                encoded_main,
-<a href=#665 id=665 data-nosnippet>665</a>            ),
-<a href=#666 id=666 data-nosnippet>666</a>            <span class="prelude-val">Err</span>(Bech32DecodeError::ReadError)
-<a href=#667 id=667 data-nosnippet>667</a>        );
-<a href=#668 id=668 data-nosnippet>668</a>    }
-<a href=#669 id=669 data-nosnippet>669</a>}</code></pre></div></section></main></body></html>
+<a href=#607 id=607 data-nosnippet>607</a>        <span class="kw">let </span>encoded_test = <span class="string">"ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk"</span>;
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="kw">let </span>encoded_regtest = <span class="string">"zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3"</span>;
+<a href=#609 id=609 data-nosnippet>609</a>
+<a href=#610 id=610 data-nosnippet>610</a>        <span class="macro">assert_eq!</span>(
+<a href=#611 id=611 data-nosnippet>611</a>            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
+<a href=#612 id=612 data-nosnippet>612</a>            encoded_main
+<a href=#613 id=613 data-nosnippet>613</a>        );
+<a href=#614 id=614 data-nosnippet>614</a>
+<a href=#615 id=615 data-nosnippet>615</a>        <span class="macro">assert_eq!</span>(
+<a href=#616 id=616 data-nosnippet>616</a>            decode_payment_address(
+<a href=#617 id=617 data-nosnippet>617</a>                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+<a href=#618 id=618 data-nosnippet>618</a>                encoded_main
+<a href=#619 id=619 data-nosnippet>619</a>            )
+<a href=#620 id=620 data-nosnippet>620</a>            .unwrap(),
+<a href=#621 id=621 data-nosnippet>621</a>            addr
+<a href=#622 id=622 data-nosnippet>622</a>        );
+<a href=#623 id=623 data-nosnippet>623</a>
+<a href=#624 id=624 data-nosnippet>624</a>        <span class="macro">assert_eq!</span>(
+<a href=#625 id=625 data-nosnippet>625</a>            encode_payment_address(constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
+<a href=#626 id=626 data-nosnippet>626</a>            encoded_test
+<a href=#627 id=627 data-nosnippet>627</a>        );
+<a href=#628 id=628 data-nosnippet>628</a>
+<a href=#629 id=629 data-nosnippet>629</a>        <span class="macro">assert_eq!</span>(
+<a href=#630 id=630 data-nosnippet>630</a>            encode_payment_address(constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS, <span class="kw-2">&amp;</span>addr),
+<a href=#631 id=631 data-nosnippet>631</a>            encoded_regtest
+<a href=#632 id=632 data-nosnippet>632</a>        );
+<a href=#633 id=633 data-nosnippet>633</a>
+<a href=#634 id=634 data-nosnippet>634</a>        <span class="macro">assert_eq!</span>(
+<a href=#635 id=635 data-nosnippet>635</a>            decode_payment_address(
+<a href=#636 id=636 data-nosnippet>636</a>                constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+<a href=#637 id=637 data-nosnippet>637</a>                encoded_test
+<a href=#638 id=638 data-nosnippet>638</a>            )
+<a href=#639 id=639 data-nosnippet>639</a>            .unwrap(),
+<a href=#640 id=640 data-nosnippet>640</a>            addr
+<a href=#641 id=641 data-nosnippet>641</a>        );
+<a href=#642 id=642 data-nosnippet>642</a>
+<a href=#643 id=643 data-nosnippet>643</a>        <span class="macro">assert_eq!</span>(
+<a href=#644 id=644 data-nosnippet>644</a>            decode_payment_address(
+<a href=#645 id=645 data-nosnippet>645</a>                constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+<a href=#646 id=646 data-nosnippet>646</a>                encoded_regtest
+<a href=#647 id=647 data-nosnippet>647</a>            )
+<a href=#648 id=648 data-nosnippet>648</a>            .unwrap(),
+<a href=#649 id=649 data-nosnippet>649</a>            addr
+<a href=#650 id=650 data-nosnippet>650</a>        );
+<a href=#651 id=651 data-nosnippet>651</a>    }
+<a href=#652 id=652 data-nosnippet>652</a>
+<a href=#653 id=653 data-nosnippet>653</a>    <span class="attr">#[test]
+<a href=#654 id=654 data-nosnippet>654</a>    </span><span class="kw">fn </span>invalid_diversifier() {
+<a href=#655 id=655 data-nosnippet>655</a>        <span class="comment">// Has a diversifier of `[1u8; 11]`.
+<a href=#656 id=656 data-nosnippet>656</a>        </span><span class="kw">let </span>encoded_main =
+<a href=#657 id=657 data-nosnippet>657</a>            <span class="string">"zs1qyqszqgpqyqszqgpqycguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ugum9p"</span>;
+<a href=#658 id=658 data-nosnippet>658</a>
+<a href=#659 id=659 data-nosnippet>659</a>        <span class="macro">assert_eq!</span>(
+<a href=#660 id=660 data-nosnippet>660</a>            decode_payment_address(
+<a href=#661 id=661 data-nosnippet>661</a>                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+<a href=#662 id=662 data-nosnippet>662</a>                encoded_main,
+<a href=#663 id=663 data-nosnippet>663</a>            ),
+<a href=#664 id=664 data-nosnippet>664</a>            <span class="prelude-val">Err</span>(Bech32DecodeError::ReadError)
+<a href=#665 id=665 data-nosnippet>665</a>        );
+<a href=#666 id=666 data-nosnippet>666</a>    }
+<a href=#667 id=667 data-nosnippet>667</a>}</code></pre></div></section></main></body></html>

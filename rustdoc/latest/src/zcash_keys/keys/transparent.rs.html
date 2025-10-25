@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/keys/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types and encodings for standalone transparent spending keys.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/keys/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types and encodings for standalone transparent spending keys.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! These types are provided for compatibility with encodings used in zcashd RPC APIs and
 <a href=#4 id=4 data-nosnippet>4</a>//! serialization formats.
@@ -7,7 +7,7 @@
 <a href=#7 id=7 data-nosnippet>7</a>
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>bip32::{PrivateKey, PrivateKeyBytes};
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>secp256k1::{PublicKey, Secp256k1, SecretKey, Signing};
-<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>secrecy::{zeroize::ZeroizeOnDrop, ExposeSecret, SecretString, SecretVec, Zeroize};
+<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize, zeroize::ZeroizeOnDrop};
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>zcash_protocol::consensus::NetworkConstants;
 <a href=#12 id=12 data-nosnippet>12</a>
 <a href=#13 id=13 data-nosnippet>13</a><span class="doccomment">/// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
@@ -342,8 +342,8 @@
 <a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">use </span>zcash_script::script::Evaluable;
 <a href=#343 id=343 data-nosnippet>343</a>
 <a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">use super</span>::{
-<a href=#345 id=345 data-nosnippet>345</a>        test_vectors::{VectorKind, INVALID, VALID},
-<a href=#346 id=346 data-nosnippet>346</a>        Key,
+<a href=#345 id=345 data-nosnippet>345</a>        Key,
+<a href=#346 id=346 data-nosnippet>346</a>        test_vectors::{INVALID, VALID, VectorKind},
 <a href=#347 id=347 data-nosnippet>347</a>    };
 <a href=#348 id=348 data-nosnippet>348</a>
 <a href=#349 id=349 data-nosnippet>349</a>    <span class="attr">#[test]
@@ -391,27 +391,29 @@
 <a href=#391 id=391 data-nosnippet>391</a>                    <span class="macro">assert_eq!</span>(hex::encode(script.to_bytes()), v.raw_bytes_hex);
 <a href=#392 id=392 data-nosnippet>392</a>
 <a href=#393 id=393 data-nosnippet>393</a>                    <span class="comment">// Public key must be invalid private key
-<a href=#394 id=394 data-nosnippet>394</a>                    </span><span class="macro">assert!</span>(Key::decode_base58(
-<a href=#395 id=395 data-nosnippet>395</a>                        <span class="kw-2">&amp;</span>v.network,
-<a href=#396 id=396 data-nosnippet>396</a>                        <span class="kw-2">&amp;</span>SecretString::new(v.base58_encoding.into())
-<a href=#397 id=397 data-nosnippet>397</a>                    )
-<a href=#398 id=398 data-nosnippet>398</a>                    .is_err());
-<a href=#399 id=399 data-nosnippet>399</a>                }
-<a href=#400 id=400 data-nosnippet>400</a>            }
-<a href=#401 id=401 data-nosnippet>401</a>        }
-<a href=#402 id=402 data-nosnippet>402</a>    }
-<a href=#403 id=403 data-nosnippet>403</a>
-<a href=#404 id=404 data-nosnippet>404</a>    <span class="doccomment">/// Checks that Base58 key parsing code is robust against a variety of corrupted data.
-<a href=#405 id=405 data-nosnippet>405</a>    </span><span class="attr">#[test]
-<a href=#406 id=406 data-nosnippet>406</a>    </span><span class="kw">fn </span>base58_keys_invalid() {
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="kw">for </span><span class="kw-2">&amp;</span>encoded <span class="kw">in </span>INVALID {
-<a href=#408 id=408 data-nosnippet>408</a>            <span class="macro">assert!</span>(
-<a href=#409 id=409 data-nosnippet>409</a>                Key::decode_base58(<span class="kw-2">&amp;</span>NetworkType::Main, <span class="kw-2">&amp;</span>SecretString::new(encoded.into())).is_err()
-<a href=#410 id=410 data-nosnippet>410</a>            );
-<a href=#411 id=411 data-nosnippet>411</a>            <span class="macro">assert_eq!</span>(
-<a href=#412 id=412 data-nosnippet>412</a>                zcash_address::ZcashAddress::try_from_encoded(encoded),
-<a href=#413 id=413 data-nosnippet>413</a>                <span class="prelude-val">Err</span>(zcash_address::ParseError::NotZcash),
-<a href=#414 id=414 data-nosnippet>414</a>            );
-<a href=#415 id=415 data-nosnippet>415</a>        }
-<a href=#416 id=416 data-nosnippet>416</a>    }
-<a href=#417 id=417 data-nosnippet>417</a>}</code></pre></div></section></main></body></html>
+<a href=#394 id=394 data-nosnippet>394</a>                    </span><span class="macro">assert!</span>(
+<a href=#395 id=395 data-nosnippet>395</a>                        Key::decode_base58(
+<a href=#396 id=396 data-nosnippet>396</a>                            <span class="kw-2">&amp;</span>v.network,
+<a href=#397 id=397 data-nosnippet>397</a>                            <span class="kw-2">&amp;</span>SecretString::new(v.base58_encoding.into())
+<a href=#398 id=398 data-nosnippet>398</a>                        )
+<a href=#399 id=399 data-nosnippet>399</a>                        .is_err()
+<a href=#400 id=400 data-nosnippet>400</a>                    );
+<a href=#401 id=401 data-nosnippet>401</a>                }
+<a href=#402 id=402 data-nosnippet>402</a>            }
+<a href=#403 id=403 data-nosnippet>403</a>        }
+<a href=#404 id=404 data-nosnippet>404</a>    }
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="doccomment">/// Checks that Base58 key parsing code is robust against a variety of corrupted data.
+<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="attr">#[test]
+<a href=#408 id=408 data-nosnippet>408</a>    </span><span class="kw">fn </span>base58_keys_invalid() {
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">for </span><span class="kw-2">&amp;</span>encoded <span class="kw">in </span>INVALID {
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="macro">assert!</span>(
+<a href=#411 id=411 data-nosnippet>411</a>                Key::decode_base58(<span class="kw-2">&amp;</span>NetworkType::Main, <span class="kw-2">&amp;</span>SecretString::new(encoded.into())).is_err()
+<a href=#412 id=412 data-nosnippet>412</a>            );
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="macro">assert_eq!</span>(
+<a href=#414 id=414 data-nosnippet>414</a>                zcash_address::ZcashAddress::try_from_encoded(encoded),
+<a href=#415 id=415 data-nosnippet>415</a>                <span class="prelude-val">Err</span>(zcash_address::ParseError::NotZcash),
+<a href=#416 id=416 data-nosnippet>416</a>            );
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>}</code></pre></div></section></main></body></html>

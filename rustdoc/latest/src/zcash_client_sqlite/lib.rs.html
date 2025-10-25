@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 <a href=#4 id=4 data-nosnippet>4</a>//! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -37,7 +37,7 @@
 <a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span>rand::RngCore;
 <a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span>rusqlite::{<span class="self">self</span>, Connection};
 <a href=#39 id=39 data-nosnippet>39</a><span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
-<a href=#40 id=40 data-nosnippet>40</a><span class="kw">use </span>shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+<a href=#40 id=40 data-nosnippet>40</a><span class="kw">use </span>shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 <a href=#41 id=41 data-nosnippet>41</a><span class="kw">use </span>std::{
 <a href=#42 id=42 data-nosnippet>42</a>    borrow::{Borrow, BorrowMut},
 <a href=#43 id=43 data-nosnippet>43</a>    cmp::{max, min},
@@ -54,45 +54,45 @@
 <a href=#54 id=54 data-nosnippet>54</a><span class="kw">use </span>uuid::Uuid;
 <a href=#55 id=55 data-nosnippet>55</a>
 <a href=#56 id=56 data-nosnippet>56</a><span class="kw">use </span>zcash_client_backend::{
-<a href=#57 id=57 data-nosnippet>57</a>    data_api::{
-<a href=#58 id=58 data-nosnippet>58</a>        <span class="self">self</span>,
-<a href=#59 id=59 data-nosnippet>59</a>        chain::{BlockSource, ChainState, CommitmentTreeRoot},
-<a href=#60 id=60 data-nosnippet>60</a>        scanning::{ScanPriority, ScanRange},
-<a href=#61 id=61 data-nosnippet>61</a>        wallet::{ConfirmationsPolicy, TargetHeight},
-<a href=#62 id=62 data-nosnippet>62</a>        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-<a href=#63 id=63 data-nosnippet>63</a>        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-<a href=#64 id=64 data-nosnippet>64</a>        ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
-<a href=#65 id=65 data-nosnippet>65</a>        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-<a href=#66 id=66 data-nosnippet>66</a>        Zip32Derivation, SAPLING_SHARD_HEIGHT,
+<a href=#57 id=57 data-nosnippet>57</a>    TransferType,
+<a href=#58 id=58 data-nosnippet>58</a>    data_api::{
+<a href=#59 id=59 data-nosnippet>59</a>        <span class="self">self</span>, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
+<a href=#60 id=60 data-nosnippet>60</a>        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+<a href=#61 id=61 data-nosnippet>61</a>        ReceivedNotes, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction,
+<a href=#62 id=62 data-nosnippet>62</a>        TargetValue, TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary,
+<a href=#63 id=63 data-nosnippet>63</a>        WalletWrite, Zip32Derivation,
+<a href=#64 id=64 data-nosnippet>64</a>        chain::{BlockSource, ChainState, CommitmentTreeRoot},
+<a href=#65 id=65 data-nosnippet>65</a>        scanning::{ScanPriority, ScanRange},
+<a href=#66 id=66 data-nosnippet>66</a>        wallet::{ConfirmationsPolicy, TargetHeight},
 <a href=#67 id=67 data-nosnippet>67</a>    },
 <a href=#68 id=68 data-nosnippet>68</a>    proto::compact_formats::CompactBlock,
 <a href=#69 id=69 data-nosnippet>69</a>    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
-<a href=#70 id=70 data-nosnippet>70</a>    TransferType,
-<a href=#71 id=71 data-nosnippet>71</a>};
-<a href=#72 id=72 data-nosnippet>72</a><span class="kw">use </span>zcash_keys::{
-<a href=#73 id=73 data-nosnippet>73</a>    address::UnifiedAddress,
-<a href=#74 id=74 data-nosnippet>74</a>    keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-<a href=#75 id=75 data-nosnippet>75</a>};
-<a href=#76 id=76 data-nosnippet>76</a><span class="kw">use </span>zcash_primitives::{
-<a href=#77 id=77 data-nosnippet>77</a>    block::BlockHash,
-<a href=#78 id=78 data-nosnippet>78</a>    transaction::{Transaction, TxId},
-<a href=#79 id=79 data-nosnippet>79</a>};
-<a href=#80 id=80 data-nosnippet>80</a><span class="kw">use </span>zcash_protocol::{
+<a href=#70 id=70 data-nosnippet>70</a>};
+<a href=#71 id=71 data-nosnippet>71</a><span class="kw">use </span>zcash_keys::{
+<a href=#72 id=72 data-nosnippet>72</a>    address::UnifiedAddress,
+<a href=#73 id=73 data-nosnippet>73</a>    keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+<a href=#74 id=74 data-nosnippet>74</a>};
+<a href=#75 id=75 data-nosnippet>75</a><span class="kw">use </span>zcash_primitives::{
+<a href=#76 id=76 data-nosnippet>76</a>    block::BlockHash,
+<a href=#77 id=77 data-nosnippet>77</a>    transaction::{Transaction, TxId},
+<a href=#78 id=78 data-nosnippet>78</a>};
+<a href=#79 id=79 data-nosnippet>79</a><span class="kw">use </span>zcash_protocol::{
+<a href=#80 id=80 data-nosnippet>80</a>    ShieldedProtocol,
 <a href=#81 id=81 data-nosnippet>81</a>    consensus::{<span class="self">self</span>, BlockHeight},
 <a href=#82 id=82 data-nosnippet>82</a>    memo::Memo,
-<a href=#83 id=83 data-nosnippet>83</a>    ShieldedProtocol,
-<a href=#84 id=84 data-nosnippet>84</a>};
-<a href=#85 id=85 data-nosnippet>85</a><span class="kw">use </span>zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
-<a href=#86 id=86 data-nosnippet>86</a>
-<a href=#87 id=87 data-nosnippet>87</a><span class="kw">use crate</span>::{
-<a href=#88 id=88 data-nosnippet>88</a>    error::SqliteClientError,
-<a href=#89 id=89 data-nosnippet>89</a>    wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
-<a href=#90 id=90 data-nosnippet>90</a>};
-<a href=#91 id=91 data-nosnippet>91</a><span class="kw">use </span>wallet::{
+<a href=#83 id=83 data-nosnippet>83</a>};
+<a href=#84 id=84 data-nosnippet>84</a><span class="kw">use </span>zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+<a href=#85 id=85 data-nosnippet>85</a>
+<a href=#86 id=86 data-nosnippet>86</a><span class="kw">use crate</span>::{
+<a href=#87 id=87 data-nosnippet>87</a>    error::SqliteClientError,
+<a href=#88 id=88 data-nosnippet>88</a>    wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
+<a href=#89 id=89 data-nosnippet>89</a>};
+<a href=#90 id=90 data-nosnippet>90</a><span class="kw">use </span>wallet::{
+<a href=#91 id=91 data-nosnippet>91</a>    SubtreeProgressEstimator,
 <a href=#92 id=92 data-nosnippet>92</a>    commitment_tree::{<span class="self">self</span>, put_shard_roots},
-<a href=#93 id=93 data-nosnippet>93</a>    common::{unspent_notes_meta, TableConstants},
+<a href=#93 id=93 data-nosnippet>93</a>    common::{TableConstants, unspent_notes_meta},
 <a href=#94 id=94 data-nosnippet>94</a>    scanning::replace_queue_entries,
-<a href=#95 id=95 data-nosnippet>95</a>    upsert_address, SubtreeProgressEstimator,
+<a href=#95 id=95 data-nosnippet>95</a>    upsert_address,
 <a href=#96 id=96 data-nosnippet>96</a>};
 <a href=#97 id=97 data-nosnippet>97</a>
 <a href=#98 id=98 data-nosnippet>98</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -127,7 +127,7 @@
 <a href=#127 id=127 data-nosnippet>127</a><span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
 <a href=#128 id=128 data-nosnippet>128</a></span><span class="kw">use </span>{
 <a href=#129 id=129 data-nosnippet>129</a>    rusqlite::named_params,
-<a href=#130 id=130 data-nosnippet>130</a>    zcash_client_backend::data_api::{testing::TransactionSummary, OutputOfSentTx, WalletTest},
+<a href=#130 id=130 data-nosnippet>130</a>    zcash_client_backend::data_api::{OutputOfSentTx, WalletTest, testing::TransactionSummary},
 <a href=#131 id=131 data-nosnippet>131</a>    zcash_keys::address::Address,
 <a href=#132 id=132 data-nosnippet>132</a>};
 <a href=#133 id=133 data-nosnippet>133</a>
@@ -151,7 +151,7 @@
 <a href=#151 id=151 data-nosnippet>151</a>
 <a href=#152 id=152 data-nosnippet>152</a><span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
 <a href=#153 id=153 data-nosnippet>153</a></span><span class="kw">use </span>{
-<a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">crate</span>::chain::{fsblockdb_with_blocks, BlockMeta},
+<a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">crate</span>::chain::{BlockMeta, fsblockdb_with_blocks},
 <a href=#155 id=155 data-nosnippet>155</a>    std::path::PathBuf,
 <a href=#156 id=156 data-nosnippet>156</a>    std::{fs, io},
 <a href=#157 id=157 data-nosnippet>157</a>};
@@ -2570,18 +2570,18 @@
 <a href=#2570 id=2570 data-nosnippet>2570</a>    <span class="kw">use </span>secrecy::{ExposeSecret, Secret, SecretVec};
 <a href=#2571 id=2571 data-nosnippet>2571</a>    <span class="kw">use </span>uuid::Uuid;
 <a href=#2572 id=2572 data-nosnippet>2572</a>    <span class="kw">use </span>zcash_client_backend::data_api::{
-<a href=#2573 id=2573 data-nosnippet>2573</a>        chain::ChainState,
-<a href=#2574 id=2574 data-nosnippet>2574</a>        testing::{TestBuilder, TestState},
-<a href=#2575 id=2575 data-nosnippet>2575</a>        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
-<a href=#2576 id=2576 data-nosnippet>2576</a>        WalletWrite,
+<a href=#2573 id=2573 data-nosnippet>2573</a>        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
+<a href=#2574 id=2574 data-nosnippet>2574</a>        WalletWrite,
+<a href=#2575 id=2575 data-nosnippet>2575</a>        chain::ChainState,
+<a href=#2576 id=2576 data-nosnippet>2576</a>        testing::{TestBuilder, TestState},
 <a href=#2577 id=2577 data-nosnippet>2577</a>    };
 <a href=#2578 id=2578 data-nosnippet>2578</a>    <span class="kw">use </span>zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
 <a href=#2579 id=2579 data-nosnippet>2579</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
 <a href=#2580 id=2580 data-nosnippet>2580</a>    <span class="kw">use </span>zcash_protocol::consensus;
 <a href=#2581 id=2581 data-nosnippet>2581</a>
 <a href=#2582 id=2582 data-nosnippet>2582</a>    <span class="kw">use crate</span>::{
-<a href=#2583 id=2583 data-nosnippet>2583</a>        error::SqliteClientError, testing::db::TestDbFactory, util::Clock <span class="kw">as _</span>,
-<a href=#2584 id=2584 data-nosnippet>2584</a>        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET, AccountUuid,
+<a href=#2583 id=2583 data-nosnippet>2583</a>        AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock <span class="kw">as _</span>,
+<a href=#2584 id=2584 data-nosnippet>2584</a>        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
 <a href=#2585 id=2585 data-nosnippet>2585</a>    };
 <a href=#2586 id=2586 data-nosnippet>2586</a>
 <a href=#2587 id=2587 data-nosnippet>2587</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
@@ -2951,7 +2951,7 @@
 <a href=#2951 id=2951 data-nosnippet>2951</a>        <span class="kw">use </span>std::collections::BTreeSet;
 <a href=#2952 id=2952 data-nosnippet>2952</a>
 <a href=#2953 id=2953 data-nosnippet>2953</a>        <span class="kw">use crate</span>::{
-<a href=#2954 id=2954 data-nosnippet>2954</a>            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
+<a href=#2954 id=2954 data-nosnippet>2954</a>            GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests,
 <a href=#2955 id=2955 data-nosnippet>2955</a>        };
 <a href=#2956 id=2956 data-nosnippet>2956</a>        <span class="kw">use </span>zcash_client_backend::data_api::TransactionDataRequest;
 <a href=#2957 id=2957 data-nosnippet>2957</a>
@@ -2972,115 +2972,117 @@
 <a href=#2972 id=2972 data-nosnippet>2972</a>            .unwrap();
 <a href=#2973 id=2973 data-nosnippet>2973</a>
 <a href=#2974 id=2974 data-nosnippet>2974</a>        <span class="comment">// The receiver for the default UA should be in the set.
-<a href=#2975 id=2975 data-nosnippet>2975</a>        </span><span class="macro">assert!</span>(receivers.contains_key(
-<a href=#2976 id=2976 data-nosnippet>2976</a>            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
-<a href=#2977 id=2977 data-nosnippet>2977</a>                .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
-<a href=#2978 id=2978 data-nosnippet>2978</a>                .<span class="number">0
-<a href=#2979 id=2979 data-nosnippet>2979</a>                </span>.transparent()
-<a href=#2980 id=2980 data-nosnippet>2980</a>                .unwrap()
-<a href=#2981 id=2981 data-nosnippet>2981</a>        ));
-<a href=#2982 id=2982 data-nosnippet>2982</a>
-<a href=#2983 id=2983 data-nosnippet>2983</a>        <span class="comment">// The default t-addr should be in the set.
-<a href=#2984 id=2984 data-nosnippet>2984</a>        </span><span class="macro">assert!</span>(receivers.contains_key(<span class="kw-2">&amp;</span>taddr));
-<a href=#2985 id=2985 data-nosnippet>2985</a>
-<a href=#2986 id=2986 data-nosnippet>2986</a>        <span class="comment">// The chain tip height must be known in order to query for data requests.
-<a href=#2987 id=2987 data-nosnippet>2987</a>        </span>st.wallet_mut().update_chain_tip(birthday).unwrap();
-<a href=#2988 id=2988 data-nosnippet>2988</a>
-<a href=#2989 id=2989 data-nosnippet>2989</a>        <span class="comment">// Transaction data requests should include a request for each ephemeral address
-<a href=#2990 id=2990 data-nosnippet>2990</a>        </span><span class="kw">let </span>ephemeral_addrs = st
-<a href=#2991 id=2991 data-nosnippet>2991</a>            .wallet()
-<a href=#2992 id=2992 data-nosnippet>2992</a>            .get_known_ephemeral_addresses(account_id, <span class="prelude-val">None</span>)
-<a href=#2993 id=2993 data-nosnippet>2993</a>            .unwrap();
-<a href=#2994 id=2994 data-nosnippet>2994</a>
-<a href=#2995 id=2995 data-nosnippet>2995</a>        <span class="macro">assert_eq!</span>(
-<a href=#2996 id=2996 data-nosnippet>2996</a>            ephemeral_addrs.len(),
-<a href=#2997 id=2997 data-nosnippet>2997</a>            GapLimits::default().ephemeral() <span class="kw">as </span>usize
-<a href=#2998 id=2998 data-nosnippet>2998</a>        );
-<a href=#2999 id=2999 data-nosnippet>2999</a>
-<a href=#3000 id=3000 data-nosnippet>3000</a>        st.wallet_mut()
-<a href=#3001 id=3001 data-nosnippet>3001</a>            .db_mut()
-<a href=#3002 id=3002 data-nosnippet>3002</a>            .schedule_ephemeral_address_checks()
-<a href=#3003 id=3003 data-nosnippet>3003</a>            .unwrap();
-<a href=#3004 id=3004 data-nosnippet>3004</a>        <span class="kw">let </span>data_requests =
-<a href=#3005 id=3005 data-nosnippet>3005</a>            transaction_data_requests(st.wallet().conn(), <span class="kw-2">&amp;</span>st.wallet().db().params, birthday)
-<a href=#3006 id=3006 data-nosnippet>3006</a>                .unwrap();
-<a href=#3007 id=3007 data-nosnippet>3007</a>
-<a href=#3008 id=3008 data-nosnippet>3008</a>        <span class="kw">let </span>base_time = st.wallet().db().clock.now();
-<a href=#3009 id=3009 data-nosnippet>3009</a>        <span class="kw">let </span>day = Duration::from_secs(<span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>);
-<a href=#3010 id=3010 data-nosnippet>3010</a>        <span class="kw">let </span><span class="kw-2">mut </span>check_times = BTreeSet::new();
-<a href=#3011 id=3011 data-nosnippet>3011</a>        <span class="kw">for </span>(addr, <span class="kw">_</span>) <span class="kw">in </span>ephemeral_addrs {
-<a href=#3012 id=3012 data-nosnippet>3012</a>            <span class="kw">let </span>has_valid_request = data_requests.iter().any(|req| <span class="kw">match </span>req {
-<a href=#3013 id=3013 data-nosnippet>3013</a>                TransactionDataRequest::TransactionsInvolvingAddress(req) =&gt; {
-<a href=#3014 id=3014 data-nosnippet>3014</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = req.request_at() {
-<a href=#3015 id=3015 data-nosnippet>3015</a>                        req.address() == addr &amp;&amp; t &gt; base_time &amp;&amp; {
-<a href=#3016 id=3016 data-nosnippet>3016</a>                            <span class="kw">let </span>t_delta = t.duration_since(base_time).unwrap();
-<a href=#3017 id=3017 data-nosnippet>3017</a>                            <span class="comment">// This is an imprecise check; the objective of the randomized time
-<a href=#3018 id=3018 data-nosnippet>3018</a>                            // selection is that all ephemeral address checks be performed within a
-<a href=#3019 id=3019 data-nosnippet>3019</a>                            // day, and that their check times be distinct.
-<a href=#3020 id=3020 data-nosnippet>3020</a>                            </span><span class="kw">let </span>result = t_delta &lt; day &amp;&amp; !check_times.contains(<span class="kw-2">&amp;</span>t);
-<a href=#3021 id=3021 data-nosnippet>3021</a>                            check_times.insert(t);
-<a href=#3022 id=3022 data-nosnippet>3022</a>                            result
-<a href=#3023 id=3023 data-nosnippet>3023</a>                        }
-<a href=#3024 id=3024 data-nosnippet>3024</a>                    } <span class="kw">else </span>{
-<a href=#3025 id=3025 data-nosnippet>3025</a>                        <span class="bool-val">false
-<a href=#3026 id=3026 data-nosnippet>3026</a>                    </span>}
-<a href=#3027 id=3027 data-nosnippet>3027</a>                }
-<a href=#3028 id=3028 data-nosnippet>3028</a>                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
-<a href=#3029 id=3029 data-nosnippet>3029</a>            });
-<a href=#3030 id=3030 data-nosnippet>3030</a>
-<a href=#3031 id=3031 data-nosnippet>3031</a>            <span class="macro">assert!</span>(has_valid_request);
-<a href=#3032 id=3032 data-nosnippet>3032</a>        }
-<a href=#3033 id=3033 data-nosnippet>3033</a>    }
-<a href=#3034 id=3034 data-nosnippet>3034</a>
-<a href=#3035 id=3035 data-nosnippet>3035</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
-<a href=#3036 id=3036 data-nosnippet>3036</a>    #[test]
-<a href=#3037 id=3037 data-nosnippet>3037</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fsblockdb_api() {
-<a href=#3038 id=3038 data-nosnippet>3038</a>        <span class="kw">use </span>zcash_client_backend::data_api::testing::AddressType;
-<a href=#3039 id=3039 data-nosnippet>3039</a>        <span class="kw">use </span>zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
-<a href=#3040 id=3040 data-nosnippet>3040</a>
-<a href=#3041 id=3041 data-nosnippet>3041</a>        <span class="kw">use </span><span class="kw">crate</span>::testing::FsBlockCache;
+<a href=#2975 id=2975 data-nosnippet>2975</a>        </span><span class="macro">assert!</span>(
+<a href=#2976 id=2976 data-nosnippet>2976</a>            receivers.contains_key(
+<a href=#2977 id=2977 data-nosnippet>2977</a>                ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
+<a href=#2978 id=2978 data-nosnippet>2978</a>                    .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
+<a href=#2979 id=2979 data-nosnippet>2979</a>                    .<span class="number">0
+<a href=#2980 id=2980 data-nosnippet>2980</a>                    </span>.transparent()
+<a href=#2981 id=2981 data-nosnippet>2981</a>                    .unwrap()
+<a href=#2982 id=2982 data-nosnippet>2982</a>            )
+<a href=#2983 id=2983 data-nosnippet>2983</a>        );
+<a href=#2984 id=2984 data-nosnippet>2984</a>
+<a href=#2985 id=2985 data-nosnippet>2985</a>        <span class="comment">// The default t-addr should be in the set.
+<a href=#2986 id=2986 data-nosnippet>2986</a>        </span><span class="macro">assert!</span>(receivers.contains_key(<span class="kw-2">&amp;</span>taddr));
+<a href=#2987 id=2987 data-nosnippet>2987</a>
+<a href=#2988 id=2988 data-nosnippet>2988</a>        <span class="comment">// The chain tip height must be known in order to query for data requests.
+<a href=#2989 id=2989 data-nosnippet>2989</a>        </span>st.wallet_mut().update_chain_tip(birthday).unwrap();
+<a href=#2990 id=2990 data-nosnippet>2990</a>
+<a href=#2991 id=2991 data-nosnippet>2991</a>        <span class="comment">// Transaction data requests should include a request for each ephemeral address
+<a href=#2992 id=2992 data-nosnippet>2992</a>        </span><span class="kw">let </span>ephemeral_addrs = st
+<a href=#2993 id=2993 data-nosnippet>2993</a>            .wallet()
+<a href=#2994 id=2994 data-nosnippet>2994</a>            .get_known_ephemeral_addresses(account_id, <span class="prelude-val">None</span>)
+<a href=#2995 id=2995 data-nosnippet>2995</a>            .unwrap();
+<a href=#2996 id=2996 data-nosnippet>2996</a>
+<a href=#2997 id=2997 data-nosnippet>2997</a>        <span class="macro">assert_eq!</span>(
+<a href=#2998 id=2998 data-nosnippet>2998</a>            ephemeral_addrs.len(),
+<a href=#2999 id=2999 data-nosnippet>2999</a>            GapLimits::default().ephemeral() <span class="kw">as </span>usize
+<a href=#3000 id=3000 data-nosnippet>3000</a>        );
+<a href=#3001 id=3001 data-nosnippet>3001</a>
+<a href=#3002 id=3002 data-nosnippet>3002</a>        st.wallet_mut()
+<a href=#3003 id=3003 data-nosnippet>3003</a>            .db_mut()
+<a href=#3004 id=3004 data-nosnippet>3004</a>            .schedule_ephemeral_address_checks()
+<a href=#3005 id=3005 data-nosnippet>3005</a>            .unwrap();
+<a href=#3006 id=3006 data-nosnippet>3006</a>        <span class="kw">let </span>data_requests =
+<a href=#3007 id=3007 data-nosnippet>3007</a>            transaction_data_requests(st.wallet().conn(), <span class="kw-2">&amp;</span>st.wallet().db().params, birthday)
+<a href=#3008 id=3008 data-nosnippet>3008</a>                .unwrap();
+<a href=#3009 id=3009 data-nosnippet>3009</a>
+<a href=#3010 id=3010 data-nosnippet>3010</a>        <span class="kw">let </span>base_time = st.wallet().db().clock.now();
+<a href=#3011 id=3011 data-nosnippet>3011</a>        <span class="kw">let </span>day = Duration::from_secs(<span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>);
+<a href=#3012 id=3012 data-nosnippet>3012</a>        <span class="kw">let </span><span class="kw-2">mut </span>check_times = BTreeSet::new();
+<a href=#3013 id=3013 data-nosnippet>3013</a>        <span class="kw">for </span>(addr, <span class="kw">_</span>) <span class="kw">in </span>ephemeral_addrs {
+<a href=#3014 id=3014 data-nosnippet>3014</a>            <span class="kw">let </span>has_valid_request = data_requests.iter().any(|req| <span class="kw">match </span>req {
+<a href=#3015 id=3015 data-nosnippet>3015</a>                TransactionDataRequest::TransactionsInvolvingAddress(req) =&gt; {
+<a href=#3016 id=3016 data-nosnippet>3016</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = req.request_at() {
+<a href=#3017 id=3017 data-nosnippet>3017</a>                        req.address() == addr &amp;&amp; t &gt; base_time &amp;&amp; {
+<a href=#3018 id=3018 data-nosnippet>3018</a>                            <span class="kw">let </span>t_delta = t.duration_since(base_time).unwrap();
+<a href=#3019 id=3019 data-nosnippet>3019</a>                            <span class="comment">// This is an imprecise check; the objective of the randomized time
+<a href=#3020 id=3020 data-nosnippet>3020</a>                            // selection is that all ephemeral address checks be performed within a
+<a href=#3021 id=3021 data-nosnippet>3021</a>                            // day, and that their check times be distinct.
+<a href=#3022 id=3022 data-nosnippet>3022</a>                            </span><span class="kw">let </span>result = t_delta &lt; day &amp;&amp; !check_times.contains(<span class="kw-2">&amp;</span>t);
+<a href=#3023 id=3023 data-nosnippet>3023</a>                            check_times.insert(t);
+<a href=#3024 id=3024 data-nosnippet>3024</a>                            result
+<a href=#3025 id=3025 data-nosnippet>3025</a>                        }
+<a href=#3026 id=3026 data-nosnippet>3026</a>                    } <span class="kw">else </span>{
+<a href=#3027 id=3027 data-nosnippet>3027</a>                        <span class="bool-val">false
+<a href=#3028 id=3028 data-nosnippet>3028</a>                    </span>}
+<a href=#3029 id=3029 data-nosnippet>3029</a>                }
+<a href=#3030 id=3030 data-nosnippet>3030</a>                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#3031 id=3031 data-nosnippet>3031</a>            });
+<a href=#3032 id=3032 data-nosnippet>3032</a>
+<a href=#3033 id=3033 data-nosnippet>3033</a>            <span class="macro">assert!</span>(has_valid_request);
+<a href=#3034 id=3034 data-nosnippet>3034</a>        }
+<a href=#3035 id=3035 data-nosnippet>3035</a>    }
+<a href=#3036 id=3036 data-nosnippet>3036</a>
+<a href=#3037 id=3037 data-nosnippet>3037</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
+<a href=#3038 id=3038 data-nosnippet>3038</a>    #[test]
+<a href=#3039 id=3039 data-nosnippet>3039</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fsblockdb_api() {
+<a href=#3040 id=3040 data-nosnippet>3040</a>        <span class="kw">use </span>zcash_client_backend::data_api::testing::AddressType;
+<a href=#3041 id=3041 data-nosnippet>3041</a>        <span class="kw">use </span>zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
 <a href=#3042 id=3042 data-nosnippet>3042</a>
-<a href=#3043 id=3043 data-nosnippet>3043</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#3044 id=3044 data-nosnippet>3044</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#3045 id=3045 data-nosnippet>3045</a>            .with_block_cache(FsBlockCache::new())
-<a href=#3046 id=3046 data-nosnippet>3046</a>            .build();
-<a href=#3047 id=3047 data-nosnippet>3047</a>
-<a href=#3048 id=3048 data-nosnippet>3048</a>        <span class="comment">// The BlockMeta DB starts off empty.
-<a href=#3049 id=3049 data-nosnippet>3049</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
-<a href=#3050 id=3050 data-nosnippet>3050</a>
-<a href=#3051 id=3051 data-nosnippet>3051</a>        <span class="comment">// Generate some fake CompactBlocks.
-<a href=#3052 id=3052 data-nosnippet>3052</a>        </span><span class="kw">let </span>seed = [<span class="number">0u8</span>; <span class="number">32</span>];
-<a href=#3053 id=3053 data-nosnippet>3053</a>        <span class="kw">let </span>hd_account_index = zip32::AccountId::ZERO;
-<a href=#3054 id=3054 data-nosnippet>3054</a>        <span class="kw">let </span>extsk = sapling::spending_key(<span class="kw-2">&amp;</span>seed, st.network().coin_type(), hd_account_index);
-<a href=#3055 id=3055 data-nosnippet>3055</a>        <span class="kw">let </span>dfvk = extsk.to_diversifiable_full_viewing_key();
-<a href=#3056 id=3056 data-nosnippet>3056</a>        <span class="kw">let </span>(h1, meta1, <span class="kw">_</span>) = st.generate_next_block(
-<a href=#3057 id=3057 data-nosnippet>3057</a>            <span class="kw-2">&amp;</span>dfvk,
-<a href=#3058 id=3058 data-nosnippet>3058</a>            AddressType::DefaultExternal,
-<a href=#3059 id=3059 data-nosnippet>3059</a>            Zatoshis::const_from_u64(<span class="number">5</span>),
-<a href=#3060 id=3060 data-nosnippet>3060</a>        );
-<a href=#3061 id=3061 data-nosnippet>3061</a>        <span class="kw">let </span>(h2, meta2, <span class="kw">_</span>) = st.generate_next_block(
-<a href=#3062 id=3062 data-nosnippet>3062</a>            <span class="kw-2">&amp;</span>dfvk,
-<a href=#3063 id=3063 data-nosnippet>3063</a>            AddressType::DefaultExternal,
-<a href=#3064 id=3064 data-nosnippet>3064</a>            Zatoshis::const_from_u64(<span class="number">10</span>),
-<a href=#3065 id=3065 data-nosnippet>3065</a>        );
-<a href=#3066 id=3066 data-nosnippet>3066</a>
-<a href=#3067 id=3067 data-nosnippet>3067</a>        <span class="comment">// The BlockMeta DB is not updated until we do so explicitly.
-<a href=#3068 id=3068 data-nosnippet>3068</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
-<a href=#3069 id=3069 data-nosnippet>3069</a>
-<a href=#3070 id=3070 data-nosnippet>3070</a>        <span class="comment">// Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-<a href=#3071 id=3071 data-nosnippet>3071</a>        </span>st.cache().write_block_metadata(<span class="kw-2">&amp;</span>[meta1, meta2]).unwrap();
-<a href=#3072 id=3072 data-nosnippet>3072</a>
-<a href=#3073 id=3073 data-nosnippet>3073</a>        <span class="comment">// The BlockMeta DB now sees blocks up to height 2.
-<a href=#3074 id=3074 data-nosnippet>3074</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h2),);
-<a href=#3075 id=3075 data-nosnippet>3075</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
-<a href=#3076 id=3076 data-nosnippet>3076</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">Some</span>(meta2));
-<a href=#3077 id=3077 data-nosnippet>3077</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
-<a href=#3078 id=3078 data-nosnippet>3078</a>
-<a href=#3079 id=3079 data-nosnippet>3079</a>        <span class="comment">// Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-<a href=#3080 id=3080 data-nosnippet>3080</a>        </span>st.cache().truncate_to_height(h1).unwrap();
-<a href=#3081 id=3081 data-nosnippet>3081</a>        <span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h1));
-<a href=#3082 id=3082 data-nosnippet>3082</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
-<a href=#3083 id=3083 data-nosnippet>3083</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">None</span>);
-<a href=#3084 id=3084 data-nosnippet>3084</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
-<a href=#3085 id=3085 data-nosnippet>3085</a>    }
-<a href=#3086 id=3086 data-nosnippet>3086</a>}</code></pre></div></section></main></body></html>
+<a href=#3043 id=3043 data-nosnippet>3043</a>        <span class="kw">use </span><span class="kw">crate</span>::testing::FsBlockCache;
+<a href=#3044 id=3044 data-nosnippet>3044</a>
+<a href=#3045 id=3045 data-nosnippet>3045</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#3046 id=3046 data-nosnippet>3046</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#3047 id=3047 data-nosnippet>3047</a>            .with_block_cache(FsBlockCache::new())
+<a href=#3048 id=3048 data-nosnippet>3048</a>            .build();
+<a href=#3049 id=3049 data-nosnippet>3049</a>
+<a href=#3050 id=3050 data-nosnippet>3050</a>        <span class="comment">// The BlockMeta DB starts off empty.
+<a href=#3051 id=3051 data-nosnippet>3051</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
+<a href=#3052 id=3052 data-nosnippet>3052</a>
+<a href=#3053 id=3053 data-nosnippet>3053</a>        <span class="comment">// Generate some fake CompactBlocks.
+<a href=#3054 id=3054 data-nosnippet>3054</a>        </span><span class="kw">let </span>seed = [<span class="number">0u8</span>; <span class="number">32</span>];
+<a href=#3055 id=3055 data-nosnippet>3055</a>        <span class="kw">let </span>hd_account_index = zip32::AccountId::ZERO;
+<a href=#3056 id=3056 data-nosnippet>3056</a>        <span class="kw">let </span>extsk = sapling::spending_key(<span class="kw-2">&amp;</span>seed, st.network().coin_type(), hd_account_index);
+<a href=#3057 id=3057 data-nosnippet>3057</a>        <span class="kw">let </span>dfvk = extsk.to_diversifiable_full_viewing_key();
+<a href=#3058 id=3058 data-nosnippet>3058</a>        <span class="kw">let </span>(h1, meta1, <span class="kw">_</span>) = st.generate_next_block(
+<a href=#3059 id=3059 data-nosnippet>3059</a>            <span class="kw-2">&amp;</span>dfvk,
+<a href=#3060 id=3060 data-nosnippet>3060</a>            AddressType::DefaultExternal,
+<a href=#3061 id=3061 data-nosnippet>3061</a>            Zatoshis::const_from_u64(<span class="number">5</span>),
+<a href=#3062 id=3062 data-nosnippet>3062</a>        );
+<a href=#3063 id=3063 data-nosnippet>3063</a>        <span class="kw">let </span>(h2, meta2, <span class="kw">_</span>) = st.generate_next_block(
+<a href=#3064 id=3064 data-nosnippet>3064</a>            <span class="kw-2">&amp;</span>dfvk,
+<a href=#3065 id=3065 data-nosnippet>3065</a>            AddressType::DefaultExternal,
+<a href=#3066 id=3066 data-nosnippet>3066</a>            Zatoshis::const_from_u64(<span class="number">10</span>),
+<a href=#3067 id=3067 data-nosnippet>3067</a>        );
+<a href=#3068 id=3068 data-nosnippet>3068</a>
+<a href=#3069 id=3069 data-nosnippet>3069</a>        <span class="comment">// The BlockMeta DB is not updated until we do so explicitly.
+<a href=#3070 id=3070 data-nosnippet>3070</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
+<a href=#3071 id=3071 data-nosnippet>3071</a>
+<a href=#3072 id=3072 data-nosnippet>3072</a>        <span class="comment">// Inform the BlockMeta DB about the newly-persisted CompactBlocks.
+<a href=#3073 id=3073 data-nosnippet>3073</a>        </span>st.cache().write_block_metadata(<span class="kw-2">&amp;</span>[meta1, meta2]).unwrap();
+<a href=#3074 id=3074 data-nosnippet>3074</a>
+<a href=#3075 id=3075 data-nosnippet>3075</a>        <span class="comment">// The BlockMeta DB now sees blocks up to height 2.
+<a href=#3076 id=3076 data-nosnippet>3076</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h2),);
+<a href=#3077 id=3077 data-nosnippet>3077</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
+<a href=#3078 id=3078 data-nosnippet>3078</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">Some</span>(meta2));
+<a href=#3079 id=3079 data-nosnippet>3079</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
+<a href=#3080 id=3080 data-nosnippet>3080</a>
+<a href=#3081 id=3081 data-nosnippet>3081</a>        <span class="comment">// Rewinding to height 1 should cause the metadata for height 2 to be deleted.
+<a href=#3082 id=3082 data-nosnippet>3082</a>        </span>st.cache().truncate_to_height(h1).unwrap();
+<a href=#3083 id=3083 data-nosnippet>3083</a>        <span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h1));
+<a href=#3084 id=3084 data-nosnippet>3084</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
+<a href=#3085 id=3085 data-nosnippet>3085</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">None</span>);
+<a href=#3086 id=3086 data-nosnippet>3086</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
+<a href=#3087 id=3087 data-nosnippet>3087</a>    }
+<a href=#3088 id=3088 data-nosnippet>3088</a>}</code></pre></div></section></main></body></html>

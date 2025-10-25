@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash_v4.rs`."><title>sighash_v4.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash_v4.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::vec::Vec;
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash_v4.rs`."><title>sighash_v4.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash_v4.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::vec::Vec;
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params <span class="kw">as </span>Blake2bParams};
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>ff::PrimeField;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -10,9 +10,9 @@
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>zcash_protocol::consensus::BranchId;
 <a href=#11 id=11 data-nosnippet>11</a>
 <a href=#12 id=12 data-nosnippet>12</a><span class="kw">use super</span>::{
-<a href=#13 id=13 data-nosnippet>13</a>    components::{sapling <span class="kw">as </span>sapling_serialization, sprout::JsDescription},
-<a href=#14 id=14 data-nosnippet>14</a>    sighash::SignableInput,
-<a href=#15 id=15 data-nosnippet>15</a>    Authorization, TransactionData,
+<a href=#13 id=13 data-nosnippet>13</a>    Authorization, TransactionData,
+<a href=#14 id=14 data-nosnippet>14</a>    components::{sapling <span class="kw">as </span>sapling_serialization, sprout::JsDescription},
+<a href=#15 id=15 data-nosnippet>15</a>    sighash::SignableInput,
 <a href=#16 id=16 data-nosnippet>16</a>};
 <a href=#17 id=17 data-nosnippet>17</a>
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">const </span>ZCASH_SIGHASH_PERSONALIZATION_PREFIX: <span class="kw-2">&amp;</span>[u8; <span class="number">12</span>] = <span class="string">b"ZcashSigHash"</span>;
@@ -195,7 +195,7 @@
 <a href=#195 id=195 data-nosnippet>195</a>            h,
 <a href=#196 id=196 data-nosnippet>196</a>            !tx.sprout_bundle
 <a href=#197 id=197 data-nosnippet>197</a>                .as_ref()
-<a href=#198 id=198 data-nosnippet>198</a>                .map_or(<span class="bool-val">true</span>, |b| b.joinsplits.is_empty()),
+<a href=#198 id=198 data-nosnippet>198</a>                .is_none_or(|b| b.joinsplits.is_empty()),
 <a href=#199 id=199 data-nosnippet>199</a>            {
 <a href=#200 id=200 data-nosnippet>200</a>                <span class="kw">let </span>bundle = tx.sprout_bundle.as_ref().unwrap();
 <a href=#201 id=201 data-nosnippet>201</a>                joinsplits_hash(
@@ -211,14 +211,14 @@
 <a href=#211 id=211 data-nosnippet>211</a>                h,
 <a href=#212 id=212 data-nosnippet>212</a>                !tx.sapling_bundle
 <a href=#213 id=213 data-nosnippet>213</a>                    .as_ref()
-<a href=#214 id=214 data-nosnippet>214</a>                    .map_or(<span class="bool-val">true</span>, |b| b.shielded_spends().is_empty()),
+<a href=#214 id=214 data-nosnippet>214</a>                    .is_none_or(|b| b.shielded_spends().is_empty()),
 <a href=#215 id=215 data-nosnippet>215</a>                shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
 <a href=#216 id=216 data-nosnippet>216</a>            );
 <a href=#217 id=217 data-nosnippet>217</a>            <span class="macro">update_hash!</span>(
 <a href=#218 id=218 data-nosnippet>218</a>                h,
 <a href=#219 id=219 data-nosnippet>219</a>                !tx.sapling_bundle
 <a href=#220 id=220 data-nosnippet>220</a>                    .as_ref()
-<a href=#221 id=221 data-nosnippet>221</a>                    .map_or(<span class="bool-val">true</span>, |b| b.shielded_outputs().is_empty()),
+<a href=#221 id=221 data-nosnippet>221</a>                    .is_none_or(|b| b.shielded_outputs().is_empty()),
 <a href=#222 id=222 data-nosnippet>222</a>                shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
 <a href=#223 id=223 data-nosnippet>223</a>            );
 <a href=#224 id=224 data-nosnippet>224</a>        }
@@ -251,12 +251,14 @@
 <a href=#251 id=251 data-nosnippet>251</a>
 <a href=#252 id=252 data-nosnippet>252</a>            <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 <a href=#253 id=253 data-nosnippet>253</a>            </span>SignableInput::Tze { .. } =&gt; {
-<a href=#254 id=254 data-nosnippet>254</a>                <span class="macro">panic!</span>(<span class="string">"A request has been made to sign a TZE input, but the transaction version is not ZFuture"</span>);
-<a href=#255 id=255 data-nosnippet>255</a>            }
-<a href=#256 id=256 data-nosnippet>256</a>        }
-<a href=#257 id=257 data-nosnippet>257</a>
-<a href=#258 id=258 data-nosnippet>258</a>        h.finalize()
-<a href=#259 id=259 data-nosnippet>259</a>    } <span class="kw">else </span>{
-<a href=#260 id=260 data-nosnippet>260</a>        <span class="macro">panic!</span>(<span class="string">"Signature hashing for pre-overwinter transactions is not supported."</span>)
-<a href=#261 id=261 data-nosnippet>261</a>    }
-<a href=#262 id=262 data-nosnippet>262</a>}</code></pre></div></section></main></body></html>
+<a href=#254 id=254 data-nosnippet>254</a>                <span class="macro">panic!</span>(
+<a href=#255 id=255 data-nosnippet>255</a>                    <span class="string">"A request has been made to sign a TZE input, but the transaction version is not ZFuture"
+<a href=#256 id=256 data-nosnippet>256</a>                </span>);
+<a href=#257 id=257 data-nosnippet>257</a>            }
+<a href=#258 id=258 data-nosnippet>258</a>        }
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>        h.finalize()
+<a href=#261 id=261 data-nosnippet>261</a>    } <span class="kw">else </span>{
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="macro">panic!</span>(<span class="string">"Signature hashing for pre-overwinter transactions is not supported."</span>)
+<a href=#263 id=263 data-nosnippet>263</a>    }
+<a href=#264 id=264 data-nosnippet>264</a>}</code></pre></div></section></main></body></html>

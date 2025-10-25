@@ -1,10 +1,10 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Structs for building transactions.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Structs for building transactions.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>core::cmp::Ordering;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>core::fmt;
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>rand::{CryptoRng, RngCore};
 <a href=#6 id=6 data-nosnippet>6</a>
-<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>zcash_protocol::{
 <a href=#10 id=10 data-nosnippet>10</a>    consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -13,11 +13,11 @@
 <a href=#13 id=13 data-nosnippet>13</a>};
 <a href=#14 id=14 data-nosnippet>14</a>
 <a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span><span class="kw">crate</span>::transaction::{
-<a href=#16 id=16 data-nosnippet>16</a>    fees::{
-<a href=#17 id=17 data-nosnippet>17</a>        transparent::{InputView, OutputView},
+<a href=#16 id=16 data-nosnippet>16</a>    Transaction, TxVersion,
+<a href=#17 id=17 data-nosnippet>17</a>    fees::{
 <a href=#18 id=18 data-nosnippet>18</a>        FeeRule,
-<a href=#19 id=19 data-nosnippet>19</a>    },
-<a href=#20 id=20 data-nosnippet>20</a>    Transaction, TxVersion,
+<a href=#19 id=19 data-nosnippet>19</a>        transparent::{InputView, OutputView},
+<a href=#20 id=20 data-nosnippet>20</a>    },
 <a href=#21 id=21 data-nosnippet>21</a>};
 <a href=#22 id=22 data-nosnippet>22</a>
 <a href=#23 id=23 data-nosnippet>23</a><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
@@ -26,9 +26,9 @@
 <a href=#26 id=26 data-nosnippet>26</a><span class="attr">#[cfg(feature = <span class="string">"circuits"</span>)]
 <a href=#27 id=27 data-nosnippet>27</a></span><span class="kw">use </span>{
 <a href=#28 id=28 data-nosnippet>28</a>    <span class="kw">crate</span>::transaction::{
-<a href=#29 id=29 data-nosnippet>29</a>        sighash::{signature_hash, SignableInput},
-<a href=#30 id=30 data-nosnippet>30</a>        txid::TxIdDigester,
-<a href=#31 id=31 data-nosnippet>31</a>        TransactionData, Unauthorized,
+<a href=#29 id=29 data-nosnippet>29</a>        TransactionData, Unauthorized,
+<a href=#30 id=30 data-nosnippet>30</a>        sighash::{SignableInput, signature_hash},
+<a href=#31 id=31 data-nosnippet>31</a>        txid::TxIdDigester,
 <a href=#32 id=32 data-nosnippet>32</a>    },
 <a href=#33 id=33 data-nosnippet>33</a>    ::sapling::prover::{OutputProver, SpendProver},
 <a href=#34 id=34 data-nosnippet>34</a>    ::transparent::builder::TransparentSigningSet,
@@ -1123,7 +1123,7 @@
 <a href=#1123 id=1123 data-nosnippet>1123</a>    <span class="kw">use super</span>::{Builder, Error};
 <a href=#1124 id=1124 data-nosnippet>1124</a>    <span class="kw">use </span><span class="kw">crate</span>::transaction::builder::BuildConfig;
 <a href=#1125 id=1125 data-nosnippet>1125</a>
-<a href=#1126 id=1126 data-nosnippet>1126</a>    <span class="kw">use </span>::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+<a href=#1126 id=1126 data-nosnippet>1126</a>    <span class="kw">use </span>::sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
 <a href=#1127 id=1127 data-nosnippet>1127</a>    <span class="kw">use </span>::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
 <a href=#1128 id=1128 data-nosnippet>1128</a>    <span class="kw">use </span>zcash_protocol::{
 <a href=#1129 id=1129 data-nosnippet>1129</a>        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
@@ -1137,7 +1137,7 @@
 <a href=#1137 id=1137 data-nosnippet>1137</a>
 <a href=#1138 id=1138 data-nosnippet>1138</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#1139 id=1139 data-nosnippet>1139</a>    </span><span class="kw">use </span>{
-<a href=#1140 id=1140 data-nosnippet>1140</a>        <span class="kw">crate</span>::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+<a href=#1140 id=1140 data-nosnippet>1140</a>        <span class="kw">crate</span>::transaction::{OutPoint, TxOut, builder::DEFAULT_TX_EXPIRY_DELTA},
 <a href=#1141 id=1141 data-nosnippet>1141</a>        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
 <a href=#1142 id=1142 data-nosnippet>1142</a>        zip32::AccountId,
 <a href=#1143 id=1143 data-nosnippet>1143</a>    };

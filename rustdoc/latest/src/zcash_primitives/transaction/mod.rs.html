@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Structs and methods for handling Zcash transactions.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Structs and methods for handling Zcash transactions.
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="kw">pub mod </span>builder;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">pub mod </span>components;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">pub mod </span>fees;
@@ -33,7 +33,7 @@
 <a href=#33 id=33 data-nosnippet>33</a>        orchard <span class="kw">as </span>orchard_serialization, sapling <span class="kw">as </span>sapling_serialization,
 <a href=#34 id=34 data-nosnippet>34</a>        sprout::{<span class="self">self</span>, JsDescription},
 <a href=#35 id=35 data-nosnippet>35</a>    },
-<a href=#36 id=36 data-nosnippet>36</a>    txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
+<a href=#36 id=36 data-nosnippet>36</a>    txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
 <a href=#37 id=37 data-nosnippet>37</a>    util::sha256d::{HashReader, HashWriter},
 <a href=#38 id=38 data-nosnippet>38</a>};
 <a href=#39 id=39 data-nosnippet>39</a>
@@ -978,8 +978,8 @@
 <a href=#978 id=978 data-nosnippet>978</a>        <span class="kw">if </span><span class="self">self</span>.orchard_bundle.is_some() {
 <a href=#979 id=979 data-nosnippet>979</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(io::Error::new(
 <a href=#980 id=980 data-nosnippet>980</a>                io::ErrorKind::InvalidInput,
-<a href=#981 id=981 data-nosnippet>981</a>                <span class="string">"Orchard components cannot be present when serializing to the V4 transaction format."
-<a href=#982 id=982 data-nosnippet>982</a>            </span>));
+<a href=#981 id=981 data-nosnippet>981</a>                <span class="string">"Orchard components cannot be present when serializing to the V4 transaction format."</span>,
+<a href=#982 id=982 data-nosnippet>982</a>            ));
 <a href=#983 id=983 data-nosnippet>983</a>        }
 <a href=#984 id=984 data-nosnippet>984</a>
 <a href=#985 id=985 data-nosnippet>985</a>        <span class="self">self</span>.version.write(<span class="kw-2">&amp;mut </span>writer)<span class="question-mark">?</span>;
@@ -1200,18 +1200,18 @@
 <a href=#1200 id=1200 data-nosnippet>1200</a>    <span class="kw">use </span>zcash_protocol::consensus::BranchId;
 <a href=#1201 id=1201 data-nosnippet>1201</a>
 <a href=#1202 id=1202 data-nosnippet>1202</a>    <span class="kw">use super</span>::{
-<a href=#1203 id=1203 data-nosnippet>1203</a>        components::{
-<a href=#1204 id=1204 data-nosnippet>1204</a>            orchard::testing::{<span class="self">self </span><span class="kw">as </span>orchard},
-<a href=#1205 id=1205 data-nosnippet>1205</a>            sapling::testing::{<span class="self">self </span><span class="kw">as </span>sapling},
-<a href=#1206 id=1206 data-nosnippet>1206</a>        },
-<a href=#1207 id=1207 data-nosnippet>1207</a>        Authorized, Transaction, TransactionData, TxId, TxVersion,
+<a href=#1203 id=1203 data-nosnippet>1203</a>        Authorized, Transaction, TransactionData, TxId, TxVersion,
+<a href=#1204 id=1204 data-nosnippet>1204</a>        components::{
+<a href=#1205 id=1205 data-nosnippet>1205</a>            orchard::testing::{<span class="self">self </span><span class="kw">as </span>orchard},
+<a href=#1206 id=1206 data-nosnippet>1206</a>            sapling::testing::{<span class="self">self </span><span class="kw">as </span>sapling},
+<a href=#1207 id=1207 data-nosnippet>1207</a>        },
 <a href=#1208 id=1208 data-nosnippet>1208</a>    };
 <a href=#1209 id=1209 data-nosnippet>1209</a>
 <a href=#1210 id=1210 data-nosnippet>1210</a>    <span class="attr">#[cfg(all(
 <a href=#1211 id=1211 data-nosnippet>1211</a>        any(zcash_unstable = <span class="string">"nu7"</span>, zcash_unstable = <span class="string">"zfuture"</span>),
 <a href=#1212 id=1212 data-nosnippet>1212</a>        feature = <span class="string">"zip-233"
 <a href=#1213 id=1213 data-nosnippet>1213</a>    </span>))]
-<a href=#1214 id=1214 data-nosnippet>1214</a>    </span><span class="kw">use </span>zcash_protocol::value::{Zatoshis, MAX_MONEY};
+<a href=#1214 id=1214 data-nosnippet>1214</a>    </span><span class="kw">use </span>zcash_protocol::value::{MAX_MONEY, Zatoshis};
 <a href=#1215 id=1215 data-nosnippet>1215</a>
 <a href=#1216 id=1216 data-nosnippet>1216</a>    <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 <a href=#1217 id=1217 data-nosnippet>1217</a>    </span><span class="kw">use </span><span class="kw">super</span>::components::tze::testing::{<span class="self">self </span><span class="kw">as </span>tze};

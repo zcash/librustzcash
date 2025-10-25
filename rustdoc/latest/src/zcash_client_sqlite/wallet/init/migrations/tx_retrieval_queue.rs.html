@@ -1,6 +1,6 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/tx_retrieval_queue.rs`."><title>tx_retrieval_queue.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>tx_retrieval_queue.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/tx_retrieval_queue.rs`."><title>tx_retrieval_queue.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>tx_retrieval_queue.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 <a href=#2 id=2 data-nosnippet>2</a>
-<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>rusqlite::{named_params, Transaction};
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>rusqlite::{Transaction, named_params};
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>std::collections::HashSet;
 <a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>uuid::Uuid;
@@ -19,9 +19,9 @@
 <a href=#19 id=19 data-nosnippet>19</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">use </span>{
 <a href=#21 id=21 data-nosnippet>21</a>    <span class="kw">crate</span>::{
-<a href=#22 id=22 data-nosnippet>22</a>        error::SqliteClientError,
-<a href=#23 id=23 data-nosnippet>23</a>        wallet::{transparent::uivk_legacy_transparent_address, TxQueryType},
-<a href=#24 id=24 data-nosnippet>24</a>        AccountRef, TxRef,
+<a href=#22 id=22 data-nosnippet>22</a>        AccountRef, TxRef,
+<a href=#23 id=23 data-nosnippet>23</a>        error::SqliteClientError,
+<a href=#24 id=24 data-nosnippet>24</a>        wallet::{TxQueryType, transparent::uivk_legacy_transparent_address},
 <a href=#25 id=25 data-nosnippet>25</a>    },
 <a href=#26 id=26 data-nosnippet>26</a>    rusqlite::OptionalExtension <span class="kw">as _</span>,
 <a href=#27 id=27 data-nosnippet>27</a>    std::convert::Infallible,
@@ -29,8 +29,8 @@
 <a href=#29 id=29 data-nosnippet>29</a>    zcash_client_backend::data_api::DecryptedTransaction,
 <a href=#30 id=30 data-nosnippet>30</a>    zcash_keys::encoding::AddressCodec,
 <a href=#31 id=31 data-nosnippet>31</a>    zcash_protocol::{
-<a href=#32 id=32 data-nosnippet>32</a>        consensus::{BlockHeight, BranchId},
-<a href=#33 id=33 data-nosnippet>33</a>        TxId,
+<a href=#32 id=32 data-nosnippet>32</a>        TxId,
+<a href=#33 id=33 data-nosnippet>33</a>        consensus::{BlockHeight, BranchId},
 <a href=#34 id=34 data-nosnippet>34</a>    },
 <a href=#35 id=35 data-nosnippet>35</a>};
 <a href=#36 id=36 data-nosnippet>36</a>
@@ -336,9 +336,9 @@
 <a href=#336 id=336 data-nosnippet>336</a>    };
 <a href=#337 id=337 data-nosnippet>337</a>
 <a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">use crate</span>::{
-<a href=#339 id=339 data-nosnippet>339</a>        testing::db::{test_clock, test_rng},
-<a href=#340 id=340 data-nosnippet>340</a>        wallet::init::{migrations::tests::test_migrate, WalletMigrator},
-<a href=#341 id=341 data-nosnippet>341</a>        WalletDb,
+<a href=#339 id=339 data-nosnippet>339</a>        WalletDb,
+<a href=#340 id=340 data-nosnippet>340</a>        testing::db::{test_clock, test_rng},
+<a href=#341 id=341 data-nosnippet>341</a>        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
 <a href=#342 id=342 data-nosnippet>342</a>    };
 <a href=#343 id=343 data-nosnippet>343</a>
 <a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">use super</span>::{DEPENDENCIES, MIGRATION_ID};

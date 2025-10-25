@@ -1,5 +1,5 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>incrementalmerkletree::{Address, Position};
-<a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, types::Value, OptionalExtension};
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>incrementalmerkletree::{Address, Position};
+<a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>rusqlite::{<span class="self">self</span>, OptionalExtension, named_params, types::Value};
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>std::cmp::{max, min};
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>std::collections::BTreeSet;
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>std::ops::Range;
@@ -7,19 +7,19 @@
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>tracing::{debug, trace};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>zcash_client_backend::data_api::{
-<a href=#10 id=10 data-nosnippet>10</a>    scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
-<a href=#11 id=11 data-nosnippet>11</a>    SAPLING_SHARD_HEIGHT,
+<a href=#10 id=10 data-nosnippet>10</a>    SAPLING_SHARD_HEIGHT,
+<a href=#11 id=11 data-nosnippet>11</a>    scanning::{ScanPriority, ScanRange, spanning_tree::SpanningTree},
 <a href=#12 id=12 data-nosnippet>12</a>};
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>zcash_protocol::{
-<a href=#14 id=14 data-nosnippet>14</a>    consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade},
-<a href=#15 id=15 data-nosnippet>15</a>    ShieldedProtocol,
+<a href=#14 id=14 data-nosnippet>14</a>    ShieldedProtocol,
+<a href=#15 id=15 data-nosnippet>15</a>    consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade},
 <a href=#16 id=16 data-nosnippet>16</a>};
 <a href=#17 id=17 data-nosnippet>17</a>
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span><span class="kw">crate</span>::TableConstants;
 <a href=#19 id=19 data-nosnippet>19</a><span class="kw">use crate</span>::{
-<a href=#20 id=20 data-nosnippet>20</a>    error::SqliteClientError,
-<a href=#21 id=21 data-nosnippet>21</a>    wallet::{block_height_extrema, init::WalletMigrationError},
-<a href=#22 id=22 data-nosnippet>22</a>    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+<a href=#20 id=20 data-nosnippet>20</a>    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+<a href=#21 id=21 data-nosnippet>21</a>    error::SqliteClientError,
+<a href=#22 id=22 data-nosnippet>22</a>    wallet::{block_height_extrema, init::WalletMigrationError},
 <a href=#23 id=23 data-nosnippet>23</a>};
 <a href=#24 id=24 data-nosnippet>24</a>
 <a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">super</span>::common::table_constants;
@@ -563,18 +563,18 @@
 <a href=#563 id=563 data-nosnippet>563</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>tests {
 <a href=#564 id=564 data-nosnippet>564</a>    <span class="kw">use </span>std::num::NonZeroU8;
 <a href=#565 id=565 data-nosnippet>565</a>
-<a href=#566 id=566 data-nosnippet>566</a>    <span class="kw">use </span>incrementalmerkletree::{frontier::Frontier, Hashable, Position};
+<a href=#566 id=566 data-nosnippet>566</a>    <span class="kw">use </span>incrementalmerkletree::{Hashable, Position, frontier::Frontier};
 <a href=#567 id=567 data-nosnippet>567</a>
 <a href=#568 id=568 data-nosnippet>568</a>    <span class="kw">use </span>secrecy::SecretVec;
 <a href=#569 id=569 data-nosnippet>569</a>    <span class="kw">use </span>zcash_client_backend::data_api::{
-<a href=#570 id=570 data-nosnippet>570</a>        chain::{ChainState, CommitmentTreeRoot},
-<a href=#571 id=571 data-nosnippet>571</a>        scanning::{spanning_tree::testing::scan_range, ScanPriority},
-<a href=#572 id=572 data-nosnippet>572</a>        testing::{
-<a href=#573 id=573 data-nosnippet>573</a>            pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
-<a href=#574 id=574 data-nosnippet>574</a>            InitialChainState, TestBuilder, TestState,
-<a href=#575 id=575 data-nosnippet>575</a>        },
-<a href=#576 id=576 data-nosnippet>576</a>        wallet::ConfirmationsPolicy,
-<a href=#577 id=577 data-nosnippet>577</a>        AccountBirthday, Ratio, WalletRead, WalletWrite,
+<a href=#570 id=570 data-nosnippet>570</a>        AccountBirthday, Ratio, WalletRead, WalletWrite,
+<a href=#571 id=571 data-nosnippet>571</a>        chain::{ChainState, CommitmentTreeRoot},
+<a href=#572 id=572 data-nosnippet>572</a>        scanning::{ScanPriority, spanning_tree::testing::scan_range},
+<a href=#573 id=573 data-nosnippet>573</a>        testing::{
+<a href=#574 id=574 data-nosnippet>574</a>            AddressType, FakeCompactOutput, InitialChainState, TestBuilder, TestState,
+<a href=#575 id=575 data-nosnippet>575</a>            pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+<a href=#576 id=576 data-nosnippet>576</a>        },
+<a href=#577 id=577 data-nosnippet>577</a>        wallet::ConfirmationsPolicy,
 <a href=#578 id=578 data-nosnippet>578</a>    };
 <a href=#579 id=579 data-nosnippet>579</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
 <a href=#580 id=580 data-nosnippet>580</a>    <span class="kw">use </span>zcash_protocol::{
@@ -584,13 +584,13 @@
 <a href=#584 id=584 data-nosnippet>584</a>    };
 <a href=#585 id=585 data-nosnippet>585</a>
 <a href=#586 id=586 data-nosnippet>586</a>    <span class="kw">use crate</span>::{
-<a href=#587 id=587 data-nosnippet>587</a>        error::SqliteClientError,
-<a href=#588 id=588 data-nosnippet>588</a>        testing::{
-<a href=#589 id=589 data-nosnippet>589</a>            db::{TestDb, TestDbFactory},
+<a href=#587 id=587 data-nosnippet>587</a>        VERIFY_LOOKAHEAD,
+<a href=#588 id=588 data-nosnippet>588</a>        error::SqliteClientError,
+<a href=#589 id=589 data-nosnippet>589</a>        testing::{
 <a href=#590 id=590 data-nosnippet>590</a>            BlockCache,
-<a href=#591 id=591 data-nosnippet>591</a>        },
-<a href=#592 id=592 data-nosnippet>592</a>        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
-<a href=#593 id=593 data-nosnippet>593</a>        VERIFY_LOOKAHEAD,
+<a href=#591 id=591 data-nosnippet>591</a>            db::{TestDb, TestDbFactory},
+<a href=#592 id=592 data-nosnippet>592</a>        },
+<a href=#593 id=593 data-nosnippet>593</a>        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
 <a href=#594 id=594 data-nosnippet>594</a>    };
 <a href=#595 id=595 data-nosnippet>595</a>
 <a href=#596 id=596 data-nosnippet>596</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -600,10 +600,10 @@
 <a href=#600 id=600 data-nosnippet>600</a>        std::convert::Infallible,
 <a href=#601 id=601 data-nosnippet>601</a>        zcash_client_backend::{
 <a href=#602 id=602 data-nosnippet>602</a>            data_api::{
-<a href=#603 id=603 data-nosnippet>603</a>                testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
-<a href=#604 id=604 data-nosnippet>604</a>                WalletCommitmentTrees,
+<a href=#603 id=603 data-nosnippet>603</a>                WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
+<a href=#604 id=604 data-nosnippet>604</a>                wallet::input_selection::GreedyInputSelector,
 <a href=#605 id=605 data-nosnippet>605</a>            },
-<a href=#606 id=606 data-nosnippet>606</a>            fees::{standard, DustOutputPolicy, StandardFeeRule},
+<a href=#606 id=606 data-nosnippet>606</a>            fees::{DustOutputPolicy, StandardFeeRule, standard},
 <a href=#607 id=607 data-nosnippet>607</a>            wallet::OvkPolicy,
 <a href=#608 id=608 data-nosnippet>608</a>        },
 <a href=#609 id=609 data-nosnippet>609</a>        zcash_protocol::memo::Memo,
@@ -1719,7 +1719,7 @@
 <a href=#1719 id=1719 data-nosnippet>1719</a>    <span class="attr">#[test]
 <a href=#1720 id=1720 data-nosnippet>1720</a>    #[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#1721 id=1721 data-nosnippet>1721</a>    </span><span class="kw">fn </span>orchard_block_spanning_tip_boundary_complete() {
-<a href=#1722 id=1722 data-nosnippet>1722</a>        <span class="kw">use </span>zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account <span class="kw">as _</span>};
+<a href=#1722 id=1722 data-nosnippet>1722</a>        <span class="kw">use </span>zcash_client_backend::data_api::{Account <span class="kw">as _</span>, wallet::ConfirmationsPolicy};
 <a href=#1723 id=1723 data-nosnippet>1723</a>
 <a href=#1724 id=1724 data-nosnippet>1724</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = prepare_orchard_block_spanning_test(<span class="bool-val">true</span>);
 <a href=#1725 id=1725 data-nosnippet>1725</a>        <span class="kw">let </span>account = st.test_account().cloned().unwrap();
@@ -1813,7 +1813,7 @@
 <a href=#1813 id=1813 data-nosnippet>1813</a>    </span><span class="attr">#[test]
 <a href=#1814 id=1814 data-nosnippet>1814</a>    #[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#1815 id=1815 data-nosnippet>1815</a>    </span><span class="kw">fn </span>orchard_block_spanning_tip_boundary_incomplete() {
-<a href=#1816 id=1816 data-nosnippet>1816</a>        <span class="kw">use </span>zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account <span class="kw">as _</span>};
+<a href=#1816 id=1816 data-nosnippet>1816</a>        <span class="kw">use </span>zcash_client_backend::data_api::{Account <span class="kw">as _</span>, wallet::ConfirmationsPolicy};
 <a href=#1817 id=1817 data-nosnippet>1817</a>
 <a href=#1818 id=1818 data-nosnippet>1818</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = prepare_orchard_block_spanning_test(<span class="bool-val">false</span>);
 <a href=#1819 id=1819 data-nosnippet>1819</a>        <span class="kw">let </span>account = st.test_account().cloned().unwrap();

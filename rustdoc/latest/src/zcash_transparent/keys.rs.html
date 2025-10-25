@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (1d23d0680 2025-10-22)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Transparent key components.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (2aaa62b89 2025-10-24)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Transparent key components.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>core::fmt;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -631,7 +631,7 @@
 <a href=#631 id=631 data-nosnippet>631</a></span><span class="kw">mod </span>tests {
 <a href=#632 id=632 data-nosnippet>632</a>    <span class="kw">use </span>bip32::ChildNumber;
 <a href=#633 id=633 data-nosnippet>633</a>    <span class="kw">use </span>subtle::ConstantTimeEq;
-<a href=#634 id=634 data-nosnippet>634</a>    <span class="kw">use </span>zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK};
+<a href=#634 id=634 data-nosnippet>634</a>    <span class="kw">use </span>zcash_protocol::consensus::{MAIN_NETWORK, NetworkConstants};
 <a href=#635 id=635 data-nosnippet>635</a>
 <a href=#636 id=636 data-nosnippet>636</a>    <span class="kw">use </span><span class="kw">super</span>::AccountPubKey;
 <a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">use </span><span class="kw">super</span>::NonHardenedChildIndex;
@@ -780,33 +780,35 @@
 <a href=#780 id=780 data-nosnippet>780</a>    <span class="attr">#[test]
 <a href=#781 id=781 data-nosnippet>781</a>    </span><span class="kw">fn </span>nonhardened_index_next() {
 <a href=#782 id=782 data-nosnippet>782</a>        <span class="macro">assert_eq!</span>(<span class="number">1</span>, NonHardenedChildIndex::ZERO.next().unwrap().index());
-<a href=#783 id=783 data-nosnippet>783</a>        <span class="macro">assert!</span>(NonHardenedChildIndex::from_index(<span class="number">0x7fffffff</span>)
-<a href=#784 id=784 data-nosnippet>784</a>            .unwrap()
-<a href=#785 id=785 data-nosnippet>785</a>            .next()
-<a href=#786 id=786 data-nosnippet>786</a>            .is_none());
-<a href=#787 id=787 data-nosnippet>787</a>    }
-<a href=#788 id=788 data-nosnippet>788</a>
-<a href=#789 id=789 data-nosnippet>789</a>    <span class="attr">#[test]
-<a href=#790 id=790 data-nosnippet>790</a>    </span><span class="kw">fn </span>nonhardened_index_ct_eq() {
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="macro">assert!</span>(check(
-<a href=#792 id=792 data-nosnippet>792</a>            NonHardenedChildIndex::ZERO,
-<a href=#793 id=793 data-nosnippet>793</a>            NonHardenedChildIndex::ZERO
-<a href=#794 id=794 data-nosnippet>794</a>        ));
-<a href=#795 id=795 data-nosnippet>795</a>        <span class="macro">assert!</span>(!check(
-<a href=#796 id=796 data-nosnippet>796</a>            NonHardenedChildIndex::ZERO,
-<a href=#797 id=797 data-nosnippet>797</a>            NonHardenedChildIndex::ZERO.next().unwrap()
-<a href=#798 id=798 data-nosnippet>798</a>        ));
-<a href=#799 id=799 data-nosnippet>799</a>
-<a href=#800 id=800 data-nosnippet>800</a>        <span class="kw">fn </span>check&lt;T: ConstantTimeEq&gt;(v1: T, v2: T) -&gt; bool {
-<a href=#801 id=801 data-nosnippet>801</a>            v1.ct_eq(<span class="kw-2">&amp;</span>v2).into()
-<a href=#802 id=802 data-nosnippet>802</a>        }
-<a href=#803 id=803 data-nosnippet>803</a>    }
-<a href=#804 id=804 data-nosnippet>804</a>
-<a href=#805 id=805 data-nosnippet>805</a>    <span class="attr">#[test]
-<a href=#806 id=806 data-nosnippet>806</a>    </span><span class="kw">fn </span>nonhardened_index_tryfrom_keyindex() {
-<a href=#807 id=807 data-nosnippet>807</a>        <span class="kw">let </span>nh: NonHardenedChildIndex = ChildNumber::new(<span class="number">0</span>, <span class="bool-val">false</span>).unwrap().try_into().unwrap();
-<a href=#808 id=808 data-nosnippet>808</a>        <span class="macro">assert_eq!</span>(nh.index(), <span class="number">0</span>);
-<a href=#809 id=809 data-nosnippet>809</a>
-<a href=#810 id=810 data-nosnippet>810</a>        <span class="macro">assert!</span>(NonHardenedChildIndex::try_from(ChildNumber::new(<span class="number">0</span>, <span class="bool-val">true</span>).unwrap()).is_err());
-<a href=#811 id=811 data-nosnippet>811</a>    }
-<a href=#812 id=812 data-nosnippet>812</a>}</code></pre></div></section></main></body></html>
+<a href=#783 id=783 data-nosnippet>783</a>        <span class="macro">assert!</span>(
+<a href=#784 id=784 data-nosnippet>784</a>            NonHardenedChildIndex::from_index(<span class="number">0x7fffffff</span>)
+<a href=#785 id=785 data-nosnippet>785</a>                .unwrap()
+<a href=#786 id=786 data-nosnippet>786</a>                .next()
+<a href=#787 id=787 data-nosnippet>787</a>                .is_none()
+<a href=#788 id=788 data-nosnippet>788</a>        );
+<a href=#789 id=789 data-nosnippet>789</a>    }
+<a href=#790 id=790 data-nosnippet>790</a>
+<a href=#791 id=791 data-nosnippet>791</a>    <span class="attr">#[test]
+<a href=#792 id=792 data-nosnippet>792</a>    </span><span class="kw">fn </span>nonhardened_index_ct_eq() {
+<a href=#793 id=793 data-nosnippet>793</a>        <span class="macro">assert!</span>(check(
+<a href=#794 id=794 data-nosnippet>794</a>            NonHardenedChildIndex::ZERO,
+<a href=#795 id=795 data-nosnippet>795</a>            NonHardenedChildIndex::ZERO
+<a href=#796 id=796 data-nosnippet>796</a>        ));
+<a href=#797 id=797 data-nosnippet>797</a>        <span class="macro">assert!</span>(!check(
+<a href=#798 id=798 data-nosnippet>798</a>            NonHardenedChildIndex::ZERO,
+<a href=#799 id=799 data-nosnippet>799</a>            NonHardenedChildIndex::ZERO.next().unwrap()
+<a href=#800 id=800 data-nosnippet>800</a>        ));
+<a href=#801 id=801 data-nosnippet>801</a>
+<a href=#802 id=802 data-nosnippet>802</a>        <span class="kw">fn </span>check&lt;T: ConstantTimeEq&gt;(v1: T, v2: T) -&gt; bool {
+<a href=#803 id=803 data-nosnippet>803</a>            v1.ct_eq(<span class="kw-2">&amp;</span>v2).into()
+<a href=#804 id=804 data-nosnippet>804</a>        }
+<a href=#805 id=805 data-nosnippet>805</a>    }
+<a href=#806 id=806 data-nosnippet>806</a>
+<a href=#807 id=807 data-nosnippet>807</a>    <span class="attr">#[test]
+<a href=#808 id=808 data-nosnippet>808</a>    </span><span class="kw">fn </span>nonhardened_index_tryfrom_keyindex() {
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="kw">let </span>nh: NonHardenedChildIndex = ChildNumber::new(<span class="number">0</span>, <span class="bool-val">false</span>).unwrap().try_into().unwrap();
+<a href=#810 id=810 data-nosnippet>810</a>        <span class="macro">assert_eq!</span>(nh.index(), <span class="number">0</span>);
+<a href=#811 id=811 data-nosnippet>811</a>
+<a href=#812 id=812 data-nosnippet>812</a>        <span class="macro">assert!</span>(NonHardenedChildIndex::try_from(ChildNumber::new(<span class="number">0</span>, <span class="bool-val">true</span>).unwrap()).is_err());
+<a href=#813 id=813 data-nosnippet>813</a>    }
+<a href=#814 id=814 data-nosnippet>814</a>}</code></pre></div></section></main></body></html>
