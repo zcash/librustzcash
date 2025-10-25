@@ -218,7 +218,7 @@ where
     // The change memo, if any, must be attached to the change in the intermediate step that
     // produces the ephemeral output, and so it should be discarded in the ultimate step; this is
     // distinguished by identifying that this transaction has ephemeral inputs.
-    let change_memo = change_memo.filter(|_| ephemeral_balance.map_or(true, |b| !b.is_input()));
+    let change_memo = change_memo.filter(|_| ephemeral_balance.is_none_or(|b| !b.is_input()));
 
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
     let underflow = || ChangeError::StrategyError(E::from(BalanceError::Underflow));

@@ -3528,6 +3528,7 @@ fn determine_fee(
             // Transparent inputs aren't supported, so this closure should never be
             // called during transaction construction. But in case it is, handle it
             // correctly.
+            let _ = (conn, outpoint);
             Ok(None)
         }
 

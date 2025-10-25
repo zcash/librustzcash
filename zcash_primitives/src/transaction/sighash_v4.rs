@@ -195,7 +195,7 @@ pub fn v4_signature_hash<
             h,
             !tx.sprout_bundle
                 .as_ref()
-                .map_or(true, |b| b.joinsplits.is_empty()),
+                .is_none_or(|b| b.joinsplits.is_empty()),
             {
                 let bundle = tx.sprout_bundle.as_ref().unwrap();
                 joinsplits_hash(
@@ -211,14 +211,14 @@ pub fn v4_signature_hash<
                 h,
                 !tx.sapling_bundle
                     .as_ref()
-                    .map_or(true, |b| b.shielded_spends().is_empty()),
+                    .is_none_or(|b| b.shielded_spends().is_empty()),
                 shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
             );
             update_hash!(
                 h,
                 !tx.sapling_bundle
                     .as_ref()
-                    .map_or(true, |b| b.shielded_outputs().is_empty()),
+                    .is_none_or(|b| b.shielded_outputs().is_empty()),
                 shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
             );
         }
