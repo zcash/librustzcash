@@ -49,7 +49,7 @@ pub struct ProposalStep {
 /// A mapping from ZIP 321 payment index to the output pool that has been chosen
 /// for that payment, based upon the payment address and the selected inputs to
 /// the transaction.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PaymentOutputPool {
     #[prost(uint32, tag = "1")]
     pub payment_index: u32,
@@ -58,7 +58,7 @@ pub struct PaymentOutputPool {
 }
 /// The unique identifier and value for each proposed input that does not
 /// require a back-reference to a prior step of the proposal.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReceivedOutput {
     #[prost(bytes = "vec", tag = "1")]
     pub txid: ::prost::alloc::vec::Vec<u8>,
@@ -71,7 +71,7 @@ pub struct ReceivedOutput {
 }
 /// A reference to a payment in a prior step of the proposal. This payment must
 /// belong to the wallet.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PriorStepOutput {
     #[prost(uint32, tag = "1")]
     pub step_index: u32,
@@ -79,7 +79,7 @@ pub struct PriorStepOutput {
     pub payment_index: u32,
 }
 /// A reference to a change or ephemeral output from a prior step of the proposal.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PriorStepChange {
     #[prost(uint32, tag = "1")]
     pub step_index: u32,
@@ -87,14 +87,14 @@ pub struct PriorStepChange {
     pub change_index: u32,
 }
 /// The unique identifier and value for an input to be used in the transaction.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ProposedInput {
     #[prost(oneof = "proposed_input::Value", tags = "1, 2, 3")]
     pub value: ::core::option::Option<proposed_input::Value>,
 }
 /// Nested message and enum types in `ProposedInput`.
 pub mod proposed_input {
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Value {
         #[prost(message, tag = "1")]
         ReceivedOutput(super::ReceivedOutput),
@@ -121,7 +121,7 @@ pub struct TransactionBalance {
 /// an ephemeral output, which must be spent by a subsequent step. This is
 /// only supported for transparent outputs. Each ephemeral output will be
 /// given a unique t-address.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChangeValue {
     /// The value of a change or ephemeral output to be created, in zatoshis.
     #[prost(uint64, tag = "1")]
@@ -139,7 +139,7 @@ pub struct ChangeValue {
 }
 /// An object wrapper for memo bytes, to facilitate representing the
 /// `change_memo == None` case.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct MemoBytes {
     #[prost(bytes = "vec", tag = "1")]
     pub value: ::prost::alloc::vec::Vec<u8>,

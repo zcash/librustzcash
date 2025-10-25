@@ -708,7 +708,7 @@ version = "1.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.libc]]
-version = "0.2.154"
+version = "0.2.177"
 criteria = "safe-to-deploy"
 
 [[exemptions.libm]]
@@ -960,7 +960,7 @@ version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-build]]
-version = "0.13.1"
+version = "0.14.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-derive]]
@@ -1175,6 +1175,10 @@ criteria = "safe-to-deploy"
 version = "0.5.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.socket2]]
+version = "0.6.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.spin]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
@@ -1272,11 +1276,19 @@ version = "0.22.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
-version = "0.13.0"
+version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic-build]]
 version = "0.10.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.tonic-prost]]
+version = "0.14.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.tonic-prost-build]]
+version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tor-async-utils]]
@@ -1515,6 +1527,10 @@ criteria = "safe-to-deploy"
 version = "0.26.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.webpki-roots]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.which]]
 version = "7.0.2"
 criteria = "safe-to-deploy"
@@ -1533,6 +1549,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-sys]]
+version = "0.60.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.winnow]]

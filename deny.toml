@@ -54,7 +54,7 @@ exceptions = [
     { name = "tinystr", allow = ["Unicode-3.0"] },
     { name = "unicode-ident", allow = ["Unicode-DFS-2016"] },
     { name = "untrusted", allow = ["ISC"] },
-    { name = "webpki-roots", allow = ["MPL-2.0"] },
+    { name = "webpki-roots", allow = ["CDLA-Permissive-2.0", "MPL-2.0"] },
     { name = "x25519-dalek", allow = ["BSD-3-Clause"] },
 ]
 
