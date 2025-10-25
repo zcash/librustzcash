@@ -62,7 +62,8 @@ tracing.workspace = true
 # - Protobuf interfaces and gRPC bindings
 hex.workspace = true
 prost.workspace = true
-tonic = { workspace = true, optional = true, features = ["prost", "codegen"] }
+tonic = { workspace = true, optional = true, features = ["codegen"] }
+tonic-prost = { workspace = true, optional = true }
 
 # - Secret management
 secrecy.workspace = true
@@ -144,8 +145,8 @@ time-core.workspace = true
 getset.workspace = true
 
 [build-dependencies]
-tonic-build = { workspace = true, features = ["prost"] }
-which = "7"
+tonic-prost-build.workspace = true
+which.workspace = true
 
 [dev-dependencies]
 ambassador.workspace = true
@@ -169,7 +170,7 @@ zcash_protocol = { workspace = true, features = ["local-consensus"] }
 default = ["time/default"]
 
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
-lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
+lightwalletd-tonic = ["dep:tonic", "dep:tonic-prost", "hyper-util?/tokio"]
 
 ## Enables the `tls-webpki-roots` feature of `tonic`.
 lightwalletd-tonic-tls-webpki-roots = ["lightwalletd-tonic", "tonic?/tls-webpki-roots"]

@@ -13,8 +13,10 @@ workspace.
 ## [0.19.0] - PLANNED
 
 ### Changed
+- MSRV is now 1.85.1.
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
-  `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`
+  `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`,
+  `prost 0.14`.
 - The implementation of `zcash_client_backend::WalletWrite` for `WalletDb` has
   additional type constraints. The `R` type parameter is now constrained to
   types that implement `RngCore`.

@@ -5,29 +5,29 @@ use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, types::Value, Connection, Row};
+use rusqlite::{Connection, Row, named_params, types::Value};
 
 use zcash_client_backend::{
+    DecryptedOutput, TransferType,
     data_api::{
-        wallet::{ConfirmationsPolicy, TargetHeight},
         Account as _, NullifierQuery, TargetValue,
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{ReceivedNote, WalletOrchardOutput},
-    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    ShieldedProtocol,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
+use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
 
 use super::{
-    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
 };
 
 /// This trait provides a generalization over shielded output representations.

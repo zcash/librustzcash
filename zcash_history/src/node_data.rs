@@ -18,7 +18,7 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
     32 + // start Orchard tree root
     32 + // end Orchard tree root
     9; // Orchard tx count (compact uint)
-       // = total of 244
+// = total of 244
 
 /// V1 node metadata.
 #[repr(C)]

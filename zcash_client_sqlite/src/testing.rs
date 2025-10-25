@@ -14,8 +14,8 @@ use super::BlockDb;
 #[cfg(feature = "unstable")]
 use {
     crate::{
-        chain::{init::init_blockmeta_db, BlockMeta},
         FsBlockDb, FsBlockDbError,
+        chain::{BlockMeta, init::init_blockmeta_db},
     },
     std::fs::File,
     tempfile::TempDir,

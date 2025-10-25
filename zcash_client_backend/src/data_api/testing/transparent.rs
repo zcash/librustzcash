@@ -14,16 +14,16 @@ use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 use super::TestAccount;
 use crate::{
     data_api::{
+        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
         wallet::{
-            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
-            ConfirmationsPolicy, TargetHeight,
+            ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
+            input_selection::GreedyInputSelector,
         },
-        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
     },
-    fees::{standard, DustOutputPolicy, StandardFeeRule},
+    fees::{DustOutputPolicy, StandardFeeRule, standard},
     wallet::WalletTransparentOutput,
 };
 

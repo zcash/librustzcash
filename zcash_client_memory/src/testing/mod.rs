@@ -1,20 +1,20 @@
-use std::convert::{identity, Infallible};
+use std::convert::{Infallible, identity};
 use std::fmt::Debug;
 
 use zcash_client_backend::{
     data_api::{
+        OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletTest,
         testing::{DataStoreFactory, Reset, TestCache, TestState},
-        OutputOfSentTx, WalletTest, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient},
 };
 use zcash_keys::address::Address;
 use zcash_protocol::{
+    ShieldedProtocol, TxId,
     consensus::BlockHeight,
     local_consensus::LocalNetwork,
     value::{ZatBalance, Zatoshis},
-    ShieldedProtocol, TxId,
 };
 
 use shardtree::store::ShardStore;
@@ -23,7 +23,7 @@ use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::{
-    data_api::{testing::transparent::GapLimits, wallet::TargetHeight, InputSource, WalletRead},
+    data_api::{InputSource, WalletRead, testing::transparent::GapLimits, wallet::TargetHeight},
     wallet::WalletTransparentOutput,
 };
 

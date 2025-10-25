@@ -19,7 +19,7 @@ use zcash_protocol::{consensus, value::BalanceError};
 use self::migrations::verify_network_compatibility;
 
 use super::commitment_tree;
-use crate::{error::SqliteClientError, util::Clock, WalletDb};
+use crate::{WalletDb, error::SqliteClientError, util::Clock};
 
 pub mod migrations;
 
@@ -641,7 +641,7 @@ fn init_wallet_db_internal<
                 SeedRelevance::NoAccounts => (),
                 // No seed is relevant to a wallet that only has imported accounts.
                 SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
-                    return Err(WalletMigrationError::SeedNotRelevant.into())
+                    return Err(WalletMigrationError::SeedNotRelevant.into());
                 }
             }
         }
@@ -692,7 +692,7 @@ pub(crate) mod testing {
     use uuid::Uuid;
     use zcash_protocol::consensus;
 
-    use crate::{util::Clock, WalletDb};
+    use crate::{WalletDb, util::Clock};
 
     use super::WalletMigrationError;
 
@@ -711,7 +711,7 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use rand::RngCore;
-    use rusqlite::{self, named_params, Connection, ToSql};
+    use rusqlite::{self, Connection, ToSql, named_params};
     use secrecy::Secret;
 
     use tempfile::NamedTempFile;
@@ -722,8 +722,8 @@ mod tests {
         address::Address,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{
-            sapling, ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
-            UnifiedSpendingKey,
+            ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey, sapling,
         },
     };
     use zcash_primitives::transaction::{TransactionData, TxVersion};
@@ -732,16 +732,16 @@ mod tests {
 
     use super::testing::init_wallet_db;
     use crate::{
-        testing::db::{test_clock, test_rng, TestDbFactory},
+        UA_TRANSPARENT, WalletDb,
+        testing::db::{TestDbFactory, test_clock, test_rng},
         util::Clock,
         wallet::db,
-        WalletDb, UA_TRANSPARENT,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         super::WalletMigrationError,
-        crate::wallet::{self, pool_code, PoolType},
+        crate::wallet::{self, PoolType, pool_code},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
         zip32::DiversifierIndex,

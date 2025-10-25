@@ -1,6 +1,6 @@
 //! Adds expiration to transaction enhancement requests.
 
-use rusqlite::{named_params, Transaction};
+use rusqlite::{Transaction, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;

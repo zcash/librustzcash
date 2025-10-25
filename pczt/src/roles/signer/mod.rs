@@ -18,8 +18,8 @@ use rand_core::OsRng;
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
-    TransactionData, TxDigests, TxVersion,
+    Authorization, TransactionData, TxDigests, TxVersion, sighash::SignableInput,
+    sighash_v5::v5_signature_hash, txid::TxIdDigester,
 };
 use zcash_protocol::consensus::BranchId;
 #[cfg(all(
@@ -29,11 +29,11 @@ use zcash_protocol::consensus::BranchId;
 use zcash_protocol::value::Zatoshis;
 
 use crate::{
-    common::{
-        Global, FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE,
-        FLAG_TRANSPARENT_INPUTS_MODIFIABLE, FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
-    },
     Pczt,
+    common::{
+        FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
+        FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE, Global,
+    },
 };
 
 use crate::common::determine_lock_time;

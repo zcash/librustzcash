@@ -40,7 +40,9 @@ pub enum Error {
     AddressGeneration(AddressGenerationError),
     #[error("Balance error: {0}")]
     Balance(#[from] zcash_protocol::value::BalanceError),
-    #[error("An error occurred while processing an account due to a failure in deriving the account's keys: {0}")]
+    #[error(
+        "An error occurred while processing an account due to a failure in deriving the account's keys: {0}"
+    )]
     BadAccountData(String),
     #[error("Error converting byte vec to array: {0:?}")]
     ByteVecToArrayConversion(Vec<u8>),
@@ -80,9 +82,7 @@ pub enum Error {
     ProtoEncodingError(#[from] prost::EncodeError),
     #[error("Missing proto field: {0}")]
     ProtoMissingField(&'static str),
-    #[error(
-        "Requested rewind to invalid block height. Safe height: {0:?}, requested height {1:?}"
-    )]
+    #[error("Requested rewind to invalid block height. Safe height: {0:?}, requested height {1:?}")]
     RequestedRewindInvalid(Option<BlockHeight>, BlockHeight),
     #[cfg(feature = "transparent-inputs")]
     #[error("Requested gap limit {1} reached for account {0:?}")]

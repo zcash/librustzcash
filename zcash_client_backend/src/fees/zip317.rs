@@ -6,23 +6,23 @@
 
 use core::marker::PhantomData;
 
-use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
+use zcash_primitives::transaction::fees::{FeeRule, transparent, zip317 as prim_zip317};
 use zcash_protocol::{
-    consensus,
+    ShieldedProtocol, consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    ShieldedProtocol,
 };
 
 use crate::{
-    data_api::{wallet::TargetHeight, AccountMeta, InputSource, NoteFilter},
+    data_api::{AccountMeta, InputSource, NoteFilter, wallet::TargetHeight},
     fees::StandardFeeRule,
 };
 
 use super::{
-    common::{single_pool_output_balance, SinglePoolBalanceConfig},
-    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
-    SplitPolicy, TransactionBalance,
+    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, SplitPolicy,
+    TransactionBalance,
+    common::{SinglePoolBalanceConfig, single_pool_output_balance},
+    sapling as sapling_fees,
 };
 
 #[cfg(feature = "orchard")]
@@ -271,20 +271,20 @@ mod tests {
     use ::transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
     use zcash_protocol::{
+        ShieldedProtocol,
         consensus::{Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
-        ShieldedProtocol,
     };
 
     use super::SingleOutputChangeStrategy;
     use crate::{
         data_api::{
-            testing::MockWalletDb, wallet::input_selection::SaplingPayment, AccountMeta, PoolMeta,
+            AccountMeta, PoolMeta, testing::MockWalletDb, wallet::input_selection::SaplingPayment,
         },
         fees::{
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
-            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
         },
     };
 

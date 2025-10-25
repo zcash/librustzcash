@@ -2,8 +2,8 @@ use hyper::StatusCode;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{retry_filter, Exchange, ExchangeData, RETRY_LIMIT};
-use crate::tor::{http::HttpError, Client, Error};
+use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
+use crate::tor::{Client, Error, http::HttpError};
 
 /// Querier for the CoinEx exchange.
 pub struct CoinEx {

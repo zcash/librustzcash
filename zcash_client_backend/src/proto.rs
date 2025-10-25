@@ -10,23 +10,23 @@ use std::{
 };
 use zcash_address::unified::{self, Encoding};
 
-use sapling::{self, note::ExtractedNoteCommitment, Node};
-use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
+use sapling::{self, Node, note::ExtractedNoteCommitment};
+use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,
     transaction::TxId,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkType},
     memo::{self, MemoBytes},
     value::Zatoshis,
-    PoolType, ShieldedProtocol,
 };
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::{chain::ChainState, wallet::TargetHeight, InputSource},
+    data_api::{InputSource, chain::ChainState, wallet::TargetHeight},
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
 };
