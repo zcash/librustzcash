@@ -91,9 +91,9 @@ impl<V: Version> Tree<V> {
         result.stored_count = length;
 
         let mut root = EntryLink::Stored(peaks[0].0);
-        for (gen, (idx, node)) in peaks.into_iter().enumerate() {
+        for (r#gen, (idx, node)) in peaks.into_iter().enumerate() {
             result.stored.insert(idx, node);
-            if gen != 0 {
+            if r#gen != 0 {
                 let next_generated = combine_nodes(
                     result
                         .resolve_link(root)

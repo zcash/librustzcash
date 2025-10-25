@@ -22,7 +22,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 rust-version = "1.85.1"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
