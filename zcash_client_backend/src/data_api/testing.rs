@@ -847,15 +847,14 @@ where
             .cloned()
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
-        let result = scan_cached_blocks(
+        scan_cached_blocks(
             &self.network,
             self.cache.block_source(),
             &mut self.wallet_data,
             from_height,
             &prior_cached_block.chain_state,
             limit,
-        );
-        result
+        )
     }
 
     /// Insert shard roots for both trees.

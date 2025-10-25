@@ -206,7 +206,10 @@ impl TransparentInputInfo {
                                 script::Component(
                                     iter::empty()
                                         .chain(Some(pv::_0))
-                                        .chain(iter::repeat(fake_sig).take(usize::from(required)))
+                                        .chain(core::iter::repeat_n(
+                                            fake_sig,
+                                            usize::from(required),
+                                        ))
                                         .chain(push_script(redeem_script))
                                         .collect(),
                                 )
