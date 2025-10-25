@@ -146,7 +146,7 @@ getset.workspace = true
 
 [build-dependencies]
 tonic-prost-build.workspace = true
-which = "7"
+which.workspace = true
 
 [dev-dependencies]
 ambassador.workspace = true

@@ -137,6 +137,7 @@ prost-build = "0.14"
 tonic = { version = "0.14", default-features = false }
 tonic-prost = { version = "0.14", default-features = false }
 tonic-prost-build = { version = "0.14", default-features = false }
+which = "8"
 
 # Secret management
 secrecy = "0.8"

@@ -124,4 +124,4 @@ zcashd-compat = ["zcash_keys/zcashd-compat", "zcash_client_backend/zcashd-compat
 
 [build-dependencies]
 prost-build.workspace = true
-which = "7"
+which.workspace = true
