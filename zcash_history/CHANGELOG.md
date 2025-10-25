@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
-- MSRV is now 1.81.0.
+- MSRV is now 1.85.1.
 
 ### Added
 - `zcash_history::Entry::data`

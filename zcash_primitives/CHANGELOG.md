@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.85.1.
+
 ### Removed
 - Removed deprecated modules:
     - `zcash_primitives::consensus`
