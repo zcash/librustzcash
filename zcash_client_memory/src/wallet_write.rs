@@ -10,32 +10,32 @@ use ::transparent::bundle::OutPoint;
 use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::store::ShardStore;
 use zcash_client_backend::{
+    TransferType,
     address::UnifiedAddress,
-    data_api::{
-        chain::ChainState,
-        scanning::{ScanPriority, ScanRange},
-        AccountPurpose, AccountSource, TransactionStatus, WalletCommitmentTrees as _,
-        Zip32Derivation, SAPLING_SHARD_HEIGHT,
-    },
     data_api::{
         AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction,
         SentTransactionOutput, WalletRead, WalletWrite,
     },
+    data_api::{
+        AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
+        WalletCommitmentTrees as _, Zip32Derivation,
+        chain::ChainState,
+        scanning::{ScanPriority, ScanRange},
+    },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, Recipient, WalletTransparentOutput},
-    TransferType,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
     PoolType,
     ShieldedProtocol::{self, Sapling},
     TxId,
+    consensus::{self, BlockHeight, NetworkUpgrade},
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::Error, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, PRUNING_DEPTH,
-    VERIFY_LOOKAHEAD,
+    MemoryWalletBlock, MemoryWalletDb, Nullifier, PRUNING_DEPTH, ReceivedNote, VERIFY_LOOKAHEAD,
+    error::Error,
 };
 
 #[cfg(feature = "orchard")]

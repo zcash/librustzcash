@@ -39,7 +39,7 @@ impl fmt::Debug for Script {
                 .finish()
         } else {
             f.debug_tuple("Script")
-                .field(&hex::encode(&self.0 .0))
+                .field(&hex::encode(&self.0.0))
                 .finish()
         }
     }
@@ -53,7 +53,7 @@ impl Default for Script {
 
 impl PartialEq for Script {
     fn eq(&self, other: &Self) -> bool {
-        self.0 .0 == other.0 .0
+        self.0.0 == other.0.0
     }
 }
 
@@ -69,12 +69,12 @@ impl Script {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0 .0, |w, e| w.write_all(&[*e]))
+        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
     pub fn serialized_size(&self) -> usize {
-        Vector::serialized_size_of_u8_vec(&self.0 .0)
+        Vector::serialized_size_of_u8_vec(&self.0.0)
     }
 }
 

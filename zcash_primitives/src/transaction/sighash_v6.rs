@@ -3,8 +3,8 @@ use blake2b_simd::Hash as Blake2bHash;
 use ::transparent::sighash::TransparentAuthorizingContext;
 
 use crate::transaction::{
-    sighash::SignableInput, sighash_v5::v5_signature_hash, Authorization, TransactionData,
-    TxDigests,
+    Authorization, TransactionData, TxDigests, sighash::SignableInput,
+    sighash_v5::v5_signature_hash,
 };
 
 #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]

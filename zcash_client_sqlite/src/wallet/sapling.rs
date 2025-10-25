@@ -4,29 +4,29 @@ use std::{collections::HashSet, rc::Rc};
 
 use group::ff::PrimeField;
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, types::Value, Connection, Row};
+use rusqlite::{Connection, Row, named_params, types::Value};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
+    DecryptedOutput, TransferType,
     data_api::{
-        wallet::{ConfirmationsPolicy, TargetHeight},
         Account, NullifierQuery, TargetValue,
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{ReceivedNote, WalletSaplingOutput},
-    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
+    ShieldedProtocol, TxId,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    ShieldedProtocol, TxId,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
+use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
 
 use super::{
-    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
 };
 
 /// This trait provides a generalization over shielded output representations.

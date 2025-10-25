@@ -7,25 +7,25 @@ use std::collections::{BTreeSet, HashSet};
 use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{named_params, params};
 use schemerz_rusqlite::RusqliteMigration;
-use shardtree::{error::ShardTreeError, store::caching::CachingShardStore, ShardTree};
+use shardtree::{ShardTree, error::ShardTreeError, store::caching::CachingShardStore};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
 use zcash_client_backend::data_api::{
-    scanning::{ScanPriority, ScanRange},
     SAPLING_SHARD_HEIGHT,
+    scanning::{ScanPriority, ScanRange},
 };
 use zcash_primitives::merkle_tree::{read_commitment_tree, read_incremental_witness};
 use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
+    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
     wallet::{
         block_height_extrema,
         commitment_tree::SqliteShardStore,
-        init::{migrations::received_notes_nullable_nf, WalletMigrationError},
+        init::{WalletMigrationError, migrations::received_notes_nullable_nf},
         scanning::insert_queue_entries,
     },
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7da6489d_e835_4657_8be5_f512bcce6cbf);

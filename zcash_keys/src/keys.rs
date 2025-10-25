@@ -566,7 +566,10 @@ impl fmt::Display for AddressGenerationError {
                 )
             }
             AddressGenerationError::ShieldedReceiverRequired => {
-                write!(f, "A Unified Address requires at least one shielded (Sapling or Orchard) receiver.")
+                write!(
+                    f,
+                    "A Unified Address requires at least one shielded (Sapling or Orchard) receiver."
+                )
             }
         }
     }
@@ -1589,7 +1592,7 @@ mod tests {
     };
 
     #[cfg(feature = "unstable")]
-    use super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey};
+    use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
     use subtle::ConstantTimeEq;

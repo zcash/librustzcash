@@ -7,7 +7,7 @@ use std::{
 
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
+use zcash_protocol::{PoolType, ShieldedProtocol, consensus::BlockHeight, value::Zatoshis};
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
@@ -113,10 +113,9 @@ impl Display for ProposalError {
                 f,
                 "The proposal attempts to spends the change output created at step {r:?}.",
             ),
-            ProposalError::Zip321(r) => write!(
-                f,
-                "The proposal results in an invalid payment {r:?}.",
-            ),
+            ProposalError::Zip321(r) => {
+                write!(f, "The proposal results in an invalid payment {r:?}.",)
+            }
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputLeftUnspent(r) => write!(
                 f,
@@ -136,7 +135,7 @@ impl Display for ProposalError {
             ProposalError::EphemeralAddressLinkability => write!(
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
-            )
+            ),
         }
     }
 }

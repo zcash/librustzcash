@@ -22,8 +22,8 @@ members = [
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.85.1"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 categories = ["cryptography::cryptocurrencies"]
@@ -169,11 +169,11 @@ incrementalmerkletree-testing = "0.3"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.30", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.31", default-features = false, features = ["compression", "rustls", "tokio"] }
 dynosaur = "0.2"
 fs-mistrust = "0.9"
 tokio = "1"
-tor-rtcompat = "0.30"
+tor-rtcompat = "0.31"
 tower = "0.5"
 trait-variant = "0.1"
 

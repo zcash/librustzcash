@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::Deref};
 
-use zcash_protocol::{consensus::BlockHeight, PoolType};
+use zcash_protocol::{PoolType, consensus::BlockHeight};
 
 /// Maps a nullifier to the block height and transaction index (NOT txid!) where it was spent.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +59,7 @@ impl From<orchard::note::Nullifier> for Nullifier {
 
 mod serialization {
     use super::*;
-    use crate::{proto::memwallet as proto, Error};
+    use crate::{Error, proto::memwallet as proto};
 
     impl From<Nullifier> for proto::Nullifier {
         fn from(nullifier: Nullifier) -> Self {

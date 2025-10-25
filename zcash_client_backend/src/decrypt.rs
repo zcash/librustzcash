@@ -4,7 +4,7 @@ use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
-    transaction::components::sapling::zip212_enforcement, transaction::Transaction,
+    transaction::Transaction, transaction::components::sapling::zip212_enforcement,
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},

@@ -15,11 +15,11 @@ use nonempty::NonEmpty;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+use shardtree::{ShardTree, error::ShardTreeError, store::memory::MemoryShardStore};
 use subtle::ConditionallySelectable;
 
 use ::sapling::{
-    note_encryption::{sapling_note_encryption, SaplingDomain},
+    note_encryption::{SaplingDomain, sapling_note_encryption},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
 };
@@ -31,40 +31,39 @@ use zcash_keys::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{components::sapling::zip212_enforcement, fees::FeeRule, Transaction, TxId},
+    transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
-    ShieldedProtocol,
 };
 use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
-    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ReceivedNotes, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction,
+    TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary,
+    WalletTest, WalletWrite, Zip32Derivation,
+    chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
     scanning::ScanRange,
     wallet::{
-        create_proposed_transactions,
+        ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
-        ConfirmationsPolicy, SpendingKeys,
     },
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TransactionDataRequest,
-    TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
 use crate::{
-    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
+    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
     fees::{
-        standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
+        standard::{self, SingleOutputChangeStrategy},
     },
     proposal::Proposal,
     proto::compact_formats::{
@@ -75,7 +74,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
+    super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
     crate::{data_api::Balance, wallet::TransparentAddressMetadata},
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     transparent::GapLimits,

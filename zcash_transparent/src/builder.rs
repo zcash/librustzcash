@@ -19,7 +19,7 @@ use crate::{
 use {
     crate::{
         bundle::OutPoint,
-        sighash::{SighashType, SIGHASH_ALL},
+        sighash::{SIGHASH_ALL, SighashType},
     },
     core::iter,
     sha2::Digest,
@@ -66,11 +66,28 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::NullDataTooLong { actual, limit } => write!(f, "Provided null data is longer than the maximum supported length (actual: {}, limit: {})", actual, limit),
-            Error::InputCountMismatch => write!(f, "The number of inputs does not match the number of sighashes"),
-            Error::InvalidExternalSignature { sig_index } => write!(f, "A provided external signature at index {} was not valid for any transparent input", sig_index),
-            Error::DuplicateSignature => write!(f, "An external signature is valid for more than one transparent input."),
-            Error::MissingSignatures => write!(f, "A bundle could not be built because required signatures on transparent inputs were missing."),
+            Error::NullDataTooLong { actual, limit } => write!(
+                f,
+                "Provided null data is longer than the maximum supported length (actual: {}, limit: {})",
+                actual, limit
+            ),
+            Error::InputCountMismatch => write!(
+                f,
+                "The number of inputs does not match the number of sighashes"
+            ),
+            Error::InvalidExternalSignature { sig_index } => write!(
+                f,
+                "A provided external signature at index {} was not valid for any transparent input",
+                sig_index
+            ),
+            Error::DuplicateSignature => write!(
+                f,
+                "An external signature is valid for more than one transparent input."
+            ),
+            Error::MissingSignatures => write!(
+                f,
+                "A bundle could not be built because required signatures on transparent inputs were missing."
+            ),
         }
     }
 }
@@ -620,7 +637,7 @@ impl Bundle<Unauthorized> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
+impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
     /// Appends a new batch of external signatures to the transparent inputs.
     ///
     /// This method iterates through the provided signatures, applying each one to the

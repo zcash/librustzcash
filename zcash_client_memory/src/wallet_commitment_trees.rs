@@ -1,11 +1,11 @@
 use std::convert::Infallible;
 
 use incrementalmerkletree::Address;
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+use shardtree::{ShardTree, error::ShardTreeError, store::memory::MemoryShardStore};
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT,
+    SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, chain::CommitmentTreeRoot,
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -105,13 +105,13 @@ pub(crate) mod serialization {
 
     use incrementalmerkletree::{Address, Level};
     use shardtree::{
-        store::{memory::MemoryShardStore, Checkpoint, ShardStore},
         LocatedPrunableTree, ShardTree,
+        store::{Checkpoint, ShardStore, memory::MemoryShardStore},
     };
     use zcash_client_backend::serialization::shardtree::{read_shard, write_shard};
     use zcash_protocol::consensus::BlockHeight;
 
-    use crate::{proto::memwallet as proto, Error};
+    use crate::{Error, proto::memwallet as proto};
 
     pub(crate) fn tree_to_protobuf<
         H: Clone

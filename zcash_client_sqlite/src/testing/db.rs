@@ -11,15 +11,16 @@ use tempfile::NamedTempFile;
 
 use rusqlite::{self};
 use secrecy::SecretVec;
-use shardtree::{error::ShardTreeError, ShardTree};
+use shardtree::{ShardTree, error::ShardTreeError};
 
 use zcash_client_backend::{
     data_api::{
+        TargetValue,
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
         wallet::{ConfirmationsPolicy, TargetHeight},
-        TargetValue, *,
+        *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };
@@ -32,13 +33,13 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, ShieldedProtocol,
+    ShieldedProtocol, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
 };
 use zip32::DiversifierIndex;
 
 use crate::{
-    error::SqliteClientError, util::testing::FixedClock, wallet::init::WalletMigrator, AccountUuid,
-    WalletDb,
+    AccountUuid, WalletDb, error::SqliteClientError, util::testing::FixedClock,
+    wallet::init::WalletMigrator,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -136,7 +137,7 @@ impl TestDb {
     #[allow(dead_code)]
     #[cfg(feature = "unstable")]
     pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
-        run_sqlite3(self.data_file.path(), command)
+        unsafe { run_sqlite3(self.data_file.path(), command) }
     }
 }
 

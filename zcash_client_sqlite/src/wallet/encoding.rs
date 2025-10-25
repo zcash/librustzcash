@@ -4,8 +4,8 @@
 use bitflags::bitflags;
 use transparent::address::TransparentAddress::*;
 use zcash_address::{
-    unified::{Container, Receiver},
     ConversionError, TryFromAddress,
+    unified::{Container, Receiver},
 };
 use zcash_client_backend::data_api::AccountSource;
 #[cfg(feature = "transparent-inputs")]
@@ -14,7 +14,7 @@ use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
-use zcash_protocol::{consensus::NetworkType, memo::MemoBytes, PoolType, ShieldedProtocol};
+use zcash_protocol::{PoolType, ShieldedProtocol, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
 
 use crate::error::SqliteClientError;

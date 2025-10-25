@@ -6,9 +6,9 @@ use core::marker::PhantomData;
 use rand_core::OsRng;
 
 use zcash_primitives::transaction::{
-    sighash::{signature_hash, SignableInput},
-    txid::TxIdDigester,
     Authorization, Transaction, TransactionData, TxVersion,
+    sighash::{SignableInput, signature_hash},
+    txid::TxIdDigester,
 };
 #[cfg(all(
     any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
@@ -20,7 +20,7 @@ use zcash_protocol::{
     constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
 };
 
-use crate::{common::determine_lock_time, Pczt};
+use crate::{Pczt, common::determine_lock_time};
 
 mod orchard;
 pub use self::orchard::OrchardError;

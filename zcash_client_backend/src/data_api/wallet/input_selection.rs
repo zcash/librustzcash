@@ -11,24 +11,24 @@ use ::transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
+    FeeRule,
     transparent::InputSize,
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
-    FeeRule,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    PoolType, ShieldedProtocol,
 };
 use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        wallet::TargetHeight, InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention,
-        TargetValue,
+        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
+        wallet::TargetHeight,
     },
-    fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
+    fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -278,7 +278,10 @@ impl fmt::Display for GreedyInputSelectorError {
                 write!(f, "Unified address contains no supported receivers.")
             }
             GreedyInputSelectorError::UnsupportedTexAddress => {
-                write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
+                write!(
+                    f,
+                    "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature."
+                )
             }
         }
     }

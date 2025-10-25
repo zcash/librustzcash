@@ -2,7 +2,7 @@
 
 use std::{fmt, io, path::Path};
 
-use arti_client::{config::TorClientConfigBuilder, TorClient};
+use arti_client::{TorClient, config::TorClientConfigBuilder};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 

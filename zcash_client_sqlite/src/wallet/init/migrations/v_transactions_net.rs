@@ -212,9 +212,9 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::add_transaction_views, WalletMigrator},
         WalletDb,
+        testing::db::{test_clock, test_rng},
+        wallet::init::{WalletMigrator, migrations::add_transaction_views},
     };
 
     #[test]
@@ -453,7 +453,9 @@ mod tests {
                         assert_eq!(received_note_count, 1);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
+                        panic!(
+                            "(Account, Transaction) pair {other:?} is not expected to exist in the wallet."
+                        );
                     }
                 }
             }

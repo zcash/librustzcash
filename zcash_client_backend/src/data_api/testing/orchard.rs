@@ -15,19 +15,19 @@ use zcash_keys::{
 use zcash_note_encryption::try_output_recovery_with_ovk;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
-    ShieldedProtocol,
 };
 
 use crate::{
     data_api::{
-        chain::{CommitmentTreeRoot, ScanSummary},
-        testing::{pool::ShieldedPoolTester, TestState},
-        wallet::{ConfirmationsPolicy, TargetHeight},
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
+        chain::{CommitmentTreeRoot, ScanSummary},
+        testing::{TestState, pool::ShieldedPoolTester},
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{Note, ReceivedNote},
 };
