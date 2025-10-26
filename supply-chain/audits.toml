@@ -34,6 +34,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.arti-client]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.async-trait]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -82,6 +87,11 @@ New `unsafe` function is a code-duplicate of an existing `unsafe` function, but
 using the correct `Shared` type for `BytesMut` in order to fix a bug.
 """
 
+[[audits.caret]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.5.3"
+
 [[audits.cc]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -93,9 +103,19 @@ criteria = "safe-to-run"
 delta = "0.2.1 -> 0.2.2"
 
 [[audits.ciborium-io]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.2"
+
+[[audits.ciborium-io]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.2.1 -> 0.2.2"
+
+[[audits.ciborium-ll]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.2"
 
 [[audits.ciborium-ll]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -111,6 +131,11 @@ delta = "4.4.14 -> 4.4.18"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
 delta = "4.5.0 -> 4.4.18"
+
+[[audits.clap_builder]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "4.5.18 -> 4.5.20"
 
 [[audits.cpp_demangle]]
 who = "Kris Nuttycombe <kris@nutty.land>"
@@ -132,6 +157,11 @@ delta = "0.20.9 -> 0.20.10"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
+
+[[audits.derive-deftly]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.0.1 -> 1.1.0"
 
 [[audits.directories]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -200,6 +230,11 @@ I have no way to check whether these constants are an improvement or not.
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.9.1 -> 0.9.3"
+
+[[audits.fs-mistrust]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.9.3 -> 0.10.0"
 
 [[audits.futures]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -390,6 +425,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.7.0 -> 0.7.2"
 
+[[audits.oneshot-fused-workaround]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.3"
+
 [[audits.oorandom]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
@@ -415,6 +455,21 @@ who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"
 version = "0.0.0"
 notes = "Initial empty crate release."
+
+[[audits.phf]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.11.3 -> 0.12.1"
+
+[[audits.phf_generator]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.11.3 -> 0.12.1"
+
+[[audits.phf_shared]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.11.3 -> 0.12.1"
 
 [[audits.pin-project-internal]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -564,6 +619,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.6.3"
 
+[[audits.retry-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.6.3 -> 0.6.5"
+
 [[audits.rgb]]
 who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-run"
@@ -639,6 +699,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.4.0 -> 0.4.5"
 
+[[audits.safelog]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.5 -> 0.4.8"
+
 [[audits.secp256k1]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -658,10 +723,27 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.201 -> 1.0.202"
 
+[[audits.serde]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.0.227 -> 1.0.228"
+notes = "Changes to build script are to alter the name of a custom `cfg` option."
+
+[[audits.serde_core]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.0.227 -> 1.0.228"
+notes = "Changes to build script are to alter the name of a custom `cfg` option."
+
 [[audits.serde_derive]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.201 -> 1.0.202"
+
+[[audits.serde_derive]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.0.227 -> 1.0.228"
 
 [[audits.serde_json]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -672,6 +754,11 @@ delta = "1.0.116 -> 1.0.117"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "1.0.117 -> 1.0.120"
+
+[[audits.slotmap-careful]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.3 -> 0.2.5"
 
 [[audits.smallvec]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -831,6 +918,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-async-utils]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-basic-utils]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -840,6 +932,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-basic-utils]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-bytes]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -856,10 +953,20 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-bytes]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-cell]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.28.0 -> 0.30.0"
+
+[[audits.tor-cell]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-cert]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -881,6 +988,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-cert]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-chanmgr]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -890,6 +1002,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-chanmgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-checkable]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -905,6 +1022,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-checkable]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-circmgr]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -916,6 +1038,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-circmgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-config]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -925,6 +1052,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-config]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-config-path]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -936,6 +1068,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-config-path]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-consdiff]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -951,6 +1088,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-consdiff]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-dirclient]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -965,6 +1107,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-dirclient]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-dirmgr]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -976,6 +1123,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-dirmgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-error]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -991,12 +1143,27 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-general-addr]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.28.0 -> 0.30.0"
 
 [[audits.tor-general-addr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-general-addr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
+[[audits.tor-guardmgr]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
@@ -1004,7 +1171,7 @@ delta = "0.30.0 -> 0.31.0"
 [[audits.tor-guardmgr]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
-delta = "0.30.0 -> 0.31.0"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-hscrypto]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1016,6 +1183,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-hscrypto]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-key-forge]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1026,12 +1198,32 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-key-forge]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
+[[audits.tor-keymgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-linkspec]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.28.0 -> 0.30.0"
 
 [[audits.tor-linkspec]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-linkspec]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
+[[audits.tor-llcrypto]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
@@ -1039,7 +1231,7 @@ delta = "0.30.0 -> 0.31.0"
 [[audits.tor-llcrypto]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
-delta = "0.30.0 -> 0.31.0"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-log-ratelim]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1056,6 +1248,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-log-ratelim]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-memquota]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1065,6 +1262,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-memquota]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-netdir]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1076,6 +1278,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-netdir]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-netdoc]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1085,6 +1292,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-netdoc]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-persist]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1102,6 +1314,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-persist]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-protover]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1117,6 +1334,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-protover]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-relay-selection]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1128,6 +1350,16 @@ criteria = "safe-to-deploy"
 delta = "0.28.0 -> 0.30.0"
 
 [[audits.tor-relay-selection]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-relay-selection]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
+[[audits.tor-rtcompat]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
@@ -1135,7 +1367,7 @@ delta = "0.30.0 -> 0.31.0"
 [[audits.tor-rtcompat]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
-delta = "0.30.0 -> 0.31.0"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tor-rtmock]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1148,6 +1380,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-rtmock]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-socksproto]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1158,6 +1395,11 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
 
+[[audits.tor-socksproto]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
+
 [[audits.tor-units]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -1167,6 +1409,11 @@ delta = "0.28.0 -> 0.30.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.30.0 -> 0.31.0"
+
+[[audits.tor-units]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.32.0"
 
 [[audits.tower-layer]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1492,7 +1739,7 @@ end = "2025-10-15"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-10-15"
-end = "2025-10-15"
+end = "2026-10-26"
 
 [[trusted.shardtree]]
 criteria = "safe-to-deploy"
