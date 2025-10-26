@@ -33,7 +33,6 @@ exceptions = [
     { name = "arrayref", allow = ["BSD-2-Clause"] },
     { name = "async_executors", allow = ["Unlicense"] },
     { name = "bounded-vec", allow = ["CC0-1.0"] },
-    { name = "bounded-vec-deque", allow = ["BSD-3-Clause"] },
     { name = "coarsetime", allow = ["ISC"] },
     { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
