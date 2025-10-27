@@ -5,7 +5,7 @@ use zcash_client_backend::{
     data_api::{SentTransaction, SentTransactionOutput},
     wallet::{NoteId, Recipient},
 };
-use zcash_protocol::{memo::Memo, value::Zatoshis, PoolType, ShieldedProtocol::Sapling, TxId};
+use zcash_protocol::{PoolType, ShieldedProtocol::Sapling, TxId, memo::Memo, value::Zatoshis};
 
 use crate::AccountId;
 
@@ -170,10 +170,8 @@ mod serialization {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_keys::encoding::AddressCodec as _,
-        zcash_primitives::{
-            consensus::Network::MainNetwork as EncodingParams, legacy::TransparentAddress,
-        },
+        transparent::address::TransparentAddress, zcash_keys::encoding::AddressCodec as _,
+        zcash_protocol::consensus::Network::MainNetwork as EncodingParams,
     };
 
     impl From<SentNote> for proto::SentNote {
@@ -335,7 +333,7 @@ mod serialization {
                             proto::PoolType::ShieldedOrchard => PoolType::Shielded(Orchard),
                             #[cfg(not(feature = "orchard"))]
                             proto::PoolType::ShieldedOrchard => {
-                                return Err(Error::OrchardNotEnabled)
+                                return Err(Error::OrchardNotEnabled);
                             }
                         },
                     }

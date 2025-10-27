@@ -26,8 +26,8 @@ use zcash_protocol::value::Zatoshis;
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::{
-    components::tze::{self, TzeIn, TzeOut},
     TzeDigests,
+    components::tze::{self, TzeIn, TzeOut},
 };
 
 /// TxId tree root personalization

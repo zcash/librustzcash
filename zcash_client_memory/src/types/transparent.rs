@@ -3,10 +3,14 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use ::transparent::bundle::{OutPoint, TxOut};
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
+};
+use transparent::keys::TransparentKeyScope;
 use zcash_client_backend::wallet::WalletTransparentOutput;
-use zcash_primitives::legacy::TransparentAddress;
-use zcash_protocol::{consensus::BlockHeight, TxId};
+
+use zcash_protocol::{TxId, consensus::BlockHeight};
 
 use super::AccountId;
 use crate::Error;
@@ -85,6 +89,8 @@ pub struct ReceivedTransparentOutput {
     pub(crate) account_id: AccountId,
     // The address to which this TXO was sent
     pub(crate) address: TransparentAddress,
+    // The key scope at which the address was derived
+    pub(crate) key_scope: TransparentKeyScope,
     // script, value_zat
     pub(crate) txout: TxOut,
     /// The maximum block height at which this TXO was either
@@ -100,6 +106,7 @@ impl ReceivedTransparentOutput {
         transaction_id: TxId,
         account_id: AccountId,
         address: TransparentAddress,
+        key_scope: TransparentKeyScope,
         txout: TxOut,
         max_observed_unspent_height: BlockHeight,
     ) -> Self {
@@ -107,6 +114,7 @@ impl ReceivedTransparentOutput {
             transaction_id,
             account_id,
             address,
+            key_scope,
             txout,
             max_observed_unspent_height: Some(max_observed_unspent_height),
         }
@@ -154,8 +162,7 @@ mod serialization {
     use crate::{proto::memwallet as proto, read_optional};
     use transparent::address::Script;
     use zcash_keys::encoding::AddressCodec;
-    use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
-    use zcash_protocol::value::Zatoshis;
+    use zcash_protocol::{consensus::Network::MainNetwork as EncodingParams, value::Zatoshis};
 
     impl From<ReceivedTransparentOutput> for proto::ReceivedTransparentOutput {
         fn from(output: ReceivedTransparentOutput) -> Self {
@@ -169,6 +176,10 @@ mod serialization {
         }
     }
 
+    // FIXME: Key scope information needs to be added to both `proto::Address` and
+    // `proto::ReceivedTransparentOutput`, with a data migration that updates stored data with
+    // correct scope information.
+    #[allow(unreachable_code)]
     impl TryFrom<proto::ReceivedTransparentOutput> for ReceivedTransparentOutput {
         type Error = crate::Error;
 
@@ -177,6 +188,7 @@ mod serialization {
                 transaction_id: TxId::from_bytes(output.transaction_id.clone().try_into()?),
                 account_id: output.account_id.into(),
                 address: TransparentAddress::decode(&EncodingParams, &output.address)?,
+                key_scope: todo!(),
                 txout: read_optional!(output, txout)?.try_into()?,
                 max_observed_unspent_height: output.max_observed_unspent_height.map(|h| h.into()),
             })
@@ -186,7 +198,7 @@ mod serialization {
     impl From<TxOut> for proto::TxOut {
         fn from(txout: TxOut) -> Self {
             Self {
-                script: txout.script_pubkey().0 .0.clone(),
+                script: txout.script_pubkey().0.0.clone(),
                 value: u64::from(txout.value()),
             }
         }

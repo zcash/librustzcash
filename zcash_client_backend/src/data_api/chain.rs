@@ -6,7 +6,7 @@
 //! ```
 //! # #[cfg(feature = "test-dependencies")]
 //! # {
-//! use zcash_primitives::{
+//! use zcash_protocol::{
 //!     consensus::{BlockHeight, Network, Parameters},
 //! };
 //!
@@ -161,7 +161,7 @@ use zcash_protocol::consensus::{self, BlockHeight};
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
-    scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
+    scanning::{BatchRunners, Nullifiers, ScanningKeys, scan_block_with_runners},
 };
 
 #[cfg(feature = "sync")]
@@ -244,7 +244,7 @@ pub trait BlockSource {
 ///        scanning::{ScanPriority, ScanRange},
 ///    };
 ///    use zcash_client_backend::proto::compact_formats::CompactBlock;
-///    use zcash_primitives::consensus::BlockHeight;
+///    use zcash_protocol::consensus::BlockHeight;
 ///
 ///    struct ExampleBlockCache {
 ///        cached_blocks: Arc<Mutex<Vec<CompactBlock>>>,
@@ -390,7 +390,7 @@ where
     /// If `range` is `None`, returns the tip of the entire cache.
     /// If no blocks are found in the cache, returns Ok(`None`).
     fn get_tip_height(&self, range: Option<&ScanRange>)
-        -> Result<Option<BlockHeight>, Self::Error>;
+    -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
     ///
@@ -703,7 +703,7 @@ pub mod testing {
 
     use crate::proto::compact_formats::CompactBlock;
 
-    use super::{error::Error, BlockSource};
+    use super::{BlockSource, error::Error};
 
     pub struct MockBlockSource;
 

@@ -10,7 +10,7 @@ use std::{
     fmt::{self, Display},
 };
 
-use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list0,
     sequence::preceded,
@@ -424,11 +424,11 @@ impl TransactionRequest {
 }
 
 mod render {
-    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
     use zcash_address::ZcashAddress;
     use zcash_protocol::{
         memo::MemoBytes,
-        value::{Zatoshis, COIN},
+        value::{COIN, Zatoshis},
     };
 
     use super::memo_to_base64;
@@ -517,21 +517,21 @@ mod parse {
     use core::fmt::Debug;
 
     use nom::{
+        AsChar, IResult, InputTakeAtPosition,
         bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
         combinator::{all_consuming, map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
-        AsChar, IResult, InputTakeAtPosition,
     };
     use percent_encoding::percent_decode;
     use zcash_address::ZcashAddress;
     use zcash_protocol::value::BalanceError;
     use zcash_protocol::{
         memo::MemoBytes,
-        value::{Zatoshis, COIN},
+        value::{COIN, Zatoshis},
     };
 
-    use super::{memo_from_base64, Payment, Zip321Error};
+    use super::{Payment, Zip321Error, memo_from_base64};
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
@@ -861,19 +861,18 @@ mod tests {
     use proptest::prelude::{any, proptest};
     use std::str::FromStr;
 
-    use zcash_address::{testing::arb_address, ZcashAddress};
+    use zcash_address::{ZcashAddress, testing::arb_address};
     use zcash_protocol::{
         consensus::NetworkType,
         memo::{Memo, MemoBytes},
-        value::{testing::arb_zatoshis, Zatoshis},
+        value::{Zatoshis, testing::arb_zatoshis},
     };
 
     use super::{
-        memo_from_base64, memo_to_base64,
-        parse::{parse_amount, zcashparam, Param},
+        Payment, TransactionRequest, memo_from_base64, memo_to_base64,
+        parse::{Param, parse_amount, zcashparam},
         render::{amount_str, memo_param, str_param},
         testing::{arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
-        Payment, TransactionRequest,
     };
 
     fn check_roundtrip(req: TransactionRequest) {

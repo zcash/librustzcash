@@ -8,8 +8,8 @@ use zcash_address::ConversionError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_primitives::transaction::builder;
 use zcash_protocol::{
-    value::{BalanceError, Zatoshis},
     PoolType,
+    value::{BalanceError, Zatoshis},
 };
 
 use crate::{
@@ -100,11 +100,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
-    /// The wallet tried to pay to an ephemeral transparent address as a normal
-    /// output.
-    #[cfg(feature = "transparent-inputs")]
-    PaysEphemeralTransparentAddress(String),
-
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
@@ -159,7 +154,10 @@ where
                 )
             }
             Error::CommitmentTree(e) => {
-                write!(f, "An error occurred in querying or updating a note commitment tree: {e}")
+                write!(
+                    f,
+                    "An error occurred in querying or updating a note commitment tree: {e}"
+                )
             }
             Error::NoteSelection(e) => {
                 write!(f, "Note selection encountered the following error: {e}")
@@ -168,7 +166,10 @@ where
                 write!(f, "Change output generation failed: {e}")
             }
             Error::Proposal(e) => {
-                write!(f, "Input selection attempted to construct an invalid proposal: {e}")
+                write!(
+                    f,
+                    "Input selection attempted to construct an invalid proposal: {e}"
+                )
             }
             Error::ProposalNotSupported => write!(
                 f,
@@ -198,7 +199,10 @@ where
                 f,
                 "The value lies outside the valid range of Zcash amounts: {e:?}."
             ),
-            Error::InsufficientFunds { available, required } => write!(
+            Error::InsufficientFunds {
+                available,
+                required,
+            } => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
                 u64::from(*available),
@@ -206,29 +210,46 @@ where
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
-            Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {t}"),
+            Error::MemoForbidden => write!(
+                f,
+                "It is not possible to send a memo to a transparent address."
+            ),
+            Error::UnsupportedChangeType(t) => write!(
+                f,
+                "Attempted to send change to an unsupported pool type: {t}"
+            ),
             Error::NoSupportedReceivers(ua) => write!(
                 f,
                 "A recipient's unified address does not contain any receivers to which the wallet can send funds; required one of {}",
-                ua.receiver_types().iter().enumerate().fold(String::new(), |mut acc, (i, tc)| {
-                    let _ = write!(acc, "{}{:?}", if i > 0 { ", " } else { "" }, tc);
-                    acc
-                })
+                ua.receiver_types()
+                    .iter()
+                    .enumerate()
+                    .fold(String::new(), |mut acc, (i, tc)| {
+                        let _ = write!(acc, "{}{:?}", if i > 0 { ", " } else { "" }, tc);
+                        acc
+                    })
             ),
-            Error::KeyNotAvailable(pool) => write!(f, "A key required for transaction construction was not available for pool type {pool}"),
-            Error::NoteMismatch(n) => write!(f, "A note being spent ({n:?}) does not correspond to either the internal or external full viewing key for the provided spending key."),
+            Error::KeyNotAvailable(pool) => write!(
+                f,
+                "A key required for transaction construction was not available for pool type {pool}"
+            ),
+            Error::NoteMismatch(n) => write!(
+                f,
+                "A note being spent ({n:?}) does not correspond to either the internal or external full viewing key for the provided spending key."
+            ),
 
             Error::Address(e) => {
-                write!(f, "An error occurred decoding the address from a payment request: {e}.")
+                write!(
+                    f,
+                    "An error occurred decoding the address from a payment request: {e}."
+                )
             }
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
-                write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
-            }
-            #[cfg(feature = "transparent-inputs")]
-            Error::PaysEphemeralTransparentAddress(addr) => {
-                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {addr}")
+                write!(
+                    f,
+                    "The specified transparent address was not recognized as belonging to the wallet."
+                )
             }
             #[cfg(feature = "pczt")]
             Error::Pczt(e) => write!(f, "PCZT error: {e}"),

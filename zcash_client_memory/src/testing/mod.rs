@@ -1,20 +1,20 @@
-use std::convert::{identity, Infallible};
+use std::convert::{Infallible, identity};
 use std::fmt::Debug;
 
 use zcash_client_backend::{
     data_api::{
+        OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletTest,
         testing::{DataStoreFactory, Reset, TestCache, TestState},
-        OutputOfSentTx, WalletTest, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient},
 };
 use zcash_keys::address::Address;
 use zcash_protocol::{
+    ShieldedProtocol, TxId,
     consensus::BlockHeight,
     local_consensus::LocalNetwork,
     value::{ZatBalance, Zatoshis},
-    ShieldedProtocol, TxId,
 };
 
 use shardtree::store::ShardStore;
@@ -23,7 +23,7 @@ use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::{
-    data_api::{testing::transparent::GapLimits, InputSource, WalletRead},
+    data_api::{InputSource, WalletRead, testing::transparent::GapLimits, wallet::TargetHeight},
     wallet::WalletTransparentOutput,
 };
 
@@ -79,7 +79,7 @@ impl TestCache for MemBlockCache {
 
 impl<P> Reset for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     type Handle = ();
 
@@ -91,7 +91,7 @@ where
 
 impl<P> WalletTest for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     #[allow(clippy::type_complexity)]
     fn get_sent_outputs(&self, txid: &TxId) -> Result<Vec<OutputOfSentTx>, Error> {
@@ -153,8 +153,9 @@ where
     fn get_transparent_output(
         &self,
         outpoint: &::transparent::bundle::OutPoint,
-        _allow_unspendable: bool,
+        _spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+        // FIXME: perform spendability check according to `_spendable_as_of`
         Ok(self
             .transparent_received_outputs
             .get(outpoint)

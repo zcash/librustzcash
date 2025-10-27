@@ -1,9 +1,9 @@
 use std::ops::{Deref, DerefMut, Range};
 
 use zcash_client_backend::data_api::scanning::{
-    spanning_tree::SpanningTree, ScanPriority, ScanRange,
+    ScanPriority, ScanRange, spanning_tree::SpanningTree,
 };
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 use crate::error::Error;
 

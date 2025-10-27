@@ -5,29 +5,29 @@ use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, types::Value, Connection, Row};
+use rusqlite::{Connection, Row, named_params, types::Value};
 
 use zcash_client_backend::{
+    DecryptedOutput, TransferType,
     data_api::{
-        wallet::{ConfirmationsPolicy, TargetHeight},
         Account as _, NullifierQuery, TargetValue,
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{ReceivedNote, WalletOrchardOutput},
-    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    ShieldedProtocol,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
+use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
 
 use super::{
-    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
 };
 
 /// This trait provides a generalization over shielded output representations.
@@ -209,6 +209,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
+    target_height: TargetHeight,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -216,6 +217,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
         txid,
         index,
         ShieldedProtocol::Orchard,
+        target_height,
         to_received_note,
     )
 }
@@ -285,14 +287,14 @@ pub(crate) fn ensure_address<
 
 pub(crate) fn select_unspent_note_meta(
     conn: &Connection,
-    chain_tip_height: BlockHeight,
     wallet_birthday: BlockHeight,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
         ShieldedProtocol::Orchard,
-        chain_tip_height,
         wallet_birthday,
+        anchor_height,
     )
 }
 
@@ -392,39 +394,17 @@ pub(crate) fn get_orchard_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers = match query {
-        NullifierQuery::Unspent => conn.prepare(
-            "SELECT a.uuid, rn.nf
-             FROM orchard_received_notes rn
-             JOIN accounts a ON a.id = rn.account_id
-             JOIN transactions tx ON tx.id_tx = rn.tx
-             WHERE rn.nf IS NOT NULL
-             AND tx.block IS NOT NULL
-             AND rn.id NOT IN (
-               SELECT spends.orchard_received_note_id
-               FROM orchard_received_note_spends spends
-               JOIN transactions stx ON stx.id_tx = spends.transaction_id
-               WHERE stx.block IS NOT NULL  -- the spending tx is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-             )",
-        )?,
-        NullifierQuery::All => conn.prepare(
-            "SELECT a.uuid, rn.nf
-             FROM orchard_received_notes rn
-             JOIN accounts a ON a.id = rn.account_id
-             WHERE nf IS NOT NULL",
-        )?,
-    };
-
-    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountUuid(row.get(0)?);
-        let nf_bytes: [u8; 32] = row.get(1)?;
-        Ok::<_, rusqlite::Error>((account, Nullifier::from_bytes(&nf_bytes).unwrap()))
-    })?;
-
-    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
-    Ok(res)
+    super::common::get_nullifiers(conn, ShieldedProtocol::Orchard, query, |nf_bytes| {
+        Nullifier::from_bytes(<&[u8; 32]>::try_from(nf_bytes).map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "unable to parse Orchard nullifier: expected 32 bytes".to_string(),
+            )
+        })?)
+        .into_option()
+        .ok_or(SqliteClientError::CorruptedData(
+            "unable to parse Orchard nullifier".to_string(),
+        ))
+    })
 }
 
 pub(crate) fn detect_spending_accounts<'a>(

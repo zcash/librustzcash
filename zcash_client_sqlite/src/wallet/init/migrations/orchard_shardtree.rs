@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{named_params, OptionalExtension};
+use rusqlite::{OptionalExtension, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use tracing::debug;
 use uuid::Uuid;

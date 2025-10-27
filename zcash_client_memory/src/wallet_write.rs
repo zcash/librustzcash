@@ -10,32 +10,32 @@ use ::transparent::bundle::OutPoint;
 use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::store::ShardStore;
 use zcash_client_backend::{
+    TransferType,
     address::UnifiedAddress,
-    data_api::{
-        chain::ChainState,
-        scanning::{ScanPriority, ScanRange},
-        AccountPurpose, AccountSource, TransactionStatus, WalletCommitmentTrees as _,
-        Zip32Derivation, SAPLING_SHARD_HEIGHT,
-    },
     data_api::{
         AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction,
         SentTransactionOutput, WalletRead, WalletWrite,
     },
+    data_api::{
+        AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
+        WalletCommitmentTrees as _, Zip32Derivation,
+        chain::ChainState,
+        scanning::{ScanPriority, ScanRange},
+    },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, Recipient, WalletTransparentOutput},
-    TransferType,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
     PoolType,
     ShieldedProtocol::{self, Sapling},
     TxId,
+    consensus::{self, BlockHeight, NetworkUpgrade},
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::Error, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, PRUNING_DEPTH,
-    VERIFY_LOOKAHEAD,
+    MemoryWalletBlock, MemoryWalletDb, Nullifier, PRUNING_DEPTH, ReceivedNote, VERIFY_LOOKAHEAD,
+    error::Error,
 };
 
 #[cfg(feature = "orchard")]
@@ -47,11 +47,10 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::bundle::TxOut,
+    ::transparent::{address::TransparentAddress, bundle::TxOut},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
-    zcash_primitives::legacy::TransparentAddress,
 };
 
 impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
@@ -1196,7 +1195,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         use zcash_keys::keys::AddressGenerationError;
         // TODO: We need to implement first_unsafe_index to make sure we dont violate gap invarient
 
-        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
+        use transparent::keys::NonHardenedChildIndex;
         let first_unsafe = self.first_unsafe_index(account_id)?;
         if let Some(account) = self.accounts.get_mut(account_id) {
             let first_unreserved = account.first_unreserved_index()?;

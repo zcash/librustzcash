@@ -1,4 +1,4 @@
-use orchard::{bundle::Authorized, circuit::VerifyingKey, pczt::Unbound, Bundle};
+use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey, pczt::Unbound};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
 

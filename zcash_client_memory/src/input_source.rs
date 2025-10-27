@@ -1,17 +1,19 @@
 use std::num::NonZeroU32;
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::WalletUtxo;
 use zcash_client_backend::{
     data_api::{
-        wallet::{ConfirmationsPolicy, TargetHeight},
         AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::NoteId,
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
+    ShieldedProtocol::{self, Sapling},
     consensus::{self, BranchId},
     value::Zatoshis,
-    ShieldedProtocol::{self, Sapling},
 };
 
 #[cfg(feature = "orchard")]
@@ -19,26 +21,24 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::bundle::OutPoint,
-    zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTransparentOutput},
-    zcash_primitives::legacy::TransparentAddress,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    zcash_client_backend::data_api::TransactionStatus,
     zcash_protocol::consensus::BlockHeight,
 };
 
-use crate::{error::Error, to_spendable_notes, AccountId, MemoryWalletDb};
+use crate::{AccountId, MemoryWalletDb, error::Error, to_spendable_notes};
 
 impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     type Error = crate::error::Error;
     type AccountId = AccountId;
     type NoteRef = NoteId;
 
-    /// Find the note with the given index (output index for Sapling, action index for Orchard)
-    /// that belongs to the given transaction
     fn get_spendable_note(
         &self,
         txid: &zcash_primitives::transaction::TxId,
         protocol: zcash_protocol::ShieldedProtocol,
         index: u32,
+        target_height: TargetHeight,
     ) -> Result<
         Option<
             zcash_client_backend::wallet::ReceivedNote<
@@ -48,10 +48,6 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         >,
         Self::Error,
     > {
-        let target_height = TargetHeight::from(
-            self.chain_height()?
-                .ok_or(crate::error::Error::ChainHeightUnknown)?,
-        );
         let note = self.received_notes.iter().find(|rn| {
             &rn.txid == txid && rn.note.protocol() == protocol && rn.output_index == index
         });
@@ -152,21 +148,13 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         unimplemented!()
     }
 
-    /// Returns the list of spendable transparent outputs received by this wallet at `address`
-    /// such that, at height `target_height`:
-    /// * the transaction that produced the output had or will have at least `min_confirmations`
-    ///   confirmations; and
-    /// * the output is unspent as of the current chain tip.
-    ///
-    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
-    /// iff the spending transaction will not be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletUtxo>, Self::Error> {
         let txos = self
             .transparent_received_outputs
             .iter()
@@ -178,38 +166,50 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
             })
             .filter_map(|(outpoint, txo, tx)| {
                 txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                    .map(|out| {
+                        WalletUtxo::new(
+                            out,
+                            // FIXME: this needs to be updated to identify the transparent key
+                            // scope for derived addresses in the wallet.
+                            None,
+                        )
+                    })
             })
             .collect();
         Ok(txos)
     }
 
-    /// Fetches the transparent output corresponding to the provided `outpoint`.
-    ///
-    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable as of the chain tip height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        _target_height: TargetHeight,
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
+        // FIXME: make use of `target_height` to check spendability.
         Ok(self
             .transparent_received_outputs
             .get(outpoint)
             .map(|txo| (txo, self.tx_table.get(&txo.transaction_id)))
             .and_then(|(txo, tx)| {
                 txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                    .map(|out| {
+                        WalletUtxo::new(
+                            out,
+                            // FIXME: this needs to be updated to identify the transparent key
+                            // scope for derived addresses in the wallet.
+                            None,
+                        )
+                    })
             }))
     }
 
-    /// Returns metadata for the spendable notes in the wallet.
     fn get_account_metadata(
         &self,
         account_id: Self::AccountId,
         selector: &NoteFilter,
+        target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let chain_tip_height = self.chain_height()?.ok_or(Error::ChainHeightUnknown)?;
-        let target_height = TargetHeight::from(chain_tip_height + 1);
         let confirmations_policy = ConfirmationsPolicy::new_symmetrical(
             NonZeroU32::MIN,
             #[cfg(feature = "transparent-inputs")]

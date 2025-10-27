@@ -4,8 +4,8 @@
 use bitflags::bitflags;
 use transparent::address::TransparentAddress::*;
 use zcash_address::{
-    unified::{Container, Receiver},
     ConversionError, TryFromAddress,
+    unified::{Container, Receiver},
 };
 use zcash_client_backend::data_api::AccountSource;
 #[cfg(feature = "transparent-inputs")]
@@ -14,7 +14,7 @@ use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
-use zcash_protocol::{consensus::NetworkType, memo::MemoBytes, PoolType, ShieldedProtocol};
+use zcash_protocol::{PoolType, ShieldedProtocol, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
 
 use crate::error::SqliteClientError;
@@ -102,7 +102,7 @@ pub(crate) fn decode_epoch_seconds(i: i64) -> Result<SystemTime, SchedulingError
 ///
 /// This extends the [`zip32::Scope`] type to include the custom scope used to generate keys for
 /// ephemeral transparent addresses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum KeyScope {
     /// A key scope corresponding to a [`zip32::Scope`].
     Zip32(zip32::Scope),
@@ -143,6 +143,15 @@ impl KeyScope {
             ))),
         }
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn as_transparent(&self) -> Option<TransparentKeyScope> {
+        match self {
+            KeyScope::Zip32(scope) => Some(TransparentKeyScope::from(*scope)),
+            KeyScope::Ephemeral => Some(TransparentKeyScope::custom(2).expect("valid scope")),
+            KeyScope::Foreign => None,
+        }
+    }
 }
 
 impl From<zip32::Scope> for KeyScope {
@@ -154,11 +163,7 @@ impl From<zip32::Scope> for KeyScope {
 #[cfg(feature = "transparent-inputs")]
 impl From<KeyScope> for Option<TransparentKeyScope> {
     fn from(value: KeyScope) -> Self {
-        match value {
-            KeyScope::Zip32(scope) => Some(scope.into()),
-            KeyScope::Ephemeral => Some(TransparentKeyScope::custom(2).expect("valid scope")),
-            KeyScope::Foreign => None,
-        }
+        value.as_transparent()
     }
 }
 

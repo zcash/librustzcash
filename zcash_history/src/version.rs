@@ -4,7 +4,7 @@ use std::io;
 use blake2b_simd::Params as Blake2Params;
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::{node_data, NodeData, MAX_NODE_DATA_SIZE};
+use crate::{MAX_NODE_DATA_SIZE, NodeData, node_data};
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     let hash_result = Blake2Params::new()

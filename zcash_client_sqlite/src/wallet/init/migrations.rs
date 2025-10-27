@@ -33,11 +33,13 @@ mod spend_key_available;
 mod support_legacy_sqlite;
 mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
+mod tx_observation_height;
 mod tx_retrieval_queue;
 mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
+mod v_received_output_spends_account;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_additional_totals;
 mod v_transactions_net;
@@ -51,7 +53,7 @@ mod wallet_summaries;
 use std::{rc::Rc, sync::Mutex};
 
 use rand_core::RngCore;
-use rusqlite::{named_params, OptionalExtension};
+use rusqlite::{OptionalExtension, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
@@ -116,10 +118,12 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
-    //                                        /                         \
-    //                     support_zcashd_wallet_import          fix_v_transactions_expired_unmined
-    //                                                                           |
-    //                                                                v_tx_outputs_return_addrs
+    //                                        /         |               \
+    //                 support_zcashd_wallet_import     |            fix_v_transactions_expired_unmined
+    //                                                  |                      /         \
+    //                                       tx_observation_height            /           \
+    //                                                                       /             \
+    //                                            v_received_output_spends_account    v_tx_outputs_return_addrs
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -198,6 +202,10 @@ pub(super) fn all_migrations<
         Box::new(support_zcashd_wallet_import::Migration),
         Box::new(fix_v_transactions_expired_unmined::Migration),
         Box::new(v_tx_outputs_return_addrs::Migration),
+        Box::new(tx_observation_height::Migration {
+            params: params.clone(),
+        }),
+        Box::new(v_received_output_spends_account::Migration),
     ]
 }
 
@@ -209,7 +217,8 @@ pub(super) fn all_migrations<
 #[allow(dead_code)] // marked as dead code so that this appears in docs with --document-private-items
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
-    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3,
+    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3, V_0_18_0,
+    V_0_18_5,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -325,11 +334,21 @@ pub const V_0_18_0: &[Uuid] = &[
     v_tx_outputs_return_addrs::MIGRATION_ID,
 ];
 
+/// Leaf migrations in the 0.18.0 release.
+pub const V_0_18_5: &[Uuid] = &[
+    tx_retrieval_queue_expiry::MIGRATION_ID,
+    support_zcashd_wallet_import::MIGRATION_ID,
+    v_tx_outputs_return_addrs::MIGRATION_ID,
+    tx_observation_height::MIGRATION_ID,
+];
+
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
     v_tx_outputs_return_addrs::MIGRATION_ID,
+    tx_observation_height::MIGRATION_ID,
+    v_received_output_spends_account::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
@@ -389,9 +408,9 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
+        WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
-        WalletDb,
     };
 
     /// Tests that we can migrate from a completely empty wallet database to the target

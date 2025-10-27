@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     num::NonZeroU32,
 };
 
@@ -7,14 +7,14 @@ use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
 use zcash_client_backend::data_api::{
+    AddressInfo, BlockMetadata, NullifierQuery, WalletRead, WalletSummary, Zip32Derivation,
     scanning::ScanRange,
     wallet::{ConfirmationsPolicy, TargetHeight},
-    AddressInfo, BlockMetadata, NullifierQuery, WalletRead, WalletSummary, Zip32Derivation,
 };
 use zcash_client_backend::{
     data_api::{
-        scanning::ScanPriority, Account as _, AccountBalance, AccountSource, Balance, Progress,
-        Ratio, SeedRelevance, TransactionDataRequest, TransactionStatus,
+        Account as _, AccountBalance, AccountSource, Balance, Progress, Ratio, SeedRelevance,
+        TransactionDataRequest, TransactionStatus, scanning::ScanPriority,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::NoteId,
@@ -22,25 +22,26 @@ use zcash_client_backend::{
 use zcash_keys::{address::UnifiedAddress, keys::UnifiedIncomingViewingKey};
 use zcash_primitives::{
     block::BlockHash,
-    consensus::BlockHeight,
     transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
-    consensus::{self, BranchId},
-    memo::Memo,
     PoolType,
+    consensus::{self, BlockHeight, BranchId},
+    memo::Memo,
 };
 use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    core::ops::Range,
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::{keys::NonHardenedChildIndex, TransparentAddress},
+    transparent::{
+        address::TransparentAddress,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
+    zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
 };
 
-use crate::{error::Error, Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier};
+use crate::{Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, error::Error};
 
 impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     type Error = Error;
@@ -273,7 +274,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         for (account, balance) in account_balances.iter_mut() {
             let transparent_balances =
                 self.get_transparent_balances(*account, target_height, confirmations_policy)?;
-            for (_, bal) in transparent_balances.into_iter() {
+            for (_, (_, bal)) in transparent_balances.into_iter() {
                 balance.with_unshielded_balance_mut(|b: &mut Balance| -> Result<(), Error> {
                     *b = (*b + bal)?;
                     Ok(())
@@ -632,25 +633,6 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .collect(),
         })
     }
-    #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        account_id: Self::AccountId,
-        index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(self
-            .accounts
-            .get(account_id)
-            .map(Account::ephemeral_addresses)
-            .unwrap_or_else(|| Ok(vec![]))?
-            .into_iter()
-            .filter(|(_addr, meta)| {
-                index_range.as_ref().map_or(true, |range| {
-                    meta.address_index().is_some_and(|i| range.contains(&i))
-                })
-            })
-            .collect::<Vec<_>>())
-    }
 
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -658,7 +640,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         _include_change: bool,
         _include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         let account = self
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
@@ -675,11 +657,16 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .iter()
             .filter_map(|(diversifier_index, ua)| {
                 ua.transparent().map(|ta| {
-                    let metadata =
-                        zcash_primitives::legacy::keys::NonHardenedChildIndex::from_index(
-                            (*diversifier_index).try_into().unwrap(),
-                        )
-                        .map(|i| TransparentAddressMetadata::new(Scope::External.into(), i));
+                    let metadata = TransparentAddressMetadata::derived(
+                        Scope::External.into(),
+                        NonHardenedChildIndex::from_index((*diversifier_index).try_into().unwrap())
+                            .expect(
+                                "diversifier index corresponds to a valid NonHardenedChildIndex",
+                            ),
+                        Exposure::Unknown,
+                        None,
+                    );
+
                     (*ta, metadata)
                 })
             })
@@ -699,7 +686,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         tracing::debug!("get_transparent_balances");
 
         let mut balances = HashMap::new();
@@ -715,10 +702,11 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         }) {
             if self.utxo_is_spendable(outpoint, target_height, confirmations_policy)? {
                 let address = txo.address;
-                balances
+                let entry = balances
                     .entry(address)
-                    .or_insert(Balance::ZERO)
-                    .add_spendable_value(txo.txout.value())?;
+                    .or_insert((txo.key_scope, Balance::ZERO));
+
+                entry.1.add_spendable_value(txo.txout.value())?;
             }
         }
 

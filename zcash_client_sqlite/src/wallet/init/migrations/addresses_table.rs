@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rusqlite::{named_params, Transaction};
+use rusqlite::{Transaction, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ use zcash_keys::{
 use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
-use crate::{wallet::init::WalletMigrationError, UA_TRANSPARENT};
+use crate::{UA_TRANSPARENT, wallet::init::WalletMigrationError};
 
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::keys::IncomingViewingKey;

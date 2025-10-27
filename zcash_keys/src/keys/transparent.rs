@@ -7,7 +7,7 @@ use core::array::TryFromSliceError;
 
 use bip32::{PrivateKey, PrivateKeyBytes};
 use secp256k1::{PublicKey, Secp256k1, SecretKey, Signing};
-use secrecy::{zeroize::ZeroizeOnDrop, ExposeSecret, SecretString, SecretVec, Zeroize};
+use secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize, zeroize::ZeroizeOnDrop};
 use zcash_protocol::consensus::NetworkConstants;
 
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
@@ -342,8 +342,8 @@ mod tests {
     use zcash_script::script::Evaluable;
 
     use super::{
-        test_vectors::{VectorKind, INVALID, VALID},
         Key,
+        test_vectors::{INVALID, VALID, VectorKind},
     };
 
     #[test]
@@ -391,11 +391,13 @@ mod tests {
                     assert_eq!(hex::encode(script.to_bytes()), v.raw_bytes_hex);
 
                     // Public key must be invalid private key
-                    assert!(Key::decode_base58(
-                        &v.network,
-                        &SecretString::new(v.base58_encoding.into())
-                    )
-                    .is_err());
+                    assert!(
+                        Key::decode_base58(
+                            &v.network,
+                            &SecretString::new(v.base58_encoding.into())
+                        )
+                        .is_err()
+                    );
                 }
             }
         }

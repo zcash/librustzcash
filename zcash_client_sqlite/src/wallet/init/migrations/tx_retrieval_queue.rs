@@ -1,6 +1,6 @@
 //! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 
-use rusqlite::{named_params, Transaction};
+use rusqlite::{Transaction, named_params};
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -19,9 +19,9 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        error::SqliteClientError,
-        wallet::{transparent::uivk_legacy_transparent_address, TxQueryType},
         AccountRef, TxRef,
+        error::SqliteClientError,
+        wallet::{TxQueryType, transparent::uivk_legacy_transparent_address},
     },
     rusqlite::OptionalExtension as _,
     std::convert::Infallible,
@@ -29,8 +29,8 @@ use {
     zcash_client_backend::data_api::DecryptedTransaction,
     zcash_keys::encoding::AddressCodec,
     zcash_protocol::{
-        consensus::{BlockHeight, BranchId},
         TxId,
+        consensus::{BlockHeight, BranchId},
     },
 };
 
@@ -336,9 +336,9 @@ mod tests {
     };
 
     use crate::{
-        testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::tests::test_migrate, WalletMigrator},
         WalletDb,
+        testing::db::{test_clock, test_rng},
+        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
     };
 
     use super::{DEPENDENCIES, MIGRATION_ID};

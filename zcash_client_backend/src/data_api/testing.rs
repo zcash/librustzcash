@@ -15,11 +15,11 @@ use nonempty::NonEmpty;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+use shardtree::{ShardTree, error::ShardTreeError, store::memory::MemoryShardStore};
 use subtle::ConditionallySelectable;
 
 use ::sapling::{
-    note_encryption::{sapling_note_encryption, SaplingDomain},
+    note_encryption::{SaplingDomain, sapling_note_encryption},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
 };
@@ -31,42 +31,39 @@ use zcash_keys::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{components::sapling::zip212_enforcement, fees::FeeRule, Transaction, TxId},
+    transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
-    ShieldedProtocol,
 };
 use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
-    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ReceivedNotes, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction,
+    TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary,
+    WalletTest, WalletWrite, Zip32Derivation,
+    chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
     scanning::ScanRange,
     wallet::{
-        create_proposed_transactions,
+        ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
-        ConfirmationsPolicy, SpendingKeys,
     },
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ReceivedNotes, ScannedBlock, SeedRelevance, SentTransaction, TransactionDataRequest,
-    TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
-#[cfg(feature = "transparent-inputs")]
-use crate::data_api::Balance;
 use crate::{
-    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
+    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
     fees::{
-        standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
+        standard::{self, SingleOutputChangeStrategy},
     },
     proposal::Proposal,
     proto::compact_formats::{
@@ -77,10 +74,9 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
-    crate::wallet::TransparentAddressMetadata,
-    ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
-    std::ops::Range,
+    super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
+    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
+    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     transparent::GapLimits,
 };
 
@@ -851,15 +847,14 @@ where
             .cloned()
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
-        let result = scan_cached_blocks(
+        scan_cached_blocks(
             &self.network,
             self.cache.block_source(),
             &mut self.wallet_data,
             from_height,
             &prior_cached_block.chain_state,
             limit,
-        );
-        result
+        )
     }
 
     /// Insert shard roots for both trees.
@@ -1544,8 +1539,8 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     /// use std::num::NonZeroU8;
     ///
     /// use incrementalmerkletree::frontier::Frontier;
-    /// use zcash_primitives::{block::BlockHash, consensus::Parameters};
-    /// use zcash_protocol::consensus::NetworkUpgrade;
+    /// use zcash_primitives::block::BlockHash;
+    /// use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
     /// use zcash_client_backend::data_api::{
     ///     chain::{ChainState, CommitmentTreeRoot},
     ///     testing::{InitialChainState, TestBuilder},
@@ -2543,6 +2538,7 @@ impl InputSource for MockWalletDb {
         _txid: &TxId,
         _protocol: ShieldedProtocol,
         _index: u32,
+        _target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -2573,6 +2569,7 @@ impl InputSource for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _selector: &NoteFilter,
+        _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
         Err(())
@@ -2725,7 +2722,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _include_change: bool,
         _include_standalone: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2735,7 +2732,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, Balance>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2749,25 +2746,8 @@ impl WalletRead for MockWalletDb {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_known_ephemeral_addresses(
-        &self,
-        _account: Self::AccountId,
-        _index_range: Option<Range<NonHardenedChildIndex>>,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        Ok(vec![])
-    }
-
-    #[cfg(feature = "transparent-inputs")]
     fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
         Ok(BlockHeight::from(0u32))
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn find_account_for_ephemeral_address(
-        &self,
-        _address: &TransparentAddress,
-    ) -> Result<Option<Self::AccountId>, Self::Error> {
-        Ok(None)
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {

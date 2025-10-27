@@ -291,7 +291,7 @@ impl Bundle {
             (Some(_), _) | (_, Some(_))
                 if self.actions.len() != actions.len() || self.value_sum != value_sum =>
             {
-                return None
+                return None;
             }
             // IO Finalizer has run, and neither bundle has excess spends or outputs.
             (Some(_), _) | (_, Some(_)) => (),

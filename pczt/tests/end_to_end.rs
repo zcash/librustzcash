@@ -9,15 +9,16 @@ use ::transparent::{
 };
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
+    Pczt,
     roles::{
         combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, prover::Prover,
         signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
         updater::Updater,
     },
-    Pczt,
 };
 use rand_core::OsRng;
-use shardtree::{store::memory::MemoryShardStore, ShardTree};
+use sha2::Digest as _;
+use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder, PcztResult},

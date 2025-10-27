@@ -480,15 +480,15 @@ mod tests {
     use ff::Field;
     use rand_core::OsRng;
 
-    use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+    use sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
     use transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_primitives::{
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         transaction::{
+            Transaction, TransactionData, TxVersion,
             builder::{BuildConfig, Builder},
             components::tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             fees::{fixed, zip317::MINIMUM_FEE},
-            Transaction, TransactionData, TxVersion,
         },
     };
     use zcash_protocol::{
@@ -498,7 +498,7 @@ mod tests {
 
     use zcash_proofs::prover::LocalTxProver;
 
-    use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
+    use super::{Context, DemoBuilder, Precondition, Program, Witness, close, hash_1, open};
 
     #[derive(PartialEq, Copy, Clone, Debug)]
     struct FutureNetwork;

@@ -241,9 +241,9 @@ impl TzeOut {
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
+    use zcash_protocol::consensus::BranchId;
 
     use crate::{
-        consensus::BranchId,
         extensions::transparent::{AuthData, Precondition, Witness},
         transaction::components::amount::testing::arb_nonnegative_amount,
         transaction::testing::arb_txid,

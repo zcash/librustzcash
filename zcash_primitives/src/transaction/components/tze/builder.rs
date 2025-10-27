@@ -23,8 +23,11 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::InvalidAmount => write!(f, "Invalid amount"),
-            Error::WitnessModeMismatch(expected, actual) =>
-                write!(f, "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}", expected, actual),
+            Error::WitnessModeMismatch(expected, actual) => write!(
+                f,
+                "TZE witness builder returned a mode that did not match the mode with which the input was initially constructed: expected = {:?}, actual = {:?}",
+                expected, actual
+            ),
         }
     }
 }

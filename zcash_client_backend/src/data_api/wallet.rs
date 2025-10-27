@@ -46,18 +46,18 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use crate::{
     data_api::{
-        error::Error, wallet::input_selection::propose_send_max, Account, MaxSpendMode,
-        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
+        Account, MaxSpendMode, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
+        WalletRead, WalletWrite, error::Error, wallet::input_selection::propose_send_max,
     },
     decrypt_transaction,
     fees::{
-        standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
+        ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
 use sapling::{
-    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+    note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
     prover::{OutputProver, SpendProver},
 };
 use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
@@ -67,28 +67,31 @@ use zcash_keys::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::transaction::{
+    Transaction, TxId,
     builder::{BuildConfig, BuildResult, Builder},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
-    Transaction, TxId,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    PoolType, ShieldedProtocol,
 };
 use zip32::Scope;
 use zip321::Payment;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    crate::{
+        fees::ChangeValue,
+        proposal::StepOutput,
+        wallet::{TransparentAddressMetadata, TransparentAddressSource},
+    },
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     transparent::bundle::TxOut,
-    zcash_keys::encoding::AddressCodec,
 };
 
 #[cfg(feature = "pczt")]
@@ -608,21 +611,20 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 where
     ParamsT: consensus::Parameters + Clone,
     DbT: InputSource,
-    DbT: WalletRead<
-        Error = <DbT as InputSource>::Error,
-        AccountId = <DbT as InputSource>::AccountId,
-    >,
+    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
-    let request = zip321::TransactionRequest::new(vec![Payment::new(
-        to.to_zcash_address(params),
-        amount,
-        memo,
-        None,
-        None,
-        vec![],
-    )
-    .ok_or(Error::MemoForbidden)?])
+    let request = zip321::TransactionRequest::new(vec![
+        Payment::new(
+            to.to_zcash_address(params),
+            amount,
+            memo,
+            None,
+            None,
+            vec![],
+        )
+        .ok_or(Error::MemoForbidden)?,
+    ])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
@@ -1203,17 +1205,17 @@ where
              outpoint: OutPoint,
              txout: TxOut|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                let pubkey = match metadata_from_address(recipient_address)? {
-                    TransparentAddressMetadata::Derived {
+                let pubkey = match metadata_from_address(recipient_address)?.source() {
+                    TransparentAddressSource::Derived {
                         scope,
                         address_index,
                     } => ufvk
                         .transparent()
                         .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                        .derive_address_pubkey(scope, address_index)
+                        .derive_address_pubkey(*scope, *address_index)
                         .expect("spending key derivation should not fail"),
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressMetadata::Standalone(pubkey) => pubkey,
+                    TransparentAddressSource::Standalone(pubkey) => *pubkey,
                 };
 
                 utxos_spent.push(outpoint.clone());
@@ -1365,15 +1367,6 @@ where
              transparent_output_meta: &mut Vec<_>,
              to: TransparentAddress|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                // Always reject sending to one of our known ephemeral addresses.
-                #[cfg(feature = "transparent-inputs")]
-                if wallet_db
-                    .find_account_for_ephemeral_address(&to)
-                    .map_err(Error::DataSource)?
-                    .is_some()
-                {
-                    return Err(Error::PaysEphemeralTransparentAddress(to.encode(params)));
-                }
                 if payment.memo().is_some() {
                     return Err(Error::MemoForbidden);
                 }
@@ -1510,7 +1503,7 @@ where
             .map_err(Error::DataSource)?;
         assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
 
-        // We don't need the TransparentAddressMetadata here; we can look it up from the data source later.
+        // We don't need the TransparentAddressSource here; we can look it up from the data source later.
         for ((change_index, change_value), (ephemeral_address, _)) in
             ephemeral_outputs.iter().zip(addresses_and_metadata)
         {
@@ -1592,17 +1585,17 @@ where
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
     for (_address, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(match address_metadata {
-            TransparentAddressMetadata::Derived {
+        transparent_signing_set.add_key(match address_metadata.source() {
+            TransparentAddressSource::Derived {
                 scope,
                 address_index,
             } => spending_keys
                 .usk
                 .transparent()
-                .derive_secret_key(scope, address_index)
+                .derive_secret_key(*scope, *address_index)
                 .expect("spending key derivation should not fail"),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => *spending_keys
+            TransparentAddressSource::Standalone(_) => *spending_keys
                 .standalone_transparent_keys
                 .get(&_address)
                 .ok_or(Error::AddressNotRecognized(_address))?,
@@ -1969,13 +1962,13 @@ where
                                 &TransparentAddress::from_script_from_chain(input.script_pubkey())
                                     .expect("we created this with a supported transparent address"),
                             )
-                            .and_then(|address_metadata| match address_metadata {
-                                TransparentAddressMetadata::Derived {
+                            .and_then(|address_metadata| match address_metadata.source() {
+                                TransparentAddressSource::Derived {
                                     scope,
                                     address_index,
                                 } => Some((index, *scope, *address_index)),
                                 #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressMetadata::Standalone(_) => None,
+                                TransparentAddressSource::Standalone(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();
@@ -2067,7 +2060,7 @@ where
     DbT::AccountId: serde::de::DeserializeOwned,
 {
     use std::collections::BTreeMap;
-    use zcash_note_encryption::{Domain, ShieldedOutput, ENC_CIPHERTEXT_SIZE};
+    use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput};
 
     let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
 

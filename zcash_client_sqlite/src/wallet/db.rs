@@ -266,6 +266,11 @@ CREATE TABLE blocks (
 ///   will only be set for transactions created using this wallet specifically, and not any
 ///   other wallet that uses the same seed (including previous installations of the same
 ///   wallet application.)
+/// - `min_observed_height`: the mempool height at the time that the wallet observed the
+///   transaction, or the mined height of the transaction, whichever is less.
+/// - `confirmed_unmined_at_height`: the maximum block height at which the wallet has observed
+///   positive proof that the transaction has not been mined in a block. Must be NULL if
+///   `mined_height` is not null.
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -278,8 +283,18 @@ CREATE TABLE "transactions" (
     raw BLOB,
     fee INTEGER,
     target_height INTEGER,
+    min_observed_height INTEGER NOT NULL,
+    confirmed_unmined_at_height INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
-    CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
+    CONSTRAINT height_consistency CHECK (
+        block IS NULL OR mined_height = block
+    ),
+    CONSTRAINT min_observed_consistency CHECK (
+        mined_height IS NULL OR min_observed_height <= mined_height
+    ),
+    CONSTRAINT confirmed_unmined_consistency CHECK (
+        confirmed_unmined_at_height IS NULL OR mined_height IS NULL
+    )
 )"#;
 
 /// Stores the Sapling notes received by the wallet.
@@ -578,9 +593,8 @@ pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "s
 ///   about transparent inputs to a transaction, this is a reference to that transaction record.
 ///   NULL for transactions where the request for enhancement data is based on discovery due
 ///   to blockchain scanning.
-/// - `request_expiry`: The block height at which this transaction data request will be considered
-///   expired. This is used to ensure that permanently-unsatisfiable transaction data requests
-///   do not stay in the queue forever.
+/// - `request_expiry`: UNUSED; this column should be removed the next time that this table
+///   should be rewritten (TODO).
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE tx_retrieval_queue (
     txid BLOB NOT NULL UNIQUE,
@@ -862,21 +876,27 @@ pub(super) const VIEW_RECEIVED_OUTPUT_SPENDS: &str = "
 CREATE VIEW v_received_output_spends AS
 SELECT
     2 AS pool,
-    sapling_received_note_id AS received_output_id,
-    transaction_id
-FROM sapling_received_note_spends
+    s.sapling_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM sapling_received_note_spends s
+JOIN sapling_received_notes rn ON rn.id = s.sapling_received_note_id
 UNION
 SELECT
     3 AS pool,
-    orchard_received_note_id AS received_output_id,
-    transaction_id
-FROM orchard_received_note_spends
+    s.orchard_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM orchard_received_note_spends s
+JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
 UNION
 SELECT
     0 AS pool,
-    transparent_received_output_id AS received_output_id,
-    transaction_id
-FROM transparent_received_output_spends";
+    s.transparent_received_output_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM transparent_received_output_spends s
+JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id";
 
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS
