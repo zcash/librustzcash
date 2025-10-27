@@ -71,13 +71,13 @@ orchard = { version = "0.11", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
-bip32 = { version = "=0.6.0-pre.1", default-features = false }
+bip32 = { version = "=0.6.0-pre.1", default-features = false, features = ["alloc"] }
 block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
 crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
 transparent = { package = "zcash_transparent", version = "0.6", path = "zcash_transparent", default-features = false }
-zcash_script = { version = "0.4", default-features = false }
+zcash_script = { version = "0.4.2", default-features = false }
 zeroize = { version = "1.7", default-features = false }
 
 # Boilerplate & missing stdlib

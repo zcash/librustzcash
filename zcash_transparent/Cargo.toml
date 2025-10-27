@@ -1,7 +1,7 @@
 [package]
 name = "zcash_transparent"
 description = "Rust implementations of the Zcash transparent protocol"
-version = "0.6.0"
+version = "0.6.1"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>",
@@ -21,7 +21,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
-zcash_script.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:
@@ -47,6 +46,7 @@ proptest = { workspace = true, optional = true }
 bip32.workspace = true
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
+zcash_script = { workspace = true, features = ["descriptor"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)

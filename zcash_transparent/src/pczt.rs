@@ -239,7 +239,7 @@ impl Bip32Derivation {
     /// Extracts the BIP 44 account index, scope, and address index from this derivation
     /// path.
     ///
-    /// Returns `None` if the seed fingerprints don't match, or if this is a non-standard
+    /// Returns `None` if the seed fingerprints don't match, or if this is not a BIP 44
     /// derivation path.
     pub fn extract_bip_44_fields(
         &self,
@@ -266,6 +266,54 @@ impl Bip32Derivation {
                         .expect("address_index is not hardened");
 
                     Some((account_index, scope, address_index))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Extracts the ZIP 48 account index, scope, and address index from this derivation
+    /// path.
+    ///
+    /// Returns `None` if the seed fingerprints don't match, or if this is not a ZIP 48
+    /// derivation path.
+    pub fn extract_zip_48_fields(
+        &self,
+        seed_fp: &zip32::fingerprint::SeedFingerprint,
+        expected_coin_type: ChildNumber,
+    ) -> Option<(zip32::AccountId, zip32::Scope, NonHardenedChildIndex)> {
+        if self.seed_fingerprint == seed_fp.to_bytes() {
+            match &self.derivation_path[..] {
+                [
+                    purpose,
+                    coin_type,
+                    account_index,
+                    script_type,
+                    scope,
+                    address_index,
+                ] if purpose == &ChildNumber(48 | ChildNumber::HARDENED_FLAG)
+                    && coin_type.is_hardened()
+                    && coin_type == &expected_coin_type
+                    && account_index.is_hardened()
+                    && script_type == &ChildNumber(133000 | ChildNumber::HARDENED_FLAG)
+                    && !scope.is_hardened()
+                    && !address_index.is_hardened() =>
+                {
+                    let account_index = zip32::AccountId::try_from(account_index.index())
+                        .expect("account_index is hardened");
+
+                    let scope = match scope.index() {
+                        0 => Some(zip32::Scope::External),
+                        1 => Some(zip32::Scope::Internal),
+                        _ => None,
+                    };
+
+                    let address_index = NonHardenedChildIndex::from_index(address_index.index())
+                        .expect("address_index is not hardened");
+
+                    scope.map(|scope| (account_index, scope, address_index))
                 }
                 _ => None,
             }

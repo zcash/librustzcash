@@ -504,8 +504,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_script]]
-version = "0.4.0"
-when = "2025-09-25"
+version = "0.4.2"
+when = "2025-10-24"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -518,11 +518,11 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.6.0"
-when = "2025-10-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.6.1"
+when = "2025-10-27"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zip32]]
 version = "0.2.0"

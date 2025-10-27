@@ -3,8 +3,9 @@ use std::sync::OnceLock;
 use ::transparent::{
     address::{Script, TransparentAddress},
     bundle as transparent,
-    keys::{AccountPrivKey, IncomingViewingKey},
+    keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
     sighash::SighashType,
+    zip48,
 };
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
@@ -16,7 +17,6 @@ use pczt::{
     },
 };
 use rand_core::OsRng;
-use sha2::Digest as _;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
@@ -32,10 +32,7 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };
-use zcash_script::{
-    pattern::check_multisig,
-    script::{self, Evaluable},
-};
+use zcash_script::script::{self, Evaluable};
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
@@ -203,33 +200,22 @@ fn transparent_to_orchard() {
 fn transparent_p2sh_multisig_to_orchard() {
     let params = MainNetwork;
     let rng = OsRng;
-    let secp = secp256k1::Secp256k1::signing_only();
 
-    // Create 3 transparent accounts to control a 2-of-3 P2SH address.
-    let transparent_sk = |i| {
-        let transparent_account_sk =
-            AccountPrivKey::from_seed(&params, &[i; 32], zip32::AccountId::ZERO).unwrap();
-        let (_, address_index) = transparent_account_sk
-            .to_account_pubkey()
-            .derive_external_ivk()
-            .unwrap()
-            .default_address();
-        transparent_account_sk
-            .derive_external_secret_key(address_index)
-            .unwrap()
-    };
-    let transparent_sks = [transparent_sk(1), transparent_sk(2), transparent_sk(3)];
-    let transparent_pubkeys = transparent_sks.map(|sk| sk.public_key(&secp).serialize());
+    // Construct a 2-of-3 ZIP 48 P2SH account.
+    let account_sk =
+        |i| zip48::AccountPrivKey::from_seed(&params, &[i; 32], zip32::AccountId::ZERO).unwrap();
+    let account_sks = [account_sk(1), account_sk(2), account_sk(3)];
+    let key_info = account_sks
+        .iter()
+        .map(|sk| sk.to_account_pubkey())
+        .collect();
+    let fvk = zip48::FullViewingKey::standard(2, key_info).unwrap();
 
-    let pks = [
-        transparent_pubkeys[0].as_slice(),
-        transparent_pubkeys[1].as_slice(),
-        transparent_pubkeys[2].as_slice(),
-    ];
-    let redeem_script = script::Component(check_multisig(2, &pks, false).unwrap());
-    let p2sh_addr = TransparentAddress::ScriptHash(
-        *ripemd::Ripemd160::digest(sha2::Sha256::digest(redeem_script.to_bytes())).as_ref(),
-    );
+    // Derive its first external address, and corresponding spending keys.
+    let (p2sh_addr, redeem_script) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    let transparent_sks = account_sks
+        .map(|sk| sk.derive_signing_key(zip32::Scope::External, NonHardenedChildIndex::ZERO));
 
     // Create an Orchard account to receive funds.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
