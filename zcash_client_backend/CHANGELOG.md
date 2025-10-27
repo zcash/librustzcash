@@ -22,6 +22,7 @@ workspace.
     - `standalone`
     - `exposure`
     - `next_check_time`
+    - `with_exposure_at`
 - `zcash_client_backend::data_api::WalletUtxo`
 - `zcash_client_backend::data_api::WalletTest::get_known_ephemeral_addresses`
 - `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
