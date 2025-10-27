@@ -761,6 +761,22 @@ impl TransparentAddressMetadata {
         self.exposure
     }
 
+    /// Returns a copy of this metadata, with its exposure metadata updated
+    pub fn with_exposure_at(
+        &self,
+        exposure_height: BlockHeight,
+        gap_metadata: GapMetadata,
+    ) -> Self {
+        Self {
+            source: self.source.clone(),
+            exposure: Exposure::Exposed {
+                at_height: exposure_height,
+                gap_metadata,
+            },
+            next_check_time: self.next_check_time,
+        }
+    }
+
     /// Returns the timestamp of the earliest time that the light wallet server may be queried for
     /// UTXOs associated with this address, or `None` if the wallet backend is not placing any
     /// restrictions on when this address can be queried. Unless the wallet application is
