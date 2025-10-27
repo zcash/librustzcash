@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (34f954f9b 2025-10-25)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Helper functions for managing light client key material.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (f37aa9955 2025-10-26)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Helper functions for managing light client key material.
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>::transparent::keys::TransparentKeyScope;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>alloc::string::{String, ToString};
@@ -91,7 +91,7 @@
 <a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">fn </span>to_transparent_child_index(j: DiversifierIndex) -&gt; <span class="prelude-ty">Option</span>&lt;NonHardenedChildIndex&gt; {
 <a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">let </span>(low_4_bytes, rest) = j.as_bytes().split_at(<span class="number">4</span>);
 <a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span>transparent_j = u32::from_le_bytes(low_4_bytes.try_into().unwrap());
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">if </span>rest.iter().any(|b| b != <span class="kw-2">&amp;</span><span class="number">0</span>) {
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">if </span>rest.iter().any(|b| <span class="macro">b !</span>= <span class="kw-2">&amp;</span><span class="number">0</span>) {
 <a href=#95 id=95 data-nosnippet>95</a>        <span class="prelude-val">None
 <a href=#96 id=96 data-nosnippet>96</a>    </span>} <span class="kw">else </span>{
 <a href=#97 id=97 data-nosnippet>97</a>        NonHardenedChildIndex::from_index(transparent_j)
@@ -352,7 +352,7 @@
 <a href=#352 id=352 data-nosnippet>352</a>            .map_err(|<span class="kw">_</span>| DecodingError::ReadError(<span class="string">"era"</span>))
 <a href=#353 id=353 data-nosnippet>353</a>            .and_then(|id| Era::try_from_id(id).ok_or(DecodingError::EraInvalid))<span class="question-mark">?</span>;
 <a href=#354 id=354 data-nosnippet>354</a>
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">if </span>decoded_era != era {
+<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">if </span><span class="macro">decoded_era !</span>= era {
 <a href=#356 id=356 data-nosnippet>356</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(DecodingError::EraMismatch(decoded_era));
 <a href=#357 id=357 data-nosnippet>357</a>        }
 <a href=#358 id=358 data-nosnippet>358</a>
@@ -372,7 +372,7 @@
 <a href=#372 id=372 data-nosnippet>372</a>
 <a href=#373 id=373 data-nosnippet>373</a>            <span class="kw">match </span>tc {
 <a href=#374 id=374 data-nosnippet>374</a>                Typecode::Orchard =&gt; {
-<a href=#375 id=375 data-nosnippet>375</a>                    <span class="kw">if </span>len != <span class="number">32 </span>{
+<a href=#375 id=375 data-nosnippet>375</a>                    <span class="kw">if </span><span class="macro">len !</span>= <span class="number">32 </span>{
 <a href=#376 id=376 data-nosnippet>376</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(DecodingError::LengthMismatch(Typecode::Orchard, len));
 <a href=#377 id=377 data-nosnippet>377</a>                    }
 <a href=#378 id=378 data-nosnippet>378</a>
@@ -392,7 +392,7 @@
 <a href=#392 id=392 data-nosnippet>392</a>                    }
 <a href=#393 id=393 data-nosnippet>393</a>                }
 <a href=#394 id=394 data-nosnippet>394</a>                Typecode::Sapling =&gt; {
-<a href=#395 id=395 data-nosnippet>395</a>                    <span class="kw">if </span>len != <span class="number">169 </span>{
+<a href=#395 id=395 data-nosnippet>395</a>                    <span class="kw">if </span><span class="macro">len !</span>= <span class="number">169 </span>{
 <a href=#396 id=396 data-nosnippet>396</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(DecodingError::LengthMismatch(Typecode::Sapling, len));
 <a href=#397 id=397 data-nosnippet>397</a>                    }
 <a href=#398 id=398 data-nosnippet>398</a>
@@ -410,7 +410,7 @@
 <a href=#410 id=410 data-nosnippet>410</a>                    }
 <a href=#411 id=411 data-nosnippet>411</a>                }
 <a href=#412 id=412 data-nosnippet>412</a>                Typecode::P2pkh =&gt; {
-<a href=#413 id=413 data-nosnippet>413</a>                    <span class="kw">if </span>len != <span class="number">74 </span>{
+<a href=#413 id=413 data-nosnippet>413</a>                    <span class="kw">if </span><span class="macro">len !</span>= <span class="number">74 </span>{
 <a href=#414 id=414 data-nosnippet>414</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(DecodingError::LengthMismatch(Typecode::P2pkh, len));
 <a href=#415 id=415 data-nosnippet>415</a>                    }
 <a href=#416 id=416 data-nosnippet>416</a>
@@ -867,7 +867,7 @@
 <a href=#867 id=867 data-nosnippet>867</a>    </span><span class="kw">pub fn </span>decode&lt;P: consensus::Parameters&gt;(params: <span class="kw-2">&amp;</span>P, encoding: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, String&gt; {
 <a href=#868 id=868 data-nosnippet>868</a>        <span class="kw">let </span>(net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())<span class="question-mark">?</span>;
 <a href=#869 id=869 data-nosnippet>869</a>        <span class="kw">let </span>expected_net = params.network_type();
-<a href=#870 id=870 data-nosnippet>870</a>        <span class="kw">if </span>net != expected_net {
+<a href=#870 id=870 data-nosnippet>870</a>        <span class="kw">if </span><span class="macro">net !</span>= expected_net {
 <a href=#871 id=871 data-nosnippet>871</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
 <a href=#872 id=872 data-nosnippet>872</a>                <span class="string">"UFVK is for network {net:?} but we expected {expected_net:?}"</span>,
 <a href=#873 id=873 data-nosnippet>873</a>            ));
@@ -1129,7 +1129,7 @@
 <a href=#1129 id=1129 data-nosnippet>1129</a>    </span><span class="kw">pub fn </span>decode&lt;P: consensus::Parameters&gt;(params: <span class="kw-2">&amp;</span>P, encoding: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, String&gt; {
 <a href=#1130 id=1130 data-nosnippet>1130</a>        <span class="kw">let </span>(net, ufvk) = unified::Uivk::decode(encoding).map_err(|e| e.to_string())<span class="question-mark">?</span>;
 <a href=#1131 id=1131 data-nosnippet>1131</a>        <span class="kw">let </span>expected_net = params.network_type();
-<a href=#1132 id=1132 data-nosnippet>1132</a>        <span class="kw">if </span>net != expected_net {
+<a href=#1132 id=1132 data-nosnippet>1132</a>        <span class="kw">if </span><span class="macro">net !</span>= expected_net {
 <a href=#1133 id=1133 data-nosnippet>1133</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
 <a href=#1134 id=1134 data-nosnippet>1134</a>                <span class="string">"UIVK is for network {net:?} but we expected {expected_net:?}"</span>,
 <a href=#1135 id=1135 data-nosnippet>1135</a>            ));
@@ -1321,7 +1321,7 @@
 <a href=#1321 id=1321 data-nosnippet>1321</a>
 <a href=#1322 id=1322 data-nosnippet>1322</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#1323 id=1323 data-nosnippet>1323</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>orchard = <span class="prelude-val">None</span>;
-<a href=#1324 id=1324 data-nosnippet>1324</a>        <span class="kw">if </span>request.orchard != Omit {
+<a href=#1324 id=1324 data-nosnippet>1324</a>        <span class="kw">if </span>request.<span class="macro">orchard !</span>= Omit {
 <a href=#1325 id=1325 data-nosnippet>1325</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
 <a href=#1326 id=1326 data-nosnippet>1326</a>            </span><span class="kw">if </span>request.orchard == Require {
 <a href=#1327 id=1327 data-nosnippet>1327</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
@@ -1340,7 +1340,7 @@
 <a href=#1340 id=1340 data-nosnippet>1340</a>
 <a href=#1341 id=1341 data-nosnippet>1341</a>        <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
 <a href=#1342 id=1342 data-nosnippet>1342</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>sapling = <span class="prelude-val">None</span>;
-<a href=#1343 id=1343 data-nosnippet>1343</a>        <span class="kw">if </span>request.sapling != Omit {
+<a href=#1343 id=1343 data-nosnippet>1343</a>        <span class="kw">if </span>request.<span class="macro">sapling !</span>= Omit {
 <a href=#1344 id=1344 data-nosnippet>1344</a>            <span class="attr">#[cfg(not(feature = <span class="string">"sapling"</span>))]
 <a href=#1345 id=1345 data-nosnippet>1345</a>            </span><span class="kw">if </span>request.sapling == Require {
 <a href=#1346 id=1346 data-nosnippet>1346</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
@@ -1367,7 +1367,7 @@
 <a href=#1367 id=1367 data-nosnippet>1367</a>
 <a href=#1368 id=1368 data-nosnippet>1368</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#1369 id=1369 data-nosnippet>1369</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>transparent = <span class="prelude-val">None</span>;
-<a href=#1370 id=1370 data-nosnippet>1370</a>        <span class="kw">if </span>request.p2pkh != Omit {
+<a href=#1370 id=1370 data-nosnippet>1370</a>        <span class="kw">if </span>request.<span class="macro">p2pkh !</span>= Omit {
 <a href=#1371 id=1371 data-nosnippet>1371</a>            <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
 <a href=#1372 id=1372 data-nosnippet>1372</a>            </span><span class="kw">if </span>request.p2pkh == Require {
 <a href=#1373 id=1373 data-nosnippet>1373</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
@@ -2027,4 +2027,5 @@
 <a href=#2027 id=2027 data-nosnippet>2027</a>            </span><span class="macro">assert_eq!</span>(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
 <a href=#2028 id=2028 data-nosnippet>2028</a>        }
 <a href=#2029 id=2029 data-nosnippet>2029</a>    }
-<a href=#2030 id=2030 data-nosnippet>2030</a>}</code></pre></div></section></main></body></html>
+<a href=#2030 id=2030 data-nosnippet>2030</a>}
+</code></pre></div></section></main></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_proofs/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (34f954f9b 2025-10-25)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_proofs/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *Zcash circuits and proofs.*
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_proofs/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (f37aa9955 2025-10-26)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_proofs/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *Zcash circuits and proofs.*
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `zcash_proofs` contains the zk-SNARK circuits used by Zcash, and the APIs for creating
 <a href=#4 id=4 data-nosnippet>4</a>//! and verifying proofs.
@@ -172,7 +172,7 @@
 <a href=#172 id=172 data-nosnippet>172</a>
 <a href=#173 id=173 data-nosnippet>173</a>    <span class="comment">// Download parameters if needed.
 <a href=#174 id=174 data-nosnippet>174</a>    // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
-<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="kw">if </span>!params_path.exists() {
+<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="macro">if !</span>params_path.exists() {
 <a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">let </span>result = stream_params_downloads_to_disk(
 <a href=#177 id=177 data-nosnippet>177</a>            <span class="kw-2">&amp;</span>params_path,
 <a href=#178 id=178 data-nosnippet>178</a>            name,
@@ -446,7 +446,7 @@
 <a href=#446 id=446 data-nosnippet>446</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), io::Error&gt; {
 <a href=#447 id=447 data-nosnippet>447</a>    <span class="kw">let </span>file_size = std::fs::metadata(params_path)<span class="question-mark">?</span>.len();
 <a href=#448 id=448 data-nosnippet>448</a>
-<a href=#449 id=449 data-nosnippet>449</a>    <span class="kw">if </span>file_size != expected_bytes {
+<a href=#449 id=449 data-nosnippet>449</a>    <span class="kw">if </span><span class="macro">file_size !</span>= expected_bytes {
 <a href=#450 id=450 data-nosnippet>450</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(io::Error::new(
 <a href=#451 id=451 data-nosnippet>451</a>            io::ErrorKind::InvalidData,
 <a href=#452 id=452 data-nosnippet>452</a>            <span class="macro">format!</span>(
@@ -496,7 +496,7 @@
 <a href=#496 id=496 data-nosnippet>496</a>
 <a href=#497 id=497 data-nosnippet>497</a>    <span class="kw">let </span>byte_count = hash_reader.byte_count();
 <a href=#498 id=498 data-nosnippet>498</a>    <span class="kw">let </span>hash = hash_reader.into_hash();
-<a href=#499 id=499 data-nosnippet>499</a>    <span class="kw">if </span>hash != expected_hash {
+<a href=#499 id=499 data-nosnippet>499</a>    <span class="kw">if </span><span class="macro">hash !</span>= expected_hash {
 <a href=#500 id=500 data-nosnippet>500</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(io::Error::new(
 <a href=#501 id=501 data-nosnippet>501</a>            io::ErrorKind::InvalidData,
 <a href=#502 id=502 data-nosnippet>502</a>            <span class="macro">format!</span>(
@@ -508,4 +508,5 @@
 <a href=#508 id=508 data-nosnippet>508</a>    }
 <a href=#509 id=509 data-nosnippet>509</a>
 <a href=#510 id=510 data-nosnippet>510</a>    <span class="prelude-val">Ok</span>(())
-<a href=#511 id=511 data-nosnippet>511</a>}</code></pre></div></section></main></body></html>
+<a href=#511 id=511 data-nosnippet>511</a>}
+</code></pre></div></section></main></body></html>

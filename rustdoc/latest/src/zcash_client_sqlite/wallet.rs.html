@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (34f954f9b 2025-10-25)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions for querying information in the wallet database.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (f37aa9955 2025-10-26)" data-channel="nightly" data-search-js="search-d69d8955.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions for querying information in the wallet database.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! These functions should generally not be used directly; instead,
 <a href=#4 id=4 data-nosnippet>4</a>//! their functionality is available via the [`WalletRead`] and
@@ -367,7 +367,7 @@
 <a href=#367 id=367 data-nosnippet>367</a>        orchard_match || sapling_match || p2pkh_match
 <a href=#368 id=368 data-nosnippet>368</a>    };
 <a href=#369 id=369 data-nosnippet>369</a>
-<a href=#370 id=370 data-nosnippet>370</a>    <span class="kw">if </span>seed_fingerprint_match != uivk_match {
+<a href=#370 id=370 data-nosnippet>370</a>    <span class="kw">if </span><span class="macro">seed_fingerprint_match !</span>= uivk_match {
 <a href=#371 id=371 data-nosnippet>371</a>        <span class="comment">// If these mismatch, it suggests database corruption.
 <a href=#372 id=372 data-nosnippet>372</a>        </span><span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(<span class="macro">format!</span>(
 <a href=#373 id=373 data-nosnippet>373</a>            <span class="string">"Seed fingerprint match: {seed_fingerprint_match}, uivk match: {uivk_match}"
@@ -1050,7 +1050,7 @@
 <a href=#1050 id=1050 data-nosnippet>1050</a>            .map_err(SqliteClientError::CorruptedData)<span class="question-mark">?</span>;
 <a href=#1051 id=1051 data-nosnippet>1051</a>
 <a href=#1052 id=1052 data-nosnippet>1052</a>        <span class="kw">match </span>previously_exposed_as {
-<a href=#1053 id=1053 data-nosnippet>1053</a>            <span class="prelude-val">Some</span>(addr) <span class="kw">if </span><span class="kw-2">&amp;</span>addr != address =&gt; {
+<a href=#1053 id=1053 data-nosnippet>1053</a>            <span class="prelude-val">Some</span>(addr) <span class="kw">if </span><span class="kw-2">&amp;</span><span class="macro">addr !</span>= address =&gt; {
 <a href=#1054 id=1054 data-nosnippet>1054</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::DiversifierIndexReuse(
 <a href=#1055 id=1055 data-nosnippet>1055</a>                    diversifier_index,
 <a href=#1056 id=1056 data-nosnippet>1056</a>                    Box::new(addr),
@@ -3014,7 +3014,7 @@
 <a href=#3014 id=3014 data-nosnippet>3014</a>    <span class="comment">// Add the transaction to the set to be queried for transaction status. This is only necessary
 <a href=#3015 id=3015 data-nosnippet>3015</a>    // at present for fully transparent transactions, because any transaction with a shielded
 <a href=#3016 id=3016 data-nosnippet>3016</a>    // component will be detected via ordinary chain scanning and/or nullifier checking.
-<a href=#3017 id=3017 data-nosnippet>3017</a>    </span><span class="kw">if </span>!detectable_via_scanning {
+<a href=#3017 id=3017 data-nosnippet>3017</a>    </span><span class="macro">if !</span>detectable_via_scanning {
 <a href=#3018 id=3018 data-nosnippet>3018</a>        queue_tx_retrieval(conn, std::iter::once(sent_tx.tx().txid()), <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
 <a href=#3019 id=3019 data-nosnippet>3019</a>    }
 <a href=#3020 id=3020 data-nosnippet>3020</a>
@@ -3315,7 +3315,7 @@
 <a href=#3315 id=3315 data-nosnippet>3315</a>                u32::from(block_height)
 <a href=#3316 id=3316 data-nosnippet>3316</a>            ))
 <a href=#3317 id=3317 data-nosnippet>3317</a>        })<span class="question-mark">?</span>;
-<a href=#3318 id=3318 data-nosnippet>3318</a>        <span class="kw">if </span>expected_hash != block_hash {
+<a href=#3318 id=3318 data-nosnippet>3318</a>        <span class="kw">if </span><span class="macro">expected_hash !</span>= block_hash {
 <a href=#3319 id=3319 data-nosnippet>3319</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::BlockConflict(block_height));
 <a href=#3320 id=3320 data-nosnippet>3320</a>        }
 <a href=#3321 id=3321 data-nosnippet>3321</a>    }
@@ -4126,7 +4126,7 @@
 <a href=#4126 id=4126 data-nosnippet>4126</a>    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
 <a href=#4127 id=4127 data-nosnippet>4127</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
 <a href=#4128 id=4128 data-nosnippet>4128</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = d_tx.tx().transparent_bundle() {
-<a href=#4129 id=4129 data-nosnippet>4129</a>        <span class="kw">if </span>!b.is_coinbase() {
+<a href=#4129 id=4129 data-nosnippet>4129</a>        <span class="macro">if !</span>b.is_coinbase() {
 <a href=#4130 id=4130 data-nosnippet>4130</a>            <span class="comment">// queue the transparent inputs for enhancement
 <a href=#4131 id=4131 data-nosnippet>4131</a>            </span>queue_tx_retrieval(
 <a href=#4132 id=4132 data-nosnippet>4132</a>                conn,
@@ -4932,4 +4932,5 @@
 <a href=#4932 id=4932 data-nosnippet>4932</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
 <a href=#4933 id=4933 data-nosnippet>4933</a>        );
 <a href=#4934 id=4934 data-nosnippet>4934</a>    }
-<a href=#4935 id=4935 data-nosnippet>4935</a>}</code></pre></div></section></main></body></html>
+<a href=#4935 id=4935 data-nosnippet>4935</a>}
+</code></pre></div></section></main></body></html>
