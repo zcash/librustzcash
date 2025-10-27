@@ -541,35 +541,25 @@ where
 
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
+    ///
+    /// This is a proxy for `generate_next_block_multi`.
     pub fn generate_next_block<Fvk: TestFvk>(
         &mut self,
         recipient_fvk: &Fvk,
         recipient_address_type: AddressType,
         value: Zatoshis,
     ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
-        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
-        let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
-        let height = prior_cached_block.height() + 1;
-
-        let (res, nfs) = self.generate_block_at(
-            height,
-            prior_cached_block.chain_state.block_hash(),
-            &[FakeCompactOutput::new(
-                recipient_fvk,
-                recipient_address_type,
-                value,
-            )],
-            prior_cached_block.sapling_end_size,
-            prior_cached_block.orchard_end_size,
-            false,
-        );
+        let (height, res, nfs) = self.generate_next_block_multi(&[FakeCompactOutput::new(
+            recipient_fvk,
+            recipient_address_type,
+            value,
+        )]);
 
         (height, res, nfs[0])
     }
 
     /// Creates a fake block at the expected next height containing multiple outputs
     /// and inserts it into the cache.
-    #[allow(dead_code)]
     pub fn generate_next_block_multi<Fvk: TestFvk>(
         &mut self,
         outputs: &[FakeCompactOutput<Fvk>],
@@ -591,7 +581,6 @@ where
     }
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
-    #[allow(dead_code)] // used only for tests that are flagged off by default
     pub fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
         let new_hash = {
             let mut hash = vec![0; 32];
@@ -2121,9 +2110,10 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
 /// Configures how a [`TestFvk`] receives a particular output.
 ///
 /// Used with [`TestFvk::add_output`] and [`TestFvk::add_logical_action`].
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub enum AddressType {
     /// The output will be sent to the default address of the full viewing key.
+    #[default]
     DefaultExternal,
     /// The output will be sent to the specified diversified address of the full viewing
     /// key.
@@ -2292,6 +2282,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
+// TODO: `tx` could be a slice and we could add multiple transactions here
 fn fake_compact_block_from_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
