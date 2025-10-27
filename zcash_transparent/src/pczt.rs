@@ -286,14 +286,20 @@ impl Bip32Derivation {
     ) -> Option<(zip32::AccountId, zip32::Scope, NonHardenedChildIndex)> {
         if self.seed_fingerprint == seed_fp.to_bytes() {
             match &self.derivation_path[..] {
-                [purpose, coin_type, account_index, script_type, scope, address_index]
-                    if purpose == &ChildNumber(48 | ChildNumber::HARDENED_FLAG)
-                        && coin_type.is_hardened()
-                        && coin_type == &expected_coin_type
-                        && account_index.is_hardened()
-                        && script_type == &ChildNumber(133000 | ChildNumber::HARDENED_FLAG)
-                        && !scope.is_hardened()
-                        && !address_index.is_hardened() =>
+                [
+                    purpose,
+                    coin_type,
+                    account_index,
+                    script_type,
+                    scope,
+                    address_index,
+                ] if purpose == &ChildNumber(48 | ChildNumber::HARDENED_FLAG)
+                    && coin_type.is_hardened()
+                    && coin_type == &expected_coin_type
+                    && account_index.is_hardened()
+                    && script_type == &ChildNumber(133000 | ChildNumber::HARDENED_FLAG)
+                    && !scope.is_hardened()
+                    && !address_index.is_hardened() =>
                 {
                     let account_index = zip32::AccountId::try_from(account_index.index())
                         .expect("account_index is hardened");

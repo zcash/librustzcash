@@ -6,7 +6,7 @@ use bip32::{ChildNumber, ExtendedPrivateKey, ExtendedPublicKey, Prefix};
 use secp256k1::{PublicKey, SecretKey};
 use zcash_protocol::consensus::{self, NetworkConstants};
 use zcash_script::{
-    descriptor::{self, sh, sortedmulti, KeyExpression, KeyOrigin},
+    descriptor::{self, KeyExpression, KeyOrigin, sh, sortedmulti},
     script,
 };
 use zip32::AccountId;
