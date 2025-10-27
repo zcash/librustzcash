@@ -22,7 +22,7 @@ use transparent::{
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
-use zcash_client_backend::wallet::{Exposure, GapMetadata};
+use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
@@ -531,11 +531,12 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
     let (gap_start, addresses_to_reserve) =
         select_addrs_to_reserve(conn, params, account_id, key_scope, gap_limit, n)?;
 
+    let gap_end = gap_start.index() + gap_limit;
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
             <Option<TransparentKeyScope>>::from(key_scope)
                 .expect("reservation relies on key derivation"),
-            gap_start.index() + gap_limit,
+            gap_end,
         ));
     }
 
@@ -556,7 +557,26 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
         },
     )?;
 
-    Ok(addresses_to_reserve)
+    Ok(addresses_to_reserve
+        .into_iter()
+        .map(|(id, addr, meta)| {
+            if let TransparentAddressSource::Derived { address_index, .. } = meta.source() {
+                (
+                    id,
+                    addr,
+                    meta.with_exposure_at(
+                        current_chain_tip,
+                        GapMetadata::InGap {
+                            gap_position: address_index.index().saturating_sub(gap_start.index()),
+                            gap_limit,
+                        },
+                    ),
+                )
+            } else {
+                unreachable!("gap addresses are always produced by derivation");
+            }
+        })
+        .collect())
 }
 
 pub(crate) fn generate_external_address(
