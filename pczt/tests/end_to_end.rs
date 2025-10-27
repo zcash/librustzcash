@@ -17,7 +17,6 @@ use pczt::{
     },
 };
 use rand_core::OsRng;
-use sha2::Digest as _;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
