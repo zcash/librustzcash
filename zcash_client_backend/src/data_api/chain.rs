@@ -569,12 +569,11 @@ impl ChainState {
     }
 }
 
-/// Scans at most `limit` blocks from the provided block source for in order to find transactions
+/// Scans at most `limit` blocks from the provided block source in order to find transactions
 /// received by the accounts tracked in the provided wallet database.
 ///
 /// This function will return after scanning at most `limit` new blocks, to enable the caller to
-/// update their UI with scanning progress. Repeatedly calling this function with `from_height ==
-/// None` will process sequential ranges of blocks.
+/// update their UI with scanning progress.
 ///
 /// ## Panics
 ///

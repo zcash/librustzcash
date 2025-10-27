@@ -591,6 +591,7 @@ where
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
     #[allow(dead_code)] // used only for tests that are flagged off by default
+                        // TODO(schell): is this true^? We often build with --all-features
     pub fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
         let new_hash = {
             let mut hash = vec![0; 32];
@@ -2101,9 +2102,10 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
 /// Configures how a [`TestFvk`] receives a particular output.
 ///
 /// Used with [`TestFvk::add_output`] and [`TestFvk::add_logical_action`].
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum AddressType {
     /// The output will be sent to the default address of the full viewing key.
+    #[default]
     DefaultExternal,
     /// The output will be sent to the specified diversified address of the full viewing
     /// key.

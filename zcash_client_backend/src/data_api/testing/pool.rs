@@ -208,15 +208,12 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h, 1);
+    let ((h, _), _) = st.add_funds::<T>().with_a_single_note_of(value).scan(1);
 
     // Spendable balance matches total balance
+    let account = st.test_account().cloned().unwrap();
     assert_eq!(st.get_total_balance(account.id()), value);
     assert_eq!(
         st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
@@ -374,22 +371,21 @@ struct ConfirmationStep {
 pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
-    input_is_trusted: bool,
+    output_should_be_trusted: bool,
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
     let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
     let starting_balance = Zatoshis::const_from_u64(60_000);
     // Add funds to the wallet in a single note, owned by the internal spending key,
     // this is the first confirmation
-    let address_type = if input_is_trusted {
+    let address_type = if output_should_be_trusted {
         AddressType::Internal
     } else {
         AddressType::DefaultExternal
     };
 
-    let (h, _, _) = st.generate_next_block(&dfvk, address_type, starting_balance);
-    st.scan_cached_blocks(h, 1);
+    st.add_a_single_note_from(address_type, starting_balance)
+        .scan(1);
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account.id()), starting_balance);
@@ -400,7 +396,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
 
     // Generate N confirmations by mining blocks
     let confirmations_policy = ConfirmationsPolicy::default();
-    let min_confirmations = u32::from(if input_is_trusted {
+    let min_confirmations = u32::from(if output_should_be_trusted {
         confirmations_policy.trusted()
     } else {
         confirmations_policy.untrusted()
@@ -445,7 +441,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         proposed.is_ok(),
         "Could not spend funds by confirmation policy ({}): {proposed:#?}\n\
         steps: {steps:#?}",
-        if input_is_trusted {
+        if output_should_be_trusted {
             "trusted"
         } else {
             "untrusted"
@@ -468,32 +464,37 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build();
+    let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let ((h, _), _) = st
+        .with_a_single_note_of(value)
+        .with_empty_blocks(3)
+        .with_a_single_note_of(value)
+        .scan(5);
+    // let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
-    let confirmation_policy = ConfirmationsPolicy::new_symmetrical(
-        NonZeroU32::new(2).expect("2 is not zero"),
-        #[cfg(feature = "transparent-inputs")]
-        false,
-    );
-    st.generate_empty_block();
-    st.generate_empty_block();
-    st.generate_empty_block();
+    // st.generate_empty_block();
+    // st.generate_empty_block();
+    // st.generate_empty_block();
 
-    st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    // st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
-    st.scan_cached_blocks(h, 5);
+    // st.scan_cached_blocks(h, 5);
 
     // Spendable balance matches total balance
     assert_eq!(
         st.get_total_balance(account.id()),
         Zatoshis::const_from_u64(120_000)
+    );
+    let confirmation_policy = ConfirmationsPolicy::new_symmetrical(
+        NonZeroU32::new(2).expect("2 is not zero"),
+        #[cfg(feature = "transparent-inputs")]
+        false,
     );
     assert_eq!(
         st.get_spendable_balance(account.id(), confirmation_policy),
