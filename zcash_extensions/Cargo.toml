@@ -19,8 +19,8 @@ release = false
 
 [dependencies]
 blake2b_simd.workspace = true
-zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
-zcash_protocol.workspace = true
+zcash_primitives = { version = "0.26", features = ["non-standard-fees", "circuits"] }
+zcash_protocol = { version = "0.7" }
 
 [dev-dependencies]
 ff.workspace = true
