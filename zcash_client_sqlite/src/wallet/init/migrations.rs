@@ -119,12 +119,12 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
-    //                                        /         /               \
-    //                 support_zcashd_wallet_import    /            fix_v_transactions_expired_unmined
-    //                                                /                    /                 \
-    //                                tx_observation_height               /                   \
-    //                                    /                              /                     \
-    //          add_transaction_trust_marker      v_received_output_spends_account   v_tx_outputs_return_addrs
+    //                                      /    /         |
+    //           support_zcashd_wallet_import   /      fix_v_transactions_expired_unmined
+    //                                         /      /                |                \
+    //                     tx_observation_height     /                 |                 \
+    //                                         \    /                  |                  \
+    //                   add_transaction_trust_marker  v_received_output_spends_account  v_tx_outputs_return_addrs
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![

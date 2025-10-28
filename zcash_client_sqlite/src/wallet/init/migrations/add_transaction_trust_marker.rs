@@ -5,12 +5,15 @@ use std::collections::HashSet;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use super::tx_observation_height;
+use super::{fix_v_transactions_expired_unmined, tx_observation_height};
 use crate::wallet::init::WalletMigrationError;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x4e68277f_6269_467e_9437_f3853cc4a41f);
 
-const DEPENDENCIES: &[Uuid] = &[tx_observation_height::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[
+    fix_v_transactions_expired_unmined::MIGRATION_ID,
+    tx_observation_height::MIGRATION_ID,
+];
 
 pub(super) struct Migration;
 
