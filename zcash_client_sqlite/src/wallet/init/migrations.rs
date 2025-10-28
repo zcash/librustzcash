@@ -9,6 +9,7 @@
 
 mod add_account_birthdays;
 mod add_account_uuids;
+mod add_transaction_trust_marker;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
@@ -118,12 +119,13 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
-    //                                        /         |               \
-    //                 support_zcashd_wallet_import     |            fix_v_transactions_expired_unmined
-    //                                                  |                      /         \
-    //                                       tx_observation_height            /           \
-    //                                                                       /             \
-    //                                            v_received_output_spends_account    v_tx_outputs_return_addrs
+    //                                      /    /         |
+    //           support_zcashd_wallet_import   /      fix_v_transactions_expired_unmined
+    //                                         /      /                |                \
+    //                     tx_observation_height     /                 |                 \
+    //                                         \    /                  |                  \
+    //                   add_transaction_trust_marker  v_received_output_spends_account  v_tx_outputs_return_addrs
+    //
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -206,6 +208,7 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(v_received_output_spends_account::Migration),
+        Box::new(add_transaction_trust_marker::Migration),
     ]
 }
 
@@ -346,9 +349,9 @@ pub const V_0_18_5: &[Uuid] = &[
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,
     support_zcashd_wallet_import::MIGRATION_ID,
-    v_tx_outputs_return_addrs::MIGRATION_ID,
-    tx_observation_height::MIGRATION_ID,
     v_received_output_spends_account::MIGRATION_ID,
+    v_tx_outputs_return_addrs::MIGRATION_ID,
+    add_transaction_trust_marker::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

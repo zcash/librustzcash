@@ -1650,7 +1650,7 @@ pub(crate) mod tests {
             // Generate the birthday block plus 10 more
             for _ in 0..11 {
                 let (_, res, _) = st.generate_next_block_multi(&vec![fake_output(false); 4]);
-                for c in res.orchard() {
+                for c in res.note_commitments().orchard() {
                     final_orchard_tree.append(*c);
                 }
             }
@@ -1664,7 +1664,7 @@ pub(crate) mod tests {
                 // One Orchard note for this wallet
                 fake_output(true),
             ]);
-            for c in res.orchard() {
+            for c in res.note_commitments().orchard() {
                 final_orchard_tree.append(*c);
             }
 
@@ -1675,7 +1675,7 @@ pub(crate) mod tests {
             // Add two note commitments to the Orchard frontier to complete the 2^16 subtree. We
             // can then add that subtree root to the Orchard frontier, so that we can compute the
             // root of the completed subtree.
-            for c in res.orchard().iter().take(2) {
+            for c in res.note_commitments().orchard().iter().take(2) {
                 final_orchard_tree.append(*c);
             }
 
@@ -1704,7 +1704,7 @@ pub(crate) mod tests {
             let mut chain_tip_height = spanning_block_height;
             for _ in 0..110 {
                 let (h, res, _) = st.generate_next_block_multi(&[fake_output(false)]);
-                for c in res.orchard() {
+                for c in res.note_commitments().orchard() {
                     final_orchard_tree.append(*c);
                 }
                 chain_tip_height = h;

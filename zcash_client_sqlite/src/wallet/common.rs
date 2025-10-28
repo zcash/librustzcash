@@ -384,7 +384,9 @@ where
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
              scan_state.max_priority,
-             MAX(tt.mined_height) AS max_shielding_input_height
+             IFNULL(t.trust_status, 0) AS trust_status,
+             MAX(tt.mined_height) AS max_shielding_input_height,
+             MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
          FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.tx
@@ -433,6 +435,8 @@ where
         |row| -> Result<_, SqliteClientError> {
             let result_note = to_received_note(params, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
+            let tx_trust_status = row.get::<_, bool>("trust_status")?;
+            let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let shard_scan_priority = max_priority_raw
                 .map(|code| {
                     parse_priority_code(code).ok_or_else(|| {
@@ -443,7 +447,12 @@ where
                 })
                 .transpose()?;
 
-            Ok((result_note, shard_scan_priority))
+            Ok((
+                result_note,
+                shard_scan_priority,
+                tx_trust_status,
+                tx_shielding_inputs_trusted,
+            ))
         },
     )?;
 
@@ -453,7 +462,7 @@ where
 
     row_results
         .map(|t| match t? {
-            (Some(note), max_shard_priority) => {
+            (Some(note), max_shard_priority, trusted, tx_shielding_inputs_trusted) => {
                 let shard_scanned = max_shard_priority
                     .iter()
                     .any(|p| *p <= ScanPriority::Scanned);
@@ -468,13 +477,20 @@ where
                     (Some(received_height), Scope::Internal) => {
                         // The note has the required number of confirmations for a trusted note.
                         received_height <= trusted_height &&
-                        // And, if the note was the output of a shielding transaction, its inputs
-                        // have at least `untrusted` confirmations
-                        note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
+                        // if the note was the output of a shielding transaction
+                        note.max_shielding_input_height().iter().all(|h| {
+                            // its inputs have at least `untrusted` confirmations
+                            h <= &untrusted_height ||
+                            // or its inputs are trusted and have at least `trusted` confirmations
+                            (h <= &trusted_height && tx_shielding_inputs_trusted)
+                        })
                     }
                     (Some(received_height), Scope::External) => {
                         // The note has the required number of confirmations for an untrusted note.
-                        received_height <= untrusted_height
+                        received_height <= untrusted_height ||
+                        // or it is the output of an explicitly trusted tx and has at least
+                        // `trusted` confirmations
+                        (received_height <= trusted_height && trusted)
                     }
                 };
 
@@ -551,7 +567,9 @@ where
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
-                 MAX(tt.mined_height) AS max_shielding_input_height
+                 IFNULL(t.trust_status, 0) AS trust_status,
+                 MAX(tt.mined_height) AS max_shielding_input_height,
+                 MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.tx
@@ -582,13 +600,15 @@ where
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, max_shielding_input_height
+                mined_height, trust_status,
+                max_shielding_input_height, min_shielding_input_trust
          FROM eligible WHERE so_far < :target_value
          UNION
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, max_shielding_input_height
+                mined_height, trust_status,
+                max_shielding_input_height, min_shielding_input_trust
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         spent_notes_clause(table_prefix)
     ))?;
@@ -615,7 +635,13 @@ where
             ":scanned_priority": priority_code(&ScanPriority::Scanned),
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
-        |r| to_spendable_note(params, r),
+        |row| {
+            let tx_trust_status = row.get::<_, bool>("trust_status")?;
+            let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
+            let note = to_spendable_note(params, row)?;
+
+            Ok(note.map(|n| (n, tx_trust_status, tx_shielding_inputs_trusted)))
+        },
     )?;
 
     let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
@@ -626,7 +652,7 @@ where
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
             result_note
-                .map(|note| {
+                .map(|(note, trusted, tx_shielding_inputs_trusted)| {
                     let received_height = note
                         .mined_height()
                         .expect("mined height checked to be non-null");
@@ -637,9 +663,20 @@ where
                             received_height <= trusted_height &&
                             // And, if the note was the output of a shielding transaction, its
                             // transparent inputs have at least `untrusted` confirmations.
-                            note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
+                            note.max_shielding_input_height().iter().all(|h| {
+                                // its inputs have at least `untrusted` confirmations
+                                h <= &untrusted_height ||
+                                // or its inputs are trusted and have at least `trusted` confirmations
+                                (h <= &trusted_height && tx_shielding_inputs_trusted)
+                            })
                         }
-                        Scope::External => received_height <= untrusted_height,
+                        Scope::External => {
+                            // The note has the required number of confirmations for an untrusted note.
+                            received_height <= untrusted_height ||
+                            // or it is the output of an explicitly trusted tx and has at least
+                            // `trusted` confirmations
+                            (received_height <= trusted_height && trusted)
+                        }
                     };
 
                     has_confirmations.then_some(note)

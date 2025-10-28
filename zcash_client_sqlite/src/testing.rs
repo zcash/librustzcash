@@ -3,9 +3,10 @@ use rusqlite::params;
 use tempfile::NamedTempFile;
 
 use zcash_client_backend::{
-    data_api::testing::{NoteCommitments, TestCache},
+    data_api::testing::{CacheInsertionResult, NoteCommitments, TestCache},
     proto::compact_formats::CompactBlock,
 };
+use zcash_protocol::TxId;
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
@@ -42,10 +43,27 @@ impl BlockCache {
     }
 }
 
+pub struct BlockCacheInsertionResult {
+    txids: Vec<TxId>,
+    note_commitments: NoteCommitments,
+}
+
+impl BlockCacheInsertionResult {
+    pub fn note_commitments(&self) -> &NoteCommitments {
+        &self.note_commitments
+    }
+}
+
+impl CacheInsertionResult for BlockCacheInsertionResult {
+    fn txids(&self) -> &[TxId] {
+        &self.txids[..]
+    }
+}
+
 impl TestCache for BlockCache {
     type BsError = SqliteClientError;
     type BlockSource = BlockDb;
-    type InsertResult = NoteCommitments;
+    type InsertResult = BlockCacheInsertionResult;
 
     fn block_source(&self) -> &Self::BlockSource {
         &self.db_cache
@@ -53,7 +71,7 @@ impl TestCache for BlockCache {
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
-        let res = NoteCommitments::from_compact_block(cb);
+        let note_commitments = NoteCommitments::from_compact_block(cb);
         self.db_cache
             .0
             .execute(
@@ -61,7 +79,11 @@ impl TestCache for BlockCache {
                 params![u32::from(cb.height()), cb_bytes,],
             )
             .unwrap();
-        res
+
+        BlockCacheInsertionResult {
+            txids: cb.vtx.iter().map(|tx| tx.txid()).collect(),
+            note_commitments,
+        }
     }
 
     fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
@@ -96,10 +118,24 @@ impl FsBlockCache {
 }
 
 #[cfg(feature = "unstable")]
+#[derive(Debug)]
+pub struct FsBlockCacheInsertionResult {
+    txids: Vec<TxId>,
+    pub(crate) block_meta: BlockMeta,
+}
+
+#[cfg(feature = "unstable")]
+impl CacheInsertionResult for FsBlockCacheInsertionResult {
+    fn txids(&self) -> &[TxId] {
+        &self.txids[..]
+    }
+}
+
+#[cfg(feature = "unstable")]
 impl TestCache for FsBlockCache {
     type BsError = FsBlockDbError;
     type BlockSource = FsBlockDb;
-    type InsertResult = BlockMeta;
+    type InsertResult = FsBlockCacheInsertionResult;
 
     fn block_source(&self) -> &Self::BlockSource {
         &self.db_meta
@@ -108,7 +144,8 @@ impl TestCache for FsBlockCache {
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         use std::io::Write;
 
-        let meta = BlockMeta {
+        let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
+        let block_meta = BlockMeta {
             height: cb.height(),
             block_hash: cb.hash(),
             block_time: cb.time,
@@ -117,14 +154,14 @@ impl TestCache for FsBlockCache {
         };
 
         let blocks_dir = self.fsblockdb_root.as_ref().join("blocks");
-        let block_path = meta.block_file_path(&blocks_dir);
+        let block_path = block_meta.block_file_path(&blocks_dir);
 
         File::create(block_path)
             .unwrap()
             .write_all(&cb.encode_to_vec())
             .unwrap();
 
-        meta
+        FsBlockCacheInsertionResult { txids, block_meta }
     }
 
     fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
