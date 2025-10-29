@@ -35,6 +35,7 @@ and the second/third are repeated and interleaved for as many steps as it takes 
   This means I would have to have input wrapped in some "it's not here yet but it will be later"
   type (like `Arc<Mutex<Option<_>>>`), but that's obviously very ugly.
   Maybe it's ultimately what we need, I don't know.
+  I've saved that work in the `chore/pool-testing-dsl-encoded-input-output` branch.
 
 ## Sandbox
 
