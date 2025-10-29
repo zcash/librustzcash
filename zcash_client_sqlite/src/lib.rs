@@ -1398,6 +1398,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wallet::delete_account(wdb.conn.0, account_uuid))
+    }
+
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,

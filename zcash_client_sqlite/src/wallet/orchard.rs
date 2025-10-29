@@ -576,6 +576,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cross_account_transfer() {
+        testing::pool::cross_account_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             OrchardPoolTester,
