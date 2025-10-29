@@ -32,8 +32,10 @@ use crate::transaction::{
 #[cfg(zcash_unstable = "nu7")]
 use {
     crate::sighash_versioning::ISSUE_SIGHASH_VERSION_TO_INFO_BYTES,
+    crate::transaction::components::sapling::SAPLING_SIGHASH_INFO_V0,
     crate::transaction::OrchardBundle::OrchardZSA,
     orchard::issuance::{IssueBundle, Signed},
+    zcash_encoding::Vector,
 };
 
 /// TxId tree root personalization
@@ -353,6 +355,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_sapling(
         &self,
+        _version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
     ) -> Self::SaplingDigest {
         sapling_bundle.map(hash_sapling_txid_data)
@@ -526,6 +529,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_sapling(
         &self,
+        #[cfg(not(zcash_unstable = "nu7"))] _version: TxVersion,
+        #[cfg(zcash_unstable = "nu7")] version: TxVersion,
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
@@ -535,6 +540,10 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
             }
 
             for spend in bundle.shielded_spends() {
+                #[cfg(zcash_unstable = "nu7")]
+                if version == TxVersion::V6 {
+                    Vector::write(&mut h, &SAPLING_SIGHASH_INFO_V0, |w, b| w.write_u8(*b)).unwrap();
+                }
                 h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
                     .unwrap();
             }
@@ -543,6 +552,10 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
                 h.write_all(output.zkproof()).unwrap();
             }
 
+            #[cfg(zcash_unstable = "nu7")]
+            if version == TxVersion::V6 {
+                Vector::write(&mut h, &SAPLING_SIGHASH_INFO_V0, |w, b| w.write_u8(*b)).unwrap();
+            }
             h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
                 .unwrap();
         }
