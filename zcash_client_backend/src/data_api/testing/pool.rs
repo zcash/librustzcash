@@ -2144,9 +2144,23 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         };
 
     let next_reserved = reservation_should_succeed(&mut st, 1);
+
+    // By reserving the address, its exposure has transitioned from "unknown" to "exposed".
+    let gap_position = 0;
+    let expected = &known_addrs[usize::try_from(gap_limits.ephemeral()).unwrap()];
+    let actual = &next_reserved[usize::try_from(gap_position).unwrap()];
+    assert_eq!(actual.0, expected.0);
+    assert_eq!(actual.1.source(), expected.1.source());
+    assert_eq!(expected.1.exposure(), Exposure::Unknown);
     assert_eq!(
-        next_reserved[0],
-        known_addrs[usize::try_from(gap_limits.ephemeral()).unwrap()]
+        actual.1.exposure(),
+        Exposure::Exposed {
+            at_height: st.latest_block_height.unwrap(),
+            gap_metadata: crate::wallet::GapMetadata::InGap {
+                gap_position,
+                gap_limit: gap_limits.ephemeral(),
+            }
+        }
     );
 
     // The range of address indices that are safe to reserve now is
