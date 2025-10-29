@@ -1,19 +1,17 @@
 //! A convenient DSL for writing wallet tests.
 
 use std::{
-    collections::VecDeque,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
-use subtle::ConditionallySelectable;
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis};
 
 use crate::data_api::{
-    chain::ScanSummary,
-    testing::{AddressType, DataStoreFactory, TestBuilder, TestCache, TestFvk, TestState},
-    WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
+    testing::{AddressType, DataStoreFactory, TestAccount, TestBuilder, TestCache, TestState},
+    wallet::ConfirmationsPolicy,
+    Account, AccountBalance, WalletRead,
 };
 
 use super::ShieldedPoolTester;
@@ -124,6 +122,23 @@ where
     Cache: TestCache,
     Dsf: DataStoreFactory,
 {
+    /// Return the current test account balance, if possible.
+    ///
+    /// Returns `None` when no account summary data is available, which is
+    /// the case before the wallet has scanned any blocks.
+    pub fn get_account_balance(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Option<AccountBalance> {
+        let account = self.get_account();
+        let binding = self
+            .wallet()
+            .get_wallet_summary(confirmations_policy)
+            .unwrap()?;
+        let balance = binding.account_balances().get(&account.id())?;
+        Some(balance.clone())
+    }
+
     /// Adds funds from a single note from an address of the given type.
     ///
     /// Returns the current block height.
@@ -137,18 +152,37 @@ where
     ///     h
     /// }
     /// ```
+    ///
+    /// This also verifies that the test account contains the expected funds as
+    /// part of the _total_, and that the funds are spendable with the minimum number
+    /// of confirmations.
     pub fn add_a_single_note_to(
         &mut self,
         address_type: AddressType,
         zatoshis: Zatoshis,
     ) -> BlockHeight {
+        let starting_balance = self
+            .get_account_balance(ConfirmationsPolicy::MIN)
+            .map(|balance| balance.total())
+            .unwrap_or(Zatoshis::ZERO);
+        let ending_balance =
+            (starting_balance + zatoshis).expect("adding funds would overflow zatoshis");
         let dfvk = T::test_account_fvk(self);
         let (h, _, _) = self.generate_next_block(&dfvk, address_type, zatoshis);
         self.scan_cached_blocks(h, 1);
+
+        // Spendable balance matches total balance at 1 confirmation.
+        let account = self.test_account().unwrap().clone();
+        assert_eq!(self.get_total_balance(account.id()), ending_balance);
+        assert_eq!(
+            self.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+            ending_balance
+        );
+
         h
     }
 
-    /// Adds funds from a single note from a default external address.
+    /// Adds funds from a single note to a default external address.
     ///
     /// Returns the current block height.
     ///
@@ -161,6 +195,10 @@ where
     ///     h
     /// }
     /// ```
+    ///
+    /// This also verifies that the test account contains the expected funds as
+    /// part of the _total_, and that the funds are spendable with the minimum number
+    /// of confirmations.
     pub fn add_a_single_note_of(&mut self, zatoshis: Zatoshis) -> BlockHeight {
         self.add_a_single_note_to(AddressType::DefaultExternal, zatoshis)
     }
@@ -177,9 +215,63 @@ where
         out_height
     }
 
-    // pub fn add_notes_to(
-    //     &mut self,
-    //     address_type: AddressType,
-    //     notes: impl IntoIterator<Item = Option<Zatoshis>>
-    // )
+    /// Returns the test account.
+    pub fn get_account(&self) -> TestAccount<Dsf::Account> {
+        self.test_account().expect("not configured").clone()
+    }
+
+    /// Add funds from multiple notes, or generate empty blocks.
+    ///
+    /// This step also verifies that the test account contains the expected
+    /// funds as part of the _total_. Keep in mind that these funds may not yet
+    /// be _spendable_ due to the number confirmations required.
+    pub fn add_notes_to(
+        &mut self,
+        address_type: AddressType,
+        notes: impl IntoIterator<Item = Option<Zatoshis>>,
+    ) -> BlockHeight {
+        let dfvk = T::test_account_fvk(self);
+        let mut from_height = None;
+        let mut current_height = BlockHeight::from_u32(0);
+        let mut limit = 0;
+        let account = self.get_account();
+        let starting_balance = self
+            .get_account_balance(ConfirmationsPolicy::MIN)
+            .map(|b| b.total())
+            .unwrap_or(Zatoshis::ZERO);
+        let mut expected_total = starting_balance;
+        for maybe_note in notes.into_iter() {
+            if let Some(zatoshis) = maybe_note {
+                expected_total = (expected_total + zatoshis).unwrap();
+                let (h, _, _) = self.generate_next_block(&dfvk, address_type, zatoshis);
+                current_height = h;
+                if from_height.is_none() {
+                    from_height = Some(current_height);
+                }
+            } else {
+                self.generate_empty_block();
+            }
+            limit += 1;
+        }
+        if let Some(from_height) = from_height {
+            self.scan_cached_blocks(from_height, limit);
+        }
+
+        assert_eq!(self.get_total_balance(account.id()), expected_total);
+        assert_eq!(
+            self.wallet()
+                .block_max_scanned()
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            current_height
+        );
+
+        current_height
+    }
+
+    /// Add funds from multiple notes, or generate empty blocks.
+    pub fn add_notes(&mut self, notes: impl IntoIterator<Item = Option<Zatoshis>>) -> BlockHeight {
+        self.add_notes_to(AddressType::DefaultExternal, notes)
+    }
 }

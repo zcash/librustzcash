@@ -209,26 +209,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
-    let value = Zatoshis::const_from_u64(60000);
-    let h = st.add_a_single_note_of(value);
-    st.scan_cached_blocks(h, 1);
-
-    // Spendable balance matches total balance
-    let account = st.test_account().cloned().unwrap();
-    assert_eq!(st.get_total_balance(account.id()), value);
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        value
-    );
-
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
+    let h = st.add_a_single_note_of(Zatoshis::const_from_u64(60000));
 
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
@@ -249,6 +230,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
     let input_selector = GreedyInputSelector::new();
 
+    let account = st.get_account();
     let proposal = st
         .propose_transfer(
             account.id(),
@@ -385,15 +367,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         AddressType::DefaultExternal
     };
 
-    let h = st.add_a_single_note_to(address_type, starting_balance);
-    st.scan_cached_blocks(h, 1);
-
-    // Spendable balance matches total balance at 1 confirmation.
-    assert_eq!(st.get_total_balance(account.id()), starting_balance);
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        starting_balance
-    );
+    let _h = st.add_a_single_note_to(address_type, starting_balance);
 
     // Generate N confirmations by mining blocks
     let confirmations_policy = ConfirmationsPolicy::default();
@@ -467,28 +441,12 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
-    // Add funds to the wallet in a single note
+    // Add funds to the wallet in two notes over 5 blocks
     let value = Zatoshis::const_from_u64(60000);
-    let h = st.add_a_single_note_of(value);
-    st.add_empty_blocks(3);
-    st.add_a_single_note_of(value);
-    st.scan_cached_blocks(h, 5);
-    // let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-    // st.generate_empty_block();
-    // st.generate_empty_block();
-    // st.generate_empty_block();
-
-    // st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-    // st.scan_cached_blocks(h, 5);
+    let h = st.add_notes([Some(value), None, None, None, Some(value)]);
 
     // Spendable balance matches total balance
     let account = st.test_account().cloned().unwrap();
-    assert_eq!(
-        st.get_total_balance(account.id()),
-        Zatoshis::const_from_u64(120_000)
-    );
     let confirmation_policy = ConfirmationsPolicy::new_symmetrical(
         NonZeroU32::new(2).expect("2 is not zero"),
         #[cfg(feature = "transparent-inputs")]
@@ -633,28 +591,9 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
     let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = Zatoshis::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h, 1);
-
-    // Spendable balance matches total balance
-    assert_eq!(st.get_total_balance(account.id()), value);
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        value
-    );
-
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
+    let h = st.add_a_single_note_of(Zatoshis::const_from_u64(60000));
 
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
@@ -785,29 +724,8 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
 
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
     // Add funds to the wallet in a single note
-    let value = Zatoshis::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h, 1);
-
-    // Spendable balance matches total balance
-    assert_eq!(st.get_total_balance(account.id()), value);
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        value
-    );
-
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
+    st.add_a_single_note_of(Zatoshis::const_from_u64(60000));
 
     let account = st.test_account().cloned().unwrap();
     let (default_addr, _) = account.usk().default_transparent_address();
@@ -849,31 +767,15 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
     cache: impl TestCache,
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
-
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
-    // Add funds to the wallet in a single note
-    let value = Zatoshis::const_from_u64(60000);
-
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-    st.generate_empty_block();
-    st.generate_empty_block();
-    let later_on_value = Zatoshis::const_from_u64(123456);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, later_on_value);
-    st.scan_cached_blocks(h1, 4);
-
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
+    st.add_notes([
+        Some(Zatoshis::const_from_u64(60000)),
+        None,
+        None,
+        Some(Zatoshis::const_from_u64(123456)),
+    ]);
 
     // Spendable balance doesn't match total balance
+    let account = st.test_account().cloned().unwrap();
     let total_balance = st.get_total_balance(account.id());
     let spendable_balance = st.get_spendable_balance(
         account.id(),
@@ -921,6 +823,7 @@ pub fn spend_everything_proposal_fails_when_unconfirmed_funds_present<T: Shielde
 /// - Attempts to construct a request to spend the whole balance to an external address in the
 ///   same pool.
 /// - succeds at doing so
+// TODO(schell): as far as I can tell this function is unused in our test suite
 pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     T: ShieldedPoolTester,
 >(
@@ -928,31 +831,15 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     cache: impl TestCache,
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
-
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
-    // Add funds to the wallet in a single note
-    let value = Zatoshis::const_from_u64(60000);
-
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-    st.generate_empty_block();
-    st.generate_empty_block();
-    let later_on_value = Zatoshis::const_from_u64(123456);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, later_on_value);
-    st.scan_cached_blocks(h1, 4);
-
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
+    let h = st.add_notes([
+        Some(Zatoshis::const_from_u64(60000)),
+        None,
+        None,
+        Some(Zatoshis::const_from_u64(123456)),
+    ]);
 
     // Spendable balance doesn't match total balance
+    let account = st.test_account().cloned().unwrap();
     let total_balance = st.get_total_balance(account.id());
     let spendable_balance = st.get_spendable_balance(
         account.id(),
@@ -1098,27 +985,11 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
 
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
-    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.scan_cached_blocks(h, 1);
-
-        assert_eq!(
-            st.wallet()
-                .block_max_scanned()
-                .unwrap()
-                .unwrap()
-                .block_height(),
-            h
-        );
-        h
-    };
 
     let value = Zatoshis::const_from_u64(100000);
 
     // Add funds to the wallet.
-    add_funds(&mut st, value);
+    st.add_a_single_note_of(value);
     let initial_balance = value;
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
@@ -1269,35 +1140,18 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
-    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.scan_cached_blocks(h, 1);
-
-        assert_eq!(
-            st.wallet()
-                .block_max_scanned()
-                .unwrap()
-                .unwrap()
-                .block_height(),
-            h
-        );
-        h
-    };
-
     let number_of_notes = 3u64;
     let note_value = Zatoshis::const_from_u64(100000);
     let value = (note_value * number_of_notes).unwrap();
 
     // Add funds to the wallet.
     for _ in 0..number_of_notes {
-        add_funds(&mut st, note_value);
+        st.add_a_single_note_of(note_value);
     }
 
     let initial_balance = value;
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
         initial_balance
@@ -1440,35 +1294,18 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
-    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.scan_cached_blocks(h, 1);
-
-        assert_eq!(
-            st.wallet()
-                .block_max_scanned()
-                .unwrap()
-                .unwrap()
-                .block_height(),
-            h
-        );
-        h
-    };
-
     let number_of_notes = 10u64;
     let note_value = Zatoshis::const_from_u64(100000);
     let non_marginal_notes_value =
         (note_value * number_of_notes).expect("sum of notes should not fail.");
 
     for _ in 0..number_of_notes {
-        add_funds(&mut st, note_value);
-        add_funds(&mut st, zip317::MARGINAL_FEE);
+        st.add_a_single_note_of(note_value);
+        st.add_a_single_note_of(zip317::MARGINAL_FEE);
     }
 
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
         non_marginal_notes_value

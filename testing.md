@@ -28,6 +28,9 @@ and the second/third are repeated and interleaved for as many steps as it takes 
 
 ## Notes
 
+- [ ] In `spend_everything_multi_step_with_marginal_notes_proposed_transfer`, after generating
+  a block with a note of value with the zip317 marginal fee, my test DSL expects that the total
+  balance includes that marginal fee, but it's not there.
 * When attempting to use a very granular scenario encoding where each step has inputs and outputs,
   I ran into the obvious problem where the input of later steps depend on the output of earlier
   steps, but of course if you're building the scenario before running it, you don't have that input
