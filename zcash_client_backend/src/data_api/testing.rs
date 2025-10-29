@@ -2102,7 +2102,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
 /// Configures how a [`TestFvk`] receives a particular output.
 ///
 /// Used with [`TestFvk::add_output`] and [`TestFvk::add_logical_action`].
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub enum AddressType {
     /// The output will be sent to the default address of the full viewing key.
     #[default]

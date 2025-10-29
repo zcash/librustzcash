@@ -26,6 +26,16 @@ My ideal here is that the test DSL can express three high-level operations:
 * [x] Apply a state transition.
 and the second/third are repeated and interleaved for as many steps as it takes to test the functionality.
 
+## Notes
+
+* When attempting to use a very granular scenario encoding where each step has inputs and outputs,
+  I ran into the obvious problem where the input of later steps depend on the output of earlier
+  steps, but of course if you're building the scenario before running it, you don't have that input
+  yet.
+  This means I would have to have input wrapped in some "it's not here yet but it will be later"
+  type (like `Arc<Mutex<Option<_>>>`), but that's obviously very ugly.
+  Maybe it's ultimately what we need, I don't know.
+
 ## Sandbox
 
 This section is a sandbox to gather code present in each test function (listed below) to analyze
