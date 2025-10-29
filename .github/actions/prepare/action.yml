@@ -5,6 +5,14 @@ inputs:
     description: 'Extra feature flags to enable'
     required: false
     default: ''
+  transparent-pool:
+    description: 'Enable all transparent pool-specific feature flags'
+    required: false
+    default: false
+  orchard-pool:
+    description: 'Enable all Orchard pool-specific feature flags'
+    required: false
+    default: false
   all-pools:
     description: 'Enable all pool-specific feature flags'
     required: false
@@ -24,10 +32,15 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - id: pools
+    - id: transparent-pool
       shell: bash
-      run: echo "features=orchard transparent-inputs transparent-key-import transparent-key-encoding" >> $GITHUB_OUTPUT
-      if: inputs.all-pools == 'true'
+      run: echo "features=transparent-inputs transparent-key-import transparent-key-encoding" >> $GITHUB_OUTPUT
+      if: inputs.transparent-pool == 'true' || inputs.all-pools == 'true'
+
+    - id: orchard-pool
+      shell: bash
+      run: echo "features=orchard" >> $GITHUB_OUTPUT
+      if: inputs.orchard-pool == 'true' || inputs.all-pools == 'true'
 
     - id: test
       shell: bash
@@ -51,7 +64,8 @@ runs:
         unstable-serialization
         unstable-spanning-tree
         ${EXTRA_FEATURES}
-        ${{ steps.pools.outputs.features }}
+        ${{ steps.transparent-pool.outputs.features }}
+        ${{ steps.orchard-pool.outputs.features }}
         ${{ steps.test.outputs.feature }}
         '" >> $GITHUB_OUTPUT
       env:

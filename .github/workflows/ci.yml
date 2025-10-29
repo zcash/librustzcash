@@ -32,9 +32,9 @@ jobs:
             os: ubuntu-latest-8cores
 
           - state: transparent
-            extra_flags: transparent-inputs transparent-key-encoding
+            transparent-pool: true
           - state: Orchard
-            extra_flags: orchard
+            orchard-pool: true
           - state: all-pools
             all-pools: true
           - state: all-features
@@ -54,6 +54,8 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
@@ -98,9 +100,9 @@ jobs:
             os: windows-latest-8cores
 
           - state: transparent
-            extra_flags: transparent-inputs transparent-key-encoding
+            transparent-pool: true
           - state: Orchard
-            extra_flags: orchard
+            orchard-pool: true
           - state: all-pools
             all-pools: true
           - state: all-features
@@ -126,6 +128,8 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
@@ -166,9 +170,9 @@ jobs:
             os: ubuntu-latest-8cores
 
           - state: transparent
-            extra_flags: transparent-inputs
+            transparent-pool: true
           - state: Orchard
-            extra_flags: orchard
+            orchard-pool: true
           - state: all-features
             all-features: true
           - state: NU7
@@ -186,6 +190,8 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
           all-pools: false
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
