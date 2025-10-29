@@ -425,8 +425,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
+      # We can't currently use only the common feature set (to exclude checking of
+      # unstable in-progress code) because this action doesn't support spaces within CLI
+      # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
       - name: Run clippy
         uses: auguwu/clippy-action@94a9ff2f6920180b89e5c03d121d0af04a9d3e03 # 1.4.0
         with:
@@ -448,8 +449,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
+      # We can't currently use only the common feature set (to exclude checking of
+      # unstable in-progress code) because this action doesn't support spaces within CLI
+      # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
       - uses: dtolnay/rust-toolchain@beta
         id: toolchain
         with:
