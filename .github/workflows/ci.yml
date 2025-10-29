@@ -36,7 +36,7 @@ jobs:
           - state: Orchard
             extra_flags: orchard
           - state: all-pools
-            extra_flags: orchard transparent-inputs transparent-key-encoding
+            all-pools: true
           - state: all-features
             all-features: true
           - state: NU7
@@ -54,7 +54,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          all-pools: false
+          all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
@@ -102,7 +102,7 @@ jobs:
           - state: Orchard
             extra_flags: orchard
           - state: all-pools
-            extra_flags: orchard transparent-inputs transparent-key-encoding
+            all-pools: true
           - state: all-features
             all-features: true
           - state: NU7
@@ -126,7 +126,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          all-pools: false
+          all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
