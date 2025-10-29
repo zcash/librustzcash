@@ -98,7 +98,7 @@ impl Signer {
     /// Signs the transparent spend at the given index with the given spending key.
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
-    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// PCZT (for example, confirming that the change amounts are correct) before calling
     /// this method.
     pub fn sign_transparent(
         &mut self,
@@ -163,7 +163,7 @@ impl Signer {
     /// not take an FVK).
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
-    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// PCZT (for example, confirming that the change amounts are correct) before calling
     /// this method.
     pub fn sign_sapling(
         &mut self,
@@ -205,7 +205,7 @@ impl Signer {
     /// Requires the spend's `fvk` field to be set (because the API does not take an FVK).
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
-    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// PCZT (for example, confirming that the change amounts are correct) before calling
     /// this method.
     pub fn sign_orchard(
         &mut self,

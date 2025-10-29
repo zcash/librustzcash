@@ -11,7 +11,7 @@ impl super::Input {
     /// Signs the transparent spend with the given spend authorizing key.
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
-    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// PCZT (for example, confirming that the change amounts are correct) before calling
     /// this method.
     ///
     /// Returns an error if the spend authorizing key does not match any pubkey involved
