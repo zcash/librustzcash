@@ -53,7 +53,8 @@ workspace.
   - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
     has been removed. Implementers of `WalletRead` must provide their own
     implementation.
-  - `WalletWrite` has added methods `schedule_next_check` and `set_tx_trust`.
+  - `WalletWrite` has added methods `delete_account`, `schedule_next_check`, and
+    `set_tx_trust`.
   - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
     instead of an `allow_unspendable` flag. See the method documentation for
     details.

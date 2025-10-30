@@ -238,10 +238,14 @@ CREATE TABLE blocks (
 
 /// Stores the wallet's transactions.
 ///
-/// Any transactions that the wallet observes as "belonging to" one of the accounts in
+/// Any transactions that the wallet observes as being associated with one of the accounts in
 /// [`TABLE_ACCOUNTS`] may be tracked in this table. As a result, this table may contain
 /// data that is not recoverable from the chain (for example, transactions created by the
 /// wallet that expired before being mined).
+///
+/// When an account is deleted, all transactions that are associated with that account in some way
+/// that are not associated with any *other* account in the wallet must be first be deleted before
+/// the account deletion operation is allowed to proceed.
 ///
 /// ### Columns
 /// - `created`: The time at which the transaction was created as a string in the format
@@ -607,13 +611,10 @@ CREATE TABLE "sent_notes" (
         REFERENCES accounts(id) ON DELETE CASCADE,
     to_address TEXT,
     to_account_id INTEGER
-        REFERENCES accounts(id) ON DELETE CASCADE,
+        REFERENCES accounts(id) ON DELETE SET NULL,
     value INTEGER NOT NULL,
     memo BLOB,
-    UNIQUE (transaction_id, output_pool, output_index),
-    CONSTRAINT ck_send_note_recipient CHECK (
-        (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-    )
+    UNIQUE (transaction_id, output_pool, output_index)
 )"#;
 pub(super) const INDEX_SENT_NOTES_FROM_ACCOUNT: &str = r#"
 CREATE INDEX idx_sent_notes_from_account ON sent_notes (

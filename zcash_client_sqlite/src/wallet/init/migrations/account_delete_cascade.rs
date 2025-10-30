@@ -301,13 +301,10 @@ impl RusqliteMigration for Migration {
                     REFERENCES accounts(id) ON DELETE CASCADE,
                 to_address TEXT,
                 to_account_id INTEGER
-                    REFERENCES accounts(id) ON DELETE CASCADE,
+                    REFERENCES accounts(id) ON DELETE SET NULL,
                 value INTEGER NOT NULL,
                 memo BLOB,
-                UNIQUE (transaction_id, output_pool, output_index),
-                CONSTRAINT ck_send_note_recipient CHECK (
-                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-                )
+                UNIQUE (transaction_id, output_pool, output_index)
             );
             INSERT INTO sent_notes_new SELECT * FROM sent_notes;
             DROP TABLE sent_notes;

@@ -3233,7 +3233,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     );
 }
 
-pub fn cross_account_transfer<T: ShieldedPoolTester, DSF>(ds_factory: DSF, cache: impl TestCache)
+pub fn account_deletion<T: ShieldedPoolTester, DSF>(ds_factory: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::DataStore: Reset,
@@ -3275,11 +3275,11 @@ where
     );
     assert_eq!(st.get_total_balance(account2), Zatoshis::ZERO);
 
-    let amount_sent = Zatoshis::from_u64(20000).unwrap();
+    let bal_2 = Zatoshis::from_u64(50000).unwrap();
     let addr2 = T::fvk_default_address(&dfvk2);
     let req = TransactionRequest::new(vec![
         // payment to an account 2
-        Payment::without_memo(addr2.to_zcash_address(st.network()), amount_sent),
+        Payment::without_memo(addr2.to_zcash_address(st.network()), bal_2),
     ])
     .unwrap();
 
@@ -3302,14 +3302,14 @@ where
         )
         .unwrap()[0];
 
-    let amount_left = (value - (amount_sent + MINIMUM_FEE).unwrap()).unwrap();
-    assert_eq!(st.get_total_balance(account1), amount_left);
+    let bal_1 = (value - (bal_2 + MINIMUM_FEE).unwrap()).unwrap();
+    assert_eq!(st.get_total_balance(account1), bal_1);
 
     let (h, _) = st.generate_next_block_including(txid1);
     st.scan_cached_blocks(h, 1);
 
-    assert_eq!(st.get_total_balance(account2), amount_sent);
-    assert_eq!(st.get_total_balance(account1), amount_left);
+    assert_eq!(st.get_total_balance(account2), bal_2);
+    assert_eq!(st.get_total_balance(account1), bal_1);
 
     // txid0 should exist; we haven't enhanced it so we'll have the mined height, but not the raw
     // transaction data.
@@ -3326,13 +3326,80 @@ where
 
     let summary = st
         .wallet()
-        .get_wallet_summary(ConfirmationsPolicy::default())
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
         .unwrap()
         .unwrap();
     assert!(summary.account_balances().get(&account1).is_none());
     assert_eq!(
         summary.account_balances().get(&account2).unwrap().total(),
-        amount_sent
+        bal_2
+    );
+    assert_eq!(
+        summary
+            .account_balances()
+            .get(&account2)
+            .unwrap()
+            .spendable_value(),
+        bal_2
+    );
+
+    // Create a third account
+    let (account3, usk3) = st
+        .wallet_mut()
+        .create_account("account3", &seed, &birthday, None)
+        .unwrap();
+    let dfvk3 = T::sk_to_fvk(T::usk_to_sk(&usk3));
+
+    // Creating a new account with the original birthday forces a rescan.
+    st.scan_cached_blocks(birthday.height(), 2);
+
+    let bal_3 = Zatoshis::from_u64(20000).unwrap();
+    let addr3 = T::fvk_default_address(&dfvk3);
+    let req = TransactionRequest::new(vec![
+        // payment to an account 3
+        Payment::without_memo(addr3.to_zcash_address(st.network()), bal_3),
+    ])
+    .unwrap();
+
+    let txid2 = st
+        .spend(
+            &input_selector,
+            &change_strategy,
+            &usk2,
+            req,
+            OvkPolicy::Sender,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap()[0];
+
+    let bal_2_final = (bal_2 - (bal_3 + MINIMUM_FEE).unwrap()).unwrap();
+    assert_eq!(st.get_total_balance(account2), bal_2_final);
+
+    let (h, _) = st.generate_next_block_including(txid2);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(st.get_total_balance(account2), bal_2_final);
+    assert_eq!(st.get_total_balance(account3), bal_3);
+
+    // txid2 should exist; we haven't enhanced it so we'll have the mined height, but not the raw
+    // transaction data.
+    assert_matches!(st.wallet_mut().get_tx_height(txid2), Ok(Some(_)));
+
+    // delete account 3
+    assert_matches!(st.wallet_mut().delete_account(account3), Ok(_));
+
+    // txid2 should still exist in the wallet, as it involves account 2
+    assert_matches!(st.wallet_mut().get_transaction(txid2), Ok(Some(_)));
+
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::default())
+        .unwrap()
+        .unwrap();
+    assert!(summary.account_balances().get(&account3).is_none());
+    assert_eq!(
+        summary.account_balances().get(&account2).unwrap().total(),
+        bal_2_final
     );
 }
 

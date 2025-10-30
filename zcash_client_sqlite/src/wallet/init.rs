@@ -772,6 +772,12 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
         let re_paren = Regex::new(r"([\(\)])").unwrap();
 
+        let normalize = |s: &str| -> String {
+            re.replace_all(&re_paren.replace_all(s, " $1 "), " ")
+                .trim()
+                .to_string()
+        };
+
         let expected_tables = vec![
             db::TABLE_ACCOUNTS,
             db::TABLE_ADDRESSES,
@@ -805,12 +811,7 @@ mod tests {
         let rows = describe_tables(&st.wallet().db().conn).unwrap();
         assert_eq!(rows.len(), expected_tables.len());
         for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
-            assert_eq!(
-                re.replace_all(&re_paren.replace_all(actual, " $1 "), " ")
-                    .trim(),
-                re.replace_all(&re_paren.replace_all(expected, " $1 "), " ")
-                    .trim(),
-            );
+            assert_eq!(normalize(actual), normalize(expected));
         }
 
         let expected_indices = vec![
@@ -856,13 +857,8 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             let actual: String = row.get(0).unwrap();
             assert_eq!(
-                re.replace_all(&re_paren.replace_all(&actual, " $1 "), " ")
-                    .trim(),
-                re.replace_all(
-                    &re_paren.replace_all(expected_indices[expected_idx], " $1 "),
-                    " "
-                )
-                .trim(),
+                normalize(&actual),
+                normalize(expected_indices[expected_idx])
             );
             expected_idx += 1;
         }
@@ -892,15 +888,7 @@ mod tests {
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let actual: String = row.get(0).unwrap();
-            assert_eq!(
-                re.replace_all(&re_paren.replace_all(&actual, " $1 "), " ")
-                    .trim(),
-                re.replace_all(
-                    &re_paren.replace_all(&expected_views[expected_idx], " $1 "),
-                    " "
-                )
-                .trim(),
-            );
+            assert_eq!(normalize(&actual), normalize(&expected_views[expected_idx]));
             expected_idx += 1;
         }
     }

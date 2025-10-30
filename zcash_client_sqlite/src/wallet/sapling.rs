@@ -588,8 +588,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cross_account_transfer() {
-        testing::pool::cross_account_transfer::<SaplingPoolTester>()
+    fn account_deletion() {
+        testing::pool::account_deletion::<SaplingPoolTester>()
     }
 
     #[test]
