@@ -481,13 +481,16 @@ mod tests {
     use rand_core::OsRng;
 
     use sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
-    use transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_primitives::{
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
+        legacy::TransparentAddress,
         transaction::{
             Transaction, TransactionData, TxVersion,
             builder::{BuildConfig, Builder},
-            components::tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+            components::{
+                transparent::builder::TransparentSigningSet,
+                tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+            },
             fees::{fixed, zip317::MINIMUM_FEE},
         },
     };

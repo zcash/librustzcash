@@ -7,15 +7,19 @@ use zcash_primitives::extensions::transparent::{
 use zcash_primitives::transaction::{Transaction, components::tze::TzeOut};
 use zcash_protocol::consensus::{BlockHeight, BranchId};
 
-use crate::transparent::demo;
+use crate::transparent::{demo, stark_verify};
 
 /// Wire value for the demo extension identifier.
 pub const EXTENSION_DEMO: u32 = 0;
+
+/// Wire value for the stark_verify extension identifier.
+pub const EXTENSION_STARK_VERIFY: u32 = 1;
 
 /// The set of programs that have assigned type IDs within the Zcash consensus rules.
 #[derive(Debug, Clone, Copy)]
 pub enum ExtensionId {
     Demo,
+    StarkVerify,
 }
 
 pub struct InvalidExtId(u32);
@@ -26,6 +30,7 @@ impl TryFrom<u32> for ExtensionId {
     fn try_from(t: u32) -> Result<Self, Self::Error> {
         match t {
             EXTENSION_DEMO => Ok(ExtensionId::Demo),
+            EXTENSION_STARK_VERIFY => Ok(ExtensionId::StarkVerify),
             n => Err(InvalidExtId(n)),
         }
     }
@@ -35,6 +40,7 @@ impl From<ExtensionId> for u32 {
     fn from(type_id: ExtensionId) -> u32 {
         match type_id {
             ExtensionId::Demo => EXTENSION_DEMO,
+            ExtensionId::StarkVerify => EXTENSION_STARK_VERIFY,
         }
     }
 }
@@ -93,6 +99,10 @@ impl<'a> demo::Context for Context<'a> {
     }
 }
 
+/// Implementation of required operations for the stark_verify extension, as satisfied
+/// by the context.
+impl stark_verify::Context for Context<'_> {}
+
 /// Identifier for the set of TZEs associated with the ZFUTURE network upgrade.
 /// This epoch is intended only for use on private test networks.
 struct EpochVTest;
@@ -112,6 +122,9 @@ impl Epoch for EpochVTest {
         // This epoch recognizes the following set of extensions:
         match ext_id {
             ExtensionId::Demo => demo::Program
+                .verify(precondition, witness, ctx)
+                .map_err(|e| Error::ProgramError(format!("Epoch vTest program error: {}", e))),
+            ExtensionId::StarkVerify => stark_verify::Program
                 .verify(precondition, witness, ctx)
                 .map_err(|e| Error::ProgramError(format!("Epoch vTest program error: {}", e))),
         }
