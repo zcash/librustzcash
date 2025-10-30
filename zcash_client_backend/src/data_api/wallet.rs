@@ -215,6 +215,7 @@ where
         data.chain_height()?,
         tx,
         &ufvks,
+        &[],
     ))?;
 
     Ok(())
