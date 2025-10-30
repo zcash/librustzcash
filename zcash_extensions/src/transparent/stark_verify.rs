@@ -10,6 +10,11 @@
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
+// Stwo Cairo imports for STARK verification
+use cairo_air::verifier::verify_cairo;
+use cairo_air::{CairoProof, PreProcessedTraceVariant};
+use stwo::core::channel::MerkleChannel;
+
 use zcash_primitives::{
     extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
     transaction::components::tze::OutPoint,

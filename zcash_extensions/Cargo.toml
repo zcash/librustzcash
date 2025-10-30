@@ -22,6 +22,21 @@ blake2b_simd.workspace = true
 zcash_primitives = { version = "0.26", features = ["non-standard-fees", "circuits"] }
 zcash_protocol = { version = "0.7" }
 
+# Stwo Cairo dependencies for STARK verification
+cairo-air = { git = "https://github.com/starkware-libs/stwo-cairo", branch = "main" }
+stwo = { git = "https://github.com/starkware-libs/stwo", rev = "ee33b014", default-features = false, features = ["parallel", "prover"] }
+stwo-constraint-framework = { git = "https://github.com/starkware-libs/stwo", rev = "ee33b014", default-features = false, features = ["parallel", "prover"] }
+stwo-cairo-common = { git = "https://github.com/starkware-libs/stwo-cairo", branch = "main" }
+stwo-cairo-serialize = { git = "https://github.com/starkware-libs/stwo-cairo", branch = "main" }
+
+# Additional dependencies required by cairo-air
+starknet-curve = "0.6.0"
+starknet-ff = "0.3.7"
+starknet-types-core = { version = "0.2.0", features = ["serde"] }
+itertools = "0.12.0"
+serde.workspace = true
+thiserror = "2.0.12"
+
 [dev-dependencies]
 ff.workspace = true
 jubjub.workspace = true
