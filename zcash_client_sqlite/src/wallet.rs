@@ -683,6 +683,96 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
+pub(crate) fn delete_account(
+    conn: &rusqlite::Transaction,
+    account_uuid: AccountUuid,
+) -> Result<(), SqliteClientError> {
+    // Update all `sent_notes` records where `to_account_id` refers to the account to be deleted to
+    // have the `to_address` field set instead to the address at which the output was received.
+    let mut to_account_tx = conn.prepare(
+        r#"
+        SELECT
+            sn.id AS sent_note_id,
+            COALESCE(addresses.address, addresses.cached_transparent_receiver_address) AS to_address
+        FROM sent_notes sn
+        JOIN v_received_outputs ro ON ro.sent_note_id = sn.id
+        JOIN addresses ON addresses.id = ro.address_id
+        JOIN accounts ta ON ta.id = sn.to_account_id
+        WHERE ta.uuid = :account_uuid
+        "#,
+    )?;
+
+    let mut update_sent_note = conn.prepare(
+        r#"
+        UPDATE sent_notes
+        SET to_address = :to_address, to_account_id = NULL
+        WHERE id = :sent_note_id
+        "#,
+    )?;
+
+    let mut rows = to_account_tx.query(named_params![
+        ":account_uuid": account_uuid.0,
+    ])?;
+
+    while let Some(row) = rows.next()? {
+        if let Some(address) = row.get::<_, Option<String>>("to_address")? {
+            update_sent_note.execute(named_params![
+                ":sent_note_id": row.get::<_, i64>("sent_note_id")?,
+                ":address": address
+            ])?;
+        }
+    }
+
+    // Delete all transaction information that is solely linked to this account. This
+    // effectively reverts the wallet state for this account to the time before its
+    // viewing keys and transparent addresses had been used to scan for information.
+    conn.execute(
+        r#"
+        WITH account_transactions AS (
+            SELECT ro.transaction_id
+            FROM v_received_outputs ro
+            JOIN accounts a ON a.id = ro.account_id
+            WHERE a.uuid = :account_uuid
+            UNION
+            SELECT ros.transaction_id
+            FROM v_received_output_spends ros
+            JOIN accounts sa ON sa.id = ros.account_id
+            WHERE sa.uuid = :account_uuid
+        ),
+        non_account_transactions AS (
+            SELECT ro.transaction_id
+            FROM v_received_outputs ro
+            JOIN accounts a ON a.id = ro.account_id
+            WHERE a.uuid != :account_uuid
+            UNION
+            SELECT ros.transaction_id
+            FROM v_received_output_spends ros
+            JOIN accounts sa ON sa.id = ros.account_id
+            WHERE sa.uuid != :account_uuid
+        )
+        DELETE FROM transactions WHERE id_tx IN (
+            SELECT transaction_id FROM account_transactions
+            EXCEPT
+            SELECT transaction_id FROM non_account_transactions
+        )
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+        ],
+    )?;
+
+    // At this point, the only information remaining about the account is its entry in the
+    // accounts table and its addresses; delete them.
+    conn.execute(
+        "DELETE FROM accounts WHERE uuid = :account_uuid",
+        named_params![
+            ":account_uuid": account_uuid.0,
+        ],
+    )?;
+
+    Ok(())
+}
+
 #[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -2067,7 +2157,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     MAX(tt.mined_height) AS max_shielding_input_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
-             INNER JOIN transactions t ON t.id_tx = rn.tx
+             INNER JOIN transactions t ON t.id_tx = rn.transaction_id
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
@@ -2306,7 +2396,7 @@ pub(crate) fn get_received_memo(
         .query_row(
             &format!(
                 "SELECT memo FROM {table_prefix}_received_notes
-                JOIN transactions ON {table_prefix}_received_notes.tx = transactions.id_tx
+                JOIN transactions ON transactions.id_tx = {table_prefix}_received_notes.transaction_id
                 WHERE transactions.txid = :txid
                 AND {table_prefix}_received_notes.{output_index_col} = :output_index"
             ),
@@ -2400,14 +2490,14 @@ pub(crate) fn get_transaction<P: Parameters>(
             let h: Option<u32> = row.get(1)?;
             let expiry: Option<u32> = row.get(2)?;
             Ok((
-                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, Option<Vec<u8>>>(0)?,
                 h.map(BlockHeight::from),
                 expiry.map(BlockHeight::from),
             ))
         },
     )
     .optional()?
-    .map(|(t, b, e)| parse_tx(params, &t, b, e))
+    .and_then(|(t_opt, b, e)| t_opt.as_ref().map(|t| parse_tx(params, t, b, e)))
     .transpose()
 }
 
@@ -2453,7 +2543,7 @@ pub(crate) fn get_sent_memo(
     let memo_bytes: Option<Vec<_>> = conn
         .query_row(
             "SELECT memo FROM sent_notes
-            JOIN transactions ON sent_notes.tx = transactions.id_tx
+            JOIN transactions ON transactions.id_tx = sent_notes.transaction_id
             WHERE transactions.txid = :txid
             AND sent_notes.output_pool = :pool_code
             AND sent_notes.output_index = :output_index",
@@ -4345,13 +4435,13 @@ fn flag_previously_received_change(
                 "UPDATE {table_prefix}_received_notes
                  SET is_change = 1
                  FROM sent_notes sn
-                 WHERE sn.tx = {table_prefix}_received_notes.tx
-                 AND sn.tx = :tx
+                 WHERE sn.transaction_id = {table_prefix}_received_notes.transaction_id
+                 AND sn.transaction_id = :transaction_id
                  AND sn.from_account_id = {table_prefix}_received_notes.account_id
                  AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
             ),
             named_params! {
-                ":tx": tx_ref.0,
+                ":transaction_id": tx_ref.0,
                 ":internal_scope": KeyScope::INTERNAL.encode()
             },
         )
@@ -4375,17 +4465,17 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_insert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account_id,
+            transaction_id, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
          VALUES (
-            :tx, :output_pool, :output_index, :from_account_id,
+            :transaction_id, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)",
     )?;
 
     let (from_account_id, to_address, to_account_id, pool_type) =
         recipient_params(conn, params, from_account_uuid, output.recipient())?;
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
         ":from_account_id": from_account_id.0,
@@ -4425,12 +4515,12 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account_id,
+            transaction_id, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
         VALUES (
-            :tx, :output_pool, :output_index, :from_account_id,
+            :transaction_id, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)
-        ON CONFLICT (tx, output_pool, output_index) DO UPDATE
+        ON CONFLICT (transaction_id, output_pool, output_index) DO UPDATE
         SET from_account_id = :from_account_id,
             to_address = IFNULL(to_address, :to_address),
             to_account_id = IFNULL(to_account_id, :to_account_id),
@@ -4441,7 +4531,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     let (from_account_id, to_address, to_account_id, pool_type) =
         recipient_params(conn, params, from_account_uuid, recipient)?;
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
         ":from_account_id": from_account_id.0,

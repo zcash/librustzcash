@@ -21,6 +21,11 @@ workspace.
   additional type constraints. The `R` type parameter is now constrained to
   types that implement `RngCore`.
 
+### Fixed
+- A bug was fixed in `WalletDb::get_transaction` that could cause transaction
+  retrieval to return an error instead of `None` for transactions for which the 
+  raw transaction data was not available.
+
 ## [0.18.9] - 2025-10-22
 
 ### Fixed

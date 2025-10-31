@@ -1720,7 +1720,7 @@ pub trait WalletRead {
     ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
-    /// transaction is not in the main chain.
+    /// transaction is not known to the wallet or not in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
@@ -1735,7 +1735,10 @@ pub trait WalletRead {
     /// that is known to the wallet.
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
-    /// Returns a transaction.
+    /// Returns the transaction with the given txid, if known to the wallet.
+    ///
+    /// Returns `None` if the txid is not known to the wallet or if the raw transaction data is not
+    /// available.
     fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error>;
 
     /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
@@ -2864,10 +2867,6 @@ pub trait WalletWrite: WalletRead {
     /// - `key_source`: A string identifier or other metadata describing the source of the seed.
     ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
     ///   applications which need to track additional identifying information for an account.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     fn import_account_ufvk(
         &mut self,
         account_name: &str,
@@ -2876,6 +2875,25 @@ pub trait WalletWrite: WalletRead {
         purpose: AccountPurpose,
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
+
+    /// Deletes the specified account, and all transactions that exclusively involve it, from the
+    /// wallet database.
+    ///
+    /// WARNING: This is a destructive operation and may result in the permanent loss of
+    /// potentially important information that is not recoverable from chain data, including:
+    /// * Data about transactions sent by the account for which [`OvkPolicy::Discard`] (or
+    ///   [`OvkPolicy::Custom`] with random OVKs) was used;
+    /// * Data related to transactions that the account attempted to send that expired or were
+    ///   otherwise invalidated without having been mined in the main chain;
+    /// * Data related to transactions that were observed in the mempool as having inputs or
+    ///   outputs that involved the account, but that were never mined in the main chain;
+    /// * Data related to transactions that were received by the wallet in a mined block, where
+    ///   that block was later un-mined in a chain reorg and the transaction was either invalidated
+    ///   or was never re-mined.
+    ///
+    /// [`OvkPolicy::Discard`]: crate::wallet::OvkPolicy::Discard
+    /// [`OvkPolicy::Custom`]: crate::wallet::OvkPolicy::Custom
+    fn delete_account(&mut self, account: Self::AccountId) -> Result<(), Self::Error>;
 
     /// Imports the given pubkey into the account without key derivation information, and adds the
     /// associated transparent p2pkh address.

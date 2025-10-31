@@ -396,13 +396,13 @@ pub(crate) fn put_received_note<
     let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes (
-            tx, output_index, account_id, address_id,
+            transaction_id, output_index, account_id, address_id,
             diversifier, value, rcm, memo, nf,
             is_change, commitment_tree_position,
             recipient_key_scope
         )
         VALUES (
-            :tx,
+            :transaction_id,
             :output_index,
             :account_id,
             :address_id,
@@ -415,7 +415,7 @@ pub(crate) fn put_received_note<
             :commitment_tree_position,
             :recipient_key_scope
         )
-        ON CONFLICT (tx, output_index) DO UPDATE
+        ON CONFLICT (transaction_id, output_index) DO UPDATE
         SET account_id = :account_id,
             address_id = :address_id,
             diversifier = :diversifier,
@@ -434,7 +434,7 @@ pub(crate) fn put_received_note<
     let diversifier = to.diversifier();
 
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
         ":account_id": account_id.0,
         ":address_id": address_id.map(|a| a.0),
@@ -585,6 +585,11 @@ pub(crate) mod tests {
     #[test]
     fn change_note_spends_succeed() {
         testing::pool::change_note_spends_succeed::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn account_deletion() {
+        testing::pool::account_deletion::<SaplingPoolTester>()
     }
 
     #[test]

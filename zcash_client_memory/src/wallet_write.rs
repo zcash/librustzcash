@@ -100,6 +100,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         }
     }
 
+    fn delete_account(&mut self, account: Self::AccountId) -> Result<(), Self::Error> {
+        self.accounts.accounts.remove(&account);
+        todo!("remove all transactions associated with the account")
+    }
+
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,

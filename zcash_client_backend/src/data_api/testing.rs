@@ -2799,6 +2799,10 @@ impl WalletWrite for MockWalletDb {
         todo!()
     }
 
+    fn delete_account(&mut self, _account: Self::AccountId) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
