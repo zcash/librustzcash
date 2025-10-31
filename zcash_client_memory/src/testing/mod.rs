@@ -54,7 +54,7 @@ impl DataStoreFactory for TestMemDbFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
-        #[cfg(feature = "transparent-inputs")] _gap_limits: GapLimits,
+        #[cfg(feature = "transparent-inputs")] _gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error> {
         Ok(MemoryWalletDb::new(network, 100))
     }

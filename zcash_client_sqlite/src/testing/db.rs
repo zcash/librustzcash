@@ -188,13 +188,13 @@ impl DataStoreFactory for TestDbFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
-        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+        #[cfg(feature = "transparent-inputs")] gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
             WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
         #[cfg(feature = "transparent-inputs")]
-        {
+        if let Some(gap_limits) = gap_limits {
             db_data = db_data.with_gap_limits(gap_limits.into());
         }
 
@@ -225,7 +225,7 @@ impl Reset for TestDb {
                 .new_data_store(
                     network,
                     #[cfg(feature = "transparent-inputs")]
-                    gap_limits.into(),
+                    Some(gap_limits.into()),
                 )
                 .unwrap(),
         );

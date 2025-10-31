@@ -20,6 +20,11 @@ workspace.
 - The implementation of `zcash_client_backend::WalletWrite` for `WalletDb` has
   additional type constraints. The `R` type parameter is now constrained to
   types that implement `RngCore`.
+- The default gap limit for ephemeral address generation has been changed from
+  5 addresses to 10. Now that ephemeral addresses are being used for more
+  single-use-address use cases than just transactions sending to TEX addresses,
+  the case that there will be a series of unused addresses (for example, for
+  swap refunds) becomes more common.
 
 ### Fixed
 - A bug was fixed in `WalletDb::get_transaction` that could cause transaction

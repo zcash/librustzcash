@@ -73,6 +73,11 @@ workspace.
     consequence of this change, the signature of
     `TransparentAddressMetadata::new` has changed; use
     `TransparentAddressMetadata::derived` instead.
+- `zcash_client_backend::testing`:
+  - `DataStoreFactory::new_data_store` now takes its `GapLimits` argument
+    as an optional value. This avoids the need for the test builder to
+    hardcode a set of gap limits that might inadvertently conflict
+    with defaults provided by a particular backend.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
