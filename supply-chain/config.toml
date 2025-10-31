@@ -1664,7 +1664,7 @@ version = "2.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.xdg]]
-version = "2.5.2"
+version = "3.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.xz2]]
