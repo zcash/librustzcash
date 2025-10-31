@@ -1412,7 +1412,7 @@
 <a href=#1412 id=1412 data-nosnippet>1412</a>    </span><span class="kw">fn </span>new_data_store(
 <a href=#1413 id=1413 data-nosnippet>1413</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#1414 id=1414 data-nosnippet>1414</a>        network: LocalNetwork,
-<a href=#1415 id=1415 data-nosnippet>1415</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>gap_limits: GapLimits,
+<a href=#1415 id=1415 data-nosnippet>1415</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>gap_limits: <span class="prelude-ty">Option</span>&lt;GapLimits&gt;,
 <a href=#1416 id=1416 data-nosnippet>1416</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::DataStore, <span class="self">Self</span>::Error&gt;;
 <a href=#1417 id=1417 data-nosnippet>1417</a>}
 <a href=#1418 id=1418 data-nosnippet>1418</a>
@@ -1426,7 +1426,7 @@
 <a href=#1426 id=1426 data-nosnippet>1426</a>    account_birthday: <span class="prelude-ty">Option</span>&lt;AccountBirthday&gt;,
 <a href=#1427 id=1427 data-nosnippet>1427</a>    account_index: <span class="prelude-ty">Option</span>&lt;zip32::AccountId&gt;,
 <a href=#1428 id=1428 data-nosnippet>1428</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#1429 id=1429 data-nosnippet>1429</a>    </span>gap_limits: GapLimits,
+<a href=#1429 id=1429 data-nosnippet>1429</a>    </span>gap_limits: <span class="prelude-ty">Option</span>&lt;GapLimits&gt;,
 <a href=#1430 id=1430 data-nosnippet>1430</a>}
 <a href=#1431 id=1431 data-nosnippet>1431</a>
 <a href=#1432 id=1432 data-nosnippet>1432</a><span class="kw">impl </span>TestBuilder&lt;(), ()&gt; {
@@ -1460,7 +1460,7 @@
 <a href=#1460 id=1460 data-nosnippet>1460</a>            account_birthday: <span class="prelude-val">None</span>,
 <a href=#1461 id=1461 data-nosnippet>1461</a>            account_index: <span class="prelude-val">None</span>,
 <a href=#1462 id=1462 data-nosnippet>1462</a>            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#1463 id=1463 data-nosnippet>1463</a>            </span>gap_limits: GapLimits::new(<span class="number">10</span>, <span class="number">5</span>, <span class="number">5</span>),
+<a href=#1463 id=1463 data-nosnippet>1463</a>            </span>gap_limits: <span class="prelude-val">None</span>,
 <a href=#1464 id=1464 data-nosnippet>1464</a>        }
 <a href=#1465 id=1465 data-nosnippet>1465</a>    }
 <a href=#1466 id=1466 data-nosnippet>1466</a>}
@@ -1519,7 +1519,7 @@
 <a href=#1519 id=1519 data-nosnippet>1519</a>            initial_chain_state: <span class="self">self</span>.initial_chain_state,
 <a href=#1520 id=1520 data-nosnippet>1520</a>            account_birthday: <span class="self">self</span>.account_birthday,
 <a href=#1521 id=1521 data-nosnippet>1521</a>            account_index: <span class="self">self</span>.account_index,
-<a href=#1522 id=1522 data-nosnippet>1522</a>            gap_limits,
+<a href=#1522 id=1522 data-nosnippet>1522</a>            gap_limits: <span class="prelude-val">Some</span>(gap_limits),
 <a href=#1523 id=1523 data-nosnippet>1523</a>        }
 <a href=#1524 id=1524 data-nosnippet>1524</a>    }
 <a href=#1525 id=1525 data-nosnippet>1525</a>}
