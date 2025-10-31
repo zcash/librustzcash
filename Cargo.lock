@@ -7259,7 +7259,6 @@ dependencies = [
  "home",
  "jubjub",
  "known-folders",
- "lazy_static",
  "minreq",
  "rand_core 0.6.4",
  "redjubjub",

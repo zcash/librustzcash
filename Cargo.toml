@@ -154,7 +154,6 @@ time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
 # Static constants and assertions
-lazy_static = "1"
 static_assertions = "1"
 
 # Tests and benchmarks

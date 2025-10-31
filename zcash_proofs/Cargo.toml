@@ -26,7 +26,6 @@ bellman.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 jubjub.workspace = true
-lazy_static.workspace = true
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core.workspace = true
 sapling.workspace = true
