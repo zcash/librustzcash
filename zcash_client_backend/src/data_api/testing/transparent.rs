@@ -450,6 +450,7 @@ where
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
+        .with_gap_limits(gap_limits)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 

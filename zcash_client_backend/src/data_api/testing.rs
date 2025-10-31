@@ -1412,7 +1412,7 @@ pub trait DataStoreFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
-        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+        #[cfg(feature = "transparent-inputs")] gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error>;
 }
 
@@ -1426,7 +1426,7 @@ pub struct TestBuilder<Cache, DataStoreFactory> {
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
     #[cfg(feature = "transparent-inputs")]
-    gap_limits: GapLimits,
+    gap_limits: Option<GapLimits>,
 }
 
 impl TestBuilder<(), ()> {
@@ -1460,7 +1460,7 @@ impl TestBuilder<(), ()> {
             account_birthday: None,
             account_index: None,
             #[cfg(feature = "transparent-inputs")]
-            gap_limits: GapLimits::new(10, 5, 5),
+            gap_limits: None,
         }
     }
 }
@@ -1519,7 +1519,7 @@ impl<A, B> TestBuilder<A, B> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
-            gap_limits,
+            gap_limits: Some(gap_limits),
         }
     }
 }

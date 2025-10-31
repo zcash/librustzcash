@@ -326,7 +326,7 @@ impl GapLimits {
 ///
 /// - external addresses: 10
 /// - transparent internal (change) addresses: 5
-/// - ephemeral addresses: 5
+/// - ephemeral addresses: 10
 ///
 /// These limits are chosen with the following rationale:
 /// - At present, many wallets query light wallet servers with a set of addresses, because querying
@@ -334,24 +334,23 @@ impl GapLimits {
 ///   timing correlation leads to undesirable delays in discovery of received funds. As such, it is
 ///   desirable to minimize the number of addresses that can be "linked", i.e. understood by the
 ///   light wallet server to all belong to the same wallet.
-/// - For transparent change addresses and ephemeral addresses, it is always expected that an
-///   address will receive funds immediately following its generation except in the case of wallet
-///   failure.
-/// - For externally-scoped transparent addresses, it is desirable to use a slightly larger gap
-///   limit to account for addresses that were shared with counterparties never having been used.
-///   However, we don't want to use the full 20-address gap limit space because it's possible that
-///   in the future, changes to the light wallet protocol will obviate the need to query for UTXOs
-///   in a fashion that links those addresses. In such a circumstance, the gap limit will be
-///   adjusted upward and address rotation should then choose an address that is outside the
-///   current gap limit; after that change, newly generated addresses will not be exposed as
-///   linked in the view of the light wallet server.
+/// - For transparent change addresses it is always expected that an address will receive funds
+///   immediately following its generation except in the case of wallet failure.
+/// - For externally-scoped transparent addresses and ephemeral addresses, it is desirable to use a
+///   slightly larger gap limit to account for addresses that were shared with counterparties never
+///   having been used. However, we don't want to use the full 20-address gap limit space because
+///   it's possible that in the future, changes to the light wallet protocol will obviate the need to
+///   query for UTXOs in a fashion that links those addresses to one another. In such a
+///   circumstance, the gap limit will be adjusted upward and address rotation should then choose
+///   an address that is outside the current gap limit; after that change, newly generated
+///   addresses will not be exposed as linked in the view of the light wallet server.
 #[cfg(feature = "transparent-inputs")]
 impl Default for GapLimits {
     fn default() -> Self {
         Self {
             external: 10,
             internal: 5,
-            ephemeral: 5,
+            ephemeral: 10,
         }
     }
 }
@@ -3022,8 +3021,13 @@ mod tests {
                             let t_delta = t.duration_since(base_time).unwrap();
                             // This is an imprecise check; the objective of the randomized time
                             // selection is that all ephemeral address checks be performed within a
-                            // day, and that their check times be distinct.
-                            let result = t_delta < day && !check_times.contains(&t);
+                            // day, and that their check times be distinct. We are bounding the
+                            // overall delta to two days to limit the probability of test failure,
+                            // since due to randomization of the check intervals it's possible that
+                            // scheduled checks might exceed one day; if we find an example where
+                            // checks exceed two days then we're in some long tail of the
+                            // distribution.
+                            let result = t_delta < 2 * day && !check_times.contains(&t);
                             check_times.insert(t);
                             result
                         }
