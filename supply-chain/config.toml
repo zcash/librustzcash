@@ -968,7 +968,7 @@ version = "1.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.pprof]]
-version = "0.13.0"
+version = "0.15.0"
 criteria = "safe-to-run"
 
 [[exemptions.ppv-lite86]]
@@ -1250,6 +1250,10 @@ criteria = "safe-to-deploy"
 [[exemptions.spin]]
 version = "0.9.8"
 criteria = "safe-to-deploy"
+
+[[exemptions.spin]]
+version = "0.10.0"
+criteria = "safe-to-run"
 
 [[exemptions.spki]]
 version = "0.7.3"
