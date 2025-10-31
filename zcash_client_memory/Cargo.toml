@@ -73,7 +73,7 @@ bytes = "1.9.0"
 [dev-dependencies]
 ciborium = "0.2.2"
 serde_json.workspace = true
-postcard = { version = "1.0.10", features = ["alloc"] }
+postcard.workspace = true
 zcash_client_backend = { workspace = true, features = ["test-dependencies"] }
 
 

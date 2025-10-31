@@ -23,7 +23,7 @@ blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
 
 # Encoding
-postcard = { version = "1", features = ["alloc"] }
+postcard.workspace = true
 serde.workspace = true
 serde_with = { version = "3", default-features = false, features = ["alloc", "macros"] }
 

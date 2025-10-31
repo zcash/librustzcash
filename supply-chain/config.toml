@@ -163,10 +163,6 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-polyfill]]
-version = "1.0.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.backtrace]]
 version = "0.3.69"
 criteria = "safe-to-deploy"
@@ -313,10 +309,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.criterion-plot]]
 version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.critical-section]]
-version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-channel]]
@@ -615,20 +607,12 @@ criteria = "safe-to-deploy"
 version = "2.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.hash32]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.hashbrown]]
 version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]
 version = "0.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.heapless]]
-version = "0.7.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
