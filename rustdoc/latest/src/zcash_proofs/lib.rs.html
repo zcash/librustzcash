@@ -84,8 +84,8 @@
 <a href=#84 id=84 data-nosnippet>84</a>    <span class="attr">#[cfg(target_os = <span class="string">"macos"</span>)]
 <a href=#85 id=85 data-nosnippet>85</a>    </span>{
 <a href=#86 id=86 data-nosnippet>86</a>        xdg::BaseDirectories::new()
-<a href=#87 id=87 data-nosnippet>87</a>            .ok()
-<a href=#88 id=88 data-nosnippet>88</a>            .map(|base_dirs| base_dirs.get_data_home().join(<span class="string">"ZcashParams"</span>))
+<a href=#87 id=87 data-nosnippet>87</a>            .get_data_home()
+<a href=#88 id=88 data-nosnippet>88</a>            .map(|data_home| data_home.join(<span class="string">"ZcashParams"</span>))
 <a href=#89 id=89 data-nosnippet>89</a>    }
 <a href=#90 id=90 data-nosnippet>90</a>
 <a href=#91 id=91 data-nosnippet>91</a>    <span class="attr">#[cfg(not(any(windows, target_os = <span class="string">"macos"</span>)))]
