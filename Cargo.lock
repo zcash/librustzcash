@@ -8148,6 +8148,7 @@ dependencies = [
  "rand_core 0.6.4",
  "sapling-crypto",
  "serde",
+ "serde_json",
  "starknet-curve 0.6.0",
  "starknet-ff",
  "starknet-types-core",

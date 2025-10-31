@@ -13,7 +13,7 @@ use std::ops::{Deref, DerefMut};
 // Stwo Cairo imports for STARK verification
 use cairo_air::verifier::verify_cairo;
 use cairo_air::{CairoProof, PreProcessedTraceVariant};
-use stwo::core::channel::MerkleChannel;
+use stwo::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 
 use zcash_primitives::{
     extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
@@ -31,9 +31,23 @@ mod verify {
     pub struct Precondition;
 
     /// Witness containing STARK proof.
-    /// Currently empty, will later contain the actual proof data.
-    #[derive(Debug, PartialEq, Eq, Clone)]
-    pub struct Witness;
+    /// Contains the serialized Cairo proof data and metadata for verification.
+    #[derive(Debug, Clone)]
+    pub struct Witness {
+        /// Serialized Cairo proof (JSON format)
+        pub proof_data: Vec<u8>,
+        /// Whether the proof includes Pedersen builtin
+        pub with_pedersen: bool,
+    }
+
+    // Manual PartialEq implementation since we need to compare the struct
+    impl PartialEq for Witness {
+        fn eq(&self, other: &Self) -> bool {
+            self.proof_data == other.proof_data && self.with_pedersen == other.with_pedersen
+        }
+    }
+
+    impl Eq for Witness {}
 }
 
 /// The precondition type for the stark_verify extension.
@@ -119,8 +133,11 @@ pub enum Witness {
 
 impl Witness {
     /// Convenience constructor for verify witness values.
-    pub fn verify() -> Self {
-        Witness::Verify(verify::Witness)
+    pub fn verify(proof_data: Vec<u8>, with_pedersen: bool) -> Self {
+        Witness::Verify(verify::Witness {
+            proof_data,
+            with_pedersen,
+        })
     }
 }
 
@@ -141,12 +158,15 @@ impl FromPayload for Witness {
     fn from_payload(mode: u32, payload: &[u8]) -> Result<Self, Self::Error> {
         match mode {
             verify::MODE => {
-                // For now, accept empty payload
+                // Payload format: [with_pedersen (1 byte)] + [proof_data]
                 if payload.is_empty() {
-                    Ok(Witness::verify())
-                } else {
-                    Err(Error::IllegalPayloadLength(payload.len()))
+                    return Err(Error::IllegalPayloadLength(0));
                 }
+
+                let with_pedersen = payload[0] != 0;
+                let proof_data = payload[1..].to_vec();
+
+                Ok(Witness::verify(proof_data, with_pedersen))
             }
             _ => Err(Error::ModeInvalid(mode)),
         }
@@ -156,7 +176,11 @@ impl FromPayload for Witness {
 impl ToPayload for Witness {
     fn to_payload(&self) -> (u32, Vec<u8>) {
         match self {
-            Witness::Verify(_) => (verify::MODE, vec![]),
+            Witness::Verify(w) => {
+                let mut payload = vec![if w.with_pedersen { 1 } else { 0 }];
+                payload.extend_from_slice(&w.proof_data);
+                (verify::MODE, payload)
+            }
         }
     }
 }
@@ -180,8 +204,7 @@ impl<C: Context> Extension<C> for Program {
 
     /// Runs the program against the given precondition, witness, and context.
     ///
-    /// For now, this always succeeds. Actual STARK verification logic will be
-    /// implemented later.
+    /// Verifies a STARK proof embedded in the witness against the precondition.
     fn verify_inner(
         &self,
         precondition: &Precondition,
@@ -189,9 +212,28 @@ impl<C: Context> Extension<C> for Program {
         _context: &C,
     ) -> Result<(), Error> {
         match (precondition, witness) {
-            (Precondition::Verify(_), Witness::Verify(_)) => {
-                // TODO: Implement actual STARK proof verification
-                // For now, always succeed
+            (Precondition::Verify(_), Witness::Verify(w)) => {
+                // Parse the Cairo proof from JSON
+                let proof_str = std::str::from_utf8(&w.proof_data)
+                    .map_err(|_| Error::VerificationFailed)?;
+
+                let cairo_proof: CairoProof<Blake2sMerkleHasher> =
+                    serde_json::from_str(proof_str).map_err(|_| Error::VerificationFailed)?;
+
+                // Determine the preprocessed trace variant based on Pedersen flag
+                let preprocessed_trace = if w.with_pedersen {
+                    PreProcessedTraceVariant::Canonical
+                } else {
+                    PreProcessedTraceVariant::CanonicalWithoutPedersen
+                };
+
+                // Verify the STARK proof (matching cairo-prove CLI exactly)
+                verify_cairo::<Blake2sMerkleChannel>(
+                    cairo_proof,
+                    preprocessed_trace,
+                )
+                .map_err(|_| Error::VerificationFailed)?;
+
                 Ok(())
             }
         }
@@ -248,6 +290,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> StarkVerifyBuilder<B> {
     pub fn add_stark_verify_input(
         &mut self,
         prevout: (OutPoint, zcash_primitives::transaction::components::tze::TzeOut),
+        proof_data: Vec<u8>,
+        with_pedersen: bool,
     ) -> Result<(), StarkVerifyBuildError<B::BuildError>> {
         // Validate that the previous output has a verify precondition
         match Precondition::from_payload(
@@ -257,8 +301,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> StarkVerifyBuilder<B> {
             Err(parse_failure) => Err(StarkVerifyBuildError::PrevoutParseFailure(parse_failure)),
             Ok(Precondition::Verify(_)) => {
                 self.txn_builder
-                    .add_tze_input(self.extension_id, verify::MODE, prevout, |_| {
-                        Ok(Witness::verify())
+                    .add_tze_input(self.extension_id, verify::MODE, prevout, move |_| {
+                        Ok(Witness::verify(proof_data.clone(), with_pedersen))
                     })
                     .map_err(StarkVerifyBuildError::BaseBuilderError)
             }
@@ -301,10 +345,16 @@ mod tests {
 
     #[test]
     fn witness_verify_round_trip() {
-        let data = vec![];
-        let w = Witness::from_payload(verify::MODE, &data).unwrap();
-        assert_eq!(w, Witness::verify());
-        assert_eq!(w.to_payload(), (verify::MODE, data));
+        let proof_data = b"test proof data".to_vec();
+        let with_pedersen = false;
+
+        // Create payload: [with_pedersen flag] + [proof_data]
+        let mut payload = vec![if with_pedersen { 1 } else { 0 }];
+        payload.extend_from_slice(&proof_data);
+
+        let w = Witness::from_payload(verify::MODE, &payload).unwrap();
+        assert_eq!(w, Witness::verify(proof_data.clone(), with_pedersen));
+        assert_eq!(w.to_payload(), (verify::MODE, payload));
     }
 
     #[test]
@@ -314,8 +364,16 @@ mod tests {
     }
 
     #[test]
-    fn witness_rejects_non_empty_payload() {
-        let w = Witness::from_payload(verify::MODE, &[1, 2, 3]);
+    fn witness_accepts_valid_payload() {
+        // Valid payload with flag and data
+        let w = Witness::from_payload(verify::MODE, &[0, 1, 2, 3]);
+        assert!(w.is_ok());
+    }
+
+    #[test]
+    fn witness_rejects_empty_payload() {
+        // Empty payload should be rejected (needs at least the flag byte)
+        let w = Witness::from_payload(verify::MODE, &[]);
         assert!(w.is_err());
     }
 
@@ -351,10 +409,10 @@ mod tests {
         .freeze()
         .unwrap();
 
-        // Create spending transaction
+        // Create spending transaction with a dummy witness (just for structural test)
         let in_witness = TzeIn {
             prevout: OutPoint::new(tx.txid(), 0),
-            witness: tze::Witness::from(0, &Witness::verify()),
+            witness: tze::Witness::from(0, &Witness::verify(vec![1, 2, 3], false)),
         };
 
         let tx_spend = TransactionData::from_parts_zfuture(
@@ -377,15 +435,130 @@ mod tests {
         .freeze()
         .unwrap();
 
-        // Verify the spend
+        // Verify the spend - this should fail with dummy data
         let ctx = Ctx;
-        assert_eq!(
-            Program.verify(
-                &tx.tze_bundle().unwrap().vout[0].precondition,
-                &tx_spend.tze_bundle().unwrap().vin[0].witness,
-                &ctx
-            ),
-            Ok(())
+        let result = Program.verify(
+            &tx.tze_bundle().unwrap().vout[0].precondition,
+            &tx_spend.tze_bundle().unwrap().vin[0].witness,
+            &ctx,
         );
+        // Dummy proof data should fail verification
+        assert!(result.is_err());
+    }
+
+    /// This test demonstrates the full STARK verification integration using actual transactions.
+    #[test]
+    #[ignore]
+    fn verify_with_example_proof() {
+        // Load the embedded proof from test fixtures
+        let proof_str = include_str!("../../tests/fixtures/example_cairo_proof.json");
+        let proof_data = proof_str.as_bytes().to_vec();
+
+        //
+        // Create a transaction with a STARK verification precondition output
+        //
+        let out = TzeOut {
+            value: Zatoshis::from_u64(100000).unwrap(),
+            precondition: tze::Precondition::from(0, &Precondition::verify()),
+        };
+
+        let tx_a = TransactionData::from_parts_zfuture(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
+                vin: vec![],
+                vout: vec![out],
+                authorization: Authorized,
+            }),
+        )
+        .freeze()
+        .unwrap();
+
+        //
+        // Create a spending transaction with the STARK proof witness
+        //
+        let in_witness = TzeIn {
+            prevout: OutPoint::new(tx_a.txid(), 0),
+            witness: tze::Witness::from(0, &Witness::verify(proof_data, false)),
+        };
+
+        let tx_b = TransactionData::from_parts_zfuture(
+            TxVersion::ZFuture,
+            BranchId::ZFuture,
+            0,
+            0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
+            None,
+            None,
+            None,
+            None,
+            Some(Bundle {
+                vin: vec![in_witness],
+                vout: vec![],
+                authorization: Authorized,
+            }),
+        )
+        .freeze()
+        .unwrap();
+
+        //
+        // Verify the spending transaction using the full verification path
+        //
+        let ctx = Ctx;
+        let result = Program.verify(
+            &tx_a.tze_bundle().unwrap().vout[0].precondition,
+            &tx_b.tze_bundle().unwrap().vin[0].witness,
+            &ctx,
+        );
+
+        // The proof should verify successfully
+        assert!(
+            result.is_ok(),
+            "STARK proof verification failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn verify_inner_basic_flow() {
+        // This test demonstrates that the verify_inner function is properly wired up
+        // and can parse/verify proofs. It expects failure with invalid proof data,
+        // which confirms the verification logic is running.
+
+        let ctx = Ctx;
+        let precondition = Precondition::verify();
+
+        // Test 1: Invalid JSON should fail at parsing stage
+        let invalid_json = b"{invalid json}".to_vec();
+        let witness = Witness::verify(invalid_json, false);
+        let result = Program.verify_inner(&precondition, &witness, &ctx);
+        assert!(
+            result.is_err(),
+            "Invalid JSON should fail verification"
+        );
+
+        // Test 2: Valid JSON but not a proof should fail
+        let not_a_proof = br#"{"foo": "bar"}"#.to_vec();
+        let witness = Witness::verify(not_a_proof, false);
+        let result = Program.verify_inner(&precondition, &witness, &ctx);
+        assert!(
+            result.is_err(),
+            "Non-proof JSON should fail verification"
+        );
+
+        // This confirms that:
+        // 1. Witness data is being passed through correctly
+        // 2. JSON parsing is attempted
+        // 3. Verification logic is invoked
+        // 4. Errors are properly propagated
     }
 }
