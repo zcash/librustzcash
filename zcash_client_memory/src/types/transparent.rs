@@ -188,7 +188,7 @@ mod serialization {
                 transaction_id: TxId::from_bytes(output.transaction_id.clone().try_into()?),
                 account_id: output.account_id.into(),
                 address: TransparentAddress::decode(&EncodingParams, &output.address)?,
-                key_scope: todo!(),
+                key_scope: TransparentKeyScope::custom(u32::MAX).expect("FIXME"),
                 txout: read_optional!(output, txout)?.try_into()?,
                 max_observed_unspent_height: output.max_observed_unspent_height.map(|h| h.into()),
             })
