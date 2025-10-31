@@ -2881,7 +2881,8 @@ pub trait WalletWrite: WalletRead {
     ///
     /// WARNING: This is a destructive operation and may result in the permanent loss of
     /// potentially important information that is not recoverable from chain data, including:
-    /// * Data about transactions sent by the account for which a random OVK was used;
+    /// * Data about transactions sent by the account for which [`OvkPolicy::Discard`] (or
+    ///   [`OvkPolicy::Custom`] with random OVKs) was used;
     /// * Data related to transactions that the account attempted to send that expired or were
     ///   otherwise invalidated without having been mined in the main chain;
     /// * Data related to transactions that were observed in the mempool as having inputs or
@@ -2889,6 +2890,9 @@ pub trait WalletWrite: WalletRead {
     /// * Data related to transactions that were received by the wallet in a mined block, where
     ///   that block was later un-mined in a chain reorg and the transaction was either invalidated
     ///   or was never re-mined.
+    ///
+    /// [`OvkPolicy::Discard`]: crate::wallet::OvkPolicy::Discard
+    /// [`OvkPolicy::Custom`]: crate::wallet::OvkPolicy::Custom
     fn delete_account(&mut self, account: Self::AccountId) -> Result<(), Self::Error>;
 
     /// Imports the given pubkey into the account without key derivation information, and adds the

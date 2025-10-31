@@ -772,6 +772,9 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
         let re_paren = Regex::new(r"([\(\)])").unwrap();
 
+        // Surround each opening or closing parenthesis character with whitespace, and then
+        // replace each occurrence of any amount of whitespace (including newlines) with a single
+        // space.
         let normalize = |s: &str| -> String {
             re.replace_all(&re_paren.replace_all(s, " $1 "), " ")
                 .trim()
