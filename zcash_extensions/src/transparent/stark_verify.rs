@@ -448,10 +448,15 @@ mod tests {
 
     /// This test demonstrates the full STARK verification integration using actual transactions.
     #[test]
-    #[ignore]
-    fn verify_with_example_proof() {
+    fn verify_proof_all_opcode_components() {
         // Load the embedded proof from test fixtures
-        let proof_str = include_str!("../../tests/fixtures/example_cairo_proof.json");
+        //
+        // Generated using this command inside stwo-cairo stwo_cairo_prover crate:
+        // ./target/release/run_and_prove \
+        //   --program ./test_data/test_prove_verify_all_opcode_components/compiled.json \
+        //   --proof_path example_proof.json \
+        //   --verify
+        let proof_str = include_str!("../../tests/fixtures/all_opcode_components_proof.json");
         let proof_data = proof_str.as_bytes().to_vec();
 
         //
@@ -487,7 +492,7 @@ mod tests {
         //
         let in_witness = TzeIn {
             prevout: OutPoint::new(tx_a.txid(), 0),
-            witness: tze::Witness::from(0, &Witness::verify(proof_data, false)),
+            witness: tze::Witness::from(0, &Witness::verify(proof_data, true)),
         };
 
         let tx_b = TransactionData::from_parts_zfuture(
