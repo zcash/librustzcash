@@ -227,6 +227,12 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.1.1 -> 0.2.0"
 
+[[audits.dynosaur]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.3.0"
+notes = "Updates its proc macro dependency, no other changes."
+
 [[audits.either]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"

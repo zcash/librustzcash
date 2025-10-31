@@ -68,7 +68,7 @@ pub mod exchanges {
 
 /// An exchange that can be queried for ZEC data.
 #[trait_variant::make(Exchange: Send)]
-#[dynosaur::dynosaur(DynExchange = dyn Exchange)]
+#[dynosaur::dynosaur(DynExchange = dyn(box) Exchange)]
 pub trait LocalExchange {
     /// Queries data about the USD/ZEC pair.
     ///
@@ -152,14 +152,14 @@ impl ExchangesBuilder {
     /// obtained via Tor (i.e. no transient failures).
     pub fn new(trusted: impl Exchange + 'static) -> Self {
         Self(Exchanges {
-            trusted: DynExchange::boxed(trusted),
+            trusted: DynExchange::new_box(trusted),
             others: vec![],
         })
     }
 
     /// Adds another [`Exchange`] as a data source.
     pub fn with(mut self, other: impl Exchange + 'static) -> Self {
-        self.0.others.push(DynExchange::boxed(other));
+        self.0.others.push(DynExchange::new_box(other));
         self
     }
 
@@ -183,8 +183,13 @@ impl Client {
 
         // Fetch the data in parallel.
         let res = join!(
-            exchanges.trusted.query_zec_to_usd(self),
-            join_all(exchanges.others.iter().map(|e| e.query_zec_to_usd(self)))
+            DynExchange::query_zec_to_usd(&exchanges.trusted, self),
+            join_all(
+                exchanges
+                    .others
+                    .iter()
+                    .map(|e| DynExchange::query_zec_to_usd(e, self))
+            )
         );
         trace!(?res, "Data results");
         let (trusted_res, other_res) = res;
