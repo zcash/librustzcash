@@ -1348,7 +1348,7 @@ where
                 builder.add_orchard_output(
                     orchard_external_ovk.clone(),
                     to,
-                    payment.amount().into(),
+                    payment.amount(),
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
@@ -1463,7 +1463,7 @@ where
                         ufvk.orchard()
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),
-                        change_value.value().into(),
+                        change_value.value(),
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
