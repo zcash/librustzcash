@@ -543,8 +543,8 @@ where
     /// given value, and inserts it into the cache.
     pub fn generate_next_block<Fvk: TestFvk>(
         &mut self,
-        fvk: &Fvk,
-        address_type: AddressType,
+        recipient_fvk: &Fvk,
+        recipient_address_type: AddressType,
         value: Zatoshis,
     ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
         let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
@@ -554,7 +554,11 @@ where
         let (res, nfs) = self.generate_block_at(
             height,
             prior_cached_block.chain_state.block_hash(),
-            &[FakeCompactOutput::new(fvk, address_type, value)],
+            &[FakeCompactOutput::new(
+                recipient_fvk,
+                recipient_address_type,
+                value,
+            )],
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
             false,
@@ -1810,14 +1814,14 @@ pub trait TestFvk: Clone {
     /// Adds a single output to the given [`CompactTx`] that will be received by this full
     /// viewing key.
     ///
-    /// `req` allows configuring how the full viewing key will detect the output.
+    /// `recipient_address_type` allows configuring how the full viewing key will detect the output.
     #[allow(clippy::too_many_arguments)]
     fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         // we don't require an initial Orchard tree size because we don't need it to compute
@@ -1831,7 +1835,7 @@ pub trait TestFvk: Clone {
     ///   and an Output.
     /// - If this is an Orchard full viewing key, the transaction will gain an Action.
     ///
-    /// `req` allows configuring how the full viewing key will detect the output.
+    /// `recipient_address_type` allows configuring how the full viewing key will detect the output.
     #[allow(clippy::too_many_arguments)]
     fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
@@ -1839,7 +1843,7 @@ pub trait TestFvk: Clone {
         params: &P,
         height: BlockHeight,
         nf: Self::Nullifier,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         // we don't require an initial Orchard tree size because we don't need it to compute
@@ -1874,7 +1878,7 @@ impl<A: TestFvk> TestFvk for &A {
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         // we don't require an initial Orchard tree size because we don't need it to compute
@@ -1885,7 +1889,7 @@ impl<A: TestFvk> TestFvk for &A {
             ctx,
             params,
             height,
-            req,
+            recipient_address_type,
             value,
             initial_sapling_tree_size,
             rng,
@@ -1898,7 +1902,7 @@ impl<A: TestFvk> TestFvk for &A {
         params: &P,
         height: BlockHeight,
         nf: Self::Nullifier,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         // we don't require an initial Orchard tree size because we don't need it to compute
@@ -1910,7 +1914,7 @@ impl<A: TestFvk> TestFvk for &A {
             params,
             height,
             nf,
-            req,
+            recipient_address_type,
             value,
             initial_sapling_tree_size,
             rng,
@@ -1945,12 +1949,12 @@ impl TestFvk for DiversifiableFullViewingKey {
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         rng: &mut R,
     ) -> Self::Nullifier {
-        let recipient = match req {
+        let recipient = match recipient_address_type {
             AddressType::DefaultExternal => self.default_address().1,
             AddressType::DiversifiedExternal(idx) => self.find_address(idx).unwrap().1,
             AddressType::Internal => self.change_address().1,
@@ -1972,7 +1976,7 @@ impl TestFvk for DiversifiableFullViewingKey {
         params: &P,
         height: BlockHeight,
         nf: Self::Nullifier,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         rng: &mut R,
@@ -1982,7 +1986,7 @@ impl TestFvk for DiversifiableFullViewingKey {
             ctx,
             params,
             height,
-            req,
+            recipient_address_type,
             value,
             initial_sapling_tree_size,
             rng,
@@ -2034,7 +2038,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         ctx: &mut CompactTx,
         _: &P,
         _: BlockHeight,
-        req: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         _: u32, // the position is not required for computing the Orchard nullifier
         mut rng: &mut R,
@@ -2044,7 +2048,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
             ::orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
                 .unwrap();
 
-        let (j, scope) = match req {
+        let (j, scope) = match recipient_address_type {
             AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
             AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
             AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
@@ -2062,19 +2066,18 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         note.nullifier(self)
     }
 
-    // Override so we can merge the spend and output into a single action.
     fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         _: &P,
         _: BlockHeight,
         revealed_spent_note_nullifier: Self::Nullifier,
-        address_type: AddressType,
+        recipient_address_type: AddressType,
         value: Zatoshis,
         _: u32, // the position is not required for computing the Orchard nullifier
         rng: &mut R,
     ) -> Self::Nullifier {
-        let (j, scope) = match address_type {
+        let (j, scope) = match recipient_address_type {
             AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
             AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
             AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
@@ -2194,27 +2197,27 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
 /// - [`TestState::generate_block_at`]
 #[derive(Clone)]
 pub struct FakeCompactOutput<Fvk> {
-    fvk: Fvk,
-    address_type: AddressType,
+    recipient_fvk: Fvk,
+    recipient_address_type: AddressType,
     value: Zatoshis,
 }
 
 impl<Fvk> FakeCompactOutput<Fvk> {
     /// Constructs a new fake output with the given properties.
-    pub fn new(fvk: Fvk, address_type: AddressType, value: Zatoshis) -> Self {
+    pub fn new(recipient_fvk: Fvk, recipient_address_type: AddressType, value: Zatoshis) -> Self {
         Self {
-            fvk,
-            address_type,
+            recipient_fvk,
+            recipient_address_type,
             value,
         }
     }
 
     /// Constructs a new random fake external output to the given FVK with a value in the range
     /// 10000..1000000 ZAT.
-    pub fn random<R: RngCore>(rng: &mut R, fvk: Fvk) -> Self {
+    pub fn random<R: RngCore>(rng: &mut R, recipient_fvk: Fvk) -> Self {
         Self {
-            fvk,
-            address_type: AddressType::DefaultExternal,
+            recipient_fvk,
+            recipient_address_type: AddressType::DefaultExternal,
             value: Zatoshis::const_from_u64(rng.gen_range(10000..1000000)),
         }
     }
@@ -2238,11 +2241,11 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     let mut ctx = fake_compact_tx(&mut rng);
     let mut nfs = vec![];
     for output in outputs {
-        let nf = output.fvk.add_output(
+        let nf = output.recipient_fvk.add_output(
             &mut ctx,
             params,
             height,
-            output.address_type,
+            output.recipient_address_type,
             output.value,
             initial_sapling_tree_size,
             &mut rng,
@@ -2312,7 +2315,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     height: BlockHeight,
     prev_hash: BlockHash,
     (nf, in_value): (Fvk::Nullifier, Zatoshis),
-    fvk: &Fvk,
+    recipient_fvk: &Fvk,
     to: Address,
     value: Zatoshis,
     initial_sapling_tree_size: u32,
@@ -2322,7 +2325,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     let mut ctx = fake_compact_tx(&mut rng);
 
     // Create a fake spend and a fake Note for the change
-    fvk.add_logical_action(
+    recipient_fvk.add_logical_action(
         &mut ctx,
         params,
         height,
@@ -2341,7 +2344,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                 height,
                 recipient,
                 value,
-                fvk.sapling_ovk(),
+                recipient_fvk.sapling_ovk(),
                 &mut rng,
             )
             .0,
@@ -2367,7 +2370,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                         nullifier,
                         *recipient,
                         value,
-                        fvk.orchard_ovk(zip32::Scope::External),
+                        recipient_fvk.orchard_ovk(zip32::Scope::External),
                         &mut rng,
                     )
                     .0,
@@ -2383,7 +2386,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                             height,
                             *recipient,
                             value,
-                            fvk.sapling_ovk(),
+                            recipient_fvk.sapling_ovk(),
                             &mut rng,
                         )
                         .0,
