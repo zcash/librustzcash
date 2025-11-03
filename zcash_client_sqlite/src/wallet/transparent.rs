@@ -995,21 +995,52 @@ pub(crate) fn tx_unexpired_condition_minconf_0(tx: &str) -> String {
     )
 }
 
-/// Generates a SQL condition that checks whether a transaction spends outputs controlled by an
-/// account.
+/// Generates a SQL condition that checks that if a TXO was received at an ephemeral
+/// address, it either had no inputs belonging to the wallet, or has been confirmed
+/// to be unspent after the transaction that created it would have expired.
+///
+/// TODO: This fragment is very unwieldy; it really doesn't work well as a fragment. It would be
+/// much better if it could be expressed as a view somehow; the problem is that views can't be
+/// parameterized, and there are numerous interacting checks that need to be made against the
+/// target height in the context where this fragment is being used.
 ///
 /// # Usage requirements
-/// - `tx` must be set to the alias for the `transactions` table in the enclosing scope.
-/// - `accounts` must be set to the alias for the `accounts` table in the enclosing scope.
+/// - `transparent_received_outputs` must be set to the alias to the `transparent_received_outputs`
+///   table in the enclosing scope.
+/// - `addresses` must be set to alias for the `addresses` table in the enclosing scope such that
+///   `addresses.id = transparent_received_outputs.address_id`.
+/// - `tx` must be set to the alias for the `transactions` table in the enclosing scope such that
+///   `tx.id_tx = transparent_received_outputs.transaction_id`.
+/// - `accounts` must be set to the alias for the `accounts` table in the enclosing scope such that
+///   `accounts.id = transparent_received_outputs.account_id`
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
-pub(crate) fn tx_spends_account_outputs_condition(tx: &str, accounts: &str) -> String {
+/// - The parent is responsible for ensuring that this condition will only be checked for
+///   outputs that have already otherwise been verified to be spendible, i.e. it must be
+///   used as a strictly constricting clause on the set of outputs.
+pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
+    transparent_received_outputs: &str,
+    addresses: &str,
+    tx: &str,
+    accounts: &str,
+) -> String {
+    let ephemeral_key_scope = KeyScope::Ephemeral.encode();
     format!(
         r#"
-        {tx}.id_tx IN (
+        -- the receiving address is not an ephemeral address
+        {addresses}.key_scope != {ephemeral_key_scope}
+        -- or the transaction that generated the TXO has no inputs belonging to the wallet
+        OR {tx}.id_tx NOT IN (
             SELECT transaction_id
             FROM v_received_output_spends
             WHERE v_received_output_spends.account_id = {accounts}.id
         )
+        -- or the transaction that generated the TXO would be considered expired as of the TXOs
+        -- max_observed_unspent_height; this operates under the assumption that the second
+        -- transaction in a TEX chain has the same expiry as the transaction that generated the
+        -- ephemeral output, and the output having been observed to be unspent above this height
+        -- indicates that the subsequent spend failed and the spending transaction will have
+        -- expired.
+        OR {transparent_received_outputs}.max_observed_unspent_height > {tx}.expiry_height
         "#
     )
 }
@@ -1046,17 +1077,12 @@ pub(crate) fn get_wallet_transparent_output(
                  -- the transaction that created the output is mined or is definitely unexpired
                  ({}) -- the transaction is unexpired
                  AND u.id NOT IN ({}) -- and the output is unspent
-                 -- excluding received txos where the address is an ephemeral address and the
-                 -- transaction that produced the TXO spent outputs belonging to the same account.
-                 AND NOT (
-                    addresses.key_scope = :ephemeral_key_scope
-                    AND {} -- the transaction that created the txo spends account-internal outputs
-                 )
+                 AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
              )
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
-        tx_spends_account_outputs_condition("t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
     let result: Result<Option<WalletUtxo>, SqliteClientError> = stmt_select_utxo
@@ -1066,7 +1092,6 @@ pub(crate) fn get_wallet_transparent_output(
                 ":output_index": outpoint.n(),
                 ":target_height": spendable_as_of.map(u32::from),
                 ":allow_unspendable": spendable_as_of.is_none(),
-                ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
             ],
             |row| {
                 let output = to_unspent_transparent_output(row)?;
@@ -1113,15 +1138,10 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          AND u.value_zat >= :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
-         -- excluding received txos where the address is an ephemeral address and the
-         -- transaction that produced the TXO spent outputs belonging to the same account.
-         AND NOT (
-            addresses.key_scope = :ephemeral_key_scope
-            AND {} -- the transaction that created the txo spends account-internal outputs
-         )",
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        tx_spends_account_outputs_condition("t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
     let addr_str = address.encode(params);
@@ -1139,7 +1159,6 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
     ])?;
 
     let mut utxos = Vec::<WalletUtxo>::new();
@@ -1185,20 +1204,14 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          AND u.value_zat > 0
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
-         -- excluding received txos where the address is an ephemeral address and the
-         -- transaction that produced the TXO spent outputs belonging to the same account.
-         AND NOT (
-            addresses.key_scope = :ephemeral_key_scope
-            AND {} -- the transaction that created the txo spends account-internal outputs
-         )",
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        tx_spends_account_outputs_condition("t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
     let mut rows = stmt_address_balances.query(named_params![
         ":account_uuid": account_uuid.0,
-        ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
     ])?;
@@ -1250,21 +1263,14 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
                     AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
                 )
              )
-             -- and the output is unspent
-             AND u.id NOT IN ({})
-             -- excluding received txos where the address is an ephemeral address and the
-             -- transaction that produced the TXO spent outputs belonging to the same account.
-             AND NOT (
-                addresses.key_scope = :ephemeral_key_scope
-                AND {} -- the transaction that created the txo spends account-internal outputs
-             )",
+             AND u.id NOT IN ({}) -- and the output is unspent
+             AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
             spent_utxos_clause(),
-            tx_spends_account_outputs_condition("t", "accounts")
+            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
         ))?;
 
         let mut rows = stmt_address_balances.query(named_params![
             ":account_uuid": account_uuid.0,
-            ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
             ":target_height": u32::from(target_height),
             ":min_confirmations": min_confirmations
         ])?;
@@ -1318,22 +1324,16 @@ pub(crate) fn add_transparent_account_balances(
          JOIN addresses ON addresses.id = u.address_id
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
-         -- excluding received txos where the address is an ephemeral address and the
-         -- transaction that produced the TXO spent outputs belonging to the same account.
-         AND NOT (
-            addresses.key_scope = :ephemeral_key_scope
-            AND {} -- the transaction that created the txo spends account-internal outputs
-         )
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
          GROUP BY accounts.uuid",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        tx_spends_account_outputs_condition("t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
-        ":ephemeral_key_scope": KeyScope::Ephemeral.encode()
     ])?;
 
     while let Some(row) = rows.next()? {
@@ -1378,23 +1378,16 @@ pub(crate) fn add_transparent_account_balances(
                     AND (t.expiry_height = 0 OR t.expiry_height >= :target_height)
                 )
              )
-             -- and the received txo is unspent
-             AND u.id NOT IN ({})
-             -- excluding received txos where the address is an ephemeral address and the
-             -- transaction that produced the TXO spent outputs belonging to the same account.
-             AND NOT (
-                addresses.key_scope = :ephemeral_key_scope
-                AND {} -- the transaction that created the txo spends account-internal outputs
-             )
+             AND u.id NOT IN ({}) -- and the received txo is unspent
+             AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
              GROUP BY accounts.uuid",
             spent_utxos_clause(),
-            tx_spends_account_outputs_condition("t", "accounts")
+            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
         ))?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
             ":target_height": u32::from(target_height),
             ":min_confirmations": min_confirmations,
-            ":ephemeral_key_scope": KeyScope::Ephemeral.encode()
         ])?;
 
         while let Some(row) = rows.next()? {
