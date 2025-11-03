@@ -4979,7 +4979,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
     let sapling_prover = LocalTxProver::bundled();
     let orchard_pk = ::orchard::circuit::ProvingKey::build::<OrchardVanilla>();
     let pczt_proven = Prover::new(pczt_updated)
-        .create_orchard_proof::<OrchardVanilla>(&orchard_pk)
+        .create_orchard_proof(&orchard_pk)
         .unwrap()
         .create_sapling_proofs(&sapling_prover, &sapling_prover)
         .unwrap()

@@ -16,11 +16,6 @@ use crate::{
     Pczt,
 };
 use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
-#[cfg(zcash_unstable = "nu7")]
-use {
-    zcash_primitives::transaction::sighash_v6::v6_signature_hash,
-    zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
-};
 
 use super::signer::pczt_to_tx_data;
 
@@ -75,27 +70,17 @@ impl IoFinalizer {
         let txid_parts = tx_data.digest(TxIdDigester);
 
         // TODO: Pick sighash based on tx version.
-        let shielded_sighash = match (global.tx_version, global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => {
-                v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-                    .as_ref()
-                    .try_into()
-                    .expect("correct length")
-            }
-            #[cfg(zcash_unstable = "nu7")]
-            (V6_TX_VERSION, V6_VERSION_GROUP_ID) => {
-                v6_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-                    .as_ref()
-                    .try_into()
-                    .expect("correct length")
-            }
-            (version, version_group_id) => {
-                return Err(Error::UnsupportedTxVersion {
-                    version,
-                    version_group_id,
-                })
-            }
-        };
+        match (global.tx_version, global.version_group_id) {
+            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
+            (version, version_group_id) => Err(Error::UnsupportedTxVersion {
+                version,
+                version_group_id,
+            }),
+        }?;
+        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+            .as_ref()
+            .try_into()
+            .expect("correct length");
 
         sapling
             .finalize_io(shielded_sighash, OsRng)

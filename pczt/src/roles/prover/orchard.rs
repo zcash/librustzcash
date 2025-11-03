@@ -1,13 +1,10 @@
-use crate::Pczt;
 use orchard::circuit::ProvingKey;
-use orchard::orchard_flavor::OrchardFlavor;
 use rand_core::OsRng;
 
+use crate::Pczt;
+
 impl super::Prover {
-    pub fn create_orchard_proof<D: OrchardFlavor>(
-        self,
-        pk: &ProvingKey,
-    ) -> Result<Self, OrchardError> {
+    pub fn create_orchard_proof(self, pk: &ProvingKey) -> Result<Self, OrchardError> {
         let Pczt {
             global,
             transparent,
@@ -18,7 +15,7 @@ impl super::Prover {
         let mut bundle = orchard.into_parsed().map_err(OrchardError::Parser)?;
 
         bundle
-            .create_proof::<D, OsRng>(pk, OsRng)
+            .create_proof(pk, OsRng)
             .map_err(OrchardError::Prover)?;
 
         Ok(Self {

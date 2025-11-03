@@ -1166,19 +1166,10 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
         let (orchard_bundle, orchard_meta) = match self
             .orchard_builder
-            .map(|builder| match self.build_config.orchard_bundle_type()? {
-                BundleType::DEFAULT_ZSA => {
-                    #[cfg(zcash_unstable = "nu7")]
-                    return builder
-                        .build_for_pczt::<OrchardZSA>(&mut rng)
-                        .map_err(Error::OrchardBuild);
-                    #[cfg(not(zcash_unstable = "nu7"))]
-                    Err(Error::OrchardBuild(BundleTypeNotSatisfiable))
-                }
-                BundleType::DEFAULT_VANILLA => builder
-                    .build_for_pczt::<OrchardVanilla>(&mut rng)
-                    .map_err(Error::OrchardBuild),
-                _ => Err(Error::OrchardBuild(BundleTypeNotSatisfiable)),
+            .map(|builder| {
+                builder
+                    .build_for_pczt(&mut rng)
+                    .map_err(Error::OrchardBuild)
             })
             .transpose()?
         {

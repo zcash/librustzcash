@@ -2106,13 +2106,13 @@ where
                     .output()
                     .value()
                     .map(orchard::value::NoteValue::from_raw)?;
-                let asset = AssetBase::from_bytes(&act.spend().asset().unwrap()).into_option()?;
                 let rho = orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
                 let rseed = act.output().rseed().as_ref().and_then(|rseed| {
                     orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
                 })?;
 
-                orchard::Note::from_parts(recipient, value, asset, rho, rseed).into_option()
+                orchard::Note::from_parts(recipient, value, AssetBase::native(), rho, rseed)
+                    .into_option()
             };
 
             let external_address = act
