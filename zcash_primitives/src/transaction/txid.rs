@@ -34,6 +34,7 @@ use {
     crate::sighash_versioning::ISSUE_SIGHASH_VERSION_TO_INFO_BYTES,
     crate::transaction::components::sapling::SAPLING_SIGHASH_INFO_V0,
     crate::transaction::OrchardBundle::OrchardZSA,
+    crate::transaction::TRANSPARENT_SIGHASH_INFO_V0,
     orchard::issuance::{IssueBundle, Signed},
     zcash_encoding::Vector,
 };
@@ -348,6 +349,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_transparent(
         &self,
+        _version: TxVersion,
         transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
     ) -> Self::TransparentDigest {
         transparent_bundle.map(transparent_digests)
@@ -516,11 +518,18 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_transparent(
         &self,
+        #[cfg(not(zcash_unstable = "nu7"))] _version: TxVersion,
+        #[cfg(zcash_unstable = "nu7")] version: TxVersion,
         transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
+                #[cfg(zcash_unstable = "nu7")]
+                if version == TxVersion::V6 {
+                    Vector::write(&mut h, &TRANSPARENT_SIGHASH_INFO_V0, |w, b| w.write_u8(*b))
+                        .unwrap();
+                }
                 txin.script_sig().write(&mut h).unwrap();
             }
         }
