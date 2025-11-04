@@ -73,6 +73,12 @@ workspace.
     consequence of this change, the signature of
     `TransparentAddressMetadata::new` has changed; use
     `TransparentAddressMetadata::derived` instead.
+- `zcash_client_backend::data_api::testing`:
+  - The `TestFvk` trait has changed in several ways. It has a ne `OutgoingViewingKey`
+    associated type, it now takes an explicit `sender_ovk` argument to its
+    `add_output` and `add_logical_action` methods, and its `sapling_fvk` and
+    `orchard_fvk` methods have been removed and replaced by a pair of methods
+    `to_ovk` and `to_ovk_bytes`.
 - `zcash_client_backend::testing`:
   - `DataStoreFactory::new_data_store` now takes its `GapLimits` argument
     as an optional value. This avoids the need for the test builder to
