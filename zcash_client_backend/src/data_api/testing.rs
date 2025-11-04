@@ -1811,10 +1811,14 @@ pub trait TestFvk: Clone {
         rng: &mut R,
     );
 
-    /// Adds a single output to the given [`CompactTx`] that will be received by this full
-    /// viewing key.
+    /// Adds a single output to the given [`CompactTx`], where the output will be discovered when
+    /// scanning with an incoming viewing key corresponding to this FVK.
     ///
-    /// `recipient_address_type` allows configuring how the full viewing key will detect the output.
+    /// `recipient_address_type` allows configuring what shielded address to produce from this FVK
+    /// as the recipient of the newly created output.
+    ///
+    /// Returns the nullifier of the newly created note, so that tests can readily have it on hand
+    /// for the purpose of spending that note.
     #[allow(clippy::too_many_arguments)]
     fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
@@ -1829,20 +1833,25 @@ pub trait TestFvk: Clone {
         rng: &mut R,
     ) -> Self::Nullifier;
 
-    /// Adds both a spend and an output to the given [`CompactTx`].
+    /// Adds both a spend and an output to the given [`CompactTx`], where the output will be
+    /// discovered when scanning with the incoming viewing key corresponding to this FVK.
     ///
     /// - If this is a Sapling full viewing key, the transaction will gain both a Spend
     ///   and an Output.
     /// - If this is an Orchard full viewing key, the transaction will gain an Action.
     ///
-    /// `recipient_address_type` allows configuring how the full viewing key will detect the output.
+    /// `recipient_address_type` allows configuring what shielded address to produce from this FVK as the
+    /// recipient of the newly created output.
+    ///
+    /// Returns the nullifier full the newly created note which will need to be revealed when that
+    /// note is later spent.
     #[allow(clippy::too_many_arguments)]
     fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        nf: Self::Nullifier,
+        nf_to_reveal_in_spend: Self::Nullifier,
         recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
@@ -1901,7 +1910,7 @@ impl<A: TestFvk> TestFvk for &A {
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        nf: Self::Nullifier,
+        nf_to_reveal_in_spend: Self::Nullifier,
         recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
@@ -1913,7 +1922,7 @@ impl<A: TestFvk> TestFvk for &A {
             ctx,
             params,
             height,
-            nf,
+            nf_to_reveal_in_spend,
             recipient_address_type,
             value,
             initial_sapling_tree_size,
@@ -1975,13 +1984,13 @@ impl TestFvk for DiversifiableFullViewingKey {
         ctx: &mut CompactTx,
         params: &P,
         height: BlockHeight,
-        nf: Self::Nullifier,
+        nf_to_reveal_in_spend: Self::Nullifier,
         recipient_address_type: AddressType,
         value: Zatoshis,
         initial_sapling_tree_size: u32,
         rng: &mut R,
     ) -> Self::Nullifier {
-        self.add_spend(ctx, nf, rng);
+        self.add_spend(ctx, nf_to_reveal_in_spend, rng);
         self.add_output(
             ctx,
             params,
@@ -2009,7 +2018,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
     fn add_spend<R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
-        revealed_spent_note_nullifier: Self::Nullifier,
+        nullifier_to_reveal: Self::Nullifier,
         rng: &mut R,
     ) {
         // Generate a dummy recipient.
@@ -2024,7 +2033,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         };
 
         let (cact, _) = compact_orchard_action(
-            revealed_spent_note_nullifier,
+            nullifier_to_reveal,
             recipient,
             Zatoshis::ZERO,
             self.orchard_ovk(zip32::Scope::Internal),
@@ -2044,7 +2053,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         mut rng: &mut R,
     ) -> Self::Nullifier {
         // Generate a dummy nullifier for the spend
-        let revealed_spent_note_nullifier =
+        let nullifier_to_reveal =
             ::orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
                 .unwrap();
 
@@ -2055,7 +2064,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         };
 
         let (cact, note) = compact_orchard_action(
-            revealed_spent_note_nullifier,
+            nullifier_to_reveal,
             self.address_at(j, scope),
             value,
             self.orchard_ovk(scope),
@@ -2071,7 +2080,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         ctx: &mut CompactTx,
         _: &P,
         _: BlockHeight,
-        revealed_spent_note_nullifier: Self::Nullifier,
+        nf_to_reveal_in_spend: Self::Nullifier,
         recipient_address_type: AddressType,
         value: Zatoshis,
         _: u32, // the position is not required for computing the Orchard nullifier
@@ -2084,7 +2093,7 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
         };
 
         let (cact, note) = compact_orchard_action(
-            revealed_spent_note_nullifier,
+            nf_to_reveal_in_spend,
             self.address_at(j, scope),
             value,
             self.orchard_ovk(scope),
