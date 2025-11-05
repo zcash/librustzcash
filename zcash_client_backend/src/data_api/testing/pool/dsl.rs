@@ -5,7 +5,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use zcash_primitives::block::BlockHash;
+use zcash_primitives::{block::BlockHash, transaction::fees::zip317};
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis};
 
 use crate::data_api::{
@@ -316,7 +316,11 @@ where
                 .into_iter()
                 .map(|into_note_config| {
                     let note_config = into_note_config.into();
-                    expected_total = (expected_total + note_config.value).unwrap();
+                    if note_config.value > zip317::MARGINAL_FEE {
+                        // Don't include dust in the expected total, as the balance
+                        // won't include it.
+                        expected_total = (expected_total + note_config.value).unwrap();
+                    }
                     (self.make_fake_output(&note_config), note_config)
                 })
                 .unzip();
