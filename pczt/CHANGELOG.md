@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.5.0] - PLANNED
+## [0.5.0] - 2025-11-05
 
 ### Changed
 - MSRV is now 1.85.1.
