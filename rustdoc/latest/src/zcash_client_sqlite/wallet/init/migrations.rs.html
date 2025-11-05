@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations.rs`."><title>migrations.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (20383c9f1 2025-11-03)" data-channel="nightly" data-search-js="search-5c29b3b5.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/</div>migrations.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migrations for the `zcash_client_sqlite` wallet database.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations.rs`."><title>migrations.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (f15a7f385 2025-11-04)" data-channel="nightly" data-search-js="search-5c29b3b5.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/</div>migrations.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migrations for the `zcash_client_sqlite` wallet database.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! The constants in this module cover all states of the migration DAG that have been
 <a href=#4 id=4 data-nosnippet>4</a>//! exposed in a public crate release, in the order that crate users would have
@@ -227,7 +227,7 @@
 <a href=#227 id=227 data-nosnippet>227</a></span><span class="kw">const </span>PUBLIC_MIGRATION_STATES: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>[Uuid]] = <span class="kw-2">&amp;</span>[
 <a href=#228 id=228 data-nosnippet>228</a>    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
 <a href=#229 id=229 data-nosnippet>229</a>    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3, V_0_18_0,
-<a href=#230 id=230 data-nosnippet>230</a>    V_0_18_5,
+<a href=#230 id=230 data-nosnippet>230</a>    V_0_18_5, V_0_19_0,
 <a href=#231 id=231 data-nosnippet>231</a>];
 <a href=#232 id=232 data-nosnippet>232</a>
 <a href=#233 id=233 data-nosnippet>233</a><span class="doccomment">/// Leaf migrations in the 0.4.0 release.
@@ -343,7 +343,7 @@
 <a href=#343 id=343 data-nosnippet>343</a>    v_tx_outputs_return_addrs::MIGRATION_ID,
 <a href=#344 id=344 data-nosnippet>344</a>];
 <a href=#345 id=345 data-nosnippet>345</a>
-<a href=#346 id=346 data-nosnippet>346</a><span class="doccomment">/// Leaf migrations in the 0.18.0 release.
+<a href=#346 id=346 data-nosnippet>346</a><span class="doccomment">/// Leaf migrations in the 0.18.5 release.
 <a href=#347 id=347 data-nosnippet>347</a></span><span class="kw">pub const </span>V_0_18_5: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[
 <a href=#348 id=348 data-nosnippet>348</a>    tx_retrieval_queue_expiry::MIGRATION_ID,
 <a href=#349 id=349 data-nosnippet>349</a>    support_zcashd_wallet_import::MIGRATION_ID,
@@ -351,149 +351,152 @@
 <a href=#351 id=351 data-nosnippet>351</a>    tx_observation_height::MIGRATION_ID,
 <a href=#352 id=352 data-nosnippet>352</a>];
 <a href=#353 id=353 data-nosnippet>353</a>
-<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// Leaf migrations as of the current repository state.
-<a href=#355 id=355 data-nosnippet>355</a></span><span class="kw">pub const </span>CURRENT_LEAF_MIGRATIONS: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[account_delete_cascade::MIGRATION_ID];
+<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// Leaf migrations in the 0.19.0 release.
+<a href=#355 id=355 data-nosnippet>355</a></span><span class="kw">pub const </span>V_0_19_0: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[account_delete_cascade::MIGRATION_ID];
 <a href=#356 id=356 data-nosnippet>356</a>
-<a href=#357 id=357 data-nosnippet>357</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>verify_network_compatibility&lt;P: consensus::Parameters&gt;(
-<a href=#358 id=358 data-nosnippet>358</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-<a href=#359 id=359 data-nosnippet>359</a>    params: <span class="kw-2">&amp;</span>P,
-<a href=#360 id=360 data-nosnippet>360</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
-<a href=#361 id=361 data-nosnippet>361</a>    <span class="comment">// Ensure that the `ufvk_support` migration has been applied; if it hasn't, we won't be able to
-<a href=#362 id=362 data-nosnippet>362</a>    // validate that the UFVKs in the wallet correspond to the network type that the wallet is
-<a href=#363 id=363 data-nosnippet>363</a>    // being migrated for.
-<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">let </span>has_ufvk = conn
-<a href=#365 id=365 data-nosnippet>365</a>        .query_row(
-<a href=#366 id=366 data-nosnippet>366</a>            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#367 id=367 data-nosnippet>367</a>                <span class="string">"SELECT 1 FROM {} WHERE id = :migration_id"</span>,
-<a href=#368 id=368 data-nosnippet>368</a>                <span class="kw">super</span>::MIGRATIONS_TABLE
-<a href=#369 id=369 data-nosnippet>369</a>            ),
-<a href=#370 id=370 data-nosnippet>370</a>            <span class="macro">named_params!</span>[<span class="string">":migration_id"</span>: <span class="kw-2">&amp;</span>ufvk_support::MIGRATION_ID.as_bytes()[..]],
-<a href=#371 id=371 data-nosnippet>371</a>            |row| row.get::&lt;<span class="kw">_</span>, bool&gt;(<span class="number">0</span>),
-<a href=#372 id=372 data-nosnippet>372</a>        )
-<a href=#373 id=373 data-nosnippet>373</a>        .optional()<span class="question-mark">?
-<a href=#374 id=374 data-nosnippet>374</a>        </span>== <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
-<a href=#375 id=375 data-nosnippet>375</a>
-<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">if </span>has_ufvk {
-<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span><span class="kw-2">mut </span>fvks_stmt = conn.prepare(<span class="string">"SELECT ufvk FROM accounts"</span>)<span class="question-mark">?</span>;
-<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = fvks_stmt.query([])<span class="question-mark">?</span>;
-<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-<a href=#380 id=380 data-nosnippet>380</a>            <span class="kw">let </span>ufvk_str = row.get::&lt;<span class="kw">_</span>, String&gt;(<span class="number">0</span>)<span class="question-mark">?</span>;
-<a href=#381 id=381 data-nosnippet>381</a>            <span class="kw">let </span>(network, <span class="kw">_</span>) = Ufvk::decode(<span class="kw-2">&amp;</span>ufvk_str).map_err(|e| {
-<a href=#382 id=382 data-nosnippet>382</a>                WalletMigrationError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UFVK: {e}"</span>))
-<a href=#383 id=383 data-nosnippet>383</a>            })<span class="question-mark">?</span>;
-<a href=#384 id=384 data-nosnippet>384</a>
-<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">if </span><span class="macro">network !</span>= params.network_type() {
-<a href=#386 id=386 data-nosnippet>386</a>                <span class="kw">let </span>network_name = |n| <span class="kw">match </span>n {
-<a href=#387 id=387 data-nosnippet>387</a>                    consensus::NetworkType::Main =&gt; <span class="string">"mainnet"</span>,
-<a href=#388 id=388 data-nosnippet>388</a>                    consensus::NetworkType::Test =&gt; <span class="string">"testnet"</span>,
-<a href=#389 id=389 data-nosnippet>389</a>                    consensus::NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
-<a href=#390 id=390 data-nosnippet>390</a>                };
-<a href=#391 id=391 data-nosnippet>391</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
-<a href=#392 id=392 data-nosnippet>392</a>                    <span class="string">"Network type mismatch: account UFVK is for {} but attempting to initialize for {}."</span>,
-<a href=#393 id=393 data-nosnippet>393</a>                    network_name(network),
-<a href=#394 id=394 data-nosnippet>394</a>                    network_name(params.network_type())
-<a href=#395 id=395 data-nosnippet>395</a>                )));
-<a href=#396 id=396 data-nosnippet>396</a>            }
-<a href=#397 id=397 data-nosnippet>397</a>        }
-<a href=#398 id=398 data-nosnippet>398</a>    }
-<a href=#399 id=399 data-nosnippet>399</a>
-<a href=#400 id=400 data-nosnippet>400</a>    <span class="prelude-val">Ok</span>(())
-<a href=#401 id=401 data-nosnippet>401</a>}
+<a href=#357 id=357 data-nosnippet>357</a><span class="doccomment">/// Leaf migrations as of the current repository state.
+<a href=#358 id=358 data-nosnippet>358</a></span><span class="kw">pub const </span>CURRENT_LEAF_MIGRATIONS: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[account_delete_cascade::MIGRATION_ID];
+<a href=#359 id=359 data-nosnippet>359</a>
+<a href=#360 id=360 data-nosnippet>360</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>verify_network_compatibility&lt;P: consensus::Parameters&gt;(
+<a href=#361 id=361 data-nosnippet>361</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+<a href=#362 id=362 data-nosnippet>362</a>    params: <span class="kw-2">&amp;</span>P,
+<a href=#363 id=363 data-nosnippet>363</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="comment">// Ensure that the `ufvk_support` migration has been applied; if it hasn't, we won't be able to
+<a href=#365 id=365 data-nosnippet>365</a>    // validate that the UFVKs in the wallet correspond to the network type that the wallet is
+<a href=#366 id=366 data-nosnippet>366</a>    // being migrated for.
+<a href=#367 id=367 data-nosnippet>367</a>    </span><span class="kw">let </span>has_ufvk = conn
+<a href=#368 id=368 data-nosnippet>368</a>        .query_row(
+<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#370 id=370 data-nosnippet>370</a>                <span class="string">"SELECT 1 FROM {} WHERE id = :migration_id"</span>,
+<a href=#371 id=371 data-nosnippet>371</a>                <span class="kw">super</span>::MIGRATIONS_TABLE
+<a href=#372 id=372 data-nosnippet>372</a>            ),
+<a href=#373 id=373 data-nosnippet>373</a>            <span class="macro">named_params!</span>[<span class="string">":migration_id"</span>: <span class="kw-2">&amp;</span>ufvk_support::MIGRATION_ID.as_bytes()[..]],
+<a href=#374 id=374 data-nosnippet>374</a>            |row| row.get::&lt;<span class="kw">_</span>, bool&gt;(<span class="number">0</span>),
+<a href=#375 id=375 data-nosnippet>375</a>        )
+<a href=#376 id=376 data-nosnippet>376</a>        .optional()<span class="question-mark">?
+<a href=#377 id=377 data-nosnippet>377</a>        </span>== <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a>    <span class="kw">if </span>has_ufvk {
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span><span class="kw-2">mut </span>fvks_stmt = conn.prepare(<span class="string">"SELECT ufvk FROM accounts"</span>)<span class="question-mark">?</span>;
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">let </span><span class="kw-2">mut </span>rows = fvks_stmt.query([])<span class="question-mark">?</span>;
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">let </span>ufvk_str = row.get::&lt;<span class="kw">_</span>, String&gt;(<span class="number">0</span>)<span class="question-mark">?</span>;
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">let </span>(network, <span class="kw">_</span>) = Ufvk::decode(<span class="kw-2">&amp;</span>ufvk_str).map_err(|e| {
+<a href=#385 id=385 data-nosnippet>385</a>                WalletMigrationError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UFVK: {e}"</span>))
+<a href=#386 id=386 data-nosnippet>386</a>            })<span class="question-mark">?</span>;
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a>            <span class="kw">if </span><span class="macro">network !</span>= params.network_type() {
+<a href=#389 id=389 data-nosnippet>389</a>                <span class="kw">let </span>network_name = |n| <span class="kw">match </span>n {
+<a href=#390 id=390 data-nosnippet>390</a>                    consensus::NetworkType::Main =&gt; <span class="string">"mainnet"</span>,
+<a href=#391 id=391 data-nosnippet>391</a>                    consensus::NetworkType::Test =&gt; <span class="string">"testnet"</span>,
+<a href=#392 id=392 data-nosnippet>392</a>                    consensus::NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
+<a href=#393 id=393 data-nosnippet>393</a>                };
+<a href=#394 id=394 data-nosnippet>394</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
+<a href=#395 id=395 data-nosnippet>395</a>                    <span class="string">"Network type mismatch: account UFVK is for {} but attempting to initialize for {}."</span>,
+<a href=#396 id=396 data-nosnippet>396</a>                    network_name(network),
+<a href=#397 id=397 data-nosnippet>397</a>                    network_name(params.network_type())
+<a href=#398 id=398 data-nosnippet>398</a>                )));
+<a href=#399 id=399 data-nosnippet>399</a>            }
+<a href=#400 id=400 data-nosnippet>400</a>        }
+<a href=#401 id=401 data-nosnippet>401</a>    }
 <a href=#402 id=402 data-nosnippet>402</a>
-<a href=#403 id=403 data-nosnippet>403</a><span class="attr">#[cfg(test)]
-<a href=#404 id=404 data-nosnippet>404</a></span><span class="kw">mod </span>tests {
-<a href=#405 id=405 data-nosnippet>405</a>    <span class="kw">use </span>std::collections::HashSet;
-<a href=#406 id=406 data-nosnippet>406</a>
-<a href=#407 id=407 data-nosnippet>407</a>    <span class="kw">use </span>rusqlite::Connection;
-<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">use </span>secrecy::Secret;
-<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">use </span>tempfile::NamedTempFile;
-<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">use </span>uuid::Uuid;
-<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">use </span>zcash_protocol::consensus::Network;
-<a href=#412 id=412 data-nosnippet>412</a>
-<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">use crate</span>::{
-<a href=#414 id=414 data-nosnippet>414</a>        WalletDb,
-<a href=#415 id=415 data-nosnippet>415</a>        testing::db::{test_clock, test_rng},
-<a href=#416 id=416 data-nosnippet>416</a>        wallet::init::WalletMigrator,
-<a href=#417 id=417 data-nosnippet>417</a>    };
-<a href=#418 id=418 data-nosnippet>418</a>
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="doccomment">/// Tests that we can migrate from a completely empty wallet database to the target
-<a href=#420 id=420 data-nosnippet>420</a>    /// migrations.
-<a href=#421 id=421 data-nosnippet>421</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>test_migrate(migrations: <span class="kw-2">&amp;</span>[Uuid]) {
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data = WalletDb::for_path(
-<a href=#424 id=424 data-nosnippet>424</a>            data_file.path(),
-<a href=#425 id=425 data-nosnippet>425</a>            Network::TestNetwork,
-<a href=#426 id=426 data-nosnippet>426</a>            test_clock(),
-<a href=#427 id=427 data-nosnippet>427</a>            test_rng(),
-<a href=#428 id=428 data-nosnippet>428</a>        )
-<a href=#429 id=429 data-nosnippet>429</a>        .unwrap();
-<a href=#430 id=430 data-nosnippet>430</a>
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">let </span>seed = [<span class="number">0xab</span>; <span class="number">32</span>];
-<a href=#432 id=432 data-nosnippet>432</a>        <span class="macro">assert_matches!</span>(
-<a href=#433 id=433 data-nosnippet>433</a>            WalletMigrator::new()
-<a href=#434 id=434 data-nosnippet>434</a>                .with_seed(Secret::new(seed.to_vec()))
-<a href=#435 id=435 data-nosnippet>435</a>                .ignore_seed_relevance()
-<a href=#436 id=436 data-nosnippet>436</a>                .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, migrations),
-<a href=#437 id=437 data-nosnippet>437</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
-<a href=#438 id=438 data-nosnippet>438</a>        );
-<a href=#439 id=439 data-nosnippet>439</a>    }
-<a href=#440 id=440 data-nosnippet>440</a>
-<a href=#441 id=441 data-nosnippet>441</a>    <span class="attr">#[test]
-<a href=#442 id=442 data-nosnippet>442</a>    </span><span class="kw">fn </span>migrate_between_releases_without_data() {
-<a href=#443 id=443 data-nosnippet>443</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
-<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data = WalletDb::for_path(
-<a href=#445 id=445 data-nosnippet>445</a>            data_file.path(),
-<a href=#446 id=446 data-nosnippet>446</a>            Network::TestNetwork,
-<a href=#447 id=447 data-nosnippet>447</a>            test_clock(),
-<a href=#448 id=448 data-nosnippet>448</a>            test_rng(),
-<a href=#449 id=449 data-nosnippet>449</a>        )
-<a href=#450 id=450 data-nosnippet>450</a>        .unwrap();
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">let </span>seed = [<span class="number">0xab</span>; <span class="number">32</span>].to_vec();
-<a href=#453 id=453 data-nosnippet>453</a>
-<a href=#454 id=454 data-nosnippet>454</a>        <span class="kw">let </span><span class="kw-2">mut </span>prev_state = HashSet::new();
-<a href=#455 id=455 data-nosnippet>455</a>        <span class="kw">let </span><span class="kw-2">mut </span>ensure_migration_state_changed = |conn: <span class="kw-2">&amp;</span>Connection| {
-<a href=#456 id=456 data-nosnippet>456</a>            <span class="kw">let </span>new_state = conn
-<a href=#457 id=457 data-nosnippet>457</a>                .prepare_cached(<span class="string">"SELECT * FROM schemer_migrations"</span>)
-<a href=#458 id=458 data-nosnippet>458</a>                .unwrap()
-<a href=#459 id=459 data-nosnippet>459</a>                .query_map([], |row| row.get::&lt;<span class="kw">_</span>, [u8; <span class="number">16</span>]&gt;(<span class="number">0</span>).map(Uuid::from_bytes))
-<a href=#460 id=460 data-nosnippet>460</a>                .unwrap()
-<a href=#461 id=461 data-nosnippet>461</a>                .collect::&lt;<span class="prelude-ty">Result</span>&lt;HashSet&lt;Uuid&gt;, <span class="kw">_</span>&gt;&gt;()
-<a href=#462 id=462 data-nosnippet>462</a>                .unwrap();
-<a href=#463 id=463 data-nosnippet>463</a>            <span class="macro">assert!</span>(<span class="macro">prev_state !</span>= new_state);
-<a href=#464 id=464 data-nosnippet>464</a>            prev_state = new_state;
-<a href=#465 id=465 data-nosnippet>465</a>        };
-<a href=#466 id=466 data-nosnippet>466</a>
-<a href=#467 id=467 data-nosnippet>467</a>        <span class="kw">let </span><span class="kw-2">mut </span>prev_leaves: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[];
-<a href=#468 id=468 data-nosnippet>468</a>        <span class="kw">for </span>migrations <span class="kw">in </span><span class="kw">super</span>::PUBLIC_MIGRATION_STATES {
-<a href=#469 id=469 data-nosnippet>469</a>            <span class="macro">assert_matches!</span>(
-<a href=#470 id=470 data-nosnippet>470</a>                WalletMigrator::new()
-<a href=#471 id=471 data-nosnippet>471</a>                    .with_seed(Secret::new(seed.clone()))
-<a href=#472 id=472 data-nosnippet>472</a>                    .ignore_seed_relevance()
-<a href=#473 id=473 data-nosnippet>473</a>                    .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, migrations),
-<a href=#474 id=474 data-nosnippet>474</a>                <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
-<a href=#475 id=475 data-nosnippet>475</a>            );
-<a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a>            <span class="comment">// If we have any new leaves, ensure the migration state changed. This lets us
-<a href=#478 id=478 data-nosnippet>478</a>            // represent releases that changed the graph edges without introducing any new
-<a href=#479 id=479 data-nosnippet>479</a>            // migrations.
-<a href=#480 id=480 data-nosnippet>480</a>            </span><span class="kw">if </span>migrations.iter().any(|m| !prev_leaves.contains(m)) {
-<a href=#481 id=481 data-nosnippet>481</a>                ensure_migration_state_changed(<span class="kw-2">&amp;</span>db_data.conn);
-<a href=#482 id=482 data-nosnippet>482</a>            }
-<a href=#483 id=483 data-nosnippet>483</a>
-<a href=#484 id=484 data-nosnippet>484</a>            prev_leaves = <span class="kw-2">*</span>migrations;
-<a href=#485 id=485 data-nosnippet>485</a>        }
+<a href=#403 id=403 data-nosnippet>403</a>    <span class="prelude-val">Ok</span>(())
+<a href=#404 id=404 data-nosnippet>404</a>}
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a><span class="attr">#[cfg(test)]
+<a href=#407 id=407 data-nosnippet>407</a></span><span class="kw">mod </span>tests {
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">use </span>std::collections::HashSet;
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">use </span>rusqlite::Connection;
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">use </span>secrecy::Secret;
+<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">use </span>tempfile::NamedTempFile;
+<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">use </span>uuid::Uuid;
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">use </span>zcash_protocol::consensus::Network;
+<a href=#415 id=415 data-nosnippet>415</a>
+<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">use crate</span>::{
+<a href=#417 id=417 data-nosnippet>417</a>        WalletDb,
+<a href=#418 id=418 data-nosnippet>418</a>        testing::db::{test_clock, test_rng},
+<a href=#419 id=419 data-nosnippet>419</a>        wallet::init::WalletMigrator,
+<a href=#420 id=420 data-nosnippet>420</a>    };
+<a href=#421 id=421 data-nosnippet>421</a>
+<a href=#422 id=422 data-nosnippet>422</a>    <span class="doccomment">/// Tests that we can migrate from a completely empty wallet database to the target
+<a href=#423 id=423 data-nosnippet>423</a>    /// migrations.
+<a href=#424 id=424 data-nosnippet>424</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>test_migrate(migrations: <span class="kw-2">&amp;</span>[Uuid]) {
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data = WalletDb::for_path(
+<a href=#427 id=427 data-nosnippet>427</a>            data_file.path(),
+<a href=#428 id=428 data-nosnippet>428</a>            Network::TestNetwork,
+<a href=#429 id=429 data-nosnippet>429</a>            test_clock(),
+<a href=#430 id=430 data-nosnippet>430</a>            test_rng(),
+<a href=#431 id=431 data-nosnippet>431</a>        )
+<a href=#432 id=432 data-nosnippet>432</a>        .unwrap();
+<a href=#433 id=433 data-nosnippet>433</a>
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">let </span>seed = [<span class="number">0xab</span>; <span class="number">32</span>];
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="macro">assert_matches!</span>(
+<a href=#436 id=436 data-nosnippet>436</a>            WalletMigrator::new()
+<a href=#437 id=437 data-nosnippet>437</a>                .with_seed(Secret::new(seed.to_vec()))
+<a href=#438 id=438 data-nosnippet>438</a>                .ignore_seed_relevance()
+<a href=#439 id=439 data-nosnippet>439</a>                .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, migrations),
+<a href=#440 id=440 data-nosnippet>440</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
+<a href=#441 id=441 data-nosnippet>441</a>        );
+<a href=#442 id=442 data-nosnippet>442</a>    }
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a>    <span class="attr">#[test]
+<a href=#445 id=445 data-nosnippet>445</a>    </span><span class="kw">fn </span>migrate_between_releases_without_data() {
+<a href=#446 id=446 data-nosnippet>446</a>        <span class="kw">let </span>data_file = NamedTempFile::new().unwrap();
+<a href=#447 id=447 data-nosnippet>447</a>        <span class="kw">let </span><span class="kw-2">mut </span>db_data = WalletDb::for_path(
+<a href=#448 id=448 data-nosnippet>448</a>            data_file.path(),
+<a href=#449 id=449 data-nosnippet>449</a>            Network::TestNetwork,
+<a href=#450 id=450 data-nosnippet>450</a>            test_clock(),
+<a href=#451 id=451 data-nosnippet>451</a>            test_rng(),
+<a href=#452 id=452 data-nosnippet>452</a>        )
+<a href=#453 id=453 data-nosnippet>453</a>        .unwrap();
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a>        <span class="kw">let </span>seed = [<span class="number">0xab</span>; <span class="number">32</span>].to_vec();
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">let </span><span class="kw-2">mut </span>prev_state = HashSet::new();
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">let </span><span class="kw-2">mut </span>ensure_migration_state_changed = |conn: <span class="kw-2">&amp;</span>Connection| {
+<a href=#459 id=459 data-nosnippet>459</a>            <span class="kw">let </span>new_state = conn
+<a href=#460 id=460 data-nosnippet>460</a>                .prepare_cached(<span class="string">"SELECT * FROM schemer_migrations"</span>)
+<a href=#461 id=461 data-nosnippet>461</a>                .unwrap()
+<a href=#462 id=462 data-nosnippet>462</a>                .query_map([], |row| row.get::&lt;<span class="kw">_</span>, [u8; <span class="number">16</span>]&gt;(<span class="number">0</span>).map(Uuid::from_bytes))
+<a href=#463 id=463 data-nosnippet>463</a>                .unwrap()
+<a href=#464 id=464 data-nosnippet>464</a>                .collect::&lt;<span class="prelude-ty">Result</span>&lt;HashSet&lt;Uuid&gt;, <span class="kw">_</span>&gt;&gt;()
+<a href=#465 id=465 data-nosnippet>465</a>                .unwrap();
+<a href=#466 id=466 data-nosnippet>466</a>            <span class="macro">assert!</span>(<span class="macro">prev_state !</span>= new_state);
+<a href=#467 id=467 data-nosnippet>467</a>            prev_state = new_state;
+<a href=#468 id=468 data-nosnippet>468</a>        };
+<a href=#469 id=469 data-nosnippet>469</a>
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="kw">let </span><span class="kw-2">mut </span>prev_leaves: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[];
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="kw">for </span>migrations <span class="kw">in </span><span class="kw">super</span>::PUBLIC_MIGRATION_STATES {
+<a href=#472 id=472 data-nosnippet>472</a>            <span class="macro">assert_matches!</span>(
+<a href=#473 id=473 data-nosnippet>473</a>                WalletMigrator::new()
+<a href=#474 id=474 data-nosnippet>474</a>                    .with_seed(Secret::new(seed.clone()))
+<a href=#475 id=475 data-nosnippet>475</a>                    .ignore_seed_relevance()
+<a href=#476 id=476 data-nosnippet>476</a>                    .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, migrations),
+<a href=#477 id=477 data-nosnippet>477</a>                <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
+<a href=#478 id=478 data-nosnippet>478</a>            );
+<a href=#479 id=479 data-nosnippet>479</a>
+<a href=#480 id=480 data-nosnippet>480</a>            <span class="comment">// If we have any new leaves, ensure the migration state changed. This lets us
+<a href=#481 id=481 data-nosnippet>481</a>            // represent releases that changed the graph edges without introducing any new
+<a href=#482 id=482 data-nosnippet>482</a>            // migrations.
+<a href=#483 id=483 data-nosnippet>483</a>            </span><span class="kw">if </span>migrations.iter().any(|m| !prev_leaves.contains(m)) {
+<a href=#484 id=484 data-nosnippet>484</a>                ensure_migration_state_changed(<span class="kw-2">&amp;</span>db_data.conn);
+<a href=#485 id=485 data-nosnippet>485</a>            }
 <a href=#486 id=486 data-nosnippet>486</a>
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="comment">// Now check that we can migrate from the last public release to the current
-<a href=#488 id=488 data-nosnippet>488</a>        // migration state in this branch.
-<a href=#489 id=489 data-nosnippet>489</a>        </span><span class="macro">assert_matches!</span>(
-<a href=#490 id=490 data-nosnippet>490</a>            WalletMigrator::new()
-<a href=#491 id=491 data-nosnippet>491</a>                .with_seed(Secret::new(seed))
-<a href=#492 id=492 data-nosnippet>492</a>                .ignore_seed_relevance()
-<a href=#493 id=493 data-nosnippet>493</a>                .init_or_migrate(<span class="kw-2">&amp;mut </span>db_data),
-<a href=#494 id=494 data-nosnippet>494</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
-<a href=#495 id=495 data-nosnippet>495</a>        );
-<a href=#496 id=496 data-nosnippet>496</a>        <span class="comment">// We don't ensure that the migration state changed, because it may not have.
-<a href=#497 id=497 data-nosnippet>497</a>    </span>}
-<a href=#498 id=498 data-nosnippet>498</a>}
+<a href=#487 id=487 data-nosnippet>487</a>            prev_leaves = <span class="kw-2">*</span>migrations;
+<a href=#488 id=488 data-nosnippet>488</a>        }
+<a href=#489 id=489 data-nosnippet>489</a>
+<a href=#490 id=490 data-nosnippet>490</a>        <span class="comment">// Now check that we can migrate from the last public release to the current
+<a href=#491 id=491 data-nosnippet>491</a>        // migration state in this branch.
+<a href=#492 id=492 data-nosnippet>492</a>        </span><span class="macro">assert_matches!</span>(
+<a href=#493 id=493 data-nosnippet>493</a>            WalletMigrator::new()
+<a href=#494 id=494 data-nosnippet>494</a>                .with_seed(Secret::new(seed))
+<a href=#495 id=495 data-nosnippet>495</a>                .ignore_seed_relevance()
+<a href=#496 id=496 data-nosnippet>496</a>                .init_or_migrate(<span class="kw-2">&amp;mut </span>db_data),
+<a href=#497 id=497 data-nosnippet>497</a>            <span class="prelude-val">Ok</span>(<span class="kw">_</span>)
+<a href=#498 id=498 data-nosnippet>498</a>        );
+<a href=#499 id=499 data-nosnippet>499</a>        <span class="comment">// We don't ensure that the migration state changed, because it may not have.
+<a href=#500 id=500 data-nosnippet>500</a>    </span>}
+<a href=#501 id=501 data-nosnippet>501</a>}
 </code></pre></div></section></main></body></html>
