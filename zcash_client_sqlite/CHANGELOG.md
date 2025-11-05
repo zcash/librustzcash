@@ -10,7 +10,10 @@ workspace.
 
 ## [Unreleased]
 
-## [0.19.0] - PLANNED
+## [0.19.0] - 2025-11-05
+
+### Added
+- `zcash_client_sqlite::wallet::init::migrations::V_0_19_0`
 
 ### Changed
 - MSRV is now 1.85.1.
