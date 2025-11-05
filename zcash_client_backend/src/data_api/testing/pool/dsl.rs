@@ -220,7 +220,7 @@ where
             .get_wallet_summary(confirmations_policy)
             .unwrap()?;
         let balance = binding.account_balances().get(&account.id())?;
-        Some(balance.clone())
+        Some(*balance)
     }
 
     /// Adds funds from a single note from an address of the given type.
