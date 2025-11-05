@@ -3105,7 +3105,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -6894,7 +6894,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7015,7 +7015,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.18.9"
+version = "0.19.0"
 dependencies = [
  "ambassador",
  "assert_matches",

@@ -10,61 +10,86 @@ workspace.
 
 ## [Unreleased]
 
-## [0.21.0] - PLANNED
+## [0.21.0] - 2025-11-05
 
 ### Added
+- `zcash_client_backend::data_api::WalletUtxo`
 - `zcash_client_backend::tor::http::cryptex`:
     - `exchanges::{CoinEx, DigiFinex, Kraken, Xt}`
-- `zcash_client_backend::wallet::{Exposure, GapMetadata}`
-- `zcash_client_backend::wallet::TransparentAddressSource`
-- `zcash_client_backend::wallet::TransparentAddressMetadata::`
+- `zcash_client_backend::wallet`:
+  - `Exposure, GapMetadata`
+  - `TransparentAddressSource`
+  - `TransparentAddressMetadata` methods:
     - `derived`
     - `standalone`
     - `exposure`
     - `next_check_time`
     - `with_exposure_at`
-- `zcash_client_backend::data_api::WalletUtxo`
-- `zcash_client_backend::data_api::WalletTest::get_known_ephemeral_addresses`
-- `zcash_client_backend::data_api::WalletTest::find_account_for_ephemeral_address`
 
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zip321 0.6`,
   `zcash_transparent 0.6`, `zcash_primitives 0.26`, `zcash_proofs 0.26`,
-  `arti-client 0.35`, `fs-mistrust 0.12`, `tonic 0.14`.
+  `pczt 0.5`, `arti-client 0.35`, `fs-mistrust 0.12`, `tonic 0.14`.
+- The wallet no longer restricts the caller from constructing payments to
+  explicit ephemeral transparent addresses, in order to allow for gap limit
+  management operations to be performed by the wallet application. If it is
+  desired to maintain the previous policy of excluding explicit payments to
+  ephemeral addresses, call `WalletRead::get_transparent_address_metadata` on
+  the address and check whether its `scope` is `TransparentKeyScope::EPHEMERAL`
+  if it is `TransparentAddressMetadata::Derived`.
 - `zcash_client_backend::data_api`:
-  - `testing::pool::ShieldedPoolTester` has added methods `note_value` and
-    `select_unspent_notes`.
-  - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}`
-    each now take an additional `target_height` argument; spendability isn't a
-    well-defined property in absence of target height information.
-  - The result types of `InputSource::get_unspent_transparent_output` and
-    `InputSource::get_unspent_transparent_outputs` have each changed; instead
-    of returning bare `WalletTransparentOutput`s, these now return `WalletUtxo`
-    values that include the `WalletTransparentOutput` data along with additional
-    derivation metadata.
-  - `WalletRead` has added method `get_ephemeral_transparent_receivers`.
-  - The result type of `WalletRead::get_transparent_receivers` has changed. The
-    value type of the returned `HashMap` is now non-optional.
-  - The result type of `WalletRead::get_transparent_balances` has changed. The
-    key scope for the address must now be returned along with the balance. The
-    semantics of this method have been changed such that it may now return balance
-    received by ephemeral addresses.
-  - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
-    has been removed. Implementers of `WalletRead` must provide their own
-    implementation.
-  - `WalletWrite` has added methods `delete_account`, `schedule_next_check`, and
-    `set_tx_trust`.
-  - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
-    instead of an `allow_unspendable` flag. See the method documentation for
-    details.
+  - Changes to the `InputSource` trait:
+    - `InputSource::{get_spendable_note, get_account_metadata, get_unspent_transparent_output}`
+      each now take an additional `target_height` argument; spendability isn't a
+      well-defined property in absence of target height information.
+    - The result types of `InputSource::get_unspent_transparent_output` and
+      `InputSource::get_unspent_transparent_outputs` have each changed; instead
+      of returning bare `WalletTransparentOutput`s, these now return `WalletUtxo`
+      values that include the `WalletTransparentOutput` data along with additional
+      derivation metadata.
+  - Changes to the `WalletRead` trait:
+    - Added `WalletRead::get_ephemeral_transparent_receivers` method.
+    - The result type of `WalletRead::get_transparent_receivers` has changed.
+      The value type of the returned `HashMap` is now non-optional.
+    - The result type of `WalletRead::get_transparent_balances` has changed. The
+      key scope for the address must now be returned along with the balance. The
+      semantics of this method have been changed such that it may now return
+      balance received by ephemeral addresses.
+    - Removed `WalletRead::get_known_ephemeral_addresses` and
+      `WalletRead::find_account_for_ephemeral_address`; they were previously
+      only used in tests and are not well-designed for wallet use. Use the new
+      `WalletTest` methods instead in tests.
+    - The inefficient default impl for `WalletRead::get_transparent_address_metadata`
+      has been removed. Implementers of `WalletRead` must provide their own
+      implementation.
+  - Changes to the `WalletWrite` trait:
+    - Added `WalletWrite::delete_account` method.
+    - Added `WalletWrite::schedule_next_check` method.
+    - Added `WalletWrite::set_tx_trust` method.
+  - Changes to the `WalletTest` trait:
+    - Added `WalletTest::get_known_ephemeral_addresses` method.
+    - Added `WalletTest::find_account_for_ephemeral_address` method.
+    - `WalletTest::get_transparent_output` now takes an `Option<TargetHeight>`
+      instead of an `allow_unspendable` flag. See the method documentation for
+      details.
+  - Changes to the `error::Error` enum:
+    - Removed the `PaysEphemeralTransparentAddress` variant.
+  - Changes to the `testing::TestFvk` trait:
+    - Added `OutgoingViewingKey` associated type.
+    - Changed `add_output` and `add_logical_action` methods to take an explicit
+      `sender_ovk` argument.
+    - Removed `sapling_fvk` and `orchard_fvk` methods.
+    - Added `to_ovk` and `to_ovk_bytes` methods.
+  - Changes to the `testing::pool::ShieldedPoolTester` trait:
+    - Added `note_value` method.
+    - Added `select_unspent_notes` method.
 - `zcash_client_backend::fees::ChangeStrategy::fetch_wallet_meta` now takes
   an additional `target_height` argument.
-- Variants of `zcash_client_backend::proposal::ProposalError` have changed.
-  A new `EphemeralAddressLinkability` variant has been added, to represent
-  the case where a caller attempts to construct a shielding transaction that
-  would link an ephemeral address to any other transparent address in the wallet
-  on-chain.
+- Changes to the `zcash_client_backend::proposal::ProposalError` enum:
+  - Added `EphemeralAddressLinkability` variant, to represent the case where a
+    caller attempts to construct a shielding transaction that would link an
+    ephemeral address to any other transparent address in the wallet on-chain.
 - `zcash_client_backend::wallet`:
   - `TransparentAddressMetadata` has been converted from an enum to a struct
     that contains both source metadata and information about when the address
@@ -73,12 +98,6 @@ workspace.
     consequence of this change, the signature of
     `TransparentAddressMetadata::new` has changed; use
     `TransparentAddressMetadata::derived` instead.
-- `zcash_client_backend::data_api::testing`:
-  - The `TestFvk` trait has changed in several ways. It has a ne `OutgoingViewingKey`
-    associated type, it now takes an explicit `sender_ovk` argument to its
-    `add_output` and `add_logical_action` methods, and its `sapling_fvk` and
-    `orchard_fvk` methods have been removed and replaced by a pair of methods
-    `to_ovk` and `to_ovk_bytes`.
 - `zcash_client_backend::testing`:
   - `DataStoreFactory::new_data_store` now takes its `GapLimits` argument
     as an optional value. This avoids the need for the test builder to
@@ -87,18 +106,6 @@ workspace.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
-- `zcash_client_backend::data_api`:
-  - `WalletRead::{get_known_ephemeral_addresses, find_account_for_ephemeral_address}`
-    have been removed. They were previously only used in tests and are not
-    well-designed for wallet use; replacements for use in tests have been added
-    to the `WalletTest` trait.
-- `zcash_client_backend::data_api::error::Error::PaysEphemeralTransparentAddress`
-  has been removed; the wallet no longer restricts the caller from constructing
-  payments to explicit ephemeral transparent addresses, in order to allow
-  for gap limit management operations to be performed by the wallet application.
-  If it is desired to maintain the previous policy of excluding explicit payments
-  to ephemeral addresses, call `get_transparent_address_metadata` on the address
-  and check whether its `scope` is `TransparentKeyScope::EPHEMERAL` if it is `Derived`.
 
 ## [0.20.0] - 2025-09-25
 

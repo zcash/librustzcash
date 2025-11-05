@@ -85,11 +85,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.4.0"
-when = "2025-09-25"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.5.0"
+when = "2025-11-05"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.sapling-crypto]]
 version = "0.5.0"
@@ -441,15 +441,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.20.0"
-when = "2025-09-25"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.21.0"
+when = "2025-11-05"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.18.9"
-when = "2025-10-23"
+version = "0.19.0"
+when = "2025-11-05"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
