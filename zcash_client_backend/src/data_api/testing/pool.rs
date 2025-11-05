@@ -4563,7 +4563,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
         .map(|i| Zatoshis::const_from_u64(i * 100_0000))
         .collect::<Vec<_>>();
     let h0 = st
-        .add_notes(note_values.clone().into_iter().map(|z| Some(z)))
+        .add_notes(note_values.clone().into_iter().map(Some))
         .first_block_height();
 
     let target_height = TargetHeight::from(h0 + 10);
