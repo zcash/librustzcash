@@ -110,7 +110,7 @@ impl compact_formats::CompactTx {
     /// Returns the transaction Id
     pub fn txid(&self) -> TxId {
         let mut hash = [0u8; 32];
-        hash.copy_from_slice(&self.hash);
+        hash.copy_from_slice(&self.txid);
         TxId::from_bytes(hash)
     }
 }

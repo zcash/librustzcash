@@ -49,16 +49,16 @@ pub struct CompactBlock {
 /// only. This message will not encode a transparent-to-transparent transaction.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactTx {
-    /// Index and hash will allow the receiver to call out to chain
-    /// explorers or other data structures to retrieve more information
-    /// about this transaction.
-    ///
-    /// the index within the full block
+    /// The index of the transaction within the block.
     #[prost(uint64, tag = "1")]
     pub index: u64,
-    /// the ID (hash) of this transaction, same as in block explorers
+    /// The id of the transaction as defined in
+    /// [§ 7.1.1 ‘Transaction Identifiers’](<https://zips.z.cash/protocol/protocol.pdf#txnidentifiers>)
+    /// This byte array MUST be in protocol order and MUST NOT be reversed
+    /// or hex-encoded; the byte-reversed and hex-encoded representation is
+    /// exclusively a textual representation of a txid.
     #[prost(bytes = "vec", tag = "2")]
-    pub hash: ::prost::alloc::vec::Vec<u8>,
+    pub txid: ::prost::alloc::vec::Vec<u8>,
     /// The transaction fee: present if server can provide. In the case of a
     /// stateless server and a transaction with transparent inputs, this will be
     /// unset because the calculation requires reference to prior transactions.
@@ -72,6 +72,42 @@ pub struct CompactTx {
     pub outputs: ::prost::alloc::vec::Vec<CompactSaplingOutput>,
     #[prost(message, repeated, tag = "6")]
     pub actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
+    /// `CompactTxIn` values corresponding to the `vin` entries of the full transaction.
+    ///
+    /// Note: the single null-outpoint input for coinbase transactions is omitted. Light
+    /// clients can test `CompactTx.index == 0` to determine whether a `CompactTx`
+    /// represents a coinbase transaction, as the coinbase transaction is always the
+    /// first transaction in any block.
+    #[prost(message, repeated, tag = "7")]
+    pub vin: ::prost::alloc::vec::Vec<CompactTxIn>,
+    #[prost(message, repeated, tag = "8")]
+    pub vout: ::prost::alloc::vec::Vec<TxOut>,
+}
+/// A compact representation of a transparent transaction input.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CompactTxIn {
+    /// The id of the transaction that generated the output being spent. This
+    /// byte array must be in protocol order and MUST NOT be reversed or
+    /// hex-encoded.
+    #[prost(bytes = "vec", tag = "1")]
+    pub prevout_txid: ::prost::alloc::vec::Vec<u8>,
+    /// The index of the output being spent in the `vout` array of the
+    /// transaction referred to by `prevoutTxid`.
+    #[prost(uint32, tag = "2")]
+    pub prevout_index: u32,
+}
+/// A transparent output being created by the transaction.
+///
+/// This contains identical data to the `TxOut` type in the transaction itself, and
+/// thus it is not "compact."
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TxOut {
+    /// The value of the output, in Zatoshis.
+    #[prost(uint64, tag = "1")]
+    pub value: u64,
+    /// The script pubkey that must be satisfied in order to spend this output.
+    #[prost(bytes = "vec", tag = "2")]
+    pub script_pub_key: ::prost::alloc::vec::Vec<u8>,
 }
 /// A compact representation of a [Sapling Spend](<https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus>).
 ///
@@ -79,7 +115,7 @@ pub struct CompactTx {
 /// protocol specification.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompactSaplingSpend {
-    /// nullifier (see the Zcash protocol specification)
+    /// Nullifier (see the Zcash protocol specification)
     #[prost(bytes = "vec", tag = "1")]
     pub nf: ::prost::alloc::vec::Vec<u8>,
 }
@@ -89,13 +125,13 @@ pub struct CompactSaplingSpend {
 /// `encCiphertext` field of a Sapling Output Description. Total size is 116 bytes.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompactSaplingOutput {
-    /// note commitment u-coordinate
+    /// Note commitment u-coordinate.
     #[prost(bytes = "vec", tag = "1")]
     pub cmu: ::prost::alloc::vec::Vec<u8>,
-    /// ephemeral public key
+    /// Ephemeral public key.
     #[prost(bytes = "vec", tag = "2")]
     pub ephemeral_key: ::prost::alloc::vec::Vec<u8>,
-    /// first 52 bytes of ciphertext
+    /// First 52 bytes of ciphertext.
     #[prost(bytes = "vec", tag = "3")]
     pub ciphertext: ::prost::alloc::vec::Vec<u8>,
 }

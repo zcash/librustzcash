@@ -2210,7 +2210,7 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
     rng.fill_bytes(&mut txid);
-    ctx.hash = txid;
+    ctx.txid = txid;
 
     ctx
 }
@@ -2304,7 +2304,7 @@ fn fake_compact_block_from_tx(
     // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
         index: tx_index as u64,
-        hash: tx.txid().as_ref().to_vec(),
+        txid: tx.txid().as_ref().to_vec(),
         ..Default::default()
     };
 

@@ -331,6 +331,11 @@ where
     let range = service::BlockRange {
         start: Some(start),
         end: Some(end),
+        pool_types: vec![
+            i32::from(service::PoolType::Transparent),
+            i32::from(service::PoolType::Sapling),
+            i32::from(service::PoolType::Orchard),
+        ],
     };
     let compact_blocks = client
         .get_block_range(range)
