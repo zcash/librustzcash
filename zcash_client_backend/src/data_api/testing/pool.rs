@@ -1459,9 +1459,6 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(650_0000);
     let (h, _, _) = st.add_a_single_note(value);
@@ -1487,6 +1484,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         ),
     );
 
+    let account = st.test_account().cloned().unwrap();
     let proposal = st
         .propose_transfer(
             account.id(),
@@ -1982,9 +1980,6 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(dsf, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(60000);
     let (h, _, _) = st.add_a_single_note(value);
@@ -2009,6 +2004,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
     let input_selector = GreedyInputSelector::new();
 
+    let account = st.test_account().cloned().unwrap();
     let proposal = st
         .propose_transfer(
             account.id(),
@@ -2609,10 +2605,6 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
     let fee_rule = StandardFeeRule::Zip317;
 
     // Add funds to the wallet in a single note
@@ -2622,6 +2614,8 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -2826,10 +2820,6 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(70000);
     st.add_a_single_note(value);
@@ -2838,6 +2828,8 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -3542,14 +3534,12 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
 ) {
     let mut st = TestDsl::with_standard_sapling_account(ds_factory, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
-
     // Generate a block with funds belonging to our wallet.
     st.add_a_single_note(Zatoshis::const_from_u64(500000));
 
     // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
     // belong to us so that we can get a checkpoint in the tree.
+    let account = st.test_account().cloned().unwrap();
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = Zatoshis::const_from_u64(10000);
     let sapling_end_size = st.latest_cached_block().unwrap().sapling_end_size();
