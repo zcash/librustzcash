@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Removed
+- `zcash_client_sqlite::GapLimits` use
+  `zcash_client_backend::wallet::transparent::GapLimits` instead.
+
 ## [0.18.10, 0.19.1] - 2025-11-25
 
 ### Fixed
