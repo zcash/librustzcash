@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `zcash_client_backend::wallet::transparent`
+- `zcash_client_backend::data_api::ll`
 
 ### Changed
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified

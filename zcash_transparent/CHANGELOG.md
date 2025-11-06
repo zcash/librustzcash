@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
+
 ### Changed
 - MSRV is now 1.85.1.
 
