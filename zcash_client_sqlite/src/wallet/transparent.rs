@@ -22,6 +22,7 @@ use transparent::{
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
+use zcash_client_backend::wallet::transparent::GapLimits;
 use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
     data_api::{
@@ -39,8 +40,7 @@ use zcash_keys::{
         UnifiedIncomingViewingKey,
     },
 };
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_primitives::transaction::fees::zip317;
+use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight},
@@ -61,7 +61,7 @@ use super::{
     get_account_ids, get_account_internal,
 };
 use crate::{
-    AccountRef, AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
+    AccountRef, AccountUuid, AddressRef, TxRef, UtxoId,
     error::SqliteClientError,
     util::Clock,
     wallet::{common::tx_unexpired_condition, get_account, mempool_height},
@@ -143,16 +143,15 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let gap_limit_starts = scopes
         .iter()
         .filter_map(|key_scope| {
-            gap_limits
-                .limit_for(*key_scope)
-                .zip(key_scope.as_transparent())
-                .and_then(|(limit, t_key_scope)| {
+            key_scope.as_transparent().and_then(|t_key_scope| {
+                gap_limits.limit_for(t_key_scope).and_then(|limit| {
                     find_gap_start(conn, account_id, t_key_scope, limit)
                         .transpose()
-                        .map(|res| res.map(|child_idx| (*key_scope, (limit, child_idx))))
+                        .map(|res| res.map(|child_idx| (t_key_scope, (limit, child_idx))))
                 })
+            })
         })
-        .collect::<Result<HashMap<KeyScope, (u32, NonHardenedChildIndex)>, SqliteClientError>>()?;
+        .collect::<Result<HashMap<TransparentKeyScope, (u32, NonHardenedChildIndex)>, SqliteClientError>>()?;
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
@@ -217,9 +216,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             row.get::<_, Option<u32>>("exposed_at_height")?
                 .map_or(Exposure::Unknown, |h| Exposure::Exposed {
                     at_height: BlockHeight::from(h),
-                    gap_metadata: gap_limit_starts
-                        .get(&key_scope)
-                        .zip(address_index_opt)
+                    gap_metadata: key_scope
+                        .as_transparent()
+                        .and_then(|t_key_scope| {
+                            gap_limit_starts.get(&t_key_scope).zip(address_index_opt)
+                        })
                         .map_or(
                             GapMetadata::DerivationUnknown,
                             |((gap_limit, start), idx)| {
@@ -268,9 +269,10 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time)
                 }
                 derived => {
-                    let scope_opt = <Option<TransparentKeyScope>>::from(derived);
-                    let (scope, address_index) =
-                        scope_opt.zip(address_index_opt).ok_or_else(|| {
+                    let (scope, address_index) = derived
+                        .as_transparent()
+                        .zip(address_index_opt)
+                        .ok_or_else(|| {
                             SqliteClientError::CorruptedData(
                                 "Derived addresses must have derivation metadata present."
                                     .to_owned(),
@@ -1797,15 +1799,15 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
                     let exposed_at_height = row.get::<_, Option<u32>>("exposed_at_height")?.map(BlockHeight::from);
 
-                    match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
-                        Some((scope, address_index)) => {
+                    match key_scope.as_transparent().zip(address_index) {
+                        Some((t_key_scope, address_index)) => {
                             let exposure = exposed_at_height.map_or(
                                 Ok::<_, SqliteClientError>(Exposure::Unknown),
                                 |at_height| {
-                                    let gap_metadata = match gap_limits.limit_for(key_scope) {
+                                    let gap_metadata = match gap_limits.limit_for(t_key_scope) {
                                         None => GapMetadata::DerivationUnknown,
                                         Some(gap_limit) => {
-                                            find_gap_start(conn, account_id, scope, gap_limit)?.map_or(
+                                            find_gap_start(conn, account_id, t_key_scope, gap_limit)?.map_or(
                                                 GapMetadata::GapRecoverable { gap_limit },
                                                 |gap_start| {
                                                     if let Some(gap_position) = address_index.index().checked_sub(gap_start.index()) {
@@ -1829,7 +1831,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             )?;
 
                             Ok(TransparentAddressMetadata::derived(
-                                scope,
+                                t_key_scope,
                                 address_index,
                                 exposure,
                                 next_check_time
@@ -2212,7 +2214,7 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::gap_limits(
             TestDbFactory::default(),
             BlockCache::new(),
-            GapLimits::default().into(),
+            GapLimits::default(),
         );
     }
 

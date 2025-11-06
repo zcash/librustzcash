@@ -20,6 +20,10 @@ workspace.
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 
+### Removed
+- `zcash_client_sqlite::GapLimits` use
+  `zcash_client_backend::wallet::transparent::GapLimits` instead.
+
 ## [0.18.10, 0.19.1] - 2025-11-25
 
 ### Fixed
@@ -46,7 +50,7 @@ workspace.
 
 ### Fixed
 - A bug was fixed in `WalletDb::get_transaction` that could cause transaction
-  retrieval to return an error instead of `None` for transactions for which the 
+  retrieval to return an error instead of `None` for transactions for which the
   raw transaction data was not available.
 
 ## [0.18.9] - 2025-10-22
