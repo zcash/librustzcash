@@ -21,13 +21,16 @@ workspace.
     a single OVK for all shielded outputs irrespective of pools, it now
     specifies that wallet-internal change outputs should be treated as though
     the policy for those outputs were `OvkPolicy::None`, rendering them only
-    recoverable using the wallet's internal IVK. 
+    recoverable using the wallet's internal IVK.
   - The `OvkPolicy::Custom` variant has changed. Instead of pool-specific
     OVKs, this now encapsulates a pair of OVKs, one to be used for all
     shielded external outputs of the transaction, and a second (optional)
     key that will be used to encrypt any wallet-internal change outputs
     that would otherwise only be recoverable using the wallet's internal
     IVK.
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
 
 ## [0.21.0] - 2025-11-05
 
