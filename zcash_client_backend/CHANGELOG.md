@@ -55,6 +55,9 @@ workspace.
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
   `zcash_client_backend::data_api::InputSource`.
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
 
 ## [0.21.0] - 2025-11-05
 

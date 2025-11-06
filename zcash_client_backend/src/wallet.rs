@@ -643,6 +643,7 @@ impl OvkPolicy {
 
 /// Metadata describing the gap limit position of a transparent address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
 pub enum GapMetadata {
     /// The address, or an address at a greater child index, has received transparent funds and
     /// will be discovered by wallet recovery by exploration over the space of
