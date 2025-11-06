@@ -56,11 +56,13 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
+use ::transparent::{
+    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
+};
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
     prover::{OutputProver, SpendProver},
 };
-use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -88,15 +90,16 @@ use {
         proposal::StepOutput,
         wallet::{TransparentAddressMetadata, TransparentAddressSource},
     },
+    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
-    transparent::bundle::TxOut,
 };
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
+    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -105,7 +108,6 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
-    transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::consensus::NetworkConstants,
 };
