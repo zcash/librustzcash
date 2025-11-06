@@ -300,6 +300,18 @@ impl Optional {
     }
 }
 
+/// Decodes a reversed-hex string into a byte array.
+///
+/// This handles the legacy format from Bitcoin Core's `uint256::GetHex`, which reverses
+/// bytes before hex encoding. `zcashd` applied this to all 32-byte JSON-RPC values
+/// (transaction IDs, block hashes, Sprout field elements, etc.), though non-32-byte
+/// hex values are not reversed.
+pub fn decode_reverse_hex(bytes: &[u8; 32]) -> alloc::string::String {
+    let mut reversed = *bytes;
+    reversed.reverse();
+    hex::encode(reversed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

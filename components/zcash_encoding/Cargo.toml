@@ -17,6 +17,7 @@ keywords = ["zcash"]
 
 [dependencies]
 core2.workspace = true
+hex.workspace = true
 nonempty.workspace = true
 
 [features]
