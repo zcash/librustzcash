@@ -48,6 +48,17 @@ impl From<TxId> for [u8; 32] {
 }
 
 impl TxId {
+    /// Creates a TxId from a reverse hex string
+    ///
+    /// See `zcash_encoding::decode_reverse_hex` for more context.
+    pub const fn from_reverse_hex(hex_str: &str) -> RpcResult<Self> {
+        let mut bytes = [0; 32];
+        hex::decode_to_slice(hex_str, &mut bytes)
+            .map_err(|_| RpcError::ParseError("Invalid hex string".to_string()))?;
+        bytes.reverse();
+        Ok(TxId(bytes))
+    }
+
     /// Wraps the given byte array as a TxId value
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         TxId(bytes)
