@@ -85,6 +85,8 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::ll::ReceivedSaplingOutput as _;
 use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
@@ -92,6 +94,7 @@ use zcash_client_backend::{
         AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio,
         ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput,
         TransactionDataRequest, TransactionStatus, WalletSummary, Zip32Derivation,
+        ll::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta},
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -114,7 +117,7 @@ use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
+    value::{BalanceError, ZatBalance, Zatoshis},
 };
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
@@ -140,7 +143,6 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    transparent::get_wallet_transparent_output,
     zcash_client_backend::wallet::WalletTransparentOutput,
 };
 
@@ -2503,40 +2505,6 @@ pub(crate) fn get_transaction<P: Parameters>(
     .transpose()
 }
 
-pub(crate) fn get_funding_accounts(
-    conn: &rusqlite::Connection,
-    tx: &Transaction,
-) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
-    let mut funding_accounts = HashSet::new();
-    #[cfg(feature = "transparent-inputs")]
-    funding_accounts.extend(transparent::detect_spending_accounts(
-        conn,
-        tx.transparent_bundle()
-            .iter()
-            .flat_map(|bundle| bundle.vin.iter().map(|txin| txin.prevout())),
-    )?);
-
-    funding_accounts.extend(sapling::detect_spending_accounts(
-        conn,
-        tx.sapling_bundle().iter().flat_map(|bundle| {
-            bundle
-                .shielded_spends()
-                .iter()
-                .map(|spend| spend.nullifier())
-        }),
-    )?);
-
-    #[cfg(feature = "orchard")]
-    funding_accounts.extend(orchard::detect_spending_accounts(
-        conn,
-        tx.orchard_bundle()
-            .iter()
-            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier())),
-    )?);
-
-    Ok(funding_accounts)
-}
-
 /// Returns the memo for a sent note, if the sent note is known to the wallet.
 pub(crate) fn get_sent_memo(
     conn: &rusqlite::Connection,
@@ -3480,21 +3448,21 @@ pub(crate) fn put_block(
 }
 
 #[derive(Debug)]
-struct TransparentSentOutput {
-    from_account_uuid: AccountUuid,
+struct TransparentSentOutput<AccountId> {
+    from_account_uuid: AccountId,
     output_index: usize,
-    recipient: Recipient<AccountUuid>,
+    recipient: Recipient<AccountId>,
     value: Zatoshis,
 }
 
 #[derive(Debug)]
-struct WalletTransparentOutputs {
+pub struct WalletTransparentOutputs<AccountId> {
     #[cfg(feature = "transparent-inputs")]
-    received: Vec<(WalletTransparentOutput, KeyScope)>,
-    sent: Vec<TransparentSentOutput>,
+    received: Vec<(WalletTransparentOutput, Option<TransparentKeyScope>)>,
+    sent: Vec<TransparentSentOutput<AccountId>>,
 }
 
-impl WalletTransparentOutputs {
+impl<AccountId> WalletTransparentOutputs<AccountId> {
     fn empty() -> Self {
         Self {
             #[cfg(feature = "transparent-inputs")]
@@ -3515,12 +3483,16 @@ impl WalletTransparentOutputs {
     }
 }
 
-fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
-    #[cfg(feature = "transparent-inputs")] conn: &rusqlite::Transaction,
+fn detect_wallet_transparent_outputs<DbT, P>(
+    #[cfg(feature = "transparent-inputs")] wallet_db: &DbT,
     params: &P,
-    d_tx: &DecryptedTransaction<AccountUuid>,
-    funding_account: Option<AccountUuid>,
-) -> Result<WalletTransparentOutputs, SqliteClientError> {
+    d_tx: &DecryptedTransaction<DbT::AccountId>,
+    funding_account: Option<DbT::AccountId>,
+) -> Result<WalletTransparentOutputs<DbT::AccountId>, DbT::Error>
+where
+    DbT: LowLevelWalletRead,
+    P: consensus::Parameters,
+{
     // This `if` is just an optimization for cases where we would do nothing in the loop.
     if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
         let mut result = WalletTransparentOutputs::empty();
@@ -3542,7 +3514,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                 // If the output belongs to the wallet, add it to `transparent_received_outputs`.
                 #[cfg(feature = "transparent-inputs")]
                 if let Some((account_uuid, key_scope)) =
-                    transparent::find_account_uuid_for_transparent_address(conn, params, &address)?
+                    wallet_db.find_account_for_transparent_address(&address)?
                 {
                     debug!(
                         "{:?} output {} belongs to account {:?}",
@@ -3576,9 +3548,9 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
-                    let recipient_address =
-                        select_receiving_address(conn, params, account_uuid, &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+                    let recipient_address = wallet_db
+                        .select_receiving_address(account_uuid, &receiver)?
+                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     #[cfg(not(feature = "transparent-inputs"))]
                     let recipient_address = receiver.to_zcash_address(params.network_type());
@@ -3610,38 +3582,46 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
     }
 }
 
-fn determine_fee(
-    conn: &rusqlite::Connection,
-    tx: &Transaction,
-) -> Result<Option<Zatoshis>, SqliteClientError> {
-    tx.fee_paid(|outpoint| {
+pub(crate) fn determine_fee<DbT, T: TxMeta>(
+    _wallet_db: &DbT,
+    tx: &T,
+) -> Result<Option<Zatoshis>, DbT::Error>
+where
+    DbT: LowLevelWalletRead,
+    DbT::Error: From<BalanceError>,
+{
+    tx.fee_paid(|_outpoint| {
         #[cfg(not(feature = "transparent-inputs"))]
         {
             // Transparent inputs aren't supported, so this closure should never be
             // called during transaction construction. But in case it is, handle it
             // correctly.
-            let _ = (conn, outpoint);
             Ok(None)
         }
 
         // This closure can do DB lookups to fetch the value of each transparent input.
         #[cfg(feature = "transparent-inputs")]
-        if let Some(out) = get_wallet_transparent_output(conn, outpoint, None)? {
+        if let Some(out) = _wallet_db.get_wallet_transparent_output(_outpoint, None)? {
             Ok(Some(out.txout().value()))
         } else {
             // If we can’t find it, fee computation can't complete accurately
-            Ok::<_, SqliteClientError>(None)
+            Ok(None)
         }
     })
 }
 
-pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
-    conn: &rusqlite::Transaction,
+pub fn store_decrypted_tx<DbT, P>(
+    wallet_db: &mut DbT,
     params: &P,
-    d_tx: DecryptedTransaction<AccountUuid>,
-    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
-) -> Result<(), SqliteClientError> {
-    let funding_accounts = get_funding_accounts(conn, d_tx.tx())?;
+    chain_tip_height: BlockHeight,
+    d_tx: DecryptedTransaction<<DbT as LowLevelWalletRead>::AccountId>,
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+    DbT::Error: From<BalanceError>,
+    P: consensus::Parameters,
+{
+    let funding_accounts = wallet_db.get_funding_accounts(d_tx.tx())?;
 
     // TODO(#1305): Correctly track accounts that fund each transaction output.
     let funding_account = funding_accounts.iter().next().copied();
@@ -3653,9 +3633,9 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         )
     }
 
-    let wallet_transparent_outputs = detect_wallet_transparent_outputs(
+    let wallet_transparent_outputs = detect_wallet_transparent_outputs::<DbT, P>(
         #[cfg(feature = "transparent-inputs")]
-        conn,
+        wallet_db,
         params,
         &d_tx,
         funding_account,
@@ -3667,35 +3647,20 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         && wallet_transparent_outputs.is_empty()
         && !d_tx.has_decrypted_outputs()
     {
-        delete_retrieval_queue_entries(conn, d_tx.tx().txid())?;
+        wallet_db.delete_retrieval_queue_entries(d_tx.tx().txid())?;
         return Ok(());
     }
 
     info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
-
-    let observed_height = d_tx.mined_height().map_or_else(
-        || {
-            mempool_height(conn)?
-                .ok_or(SqliteClientError::ChainHeightUnknown)
-                .map(BlockHeight::from)
-        },
-        Ok,
-    )?;
+    let observed_height = d_tx.mined_height().unwrap_or(chain_tip_height + 1);
 
     // If the transaction is fully shielded, or all transparent inputs are available, set the
     // fee value.
-    let fee = determine_fee(conn, d_tx.tx())?;
+    let fee = determine_fee(wallet_db, d_tx.tx())?;
 
-    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None, observed_height)?;
+    let tx_ref = wallet_db.put_tx_data(d_tx.tx(), fee, None, None, observed_height)?;
     if let Some(height) = d_tx.mined_height() {
-        set_transaction_status(
-            conn,
-            params,
-            #[cfg(feature = "transparent-inputs")]
-            gap_limits,
-            d_tx.tx().txid(),
-            TransactionStatus::Mined(height),
-        )?;
+        wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
 
     // A flag used to determine whether it is necessary to query for transactions that
@@ -3716,9 +3681,9 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             TransferType::Outgoing => {
                 let recipient = {
                     let receiver = Receiver::Sapling(output.note().recipient());
-                    let recipient_address =
-                        select_receiving_address(conn, params, *output.account(), &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+                    let recipient_address = wallet_db
+                        .select_receiving_address(*output.account(), &receiver)?
+                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     Recipient::External {
                         recipient_address,
@@ -3726,9 +3691,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     }
                 };
 
-                put_sent_output(
-                    conn,
-                    params,
+                wallet_db.put_sent_output(
                     *output.account(),
                     tx_ref,
                     output.index(),
@@ -3738,14 +3701,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::WalletInternal => {
-                sapling::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
+                wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), None)?;
 
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
@@ -3753,9 +3709,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     note: Box::new(Note::Sapling(output.note().clone())),
                 };
 
-                put_sent_output(
-                    conn,
-                    params,
+                wallet_db.put_sent_output(
                     *output.account(),
                     tx_ref,
                     output.index(),
@@ -3765,17 +3719,10 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::Incoming => {
-                let _account_id = sapling::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
+                wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), None)?;
 
                 #[cfg(feature = "transparent-inputs")]
-                gap_update_set.insert((_account_id, KeyScope::EXTERNAL));
+                gap_update_set.insert((output.account_id(), TransparentKeyScope::EXTERNAL));
 
                 if let Some(account_id) = funding_account {
                     let recipient = Recipient::InternalAccount {
@@ -3783,23 +3730,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                         external_address: {
                             let receiver = Receiver::Sapling(output.note().recipient());
                             Some(
-                                select_receiving_address(
-                                    conn,
-                                    params,
-                                    *output.account(),
-                                    &receiver,
-                                )?
-                                .unwrap_or_else(|| {
-                                    receiver.to_zcash_address(params.network_type())
-                                }),
+                                wallet_db
+                                    .select_receiving_address(*output.account(), &receiver)?
+                                    .unwrap_or_else(|| {
+                                        receiver.to_zcash_address(params.network_type())
+                                    }),
                             )
                         },
                         note: Box::new(Note::Sapling(output.note().clone())),
                     };
 
-                    put_sent_output(
-                        conn,
-                        params,
+                    wallet_db.put_sent_output(
                         account_id,
                         tx_ref,
                         output.index(),
@@ -3822,9 +3763,9 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             TransferType::Outgoing => {
                 let recipient = {
                     let receiver = Receiver::Orchard(output.note().recipient());
-                    let recipient_address =
-                        select_receiving_address(conn, params, *output.account(), &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+                    let recipient_address = wallet_db
+                        .select_receiving_address(*output.account(), &receiver)?
+                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     Recipient::External {
                         recipient_address,
@@ -3832,9 +3773,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     }
                 };
 
-                put_sent_output(
-                    conn,
-                    params,
+                wallet_db.put_sent_output(
                     *output.account(),
                     tx_ref,
                     output.index(),
@@ -3844,14 +3783,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::WalletInternal => {
-                orchard::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
+                wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), None)?;
 
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
@@ -3859,9 +3791,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     note: Box::new(Note::Orchard(*output.note())),
                 };
 
-                put_sent_output(
-                    conn,
-                    params,
+                wallet_db.put_sent_output(
                     *output.account(),
                     tx_ref,
                     output.index(),
@@ -3871,17 +3801,13 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::Incoming => {
-                let _account_id = orchard::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
+                #[cfg(feature = "transparent-inputs")]
+                use zcash_client_backend::data_api::ll::ReceivedOrchardOutput as _;
+
+                wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), None)?;
 
                 #[cfg(feature = "transparent-inputs")]
-                gap_update_set.insert((_account_id, KeyScope::EXTERNAL));
+                gap_update_set.insert((output.account_id(), TransparentKeyScope::EXTERNAL));
 
                 if let Some(account_id) = funding_account {
                     // Even if the recipient address is external, record the send as internal.
@@ -3890,23 +3816,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                         external_address: {
                             let receiver = Receiver::Orchard(output.note().recipient());
                             Some(
-                                select_receiving_address(
-                                    conn,
-                                    params,
-                                    *output.account(),
-                                    &receiver,
-                                )?
-                                .unwrap_or_else(|| {
-                                    receiver.to_zcash_address(params.network_type())
-                                }),
+                                wallet_db
+                                    .select_receiving_address(*output.account(), &receiver)?
+                                    .unwrap_or_else(|| {
+                                        receiver.to_zcash_address(params.network_type())
+                                    }),
                             )
                         },
                         note: Box::new(Note::Orchard(*output.note())),
                     };
 
-                    put_sent_output(
-                        conn,
-                        params,
+                    wallet_db.put_sent_output(
                         account_id,
                         tx_ref,
                         output.index(),
@@ -3927,21 +3847,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         .iter()
         .flat_map(|b| b.vin.iter())
     {
-        transparent::mark_transparent_utxo_spent(conn, tx_ref, txin.prevout())?;
+        wallet_db.mark_transparent_utxo_spent(txin.prevout(), tx_ref)?;
     }
 
     #[cfg(feature = "transparent-inputs")]
     for (received_t_output, key_scope) in &wallet_transparent_outputs.received {
-        let (account_id, _, _, _) = transparent::put_transparent_output(
-            conn,
-            params,
-            gap_limits,
-            received_t_output,
-            observed_height,
-            false,
-        )?;
+        let (account_id, _) =
+            wallet_db.put_transparent_output(received_t_output, observed_height, false)?;
 
-        gap_update_set.insert((account_id, *key_scope));
+        if let Some(key_scope) = key_scope {
+            gap_update_set.insert((account_id, *key_scope));
+        }
 
         // Since the wallet created the transparent output, we need to ensure
         // that any transparent inputs belonging to the wallet will be
@@ -3953,9 +3869,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
         // possible that the spend of these outputs is not then later detected
         // if the transaction that spends them is purely transparent. This is
         // especially a problem in wallet recovery.
-        transparent::queue_transparent_spend_detection(
-            conn,
-            params,
+        wallet_db.queue_transparent_spend_detection(
             *received_t_output.recipient_address(),
             tx_ref,
             received_t_output.outpoint().n(),
@@ -3963,9 +3877,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     }
 
     for sent_t_output in &wallet_transparent_outputs.sent {
-        put_sent_output(
-            conn,
-            params,
+        wallet_db.put_sent_output(
             sent_t_output.from_account_uuid,
             tx_ref,
             sent_t_output.output_index,
@@ -3985,63 +3897,19 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // Regenerate the gap limit addresses.
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in gap_update_set {
-        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
-            use ReceiverRequirement::*;
-            transparent::generate_gap_addresses(
-                conn,
-                params,
-                gap_limits,
-                account_id,
-                t_key_scope,
-                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                false,
-            )?;
-        }
+        use ReceiverRequirement::*;
+        wallet_db.generate_transparent_gap_addresses(
+            account_id,
+            key_scope,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
     }
 
     // For each transaction that spends a transparent output of this transaction and does not
     // already have a known fee value, set the fee if possible.
-    let mut spending_txs_stmt = conn.prepare(
-        "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
-         FROM transactions t
-         -- find transactions that spend transparent outputs of the decrypted tx
-         LEFT OUTER JOIN transparent_received_output_spends ts
-            ON ts.transaction_id = t.id_tx
-         LEFT OUTER JOIN transparent_received_outputs tro
-            ON tro.transaction_id = :transaction_id
-            AND tro.id = ts.transparent_received_output_id
-         WHERE t.fee IS NULL
-         AND t.raw IS NOT NULL
-         AND ts.transaction_id IS NOT NULL",
-    )?;
-
-    let mut spending_txs_rows = spending_txs_stmt.query(named_params! {
-        ":transaction_id": tx_ref.0
-    })?;
-
-    while let Some(row) = spending_txs_rows.next()? {
-        let spending_tx_ref = row.get(0).map(TxRef)?;
-        let tx_bytes: Vec<u8> = row.get(1)?;
-        let block: Option<u32> = row.get(2)?;
-        let expiry: Option<u32> = row.get(3)?;
-
-        let (_, spending_tx) = parse_tx(
-            params,
-            &tx_bytes,
-            block.map(BlockHeight::from),
-            expiry.map(BlockHeight::from),
-        )?;
-
-        if let Some(fee) = determine_fee(conn, &spending_tx)? {
-            conn.execute(
-                "UPDATE transactions
-                 SET fee = :fee
-                 WHERE id_tx = :transaction_id",
-                named_params! {
-                    ":transaction_id": spending_tx_ref.0,
-                    ":fee": u64::from(fee)
-                },
-            )?;
+    for (spending_tx_ref, spending_tx) in wallet_db.get_spending_transactions(tx_ref)? {
+        if let Some(fee) = determine_fee(wallet_db, &spending_tx)? {
+            wallet_db.update_tx_fee(spending_tx_ref, fee)?;
         }
     }
 
@@ -4051,15 +3919,15 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // part) by this wallet.
     #[cfg(feature = "transparent-inputs")]
     if tx_has_wallet_outputs {
-        queue_transparent_input_retrieval(conn, tx_ref, &d_tx)?
+        wallet_db.queue_transparent_input_retrieval(tx_ref, &d_tx)?
     }
 
-    delete_retrieval_queue_entries(conn, d_tx.tx().txid())?;
+    wallet_db.delete_retrieval_queue_entries(d_tx.tx().txid())?;
 
     // If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
     #[cfg(feature = "transparent-inputs")]
-    queue_unmined_tx_retrieval(conn, &d_tx)?;
+    wallet_db.queue_unmined_tx_retrieval(&d_tx)?;
 
     Ok(())
 }
