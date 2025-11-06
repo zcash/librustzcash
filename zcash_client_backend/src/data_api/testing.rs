@@ -75,9 +75,11 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
-    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
+    crate::{
+        data_api::Balance,
+        wallet::{TransparentAddressMetadata, transparent::GapLimits},
+    },
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
-    transparent::GapLimits,
 };
 
 #[cfg(feature = "orchard")]
