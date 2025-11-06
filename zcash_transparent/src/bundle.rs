@@ -146,6 +146,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
+/// A pointer to a transparent Zcash transaction output.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
     pub(crate) hash: TxId,
