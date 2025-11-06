@@ -51,6 +51,9 @@ workspace.
     IVK.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variant `PaymentAmountMissing`
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
 
 ## [0.21.0] - 2025-11-05
 
