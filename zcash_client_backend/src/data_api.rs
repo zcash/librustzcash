@@ -125,6 +125,7 @@ use zcash_protocol::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
+pub mod ll;
 pub mod scanning;
 pub mod wallet;
 

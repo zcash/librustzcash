@@ -17,6 +17,7 @@ workspace.
 - `impl core::error::Error` for:
   -` zcash_transparent::builder::Error`
   - `zcash_transparent::coinbase::Error`
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
 
 ### Changed
 - MSRV is now 1.85.1.
