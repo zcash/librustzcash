@@ -1892,13 +1892,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         d_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
-            wallet::store_decrypted_tx(
-                wdb.conn.0,
-                &wdb.params,
-                d_tx,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-            )
+            let chain_tip = wallet::chain_tip_height(wdb.conn.borrow())?
+                .ok_or(SqliteClientError::ChainHeightUnknown)?;
+            let params = *wdb.params();
+            wallet::store_decrypted_tx(wdb, &params, chain_tip, d_tx)
         })
     }
 
