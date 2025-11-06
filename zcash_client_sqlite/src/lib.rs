@@ -113,7 +113,7 @@ use {
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{Balance, TransactionsInvolvingAddress, WalletUtxo},
-        wallet::TransparentAddressMetadata,
+        wallet::{TransparentAddressMetadata, transparent::GapLimits},
     },
     zcash_keys::encoding::AddressCodec,
 };
@@ -271,113 +271,6 @@ struct TxRef(pub i64);
 /// A newtype wrapper for sqlite primary key values for the addresses table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct AddressRef(pub(crate) i64);
-
-/// A data structure that can be used to configure custom gap limits for use in transparent address
-/// rotation.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg(feature = "transparent-inputs")]
-pub struct GapLimits {
-    external: u32,
-    internal: u32,
-    ephemeral: u32,
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl GapLimits {
-    /// Constructs a new `GapLimits` value from its constituent parts.
-    ///
-    /// The gap limits recommended for use with this crate are supplied by the [`Default`]
-    /// implementation for this type.
-    ///
-    /// This constructor is only available under the `unstable` feature, as it is not recommended
-    /// for general use.
-    #[cfg(any(test, feature = "test-dependencies", feature = "unstable"))]
-    pub fn from_parts(external: u32, internal: u32, ephemeral: u32) -> Self {
-        Self {
-            external,
-            internal,
-            ephemeral,
-        }
-    }
-
-    pub(crate) fn external(&self) -> u32 {
-        self.external
-    }
-
-    pub(crate) fn internal(&self) -> u32 {
-        self.internal
-    }
-
-    pub(crate) fn ephemeral(&self) -> u32 {
-        self.ephemeral
-    }
-
-    pub(crate) fn limit_for(&self, scope: KeyScope) -> Option<u32> {
-        match scope {
-            KeyScope::EXTERNAL => Some(self.external()),
-            KeyScope::INTERNAL => Some(self.internal()),
-            KeyScope::Ephemeral => Some(self.ephemeral()),
-            _ => None,
-        }
-    }
-}
-
-/// The default gap limits supported by this implementation are:
-///
-/// - external addresses: 10
-/// - transparent internal (change) addresses: 5
-/// - ephemeral addresses: 10
-///
-/// These limits are chosen with the following rationale:
-/// - At present, many wallets query light wallet servers with a set of addresses, because querying
-///   for each address independently and in a fashion that is not susceptible to clustering via
-///   timing correlation leads to undesirable delays in discovery of received funds. As such, it is
-///   desirable to minimize the number of addresses that can be "linked", i.e. understood by the
-///   light wallet server to all belong to the same wallet.
-/// - For transparent change addresses it is always expected that an address will receive funds
-///   immediately following its generation except in the case of wallet failure.
-/// - For externally-scoped transparent addresses and ephemeral addresses, it is desirable to use a
-///   slightly larger gap limit to account for addresses that were shared with counterparties never
-///   having been used. However, we don't want to use the full 20-address gap limit space because
-///   it's possible that in the future, changes to the light wallet protocol will obviate the need to
-///   query for UTXOs in a fashion that links those addresses to one another. In such a
-///   circumstance, the gap limit will be adjusted upward and address rotation should then choose
-///   an address that is outside the current gap limit; after that change, newly generated
-///   addresses will not be exposed as linked in the view of the light wallet server.
-#[cfg(feature = "transparent-inputs")]
-impl Default for GapLimits {
-    fn default() -> Self {
-        Self {
-            external: 10,
-            internal: 5,
-            ephemeral: 10,
-        }
-    }
-}
-
-#[cfg(all(
-    any(test, feature = "test-dependencies"),
-    feature = "transparent-inputs"
-))]
-impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::GapLimits {
-    fn from(value: GapLimits) -> Self {
-        zcash_client_backend::data_api::testing::transparent::GapLimits::new(
-            value.external,
-            value.internal,
-            value.ephemeral,
-        )
-    }
-}
-
-#[cfg(all(
-    any(test, feature = "test-dependencies"),
-    feature = "transparent-inputs"
-))]
-impl From<zcash_client_backend::data_api::testing::transparent::GapLimits> for GapLimits {
-    fn from(value: zcash_client_backend::data_api::testing::transparent::GapLimits) -> Self {
-        GapLimits::from_parts(value.external(), value.internal(), value.ephemeral())
-    }
-}
 
 /// A wrapper for the SQLite connection to the wallet database, along with a capability to read the
 /// system from the clock. A `WalletDb` encapsulates the full set of capabilities that are required
