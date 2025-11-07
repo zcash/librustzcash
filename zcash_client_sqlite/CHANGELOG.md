@@ -14,6 +14,7 @@ workspace.
 - `zcash_client_sqlite::TxRef`
 - `impl<'a> Borrow<rusqlite::Transaction<'a>> for zcash_client_sqlite::SqlTransaction<'a>`
 - `impl zcash_client_backend::data_api::ll::LowLevelWalletRead for WalletDb`
+- `impl zcash_client_backend::data_api::ll::LowLevelWalletWrite for WalletDb`
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use
