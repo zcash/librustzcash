@@ -8,18 +8,17 @@ use rusqlite::{Connection, Row, named_params, types::Value};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    DecryptedOutput, TransferType,
     data_api::{
         Account, NullifierQuery, TargetValue,
+        ll::ReceivedSaplingOutput,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{ReceivedNote, WalletSaplingOutput},
+    wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
     ShieldedProtocol, TxId,
     consensus::{self, BlockHeight},
-    memo::MemoBytes,
 };
 use zip32::Scope;
 
@@ -28,82 +27,6 @@ use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::S
 use super::{
     KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
 };
-
-/// This trait provides a generalization over shielded output representations.
-pub(crate) trait ReceivedSaplingOutput {
-    type AccountId;
-
-    fn index(&self) -> usize;
-    fn account_id(&self) -> Self::AccountId;
-    fn note(&self) -> &sapling::Note;
-    fn memo(&self) -> Option<&MemoBytes>;
-    fn is_change(&self) -> bool;
-    fn nullifier(&self) -> Option<&sapling::Nullifier>;
-    fn note_commitment_tree_position(&self) -> Option<Position>;
-    fn recipient_key_scope(&self) -> Option<Scope>;
-}
-
-impl<AccountId: Copy> ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
-    type AccountId = AccountId;
-
-    fn index(&self) -> usize {
-        self.index()
-    }
-    fn account_id(&self) -> Self::AccountId {
-        *WalletSaplingOutput::account_id(self)
-    }
-    fn note(&self) -> &sapling::Note {
-        WalletSaplingOutput::note(self)
-    }
-    fn memo(&self) -> Option<&MemoBytes> {
-        None
-    }
-    fn is_change(&self) -> bool {
-        WalletSaplingOutput::is_change(self)
-    }
-    fn nullifier(&self) -> Option<&sapling::Nullifier> {
-        self.nf()
-    }
-    fn note_commitment_tree_position(&self) -> Option<Position> {
-        Some(WalletSaplingOutput::note_commitment_tree_position(self))
-    }
-    fn recipient_key_scope(&self) -> Option<Scope> {
-        self.recipient_key_scope()
-    }
-}
-
-impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
-    type AccountId = AccountId;
-
-    fn index(&self) -> usize {
-        self.index()
-    }
-    fn account_id(&self) -> Self::AccountId {
-        *self.account()
-    }
-    fn note(&self) -> &sapling::Note {
-        self.note()
-    }
-    fn memo(&self) -> Option<&MemoBytes> {
-        Some(self.memo())
-    }
-    fn is_change(&self) -> bool {
-        self.transfer_type() == TransferType::WalletInternal
-    }
-    fn nullifier(&self) -> Option<&sapling::Nullifier> {
-        None
-    }
-    fn note_commitment_tree_position(&self) -> Option<Position> {
-        None
-    }
-    fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type() == TransferType::WalletInternal {
-            Some(Scope::Internal)
-        } else {
-            Some(Scope::External)
-        }
-    }
-}
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
