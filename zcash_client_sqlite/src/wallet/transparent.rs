@@ -1051,12 +1051,12 @@ pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
 ///
 /// # Parameters
 /// - `outpoint`: The identifier for the output to be retrieved.
-/// - `spendable_as_of`: The target height of a transaction under construction that will spend the
+/// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
-    spendable_as_of: Option<TargetHeight>,
+    target_height: Option<TargetHeight>,
 ) -> Result<Option<WalletUtxo>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
@@ -1092,8 +1092,8 @@ pub(crate) fn get_wallet_transparent_output(
             named_params![
                 ":txid": outpoint.hash(),
                 ":output_index": outpoint.n(),
-                ":target_height": spendable_as_of.map(u32::from),
-                ":allow_unspendable": spendable_as_of.is_none(),
+                ":target_height": target_height.map(u32::from),
+                ":allow_unspendable": target_height.is_none(),
             ],
             |row| {
                 let output = to_unspent_transparent_output(row)?;
