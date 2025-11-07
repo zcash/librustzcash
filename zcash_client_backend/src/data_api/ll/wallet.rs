@@ -37,7 +37,7 @@ struct TransparentSentOutput<AccountId> {
 #[derive(Debug)]
 pub struct WalletTransparentOutputs<AccountId> {
     #[cfg(feature = "transparent-inputs")]
-    received: Vec<(WalletTransparentOutput, TransparentKeyScope)>,
+    received: Vec<(WalletTransparentOutput, Option<TransparentKeyScope>)>,
     sent: Vec<TransparentSentOutput<AccountId>>,
 }
 
@@ -149,6 +149,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut tx_has_wallet_outputs = false;
 
+    // The set of account/scope pairs for which to update the gap limit.
     #[cfg(feature = "transparent-inputs")]
     let mut gap_update_set = HashSet::new();
 
@@ -332,7 +333,9 @@ where
         let (account_id, _) =
             wallet_db.put_transparent_output(received_t_output, observed_height, false)?;
 
-        gap_update_set.insert((account_id, *key_scope));
+        if let Some(t_key_scope) = key_scope {
+            gap_update_set.insert((account_id, *t_key_scope));
+        }
 
         // Since the wallet created the transparent output, we need to ensure
         // that any transparent inputs belonging to the wallet will be

@@ -134,7 +134,7 @@ pub trait LowLevelWalletRead {
     fn find_account_for_transparent_address(
         &self,
         address: &TransparentAddress,
-    ) -> Result<Option<(Self::AccountId, TransparentKeyScope)>, Self::Error>;
+    ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
     fn detect_accounts_transparent<'a>(
@@ -159,6 +159,7 @@ pub trait LowLevelWalletRead {
     /// - `outpoint`: The identifier for the output to be retrieved.
     /// - `spendable_as_of`: The target height of a transaction under construction that will spend the
     ///   returned output. If this is `None`, no spendability checks are performed.
+    #[cfg(feature = "transparent-inputs")]
     fn get_wallet_transparent_output(
         &self,
         outpoint: &OutPoint,
