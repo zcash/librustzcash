@@ -61,7 +61,10 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
-        ll::{LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput},
+        ll::{
+            LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
+            wallet::store_decrypted_tx,
+        },
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -1894,8 +1897,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| {
             let chain_tip = wallet::chain_tip_height(wdb.conn.borrow())?
                 .ok_or(SqliteClientError::ChainHeightUnknown)?;
-            let params = *wdb.params();
-            wallet::store_decrypted_tx(wdb, &params, chain_tip, d_tx)
+            store_decrypted_tx(wdb, wdb.params, chain_tip, d_tx)
         })
     }
 
