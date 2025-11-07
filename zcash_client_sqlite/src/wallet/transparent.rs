@@ -747,9 +747,9 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
 pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_id: AccountRef,
     key_scope: TransparentKeyScope,
-    gap_limits: &GapLimits,
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
@@ -827,9 +827,9 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
             generate_gap_addresses(
                 conn,
                 params,
+                gap_limits,
                 account_id,
                 t_key_scope,
-                gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 false,
             )?;
@@ -1521,7 +1521,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     gap_limits: &GapLimits,
     output: &WalletTransparentOutput,
-) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
+) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
     put_transparent_output(conn, params, gap_limits, output, observed_height, true)
 }
@@ -1963,21 +1963,23 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     output: &WalletTransparentOutput,
     observation_height: BlockHeight,
     known_unspent: bool,
-) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
+) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let addr_str = output.recipient_address().encode(params);
 
     // Unlike the shielded pools, we only can receive transparent outputs on addresses for which we
     // have an `addresses` table entry, so we can just query for that here.
-    let (address_id, account_id, key_scope_code) = conn
+    let (address_id, account_id, account_uuid, key_scope_code) = conn
         .query_row(
-            "SELECT id, account_id, key_scope
+            "SELECT addresses.id, account_id, accounts.uuid, key_scope
              FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
              WHERE cached_transparent_receiver_address = :transparent_address",
             named_params! {":transparent_address": addr_str},
             |row| {
                 Ok((
                     row.get("id").map(AddressRef)?,
                     row.get("account_id").map(AccountRef)?,
+                    row.get("uuid").map(AccountUuid)?,
                     row.get("key_scope")?,
                 ))
             },
@@ -2130,7 +2132,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         output_height.map_or(observation_height, BlockHeight::from),
     )?;
 
-    Ok((account_id, key_scope, utxo_id))
+    Ok((account_id, account_uuid, key_scope, utxo_id))
 }
 
 /// Adds a request to retrieve transactions involving the specified address to the transparent

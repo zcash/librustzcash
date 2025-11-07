@@ -292,7 +292,9 @@ mod tests {
     };
     use zcash_client_backend::{
         TransferType,
-        data_api::{BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees},
+        data_api::{
+            BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, ll::ReceivedSaplingOutput,
+        },
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
         scanning::{Nullifiers, ScanningKeys, scan_block},
@@ -326,7 +328,6 @@ mod tests {
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
             },
             memo_repr,
-            sapling::ReceivedSaplingOutput,
         },
     };
 
