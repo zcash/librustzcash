@@ -239,7 +239,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         output: &crate::wallet::WalletTransparentOutput,
         observation_height: BlockHeight,
         known_unspent: bool,
-    ) -> Result<(Self::AccountId, TransparentKeyScope), Self::Error>;
+    ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
     fn mark_transparent_utxo_spent(

@@ -8,19 +8,18 @@ use orchard::{
 use rusqlite::{Connection, Row, named_params, types::Value};
 
 use zcash_client_backend::{
-    DecryptedOutput, TransferType,
     data_api::{
         Account as _, NullifierQuery, TargetValue,
+        ll::ReceivedOrchardOutput,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{ReceivedNote, WalletOrchardOutput},
+    wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     ShieldedProtocol,
     consensus::{self, BlockHeight},
-    memo::MemoBytes,
 };
 use zip32::Scope;
 
@@ -29,82 +28,6 @@ use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::S
 use super::{
     KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
 };
-
-/// This trait provides a generalization over shielded output representations.
-pub(crate) trait ReceivedOrchardOutput {
-    type AccountId;
-
-    fn index(&self) -> usize;
-    fn account_id(&self) -> Self::AccountId;
-    fn note(&self) -> &Note;
-    fn memo(&self) -> Option<&MemoBytes>;
-    fn is_change(&self) -> bool;
-    fn nullifier(&self) -> Option<&Nullifier>;
-    fn note_commitment_tree_position(&self) -> Option<Position>;
-    fn recipient_key_scope(&self) -> Option<Scope>;
-}
-
-impl<AccountId: Copy> ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
-    type AccountId = AccountId;
-
-    fn index(&self) -> usize {
-        self.index()
-    }
-    fn account_id(&self) -> Self::AccountId {
-        *WalletOrchardOutput::account_id(self)
-    }
-    fn note(&self) -> &Note {
-        WalletOrchardOutput::note(self)
-    }
-    fn memo(&self) -> Option<&MemoBytes> {
-        None
-    }
-    fn is_change(&self) -> bool {
-        WalletOrchardOutput::is_change(self)
-    }
-    fn nullifier(&self) -> Option<&Nullifier> {
-        self.nf()
-    }
-    fn note_commitment_tree_position(&self) -> Option<Position> {
-        Some(WalletOrchardOutput::note_commitment_tree_position(self))
-    }
-    fn recipient_key_scope(&self) -> Option<Scope> {
-        self.recipient_key_scope()
-    }
-}
-
-impl<AccountId: Copy> ReceivedOrchardOutput for DecryptedOutput<Note, AccountId> {
-    type AccountId = AccountId;
-
-    fn index(&self) -> usize {
-        self.index()
-    }
-    fn account_id(&self) -> Self::AccountId {
-        *self.account()
-    }
-    fn note(&self) -> &orchard::note::Note {
-        self.note()
-    }
-    fn memo(&self) -> Option<&MemoBytes> {
-        Some(self.memo())
-    }
-    fn is_change(&self) -> bool {
-        self.transfer_type() == TransferType::WalletInternal
-    }
-    fn nullifier(&self) -> Option<&Nullifier> {
-        None
-    }
-    fn note_commitment_tree_position(&self) -> Option<Position> {
-        None
-    }
-    fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type() == TransferType::WalletInternal {
-            Some(Scope::Internal)
-        } else {
-            Some(Scope::External)
-        }
-    }
-}
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
@@ -381,6 +304,7 @@ pub(crate) fn put_received_note<
             ],
         )?;
     }
+
     Ok(account_id)
 }
 
