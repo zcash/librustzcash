@@ -61,7 +61,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
-        ll::LowLevelWalletRead,
+        ll::{LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput},
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -99,6 +99,7 @@ use wallet::{
 use {
     incrementalmerkletree::frontier::Frontier, shardtree::store::Checkpoint,
     std::collections::BTreeMap, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    zcash_client_backend::data_api::ll::ReceivedOrchardOutput,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1592,9 +1593,9 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                     wallet::transparent::generate_gap_addresses(
                         wdb.conn.0,
                         &wdb.params,
+                        &wdb.gap_limits,
                         account_id,
                         t_key_scope,
-                        &wdb.gap_limits,
                         UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                         false,
                     )?;
@@ -1856,7 +1857,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return self.transactionally(|wdb| {
-            let (account_id, key_scope, utxo_id) =
+            let (account_id, _, key_scope, utxo_id) =
                 wallet::transparent::put_received_transparent_utxo(
                     wdb.conn.0,
                     &wdb.params,
@@ -1869,9 +1870,9 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 wallet::transparent::generate_gap_addresses(
                     wdb.conn.0,
                     &wdb.params,
+                    &wdb.gap_limits,
                     account_id,
                     t_key_scope,
-                    &wdb.gap_limits,
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                     true,
                 )?;
@@ -2090,6 +2091,195 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error> {
         wallet::get_txs_spending_transparent_outputs_of(self.conn.borrow(), &self.params, tx_ref)
+    }
+}
+
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    LowLevelWalletWrite for WalletDb<C, P, CL, R>
+{
+    fn put_tx_data(
+        &mut self,
+        tx: &Transaction,
+        fee: Option<zcash_protocol::value::Zatoshis>,
+        created_at: Option<time::OffsetDateTime>,
+        target_height: Option<TargetHeight>,
+        observed_height: BlockHeight,
+    ) -> Result<Self::TxRef, Self::Error> {
+        wallet::put_tx_data(
+            self.conn.borrow(),
+            tx,
+            fee,
+            created_at,
+            target_height,
+            observed_height,
+        )
+    }
+
+    fn set_transaction_status(
+        &mut self,
+        txid: TxId,
+        status: data_api::TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        wallet::set_transaction_status(
+            self.conn.borrow(),
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            txid,
+            status,
+        )
+    }
+
+    fn put_received_sapling_note<T: ReceivedSaplingOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error> {
+        wallet::sapling::put_received_note(
+            self.conn.borrow(),
+            &self.params,
+            output,
+            tx_ref,
+            target_or_mined_height,
+            spent_in,
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_received_orchard_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error> {
+        wallet::orchard::put_received_note(
+            self.conn.borrow(),
+            &self.params,
+            output,
+            tx_ref,
+            target_or_mined_height,
+            spent_in,
+        )?;
+
+        Ok(())
+    }
+
+    fn put_sent_output(
+        &mut self,
+        from_account_uuid: Self::AccountId,
+        tx_ref: Self::TxRef,
+        output_index: usize,
+        recipient: &zcash_client_backend::wallet::Recipient<Self::AccountId>,
+        value: zcash_protocol::value::Zatoshis,
+        memo: Option<&zcash_protocol::memo::MemoBytes>,
+    ) -> Result<(), Self::Error> {
+        wallet::put_sent_output(
+            self.conn.borrow(),
+            &self.params,
+            from_account_uuid,
+            tx_ref,
+            output_index,
+            recipient,
+            value,
+            memo,
+        )
+    }
+
+    fn update_tx_fee(
+        &mut self,
+        tx_ref: Self::TxRef,
+        fee: zcash_protocol::value::Zatoshis,
+    ) -> Result<(), Self::Error> {
+        wallet::update_tx_fee(self.conn.borrow(), tx_ref, fee)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn put_transparent_output(
+        &mut self,
+        output: &zcash_client_backend::wallet::WalletTransparentOutput,
+        observation_height: BlockHeight,
+        known_unspent: bool,
+    ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error> {
+        let (_, account_uuid, key_scope, _) = wallet::transparent::put_transparent_output(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            output,
+            observation_height,
+            known_unspent,
+        )?;
+
+        Ok((account_uuid, key_scope.as_transparent()))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_utxo_spent(
+        &mut self,
+        outpoint: &OutPoint,
+        spent_in_tx: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::transparent::mark_transparent_utxo_spent(self.conn.borrow(), spent_in_tx, outpoint)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn generate_transparent_gap_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        key_scope: TransparentKeyScope,
+        request: UnifiedAddressRequest,
+    ) -> Result<(), Self::Error> {
+        let account_ref = wallet::get_account_ref(self.conn.borrow(), account_id)?;
+        wallet::transparent::generate_gap_addresses(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            account_ref,
+            key_scope,
+            request,
+            false,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn queue_transparent_spend_detection(
+        &mut self,
+        receiving_address: TransparentAddress,
+        tx_ref: Self::TxRef,
+        output_index: u32,
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::queue_transparent_spend_detection(
+            self.conn.borrow(),
+            &self.params,
+            receiving_address,
+            tx_ref,
+            output_index,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn queue_transparent_input_retrieval(
+        &mut self,
+        tx_ref: Self::TxRef,
+        d_tx: &data_api::DecryptedTransaction<'_, Self::AccountId>,
+    ) -> Result<(), Self::Error> {
+        wallet::queue_transparent_input_retrieval(self.conn.borrow(), tx_ref, d_tx)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn queue_unmined_tx_retrieval(
+        &mut self,
+        d_tx: &data_api::DecryptedTransaction<'_, Self::AccountId>,
+    ) -> Result<(), Self::Error> {
+        wallet::queue_unmined_tx_retrieval(self.conn.borrow(), d_tx)
+    }
+
+    fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error> {
+        wallet::delete_retrieval_queue_entries(self.conn.borrow(), txid)
     }
 }
 

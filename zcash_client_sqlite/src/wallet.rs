@@ -140,7 +140,6 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::collections::BTreeMap,
     transparent::get_wallet_transparent_output,
     zcash_client_backend::wallet::WalletTransparentOutput,
 };
@@ -672,9 +671,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         transparent::generate_gap_addresses(
             conn,
             params,
+            gap_limits,
             account_id,
             key_scope,
-            gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             false,
         )?;
@@ -867,9 +866,9 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
             transparent::generate_gap_addresses(
                 conn,
                 params,
+                gap_limits,
                 account.internal_id(),
                 TransparentKeyScope::EXTERNAL,
-                gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 true,
             )?;
@@ -3706,7 +3705,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     let mut tx_has_wallet_outputs = false;
 
     #[cfg(feature = "transparent-inputs")]
-    let mut receiving_accounts = BTreeMap::new();
+    let mut gap_update_set = HashSet::new();
 
     for output in d_tx.sapling_outputs() {
         #[cfg(feature = "transparent-inputs")]
@@ -3776,7 +3775,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
 
                 #[cfg(feature = "transparent-inputs")]
-                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
+                gap_update_set.insert((_account_id, KeyScope::EXTERNAL));
 
                 if let Some(account_id) = funding_account {
                     let recipient = Recipient::InternalAccount {
@@ -3882,7 +3881,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
 
                 #[cfg(feature = "transparent-inputs")]
-                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
+                gap_update_set.insert((_account_id, KeyScope::EXTERNAL));
 
                 if let Some(account_id) = funding_account {
                     // Even if the recipient address is external, record the send as internal.
@@ -3933,7 +3932,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     for (received_t_output, key_scope) in &wallet_transparent_outputs.received {
-        let (account_id, _, _) = transparent::put_transparent_output(
+        let (account_id, _, _, _) = transparent::put_transparent_output(
             conn,
             params,
             gap_limits,
@@ -3942,7 +3941,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             false,
         )?;
 
-        receiving_accounts.insert(account_id, *key_scope);
+        gap_update_set.insert((account_id, *key_scope));
 
         // Since the wallet created the transparent output, we need to ensure
         // that any transparent inputs belonging to the wallet will be
@@ -3985,15 +3984,15 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     // Regenerate the gap limit addresses.
     #[cfg(feature = "transparent-inputs")]
-    for (account_id, key_scope) in receiving_accounts {
+    for (account_id, key_scope) in gap_update_set {
         if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
             use ReceiverRequirement::*;
             transparent::generate_gap_addresses(
                 conn,
                 params,
+                gap_limits,
                 account_id,
                 t_key_scope,
-                gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 false,
             )?;
@@ -4103,6 +4102,24 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
             Ok((spending_tx_ref, spending_tx))
         })?
         .collect()
+}
+
+pub(crate) fn update_tx_fee(
+    conn: &rusqlite::Transaction<'_>,
+    tx_ref: TxRef,
+    fee: zcash_protocol::value::Zatoshis,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE transactions
+         SET fee = :fee
+         WHERE id_tx = :transaction_id",
+        named_params! {
+            ":transaction_id": tx_ref.0,
+            ":fee": u64::from(fee)
+        },
+    )?;
+
+    Ok(())
 }
 
 pub(crate) fn set_tx_trust(
