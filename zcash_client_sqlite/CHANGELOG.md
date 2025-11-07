@@ -16,6 +16,9 @@ workspace.
   - `tx_mined_height`
   - `tx_trust_status`
   - `recipient_key_scope`
+- `zcash_client_sqlite::TxRef`
+- `impl<'a> Borrow<rusqlite::Transaction<'a>> for zcash_client_sqlite::SqlTransaction<'a>`
+- `impl zcash_client_backend::data_api::ll::LowLevelWalletRead for WalletDb`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
@@ -23,6 +26,7 @@ workspace.
 ### Removed
 - `zcash_client_sqlite::GapLimits` use
   `zcash_client_backend::wallet::transparent::GapLimits` instead.
+- `zcash_client_sqlite::UtxoId` contents are now private.
 
 ## [0.18.10, 0.19.1] - 2025-11-25
 

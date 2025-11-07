@@ -35,7 +35,6 @@
 use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use rand::RngCore;
-use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
@@ -62,6 +61,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        ll::LowLevelWalletRead,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -262,11 +262,11 @@ impl fmt::Display for ReceivedNoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct UtxoId(pub i64);
+pub struct UtxoId(pub(crate) i64);
 
 /// A newtype wrapper for sqlite primary key values for the transactions table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct TxRef(pub i64);
+pub struct TxRef(pub(crate) i64);
 
 /// A newtype wrapper for sqlite primary key values for the addresses table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -293,6 +293,12 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
+impl<'a> Borrow<rusqlite::Transaction<'a>> for SqlTransaction<'a> {
+    fn borrow(&self) -> &rusqlite::Transaction<'a> {
+        self.0
+    }
+}
+
 impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Returns the network parameters that this walletdb instance is bound to.
     pub fn params(&self) -> &P {
@@ -300,7 +306,7 @@ impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     }
 }
 
-impl<P, CL, R> WalletDb<Connection, P, CL, R> {
+impl<P, CL, R> WalletDb<rusqlite::Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
     ///
@@ -316,7 +322,7 @@ impl<P, CL, R> WalletDb<Connection, P, CL, R> {
         clock: CL,
         rng: R,
     ) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).and_then(move |conn| {
+        rusqlite::Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
             Ok(WalletDb {
                 conn,
@@ -366,7 +372,7 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     }
 }
 
-impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
         F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>) -> Result<A, E>,
@@ -434,7 +440,7 @@ impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C: BorrowMut<Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
     /// For each ephemeral address in the wallet, ensure that the transaction data request queue
     /// contains a request for the wallet to check for UTXOs belonging to that address at some time
     /// during the next 24-hour period.
@@ -1092,12 +1098,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     fn get_transparent_output(
         &self,
         outpoint: &OutPoint,
-        spendable_as_of: Option<TargetHeight>,
+        target_height: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
         let result = wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
-            spendable_as_of,
+            target_height,
         )?
         .map(|utxo| utxo.into_wallet_output());
 
@@ -2012,6 +2018,81 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 }
 
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    LowLevelWalletRead for WalletDb<C, P, CL, R>
+{
+    type AccountId = AccountUuid;
+    type Error = SqliteClientError;
+    type TxRef = TxRef;
+
+    fn select_receiving_address(
+        &self,
+        account: Self::AccountId,
+        receiver: &zcash_keys::address::Receiver,
+    ) -> Result<Option<zcash_address::ZcashAddress>, Self::Error> {
+        wallet::select_receiving_address(self.conn.borrow(), &self.params, account, receiver)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_transparent_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error> {
+        wallet::transparent::find_account_uuid_for_transparent_address(
+            self.conn.borrow(),
+            &self.params,
+            address,
+        )
+        .map(|opt| opt.map(|(a, s)| (a, s.as_transparent())))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn detect_accounts_transparent<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t transparent::bundle::OutPoint>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::transparent::detect_spending_accounts(self.conn.borrow(), spends)
+            .map_err(SqliteClientError::from)
+    }
+
+    fn detect_accounts_sapling<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t sapling::Nullifier>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::sapling::detect_spending_accounts(self.conn.borrow(), spends)
+            .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_orchard<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::orchard::detect_spending_accounts(self.conn.borrow(), spends)
+            .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_wallet_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+        target_height: Option<TargetHeight>,
+    ) -> Result<Option<WalletUtxo>, Self::Error> {
+        wallet::transparent::get_wallet_transparent_output(
+            self.conn.borrow(),
+            outpoint,
+            target_height,
+        )
+    }
+
+    fn get_spending_transactions(
+        &self,
+        tx_ref: Self::TxRef,
+    ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error> {
+        wallet::get_spending_transactions(self.conn.borrow(), &self.params, tx_ref)
+    }
+}
+
 pub(crate) type SaplingShardStore<C> = SqliteShardStore<C, sapling::Node, SAPLING_SHARD_HEIGHT>;
 pub(crate) type SaplingCommitmentTree<C> =
     ShardTree<SaplingShardStore<C>, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>;
@@ -2218,12 +2299,12 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
 }
 
 /// A handle for the SQLite block source.
-pub struct BlockDb(Connection);
+pub struct BlockDb(rusqlite::Connection);
 
 impl BlockDb {
     /// Opens a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(BlockDb)
+        rusqlite::Connection::open(path).map(BlockDb)
     }
 }
 
@@ -2283,7 +2364,7 @@ impl BlockSource for BlockDb {
 /// order; this assumption is likely to be weakened and/or removed in a future update.
 #[cfg(feature = "unstable")]
 pub struct FsBlockDb {
-    conn: Connection,
+    conn: rusqlite::Connection,
     blocks_dir: PathBuf,
 }
 
@@ -2343,7 +2424,7 @@ impl FsBlockDb {
             let blocks_dir = fsblockdb_root.as_ref().join("blocks");
             fs::create_dir_all(&blocks_dir)?;
             Ok(FsBlockDb {
-                conn: Connection::open(db_path).map_err(FsBlockDbError::Db)?,
+                conn: rusqlite::Connection::open(db_path).map_err(FsBlockDbError::Db)?,
                 blocks_dir,
             })
         } else {
