@@ -40,6 +40,8 @@ use {
 #[cfg(feature = "orchard")]
 use crate::wallet::WalletOrchardOutput;
 
+pub mod wallet;
+
 /// A trait for types that can provide information about outputs spent by and fees that were paid
 /// for a given transaction.
 pub trait TxMeta {
