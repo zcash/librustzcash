@@ -810,13 +810,17 @@ pub mod testing {
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
         ) -> Payment {
             let memo = memo.filter(|_| recipient_address.can_receive_memo());
+            let other_params = other_params
+                .into_iter()
+                .filter(|(name, _)| !name.starts_with("req-"))
+                .collect();
             Payment {
                 recipient_address,
                 amount,
                 memo,
                 label,
                 message,
-                other_params: other_params.into_iter().collect(),
+                other_params,
             }
         }
     }
@@ -1109,6 +1113,12 @@ mod tests {
         let invalid_11 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.";
         let i11r = TransactionRequest::from_uri(invalid_11);
         assert!(i11r.is_err());
+
+        // invalid: unrecognized required parameters are not allowed
+        let invalid_12 =
+            "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.45&req-unknown=x";
+        let i12r = TransactionRequest::from_uri(invalid_12);
+        assert!(i12r.is_err());
     }
 
     proptest! {
