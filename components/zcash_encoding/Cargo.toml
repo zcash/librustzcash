@@ -20,6 +20,9 @@ core2.workspace = true
 hex.workspace = true
 nonempty.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [features]
 default = ["std"]
 std = ["core2/std"]
