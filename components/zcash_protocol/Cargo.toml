@@ -29,6 +29,7 @@ memuse = { workspace = true, optional = true }
 document-features = { workspace = true, optional = true }
 
 # - Encodings
+zcash_encoding.workspace = true
 core2.workspace = true
 hex.workspace = true
 

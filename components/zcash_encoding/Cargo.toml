@@ -17,7 +17,11 @@ keywords = ["zcash"]
 
 [dependencies]
 core2.workspace = true
+hex.workspace = true
 nonempty.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [features]
 default = ["std"]

@@ -2,6 +2,8 @@ use alloc::string::ToString;
 use core::fmt;
 use core2::io::{self, Read, Write};
 
+use zcash_encoding::ReverseHex;
+
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
 
@@ -29,9 +31,7 @@ impl fmt::Debug for TxId {
 
 impl fmt::Display for TxId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut data = self.0;
-        data.reverse();
-        formatter.write_str(&hex::encode(data))
+        formatter.write_str(&ReverseHex::encode(&self.0))
     }
 }
 
