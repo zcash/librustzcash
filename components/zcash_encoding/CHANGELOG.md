@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_encoding::ReverseHex::{encode, decode}`
 
 ## [0.3.0] - 2025-02-21
 ### Changed

@@ -316,6 +316,9 @@ impl ReverseHex {
 
     /// Decodes a reversed-hex string into a byte array by decoding the hex and
     /// reversing the order of the bytes.
+    ///
+    /// Returns `None` if the hex decoding fails or if the output is the wrong
+    /// size.
     pub fn decode(hex_str: &str) -> Option<[u8; 32]> {
         let mut bytes = [0; 32];
         let res = hex::decode_to_slice(hex_str, &mut bytes);
