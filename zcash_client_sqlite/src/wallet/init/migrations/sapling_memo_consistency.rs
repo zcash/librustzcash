@@ -110,7 +110,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?;
 
             let decrypted_outputs =
-                decrypt_transaction(&self.params, Some(block_height), None, &tx, &ufvks);
+                decrypt_transaction(&self.params, Some(block_height), None, &tx, &ufvks, &[]);
 
             // Orchard outputs were not supported as of the wallet states that could require this
             // migration.
