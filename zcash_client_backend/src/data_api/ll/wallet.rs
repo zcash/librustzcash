@@ -149,6 +149,26 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut tx_has_wallet_outputs = false;
 
+    // Mark notes as spent and remove them from the scanning cache when we observe their
+    // nullifiers.
+    for spend in d_tx
+        .tx()
+        .sapling_bundle()
+        .iter()
+        .flat_map(|b| b.shielded_spends().iter())
+    {
+        wallet_db.mark_sapling_note_spent(spend.nullifier(), tx_ref)?;
+    }
+    #[cfg(feature = "orchard")]
+    for action in d_tx
+        .tx()
+        .orchard_bundle()
+        .iter()
+        .flat_map(|b| b.actions().iter())
+    {
+        wallet_db.mark_orchard_note_spent(action.nullifier(), tx_ref)?;
+    }
+
     // The set of account/scope pairs for which to update the gap limit.
     #[cfg(feature = "transparent-inputs")]
     let mut gap_update_set = HashSet::new();
