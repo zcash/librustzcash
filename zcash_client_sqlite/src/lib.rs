@@ -40,7 +40,7 @@ use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
     borrow::{Borrow, BorrowMut},
     cmp::{max, min},
-    collections::HashMap,
+    collections::{BTreeSet, HashMap, HashSet},
     convert::AsRef,
     fmt,
     num::NonZeroU32,
@@ -69,7 +69,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -113,7 +113,6 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::collections::BTreeSet,
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{Balance, TransactionsInvolvingAddress, WalletUtxo},
@@ -269,7 +268,7 @@ impl fmt::Display for ReceivedNoteId {
 pub struct UtxoId(pub(crate) i64);
 
 /// A newtype wrapper for sqlite primary key values for the transactions table.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TxRef(pub(crate) i64);
 
 /// A newtype wrapper for sqlite primary key values for the addresses table.
@@ -1441,8 +1440,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 }
 
                 // Insert the block into the database.
-                wallet::put_block(
-                    wdb.conn.0,
+                wdb.put_block_meta(
                     block.height(),
                     block.block_hash(),
                     block.block_time(),
@@ -1455,20 +1453,20 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 )?;
 
                 for tx in block.transactions() {
-                    let tx_ref = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+                    let tx_ref = wdb.put_tx_meta(tx, block.height())?;
 
                     #[cfg(feature = "transparent-inputs")]
                     tx_refs.insert(tx_ref);
 
-                    wallet::queue_tx_retrieval(wdb.conn.0, std::iter::once(tx.txid()), None)?;
+                    wdb.queue_tx_retrieval(std::iter::once(tx.txid()), None)?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in tx.sapling_spends() {
-                        wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_ref, spend.nf())?;
+                        wdb.mark_sapling_note_spent(spend.nf(), tx_ref)?;
                     }
                     #[cfg(feature = "orchard")]
                     for spend in tx.orchard_spends() {
-                        wallet::orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, spend.nf())?;
+                        wdb.mark_orchard_note_spent(spend.nf(), tx_ref)?;
                     }
 
                     for output in tx.sapling_outputs() {
@@ -1476,19 +1474,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                         // we previously scanned.
                         let spent_in = output
                             .nf()
-                            .map(|nf| {
-                                wallet::query_nullifier_map(
-                                    wdb.conn.0,
-                                    ShieldedProtocol::Sapling,
-                                    nf,
-                                )
-                            })
+                            .map(|nf| wdb.detect_sapling_spend(nf))
                             .transpose()?
                             .flatten();
 
-                        wallet::sapling::put_received_note(
-                            wdb.conn.0,
-                            &wdb.params,
+                        wdb.put_received_sapling_note(
                             output,
                             tx_ref,
                             Some(block.height()),
@@ -1501,19 +1491,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                         // we previously scanned.
                         let spent_in = output
                             .nf()
-                            .map(|nf| {
-                                wallet::query_nullifier_map(
-                                    wdb.conn.0,
-                                    ShieldedProtocol::Orchard,
-                                    &nf.to_bytes(),
-                                )
-                            })
+                            .map(|nf| wdb.detect_orchard_spend(nf))
                             .transpose()?
                             .flatten();
 
-                        wallet::orchard::put_received_note(
-                            wdb.conn.0,
-                            &wdb.params,
+                        wdb.put_received_orchard_note(
                             output,
                             tx_ref,
                             Some(block.height()),
@@ -1523,25 +1505,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 }
 
                 // Insert the new nullifiers from this block into the nullifier map.
-                wallet::insert_nullifier_map(
-                    wdb.conn.0,
+                wdb.track_block_sapling_nullifiers(
                     block.height(),
-                    ShieldedProtocol::Sapling,
                     block.sapling().nullifier_map(),
                 )?;
+
                 #[cfg(feature = "orchard")]
-                wallet::insert_nullifier_map(
-                    wdb.conn.0,
+                wdb.track_block_orchard_nullifiers(
                     block.height(),
-                    ShieldedProtocol::Orchard,
-                    &block
-                        .orchard()
-                        .nullifier_map()
-                        .iter()
-                        .map(|(txid, idx, nfs)| {
-                            (*txid, *idx, nfs.iter().map(|nf| nf.to_bytes()).collect())
-                        })
-                        .collect::<Vec<_>>(),
+                    block.orchard().nullifier_map(),
                 )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
@@ -1590,28 +1562,19 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
             }
 
             #[cfg(feature = "transparent-inputs")]
-            for (account_id, key_scope) in wallet::involved_accounts(wdb.conn.0, tx_refs)? {
-                if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+            for (account_id, key_scope) in wdb.find_involved_accounts(tx_refs)? {
+                if let Some(t_key_scope) = key_scope {
                     use ReceiverRequirement::*;
-                    wallet::transparent::generate_gap_addresses(
-                        wdb.conn.0,
-                        &wdb.params,
-                        &wdb.gap_limits,
+                    wdb.generate_transparent_gap_addresses(
                         account_id,
                         t_key_scope,
                         UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                        false,
                     )?;
                 }
             }
 
             // Prune the nullifier map of entries we no longer need.
-            if let Some(meta) = wdb.block_fully_scanned()? {
-                wallet::prune_nullifier_map(
-                    wdb.conn.0,
-                    meta.block_height().saturating_sub(PRUNING_DEPTH),
-                )?;
-            }
+            wdb.prune_tracked_nullifiers(PRUNING_DEPTH)?;
 
             // We will have a start position and a last scanned height in all cases where
             // `blocks` is non-empty.
@@ -1738,7 +1701,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 // Update the Sapling note commitment tree with all newly read note commitments
                 {
                     let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
-                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                    wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(|sapling_tree| {
                         debug!(
                             "Sapling initial tree size at {:?}: {:?}",
                             from_state.block_height(),
@@ -1789,7 +1752,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                 #[cfg(feature = "orchard")]
                 {
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
-                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                    wdb.with_orchard_tree_mut::<_, _, SqliteClientError>(|orchard_tree| {
                         debug!(
                             "Orchard initial tree size at {:?}: {:?}",
                             from_state.block_height(),
@@ -1839,9 +1802,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
                     })?;
                 }
 
-                wallet::scanning::scan_complete(
-                    wdb.conn.0,
-                    &wdb.params,
+                wdb.notify_scan_complete(
                     Range {
                         start: start_positions.height,
                         end: last_scanned_height + 1,
@@ -2034,6 +1995,17 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn find_involved_accounts(
+        &self,
+        tx_refs: impl IntoIterator<Item = Self::TxRef>,
+    ) -> Result<HashSet<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error> {
+        Ok(wallet::involved_accounts(self.conn.borrow(), tx_refs)?
+            .into_iter()
+            .map(|(_, uuid, scope)| (uuid, scope))
+            .collect())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn find_account_for_transparent_address(
         &self,
         address: &TransparentAddress,
@@ -2091,11 +2063,62 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error> {
         wallet::get_spending_transactions(self.conn.borrow(), &self.params, tx_ref)
     }
+
+    fn detect_sapling_spend(
+        &self,
+        nf: &::sapling::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error> {
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedProtocol::Sapling, nf)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_orchard_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error> {
+        wallet::query_nullifier_map(
+            self.conn.borrow(),
+            ShieldedProtocol::Orchard,
+            &nf.to_bytes(),
+        )
+    }
 }
 
 impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
     LowLevelWalletWrite for WalletDb<C, P, CL, R>
 {
+    fn put_block_meta(
+        &mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        sapling_commitment_tree_size: u32,
+        sapling_output_count: u32,
+        #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] orchard_action_count: u32,
+    ) -> Result<(), Self::Error> {
+        wallet::put_block(
+            self.conn.borrow(),
+            block_height,
+            block_hash,
+            block_time,
+            sapling_commitment_tree_size,
+            sapling_output_count,
+            #[cfg(feature = "orchard")]
+            orchard_commitment_tree_size,
+            #[cfg(feature = "orchard")]
+            orchard_action_count,
+        )
+    }
+
+    fn put_tx_meta(
+        &mut self,
+        tx: &WalletTx<Self::AccountId>,
+        height: BlockHeight,
+    ) -> Result<Self::TxRef, Self::Error> {
+        wallet::put_tx_meta(self.conn.borrow(), tx, height)
+    }
+
     fn put_tx_data(
         &mut self,
         tx: &Transaction,
@@ -2148,6 +2171,27 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         Ok(())
     }
 
+    fn mark_sapling_note_spent(
+        &mut self,
+        nf: &::sapling::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::sapling::mark_sapling_note_spent(self.conn.borrow(), tx_ref, nf)
+    }
+
+    fn track_block_sapling_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxId, u16, Vec<::sapling::Nullifier>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_nullifier_map(
+            self.conn.borrow(),
+            block_height,
+            ShieldedProtocol::Sapling,
+            nfs,
+        )
+    }
+
     #[cfg(feature = "orchard")]
     fn put_received_orchard_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
         &mut self,
@@ -2164,6 +2208,42 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             target_or_mined_height,
             spent_in,
         )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn mark_orchard_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::orchard::mark_orchard_note_spent(self.conn.borrow(), tx_ref, nf)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn track_block_orchard_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxId, u16, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_nullifier_map(
+            self.conn.borrow(),
+            block_height,
+            ShieldedProtocol::Orchard,
+            &nfs.iter()
+                .map(|(txid, idx, nfs)| (*txid, *idx, nfs.iter().map(|n| n.to_bytes()).collect()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
+        if let Some(meta) = wallet::block_fully_scanned(self.conn.borrow(), &self.params)? {
+            wallet::prune_nullifier_map(
+                self.conn.borrow(),
+                meta.block_height().saturating_sub(pruning_depth),
+            )?;
+        }
 
         Ok(())
     }
@@ -2269,16 +2349,29 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::queue_transparent_input_retrieval(self.conn.borrow(), tx_ref, d_tx)
     }
 
-    #[cfg(feature = "transparent-inputs")]
-    fn queue_unmined_tx_retrieval(
+    fn queue_tx_retrieval(
         &mut self,
-        d_tx: &data_api::DecryptedTransaction<'_, Self::AccountId>,
+        txids: impl Iterator<Item = TxId>,
+        dependent_tx_ref: Option<Self::TxRef>,
     ) -> Result<(), Self::Error> {
-        wallet::queue_unmined_tx_retrieval(self.conn.borrow(), d_tx)
+        wallet::queue_tx_retrieval(self.conn.borrow(), txids, dependent_tx_ref)
     }
 
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error> {
         wallet::delete_retrieval_queue_entries(self.conn.borrow(), txid)
+    }
+
+    fn notify_scan_complete(
+        &mut self,
+        range: Range<BlockHeight>,
+        wallet_note_positions: &[(ShieldedProtocol, Position)],
+    ) -> Result<(), Self::Error> {
+        wallet::scanning::scan_complete(
+            self.conn.borrow(),
+            &self.params,
+            range,
+            wallet_note_positions,
+        )
     }
 }
 
