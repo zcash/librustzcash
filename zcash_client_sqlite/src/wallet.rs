@@ -140,6 +140,7 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
+    std::collections::HashSet,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
 };
 
@@ -1227,13 +1228,14 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
 pub(crate) fn involved_accounts(
     conn: &rusqlite::Connection,
     tx_refs: impl IntoIterator<Item = TxRef>,
-) -> Result<Vec<(AccountRef, KeyScope)>, SqliteClientError> {
+) -> Result<HashSet<(AccountRef, AccountUuid, Option<TransparentKeyScope>)>, SqliteClientError> {
     use rusqlite::types::Value;
     use std::rc::Rc;
 
     let mut stmt = conn.prepare_cached(
-        "SELECT account_id, key_scope
+        "SELECT account_id, accounts.uuid, key_scope
          FROM v_address_uses
+         JOIN accounts ON accounts.id = v_address_uses.account_id
          WHERE transaction_id IN rarray(:tx_refs_ptr)",
     )?;
 
@@ -1246,12 +1248,13 @@ pub(crate) fn involved_accounts(
             },
             |row| {
                 Ok::<_, SqliteClientError>((
-                    row.get(0).map(AccountRef)?,
-                    KeyScope::decode(row.get(1)?)?,
+                    row.get("account_id").map(AccountRef)?,
+                    AccountUuid(row.get("uuid")?),
+                    KeyScope::decode(row.get("key_scope")?)?.as_transparent(),
                 ))
             },
         )?
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<HashSet<_>, _>>()?;
 
     Ok(result)
 }
@@ -3682,22 +3685,6 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
                 Some(tx_ref),
             )?;
         }
-    }
-
-    Ok(())
-}
-
-#[cfg(feature = "transparent-inputs")]
-pub(crate) fn queue_unmined_tx_retrieval<AccountId>(
-    conn: &rusqlite::Transaction<'_>,
-    d_tx: &DecryptedTransaction<'_, AccountId>,
-) -> Result<(), SqliteClientError> {
-    let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-    #[cfg(feature = "orchard")]
-    let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-    if d_tx.mined_height().is_none() && !detectable_via_scanning {
-        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?
     }
 
     Ok(())
