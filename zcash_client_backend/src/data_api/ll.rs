@@ -9,15 +9,15 @@
 //! [`WalletWrite`]: super::WalletWrite
 
 use core::{fmt::Debug, hash::Hash};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use incrementalmerkletree::Position;
 use transparent::bundle::OutPoint;
 use zcash_address::ZcashAddress;
 use zcash_keys::address::Receiver;
-use zcash_primitives::transaction::Transaction;
+use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
-    TxId,
+    ShieldedProtocol, TxId,
     consensus::BlockHeight,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -27,7 +27,7 @@ use zip32::Scope;
 use super::{TransactionStatus, wallet::TargetHeight};
 use crate::{
     DecryptedOutput, TransferType,
-    wallet::{Recipient, WalletSaplingOutput},
+    wallet::{Recipient, WalletSaplingOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -104,6 +104,8 @@ pub trait LowLevelWalletRead {
     /// A wallet-internal transaction identifier.
     type TxRef: Copy + Eq;
 
+    /// Returns the set of account identifiers for accounts that spent notes and/or UTXOs in the
+    /// construction of the given transaction.
     fn get_funding_accounts<T: TxMeta>(
         &self,
         tx: &T,
@@ -123,12 +125,22 @@ pub trait LowLevelWalletRead {
 
     /// Returns the most likely wallet address that corresponds to the protocol-level receiver of a
     /// note or UTXO.
+    ///
+    /// If the wallet database has stored a wallet address that contains the given receiver, then
+    /// that address is returned; otherwise, a new address containing that receiver is generated.
     fn select_receiving_address(
         &self,
         account: Self::AccountId,
         receiver: &Receiver,
     ) -> Result<Option<ZcashAddress>, Self::Error>;
 
+    /// Detects and returns the identifier for the account that generated the given address, if the
+    /// address belongs to an account in the wallet.
+    ///
+    /// In addition, for HD-derived addresses, the change-level key scope used to derive the
+    /// address is returned, so that the caller is able to determine whether any special handling
+    /// rules apply to the address for the purposes of preserving user privacy (by limiting address
+    /// linking, etc.).
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
     fn find_account_for_transparent_address(
@@ -136,22 +148,44 @@ pub trait LowLevelWalletRead {
         address: &TransparentAddress,
     ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
 
+    /// Finds the set of accounts that either provide inputs to or receive outputs from any of the
+    /// provided transactions.
+    #[cfg(feature = "transparent-inputs")]
+    fn find_involved_accounts(
+        &self,
+        tx_refs: impl IntoIterator<Item = Self::TxRef>,
+    ) -> Result<HashSet<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
+
+    /// Detects the set of accounts that received transparent outputs corresponding to the provided
+    /// [`OutPoint`]s. This is used to determine which account(s) funded a given transaction.
+    ///
+    /// [`OutPoint`]: transparent::bundle::OutPoint
     #[cfg(feature = "transparent-inputs")]
     fn detect_accounts_transparent<'a>(
         &self,
         spends: impl Iterator<Item = &'a transparent::bundle::OutPoint>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error>;
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
 
+    /// Detects the set of accounts that received Sapling outputs that, when spent, reveal(ed) the
+    /// given [`Nullifier`]s. This is used to determine which account(s) funded a given
+    /// transaction.
+    ///
+    /// [`Nullifier`]: sapling::Nullifier
     fn detect_accounts_sapling<'a>(
         &self,
         spends: impl Iterator<Item = &'a sapling::Nullifier>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error>;
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
 
+    /// Detects the set of accounts that received Orchard outputs that, when spent, reveal(ed) the
+    /// given [`Nullifier`]s. This is used to determine which account(s) funded a given
+    /// transaction.
+    ///
+    /// [`Nullifier`]: orchard::note::Nullifier
     #[cfg(feature = "orchard")]
     fn detect_accounts_orchard<'a>(
         &self,
         spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error>;
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
 
     /// Get information about a transparent output controlled by the wallet.
     ///
@@ -175,9 +209,40 @@ pub trait LowLevelWalletRead {
         &self,
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error>;
+
+    fn detect_sapling_spend(
+        &self,
+        nf: &::sapling::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
+
+    #[cfg(feature = "orchard")]
+    fn detect_orchard_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
 }
 
 pub trait LowLevelWalletWrite: LowLevelWalletRead {
+    /// Add metadata about a block to the wallet data store.
+    fn put_block_meta(
+        &mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        sapling_commitment_tree_size: u32,
+        sapling_output_count: u32,
+        #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] orchard_action_count: u32,
+    ) -> Result<(), Self::Error>;
+
+    /// Add metadata about a transaction to the wallet data store.
+    fn put_tx_meta(
+        &mut self,
+        tx: &WalletTx<Self::AccountId>,
+        height: BlockHeight,
+    ) -> Result<Self::TxRef, Self::Error>;
+
+    /// Adds the given transaction to the wallet.
     fn put_tx_data(
         &mut self,
         tx: &Transaction,
@@ -187,6 +252,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         observed_height: BlockHeight,
     ) -> Result<Self::TxRef, Self::Error>;
 
+    /// Updates transaction metadata
     fn set_transaction_status(
         &mut self,
         txid: TxId,
@@ -201,6 +267,18 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    fn mark_sapling_note_spent(
+        &mut self,
+        tx_ref: Self::TxRef,
+        nf: &::sapling::Nullifier,
+    ) -> Result<bool, Self::Error>;
+
+    fn track_block_sapling_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxId, u16, Vec<::sapling::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
     #[cfg(feature = "orchard")]
     fn put_received_orchard_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
         &mut self,
@@ -209,6 +287,22 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         target_or_mined_height: Option<BlockHeight>,
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
+
+    #[cfg(feature = "orchard")]
+    fn mark_orchard_note_spent(
+        &mut self,
+        tx_ref: Self::TxRef,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<bool, Self::Error>;
+
+    #[cfg(feature = "orchard")]
+    fn track_block_orchard_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxId, u16, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
+    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error>;
 
     /// Records information about a transaction output that your wallet created, from the constituent
     /// properties of that output.
@@ -257,6 +351,12 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         require_key: bool,
     ) -> Result<(), Self::Error>;
 
+    fn queue_tx_retrieval(
+        &mut self,
+        txids: impl Iterator<Item = TxId>,
+        dependent_tx_ref: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error>;
+
     #[cfg(feature = "transparent-inputs")]
     fn queue_transparent_spend_detection(
         &mut self,
@@ -272,13 +372,13 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         d_tx: &super::DecryptedTransaction<'_, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    #[cfg(feature = "transparent-inputs")]
-    fn queue_unmined_tx_retrieval(
-        &mut self,
-        d_tx: &super::DecryptedTransaction<'_, Self::AccountId>,
-    ) -> Result<(), Self::Error>;
-
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error>;
+
+    fn notify_scan_complete(
+        &mut self,
+        range: Range<BlockHeight>,
+        wallet_note_positions: &[(ShieldedProtocol, Position)],
+    ) -> Result<(), Self::Error>;
 }
 
 /// This trait provides a generalization over shielded Sapling output representations.
