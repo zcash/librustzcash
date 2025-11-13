@@ -149,6 +149,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut tx_has_wallet_outputs = false;
 
+    // The set of account/scope pairs for which to update the gap limit.
     #[cfg(feature = "transparent-inputs")]
     let mut gap_update_set = HashSet::new();
 
@@ -406,7 +407,16 @@ where
     // If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
     #[cfg(feature = "transparent-inputs")]
-    wallet_db.queue_unmined_tx_retrieval(&d_tx)?;
+    {
+        let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+        #[cfg(feature = "orchard")]
+        let detectable_via_scanning =
+            detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+        if d_tx.mined_height().is_none() && !detectable_via_scanning {
+            wallet_db.queue_tx_retrieval(std::iter::once(d_tx.tx().txid()), None)?
+        }
+    }
 
     Ok(())
 }

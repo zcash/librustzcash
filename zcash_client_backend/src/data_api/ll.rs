@@ -9,16 +9,19 @@
 //! [`WalletWrite`]: super::WalletWrite
 
 use core::{fmt::Debug, hash::Hash};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use incrementalmerkletree::Position;
 use transparent::bundle::OutPoint;
 use zcash_address::ZcashAddress;
 use zcash_keys::address::Receiver;
-use zcash_primitives::transaction::{Transaction, TransactionData};
+use zcash_primitives::{
+    block::BlockHash,
+    transaction::{Transaction, TransactionData},
+};
 use zcash_protocol::{
-    TxId,
-    consensus::BlockHeight,
+    ShieldedProtocol, TxId,
+    consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -27,7 +30,7 @@ use zip32::Scope;
 use super::{TransactionStatus, wallet::TargetHeight};
 use crate::{
     DecryptedOutput, TransferType,
-    wallet::{Recipient, WalletSaplingOutput},
+    wallet::{Recipient, WalletSaplingOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -167,6 +170,15 @@ pub trait LowLevelWalletRead {
         address: &TransparentAddress,
     ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
 
+    /// Finds the set of accounts that either provide inputs to or receive outputs from any of the
+    /// provided transactions.
+    #[cfg(feature = "transparent-inputs")]
+    #[allow(clippy::type_complexity)]
+    fn find_involved_accounts(
+        &self,
+        tx_refs: impl IntoIterator<Item = Self::TxRef>,
+    ) -> Result<HashSet<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error>;
+
     /// Detects the set of accounts that received transparent outputs corresponding to the provided
     /// [`OutPoint`]s. This is used to determine which account(s) funded a given transaction.
     ///
@@ -221,6 +233,21 @@ pub trait LowLevelWalletRead {
         &self,
         tx_ref: Self::TxRef,
     ) -> Result<Vec<(Self::TxRef, Transaction)>, Self::Error>;
+
+    /// Finds the reference to the transaction that reveals the given Sapling nullifier in the
+    /// backing data store, if known.
+    fn detect_sapling_spend(
+        &self,
+        nf: &::sapling::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
+
+    /// Finds the reference to the transaction that reveals the given Orchard nullifier in the
+    /// backing data store, if known.
+    #[cfg(feature = "orchard")]
+    fn detect_orchard_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
 }
 
 /// A capability trait that provides low-level wallet write operations. These operations are used
@@ -228,6 +255,26 @@ pub trait LowLevelWalletRead {
 ///
 /// [`WalletWrite`]: super::WalletWrite
 pub trait LowLevelWalletWrite: LowLevelWalletRead {
+    /// Add metadata about a block to the wallet data store.
+    #[allow(clippy::too_many_arguments)]
+    fn put_block_meta(
+        &mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        sapling_commitment_tree_size: u32,
+        sapling_output_count: u32,
+        #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] orchard_action_count: u32,
+    ) -> Result<(), Self::Error>;
+
+    /// Add metadata about a transaction to the wallet data store.
+    fn put_tx_meta(
+        &mut self,
+        tx: &WalletTx<Self::AccountId>,
+        height: BlockHeight,
+    ) -> Result<Self::TxRef, Self::Error>;
+
     /// Adds the given transaction to the wallet.
     fn put_tx_data(
         &mut self,
@@ -256,6 +303,31 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Updates the backing store to indicate that the Sapling output having the given nullifier is
+    /// spent in the transaction referenced by `spent_in_tx`. This may result in multiple distinct
+    /// transactions being recorded as having spent the note; only one of these transactions will
+    /// end up having been mined (by consensus.)
+    ///
+    /// Returns `Ok(true)` if a a new record was added to the data store.
+    fn mark_sapling_note_spent(
+        &mut self,
+        nf: &::sapling::Nullifier,
+        spent_in_tx: Self::TxRef,
+    ) -> Result<bool, Self::Error>;
+
+    /// Causes the given Sapling output nullifiers to be tracked by the wallet.
+    ///
+    /// When scanning the chain out-of-order, it is necessary to store the any nullifiers observed
+    /// after a gap in the scanned blocks until the blocks in that gap have been fully scanned, in
+    /// order to be able to immediately detect that a received output has already been spent. The
+    /// data store should track a mapping from each nullifier to the block, transaction index and
+    /// ID of the transaction where the spend occurred.
+    fn track_block_sapling_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::sapling::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
     /// Adds information about a received Orchard note to the wallet, or updates any existing
     /// record for that output.
     #[cfg(feature = "orchard")]
@@ -266,6 +338,35 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         target_or_mined_height: Option<BlockHeight>,
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
+
+    /// Updates the backing store to indicate that the Orchard output having the given nullifier is
+    /// spent in the transaction referenced by `spent_in_tx`. This may result in multiple distinct
+    /// transactions being recorded as having spent the note; only one of these transactions will
+    /// end up having been mined (by consensus.)
+    ///
+    /// Returns `Ok(true)` if a a new record was added to the data store.
+    #[cfg(feature = "orchard")]
+    fn mark_orchard_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error>;
+
+    /// Causes the given Orchard output nullifiers to be tracked by the wallet.
+    ///
+    /// When scanning the chain out-of-order, it is necessary to store the any nullifiers observed
+    /// after a gap in the scanned blocks until the blocks in that gap have been fully scanned, in
+    /// order to be able to immediately detect that a received output has already been spent. The
+    /// data store should track a mapping from each nullifier to the block, transaction index and
+    /// ID of the transaction where the spend occurred.
+    #[cfg(feature = "orchard")]
+    fn track_block_orchard_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
+    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error>;
 
     /// Records information about a transaction output that your wallet created, from the constituent
     /// properties of that output.
@@ -340,6 +441,19 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         request: UnifiedAddressRequest,
     ) -> Result<(), Self::Error>;
 
+    /// Adds a [`TransactionDataRequest::Enhancement`] request for the enhancement of the given
+    /// transaction to the transaction data request queue. The `dependent_tx_ref` parameter
+    /// specifies the transaction that caused this request to be generated, likely as part of the
+    /// process of traversing the transparent transaction graph by inspecting the inputs of a
+    /// transaction with outputs that were received by the wallet.
+    ///
+    /// [`TransactionDataRequest::Enhancement`]: super::TransactionDataRequest
+    fn queue_tx_retrieval(
+        &mut self,
+        txids: impl Iterator<Item = TxId>,
+        dependent_tx_ref: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error>;
+
     /// Adds a [`TransactionDataRequest::TransactionsInvolvingAddress`] request to the transaction
     /// data request queue. When the transparetn output of `tx_ref` at output index `output_index`
     /// (which must have been received at `receiving_address`) is detected as having been spent,
@@ -372,18 +486,20 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         d_tx: &super::DecryptedTransaction<'_, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// TODO
-    #[cfg(feature = "transparent-inputs")]
-    fn queue_unmined_tx_retrieval(
-        &mut self,
-        d_tx: &super::DecryptedTransaction<'_, Self::AccountId>,
-    ) -> Result<(), Self::Error>;
-
     /// Deletes all [`TransactionDataRequest::Enhancement`] requests for the given transaction ID
     /// from the transaction data request queue.
     ///
     /// [`TransactionDataRequest::Enhancement`]: super::TransactionDataRequest
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error>;
+
+    /// Updates the state of the wallet backend to indicate that the given range of blocks has been
+    /// fully scanned, identifying the position in the note commitment tree of any notes belonging
+    /// to the wallet that were discoveredd in the process of scanning.
+    fn notify_scan_complete(
+        &mut self,
+        range: Range<BlockHeight>,
+        wallet_note_positions: &[(ShieldedProtocol, Position)],
+    ) -> Result<(), Self::Error>;
 }
 
 /// This trait provides a generalization over shielded Sapling output representations.
