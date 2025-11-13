@@ -14,7 +14,20 @@ workspace.
 - MSRV is now 1.85.1.
 
 ### Removed
-- Removed deprecated modules:
+
+- Removed deprecated module `zcash_primitives::transaction::amount::testing`, use `zcash_protocol::value::testing` instead.
+- Removed deprecated module `zcash_primitives::transaction::amount`, use `zcash_protocol::value` instead.
+- Removed deprecated module `zcash_primitives::transaction::transparent::builder`, use `zcash_transparent::builder` instead.
+- Removed deprecated module `zcash_primitives::transaction::transparent::pczt`, use `zcash_transparent::pczt` instead.
+- Removed deprecated module `zcash_primitives::transaction::transparent`, use `zcash_transparent` instead.
+- Removed deprecated `zcash_primitives::transaction::Outpoint`, use `zcash_transparent::bundle::Outpoint` instead.
+- Removed deprecated `zcash_primitives::transaction::TxIn`, use `zcash_transparent::bundle::TxIn` instead.
+- Removed deprecated `zcash_primitives::transaction::TxOut`, use `zcash_transparent::bundle::TxOut` instead.
+- Removed deprecated `zcash_primitives::transaction::ZatBalance`, use `zcash_protocol::value::ZatBalance` instead.
+- Removed deprecated `zcash_primitives::transaction::OutputDescription`, use `sapling_crypto::bundle::OutputDescription` instead.
+- Removed deprecated `zcash_primitives::transaction::SpendDescription`, use `sapling_crypto::bundle::SpendDescription` instead.
+
+- Removed other deprecated modules:
     - `zcash_primitives::consensus`
     - `zcash_primitives::constants`
     - `zcash_primitives::memo`
