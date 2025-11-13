@@ -171,6 +171,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut tx_has_wallet_outputs = false;
 
+    // The set of account/scope pairs for which to update the gap limit.
     #[cfg(feature = "transparent-inputs")]
     let mut gap_update_set = HashSet::new();
 
@@ -255,6 +256,16 @@ where
         }
     }
 
+    // Mark Sapling notes as spent when we observe their nullifiers.
+    for spend in d_tx
+        .tx()
+        .sapling_bundle()
+        .iter()
+        .flat_map(|b| b.shielded_spends().iter())
+    {
+        wallet_db.mark_sapling_note_spent(spend.nullifier(), tx_ref)?;
+    }
+
     #[cfg(feature = "orchard")]
     for output in d_tx.orchard_outputs() {
         #[cfg(feature = "transparent-inputs")]
@@ -336,6 +347,17 @@ where
                 }
             }
         }
+    }
+
+    // Mark Orchard notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for action in d_tx
+        .tx()
+        .orchard_bundle()
+        .iter()
+        .flat_map(|b| b.actions().iter())
+    {
+        wallet_db.mark_orchard_note_spent(action.nullifier(), tx_ref)?;
     }
 
     // If any of the utxos spent in the transaction are ours, mark them as spent.
@@ -426,7 +448,16 @@ where
     // If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
     #[cfg(feature = "transparent-inputs")]
-    wallet_db.queue_unmined_tx_retrieval(&d_tx)?;
+    {
+        let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+        #[cfg(feature = "orchard")]
+        let detectable_via_scanning =
+            detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+        if d_tx.mined_height().is_none() && !detectable_via_scanning {
+            wallet_db.queue_tx_retrieval(std::iter::once(d_tx.tx().txid()), None)?
+        }
+    }
 
     Ok(())
 }
