@@ -14,7 +14,30 @@ workspace.
 - MSRV is now 1.85.1.
 
 ### Removed
-- Removed deprecated modules:
+
+- Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_ALL`, use `zcash_transparent::sighash::SIGHASH_ALL` instead.
+- Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_NONE`, use `zcash_transparent::sighash::SIGHASH_NONE` instead.
+- Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_SINGLE`, use `zcash_transparent::sighash::SIGHASH_SINGLE` instead.
+- Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_MASK`, use `zcash_transparent::sighash::SIGHASH_MASK` instead.
+- Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_ANYONECANPAY`, use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead.
+- Removed deprecated `zcash_primitives::transaction::sighash::SighashType`, use `zcash_transparent::sighash::SighashType` instead.
+
+- Removed deprecated module `zcash_primitives::transaction::components::amount::testing`:
+  - `arb_positive_amount`, use `zcash_protocol::value::testing::arb_positive_zat_balance` instead.
+  - `arb_amount`, use `zcash_protocol::value::testing::arb_zat_balance`
+  - `arb_nonnegative_amount`, use `zcash_protocol::value::testing::arb_zatoshis` 
+- Removed deprecated module `zcash_primitives::transaction::components::amount`, use `zcash_protocol::value` instead.
+- Removed deprecated module `zcash_primitives::transaction::components::transparent::builder`, use `zcash_transparent::builder` instead.
+- Removed deprecated module `zcash_primitives::transaction::components::transparent::pczt`, use `zcash_transparent::pczt` instead.
+- Removed deprecated module `zcash_primitives::transaction::components::transparent`, use `zcash_transparent` instead.
+- Removed deprecated `zcash_primitives::transaction::components::Outpoint`, use `zcash_transparent::bundle::Outpoint` instead.
+- Removed deprecated `zcash_primitives::transaction::components::TxIn`, use `zcash_transparent::bundle::TxIn` instead.
+- Removed deprecated `zcash_primitives::transaction::components::TxOut`, use `zcash_transparent::bundle::TxOut` instead.
+- Removed deprecated `zcash_primitives::transaction::components::ZatBalance`, use `zcash_protocol::value::ZatBalance` instead.
+- Removed deprecated `zcash_primitives::transaction::components::OutputDescription`, use `sapling_crypto::bundle::OutputDescription` instead.
+- Removed deprecated `zcash_primitives::transaction::components::SpendDescription`, use `sapling_crypto::bundle::SpendDescription` instead.
+
+- Removed other deprecated modules:
     - `zcash_primitives::consensus`
     - `zcash_primitives::constants`
     - `zcash_primitives::memo`
