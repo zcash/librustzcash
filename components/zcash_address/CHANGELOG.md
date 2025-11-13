@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed deprecated `zcash_address::Network`, use `zcash_protocol::consensus::Network` instead.
+
 ## [0.10.1] - 2025-10-18
 
 ### Fixed

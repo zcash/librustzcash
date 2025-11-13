@@ -331,7 +331,7 @@ pub trait BlockSource {
 /// #        zcash_primitives::block::BlockHash([0; 32]),
 /// #        sapling::Nullifier([0; 32]),
 /// #        &dfvk,
-/// #        zcash_primitives::transaction::components::amount::NonNegativeAmount::const_from_u64(5),
+/// #        zcash_protocol::value::Zatoshis::const_from_u64(5),
 /// #        false,
 /// #        None,
 /// #    );
@@ -340,7 +340,7 @@ pub trait BlockSource {
 /// #        zcash_primitives::block::BlockHash([0; 32]),
 /// #        sapling::Nullifier([0; 32]),
 /// #        &dfvk,
-/// #        zcash_primitives::transaction::components::amount::NonNegativeAmount::const_from_u64(5),
+/// #        zcash_protocol::value::Zatoshis::const_from_u64(5),
 /// #        false,
 /// #        None,
 /// #    );
