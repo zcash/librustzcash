@@ -11,6 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- `zip::Payment::new` now returns `Err(Zip321Error::TransparentMemo(0))`
+  instead of `None` for payment requests that include a memo. The recipient
+  can't receive memos because we're sending payment to a t-address.
 - MSRV is now 1.85.1.
 
 ## [0.6.0] - 2025-10-02

@@ -440,7 +440,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             payment.message().cloned(),
                             payment.other_params().to_vec(),
                         )
-                        .expect("cannot fail because memo is None"),
+                        .map_err(|payment_error| {
+                            InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
+                        })?,
                     );
                     total_ephemeral = (total_ephemeral + payment.amount())
                         .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
@@ -880,10 +882,8 @@ where
         .expect("the sum of an single-element vector of fee values cannot overflow");
 
     let payment = zip321::Payment::new(recipient, total_to_recipient, memo, None, None, vec![])
-        .ok_or_else(|| {
-            InputSelectorError::Proposal(ProposalError::Zip321(
-                zip321::Zip321Error::TransparentMemo(0),
-            ))
+        .map_err(|payment_error| {
+            InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
         })?;
 
     let transaction_request =
