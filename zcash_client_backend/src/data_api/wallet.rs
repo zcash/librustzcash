@@ -623,7 +623,8 @@ where
             None,
             vec![],
         )
-        .ok_or(Error::MemoForbidden)?,
+        // Assume failure is due to memo
+        .map_err(|_| Error::MemoForbidden)?,
     ])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",

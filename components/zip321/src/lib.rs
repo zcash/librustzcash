@@ -136,7 +136,7 @@ pub struct Payment {
 impl Payment {
     /// Constructs a new [`Payment`] from its constituent parts.
     ///
-    /// Returns `None` if the payment requests that a memo be sent to a recipient that cannot
+    /// Returns `Err` if the payment requests that a memo be sent to a recipient that cannot
     /// receive a memo.
     pub fn new(
         recipient_address: ZcashAddress,
@@ -145,9 +145,9 @@ impl Payment {
         label: Option<String>,
         message: Option<String>,
         other_params: Vec<(String, String)>,
-    ) -> Option<Self> {
+    ) -> Result<Payment, Zip321Error> {
         if memo.is_none() || recipient_address.can_receive_memo() {
-            Some(Self {
+            Ok(Self {
                 recipient_address,
                 amount,
                 memo,
@@ -156,7 +156,7 @@ impl Payment {
                 other_params,
             })
         } else {
-            None
+            Err(Zip321Error::TransparentMemo(0))
         }
     }
 
