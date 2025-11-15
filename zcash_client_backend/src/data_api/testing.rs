@@ -2877,7 +2877,7 @@ impl WalletWrite for MockWalletDb {
 
     fn store_decrypted_tx(
         &mut self,
-        _received_tx: DecryptedTransaction<Self::AccountId>,
+        _received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

@@ -1,10 +1,11 @@
 //! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 
-use rusqlite::{Transaction, named_params};
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+
+use zcash_primitives::transaction::{Transaction, builder::DEFAULT_TX_EXPIRY_DELTA};
 use zcash_protocol::consensus;
 
 use crate::wallet::init::WalletMigrationError;
@@ -63,7 +64,7 @@ impl<P> schemerz::Migration<Uuid> for Migration<P> {
 impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         conn.execute_batch(
             "CREATE TABLE tx_retrieval_queue (
                 txid BLOB NOT NULL UNIQUE,
@@ -120,7 +121,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let mined_height = row.get::<_, Option<u32>>(2)?.map(BlockHeight::from);
 
                 if let Some(tx_data) = tx_data {
-                    let tx = zcash_primitives::transaction::Transaction::read(
+                    let tx = Transaction::read(
                         &tx_data[..],
                         // We assume unmined transactions are created with the current consensus branch ID.
                         mined_height.map_or(BranchId::Sapling, |h| {
@@ -189,7 +190,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         }
                     }
 
-                    let d_tx = DecryptedTransaction::<'_, Infallible>::new(
+                    let d_tx = DecryptedTransaction::<Transaction, Infallible>::new(
                         mined_height,
                         &tx,
                         vec![],
@@ -206,7 +207,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         Ok(())
     }
 
-    fn down(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         conn.execute_batch(
             "DROP TABLE transparent_spend_map;
              DROP TABLE transparent_spend_search_queue;
@@ -248,7 +249,7 @@ fn queue_transparent_spend_detection<P: consensus::Parameters>(
 fn queue_transparent_input_retrieval<AccountId>(
     conn: &rusqlite::Transaction<'_>,
     tx_ref: TxRef,
-    d_tx: &DecryptedTransaction<'_, AccountId>,
+    d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
     if let Some(b) = d_tx.tx().transparent_bundle() {
         if !b.is_coinbase() {
@@ -267,7 +268,7 @@ fn queue_transparent_input_retrieval<AccountId>(
 #[cfg(feature = "transparent-inputs")]
 fn queue_unmined_tx_retrieval<AccountId>(
     conn: &rusqlite::Transaction<'_>,
-    d_tx: &DecryptedTransaction<'_, AccountId>,
+    d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
     let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
     #[cfg(feature = "orchard")]
