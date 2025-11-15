@@ -67,6 +67,9 @@ workspace.
 - `zcash_client_backend::wallet::WalletTx::block_index` now has type
   `zcash_protocol::consensus::TxIndex` and the `new` function has
   been modified accordingly.
+- Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
+  have been modified. It now abstracts over the transaction type, to permit
+  use with partial or compact transaction data instead of full transactions.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

@@ -1421,7 +1421,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<Self::AccountId>,
+        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let chain_tip = wallet::chain_tip_height(wdb.conn.borrow())?
@@ -1912,7 +1912,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn queue_transparent_input_retrieval(
         &mut self,
         tx_ref: Self::TxRef,
-        d_tx: &data_api::DecryptedTransaction<'_, Self::AccountId>,
+        d_tx: &data_api::DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         wallet::queue_transparent_input_retrieval(self.conn.borrow(), tx_ref, d_tx)
     }
