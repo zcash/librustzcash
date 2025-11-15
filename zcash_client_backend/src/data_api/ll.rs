@@ -8,7 +8,7 @@
 //! [`WalletRead`]: super::WalletRead
 //! [`WalletWrite`]: super::WalletWrite
 
-use core::{fmt::Debug, hash::Hash};
+use core::hash::Hash;
 use std::{collections::HashSet, ops::Range};
 
 use incrementalmerkletree::Position;
@@ -108,17 +108,17 @@ impl TxMeta for Transaction {
 /// [`WalletWrite`]: super::WalletWrite
 pub trait LowLevelWalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
-    type Error: Debug;
+    type Error;
 
     /// The type of the account identifier.
     ///
     /// An account identifier corresponds to at most a single unified spending key's worth of spend
     /// authority, such that both received notes and change spendable by that spending authority
     /// will be interpreted as belonging to that account.
-    type AccountId: Debug + Copy + Eq + Hash;
+    type AccountId: Copy + Eq + Hash;
 
     /// A wallet-internal transaction identifier.
-    type TxRef: Copy + Eq;
+    type TxRef: Copy + Eq + Hash;
 
     /// Returns the set of account identifiers for accounts that spent notes and/or UTXOs in the
     /// construction of the given transaction.
@@ -366,6 +366,8 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
     ) -> Result<(), Self::Error>;
 
+    /// Removes nullifiers tracked by the wallet for transactions mined in blocks at heights less
+    /// than `pruning_depth` blocks below the height to which the wallet has been fully scanned.
     fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error>;
 
     /// Records information about a transaction output that your wallet created, from the constituent

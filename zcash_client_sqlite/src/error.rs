@@ -10,6 +10,8 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_client_backend::data_api::ll;
+use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::BalanceError};
@@ -384,6 +386,18 @@ impl From<AddressGenerationError> for SqliteClientError {
 impl From<SchedulingError> for SqliteClientError {
     fn from(value: SchedulingError) -> Self {
         SqliteClientError::Scheduling(value)
+    }
+}
+
+impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteClientError {
+    fn from(value: PutBlocksError<SqliteClientError, commitment_tree::Error>) -> Self {
+        match value {
+            ll::wallet::PutBlocksError::NonSequentialBlocks { .. } => {
+                SqliteClientError::NonSequentialBlocks
+            }
+            ll::wallet::PutBlocksError::Storage(e) => e,
+            ll::wallet::PutBlocksError::ShardTree(e) => SqliteClientError::from(e),
+        }
     }
 }
 
