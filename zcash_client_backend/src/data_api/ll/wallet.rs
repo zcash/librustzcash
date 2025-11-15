@@ -111,28 +111,28 @@ where
     })
 }
 
-pub enum PutBlocksError<E> {
+pub enum PutBlocksError<SE, TE> {
     NonSequentialBlocks {
         prev_height: BlockHeight,
         block_height: BlockHeight,
     },
-    Storage(E),
-    ShardTree(ShardTreeError<E>),
+    Storage(SE),
+    ShardTree(ShardTreeError<TE>),
 }
 
-impl<E> From<ShardTreeError<E>> for PutBlocksError<E> {
-    fn from(value: ShardTreeError<E>) -> Self {
+impl<SE, TE> From<ShardTreeError<TE>> for PutBlocksError<SE, TE> {
+    fn from(value: ShardTreeError<TE>) -> Self {
         PutBlocksError::ShardTree(value)
     }
 }
 
-pub fn put_blocks<DbT, E>(
+pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<DbT::AccountId>>,
-) -> Result<(), PutBlocksError<<DbT as LowLevelWalletRead>::Error>>
+) -> Result<(), PutBlocksError<SE, TE>>
 where
-    DbT: LowLevelWalletWrite<Error = E> + WalletCommitmentTrees<Error = E>,
+    DbT: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>,
     DbT::TxRef: Eq + Hash,
 {
     struct BlockPositions {
@@ -309,7 +309,7 @@ where
         .find_involved_accounts(tx_refs)
         .map_err(PutBlocksError::Storage)?
     {
-        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
+        if let Some(t_key_scope) = key_scope {
             use ReceiverRequirement::*;
             wallet_db
                 .generate_transparent_gap_addresses(
@@ -440,7 +440,7 @@ where
         // Update the Sapling note commitment tree with all newly read note commitments
         {
             let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
-            wallet_db.with_sapling_tree_mut::<_, _, PutBlocksError<E>>(|sapling_tree| {
+            wallet_db.with_sapling_tree_mut::<_, _, PutBlocksError<SE, TE>>(|sapling_tree| {
                 debug!(
                     "Sapling initial tree size at {:?}: {:?}",
                     from_state.block_height(),
@@ -489,7 +489,7 @@ where
         #[cfg(feature = "orchard")]
         {
             let mut orchard_subtrees = orchard_subtrees.into_iter();
-            wallet_db.with_orchard_tree_mut::<_, _, PutBlocksError<E>>(|orchard_tree| {
+            wallet_db.with_orchard_tree_mut::<_, _, PutBlocksError<SE, TE>>(|orchard_tree| {
                 debug!(
                     "Orchard initial tree size at {:?}: {:?}",
                     from_state.block_height(),
@@ -559,6 +559,7 @@ pub fn store_decrypted_tx<DbT, P>(
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
 where
     DbT: LowLevelWalletWrite,
+    DbT::AccountId: core::fmt::Debug,
     DbT::Error: From<BalanceError>,
     P: consensus::Parameters,
 {
@@ -929,6 +930,7 @@ fn detect_wallet_transparent_outputs<DbT, P>(
 ) -> Result<WalletTransparentOutputs<DbT::AccountId>, DbT::Error>
 where
     DbT: LowLevelWalletRead,
+    DbT::AccountId: core::fmt::Debug,
     P: consensus::Parameters,
 {
     // This `if` is just an optimization for cases where we would do nothing in the loop.
