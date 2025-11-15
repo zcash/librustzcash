@@ -519,7 +519,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     fn queue_transparent_input_retrieval(
         &mut self,
         tx_ref: Self::TxRef,
-        d_tx: &super::DecryptedTransaction<'_, Self::AccountId>,
+        d_tx: &super::DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
     /// Deletes all [`TransactionDataRequest::Enhancement`] requests for the given transaction ID

@@ -164,9 +164,12 @@ pub trait ShieldedPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
 
-    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize;
+    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<Transaction, A>) -> usize;
 
-    fn with_decrypted_pool_memos<A>(d_tx: &DecryptedTransaction<'_, A>, f: impl FnMut(&MemoBytes));
+    fn with_decrypted_pool_memos<A>(
+        d_tx: &DecryptedTransaction<Transaction, A>,
+        f: impl FnMut(&MemoBytes),
+    );
 
     fn try_output_recovery<P: consensus::Parameters>(
         params: &P,

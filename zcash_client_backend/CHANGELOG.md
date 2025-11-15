@@ -60,6 +60,9 @@ workspace.
 - `zcash_client_backend::wallet::GapMetadata` has been moved behind the
   `transparent-inputs` feature flag, as it is only useful in the context
   of the wallet receiving transparent funds.
+- Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
+  have been modified. It now abstracts over the transaction type, to permit
+  use with partial or compact transaction data instead of full transactions.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

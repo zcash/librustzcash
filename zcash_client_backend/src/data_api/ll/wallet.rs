@@ -9,6 +9,7 @@ use tracing::{debug, info, trace, warn};
 use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::error::ShardTreeError;
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
@@ -580,7 +581,7 @@ pub fn store_decrypted_tx<DbT, P>(
     wallet_db: &mut DbT,
     params: &P,
     chain_tip_height: BlockHeight,
-    d_tx: DecryptedTransaction<<DbT as LowLevelWalletRead>::AccountId>,
+    d_tx: DecryptedTransaction<Transaction, <DbT as LowLevelWalletRead>::AccountId>,
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
 where
     DbT: LowLevelWalletWrite,
@@ -930,7 +931,7 @@ where
 fn detect_wallet_transparent_outputs<DbT, P>(
     #[cfg(feature = "transparent-inputs")] wallet_db: &DbT,
     params: &P,
-    d_tx: &DecryptedTransaction<DbT::AccountId>,
+    d_tx: &DecryptedTransaction<Transaction, DbT::AccountId>,
     funding_account: Option<DbT::AccountId>,
 ) -> Result<WalletTransparentOutputs<DbT::AccountId>, DbT::Error>
 where

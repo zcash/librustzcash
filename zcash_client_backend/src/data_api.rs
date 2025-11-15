@@ -2343,19 +2343,19 @@ impl<A> ScannedBlock<A> {
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct DecryptedTransaction<'a, AccountId> {
+pub struct DecryptedTransaction<'a, Tx, AccountId> {
     mined_height: Option<BlockHeight>,
-    tx: &'a Transaction,
+    tx: &'a Tx,
     sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<DecryptedOutput<orchard::note::Note, AccountId>>,
 }
 
-impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
+impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
         mined_height: Option<BlockHeight>,
-        tx: &'a Transaction,
+        tx: &'a Tx,
         sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<
             DecryptedOutput<orchard::note::Note, AccountId>,
@@ -2375,7 +2375,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         self.mined_height
     }
     /// Returns the raw transaction data.
-    pub fn tx(&self) -> &Transaction {
+    pub fn tx(&self) -> &Tx {
         self.tx
     }
     /// Returns the Sapling outputs that were decrypted from the transaction.
@@ -3053,7 +3053,7 @@ pub trait WalletWrite: WalletRead {
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
         &mut self,
-        received_tx: DecryptedTransaction<Self::AccountId>,
+        received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
     /// Sets the trust status of the given transaction to either trusted or untrusted.
