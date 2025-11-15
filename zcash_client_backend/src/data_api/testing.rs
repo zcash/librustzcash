@@ -75,9 +75,11 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
-    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
+    crate::{
+        data_api::Balance,
+        wallet::{TransparentAddressMetadata, transparent::GapLimits},
+    },
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
-    transparent::GapLimits,
 };
 
 #[cfg(feature = "orchard")]
@@ -2876,7 +2878,7 @@ impl WalletWrite for MockWalletDb {
 
     fn store_decrypted_tx(
         &mut self,
-        _received_tx: DecryptedTransaction<Self::AccountId>,
+        _received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

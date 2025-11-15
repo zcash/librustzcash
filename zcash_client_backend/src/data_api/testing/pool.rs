@@ -161,9 +161,12 @@ pub trait ShieldedPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
 
-    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize;
+    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<Transaction, A>) -> usize;
 
-    fn with_decrypted_pool_memos<A>(d_tx: &DecryptedTransaction<'_, A>, f: impl FnMut(&MemoBytes));
+    fn with_decrypted_pool_memos<A>(
+        d_tx: &DecryptedTransaction<Transaction, A>,
+        f: impl FnMut(&MemoBytes),
+    );
 
     fn try_output_recovery<P: consensus::Parameters>(
         params: &P,
@@ -1126,7 +1129,10 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::{
+        data_api::{MaxSpendMode, OutputOfSentTx},
+        wallet::transparent::GapLimits,
+    };
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
@@ -1302,7 +1308,7 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::{data_api::OutputOfSentTx, wallet::transparent::GapLimits};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
@@ -1476,7 +1482,10 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::{
+        data_api::{MaxSpendMode, OutputOfSentTx},
+        wallet::transparent::GapLimits,
+    };
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
@@ -1836,8 +1845,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
     use crate::{
-        data_api::{OutputOfSentTx, TransactionStatus, testing::transparent::GapLimits},
-        wallet::{Exposure, TransparentAddressSource},
+        data_api::{OutputOfSentTx, TransactionStatus},
+        wallet::{Exposure, TransparentAddressSource, transparent::GapLimits},
     };
 
     let gap_limits = GapLimits::new(10, 5, 3);
@@ -2367,7 +2376,7 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{OutputOfSentTx, testing::transparent::GapLimits};
+    use crate::{data_api::OutputOfSentTx, wallet::transparent::GapLimits};
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()

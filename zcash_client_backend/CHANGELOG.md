@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the 
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
+
 ## [0.21.0] - 2025-11-05
 
 ### Added

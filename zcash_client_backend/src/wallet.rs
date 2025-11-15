@@ -29,6 +29,9 @@ use {
     std::time::SystemTime,
 };
 
+#[cfg(feature = "transparent-inputs")]
+pub mod transparent;
+
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
@@ -639,6 +642,7 @@ impl OvkPolicy {
 
 /// Metadata describing the gap limit position of a transparent address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
 pub enum GapMetadata {
     /// The address, or an address at a greater child index, has received transparent funds and
     /// will be discovered by wallet recovery by exploration over the space of
