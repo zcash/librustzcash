@@ -3203,7 +3203,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     // Add funds to the wallet
     st.add_notes([Some(Zatoshis::const_from_u64(50000))]);
 
-    // Add 10 dust notes to the wallet
+    // Add 10 uneconomic (dust) notes to the wallet
     for _ in 1..=10 {
         st.add_notes([Some(Zatoshis::const_from_u64(1000))]);
     }
@@ -4458,8 +4458,6 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, Dsf>(
     );
 }
 
-// TODO: This test can probably be entirely removed, as the following test duplicates it entirely.
-// TODO(schell): ^still a valid todo?
 pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
@@ -4478,14 +4476,6 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, Dsf>(
     // Create a fake CompactBlock sending value to the address
     let value = Zatoshis::const_from_u64(50000);
     let (_, _, nf) = st.add_a_single_note(value);
-    // let (received_height, _, nf) =
-    //     st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-    // // Scan the cache
-    // st.scan_cached_blocks(received_height, 1);
-
-    // // Account balance should reflect the received note
-    // assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));

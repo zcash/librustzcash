@@ -93,9 +93,11 @@ where
 /// A proxy for `FakeCompactOutput` that allows test code to omit the `fvk` and
 /// `address_type` fields, which can be derived from the `TestState` in most cases.
 pub struct TestNoteConfig<T: ShieldedPoolTester> {
+    /// The amount of the note.
     pub value: Zatoshis,
-    /// Diversifiable full viewing key of
+    /// Diversifiable full viewing key of the recipient.
     pub fvk: Option<T::Fvk>,
+    /// Address type of the recipient.
     pub address_type: Option<AddressType>,
 }
 
@@ -288,7 +290,7 @@ where
     ///
     /// This step also verifies that the test account contains the expected
     /// funds as part of the _total_. Keep in mind that these funds may not yet
-    /// be _spendable_ due to the number confirmations required.
+    /// be _spendable_ due to the number of confirmations required.
     ///
     /// Returns a summary of steps.
     ///
@@ -317,8 +319,8 @@ where
                 .map(|into_note_config| {
                     let note_config = into_note_config.into();
                     if note_config.value > zip317::MARGINAL_FEE {
-                        // Don't include dust in the expected total, as the balance
-                        // won't include it.
+                        // Don't include uneconomic (dust) notes in the expected
+                        // total, as the balance won't include them.
                         expected_total = (expected_total + note_config.value).unwrap();
                     }
                     (self.make_fake_output(&note_config), note_config)
