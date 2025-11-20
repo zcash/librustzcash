@@ -10,8 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::pczt`:
+  - `Input::with_signable_input`
+  - `Input::append_signature`
+
 ### Changed
 - MSRV is now 1.85.1.
+- `zcash_transparent::pczt`:
+  - `SignerError` has added variants:
+    - `InvalidExternalSignature`
+    - `MissingPreimage`
+    - `UnsupportedPubkey`
 
 ## [0.6.1] - 2025-10-27
 
