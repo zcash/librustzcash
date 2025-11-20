@@ -50,7 +50,7 @@ pub struct Signer {
     tx_data: TransactionData<EffectsOnly>,
     txid_parts: TxDigests<Blake2bHash>,
     shielded_sighash: [u8; 32],
-    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
+    secp: secp256k1::Secp256k1<secp256k1::All>,
 }
 
 impl Signer {
@@ -78,10 +78,7 @@ impl Signer {
                 version_group_id,
             })),
         }?;
-        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-            .as_ref()
-            .try_into()
-            .expect("correct length");
+        let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         Ok(Self {
             global,
@@ -91,8 +88,21 @@ impl Signer {
             tx_data,
             txid_parts,
             shielded_sighash,
-            secp: secp256k1::Secp256k1::signing_only(),
+            secp: secp256k1::Secp256k1::new(),
         })
+    }
+
+    /// Calculates the signature digest that must be signed to authorize the given input.
+    ///
+    /// This can be used to produce a signature externally suitable for passing to e.g.
+    /// [`Self::append_transparent_signature`].
+    pub fn sighash(&self, signable_input: &SignableInput) -> [u8; 32] {
+        match signable_input {
+            SignableInput::Shielded => self.shielded_sighash,
+            SignableInput::Transparent(_) => {
+                sighash(&self.tx_data, signable_input, &self.txid_parts)
+            }
+        }
     }
 
     /// Signs the transparent spend at the given index with the given spending key.
@@ -105,6 +115,49 @@ impl Signer {
         index: usize,
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
+        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts, secp| {
+            input.sign(
+                index,
+                |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
+                sk,
+                secp,
+            )
+        })
+    }
+
+    /// Appends the given signature to the transparent spend.
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn append_transparent_signature(
+        &mut self,
+        index: usize,
+        signature: secp256k1::ecdsa::Signature,
+    ) -> Result<(), Error> {
+        self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts, secp| {
+            input.append_signature(
+                index,
+                |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
+                signature,
+                secp,
+            )
+        })
+    }
+
+    fn generate_or_append_transparent_signature<F>(
+        &mut self,
+        index: usize,
+        f: F,
+    ) -> Result<(), Error>
+    where
+        F: FnOnce(
+            &mut transparent::pczt::Input,
+            &TransactionData<EffectsOnly>,
+            &TxDigests<Blake2bHash>,
+            &secp256k1::Secp256k1<secp256k1::All>,
+        ) -> Result<(), transparent::pczt::SignerError>,
+    {
         let input = self
             .transparent
             .inputs_mut()
@@ -114,23 +167,8 @@ impl Signer {
         // Check consistency of the input being signed.
         // TODO
 
-        input
-            .sign(
-                index,
-                |input| {
-                    v5_signature_hash(
-                        &self.tx_data,
-                        &SignableInput::Transparent(input),
-                        &self.txid_parts,
-                    )
-                    .as_ref()
-                    .try_into()
-                    .unwrap()
-                },
-                sk,
-                &self.secp,
-            )
-            .map_err(Error::TransparentSign)?;
+        // Generate or apply the signature.
+        f(input, &self.tx_data, &self.txid_parts, &self.secp).map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:
         // - If the Signer added a signature that does not use `SIGHASH_ANYONECANPAY`, the
@@ -170,6 +208,30 @@ impl Signer {
         index: usize,
         ask: &sapling::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
+        self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
+            spend.sign(shielded_sighash, ask, OsRng)
+        })
+    }
+
+    /// Applies the given signature to the Sapling spend.
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn apply_sapling_signature(
+        &mut self,
+        index: usize,
+        signature: secp256k1::ecdsa::Signature,
+    ) -> Result<(), Error> {
+        self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
+            spend.append_signature(index, shielded_sighash, signature)
+        })
+    }
+
+    fn generate_or_apply_sapling_signature<F>(&mut self, index: usize, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&mut sapling::pczt::Spend, [u8; 32]) -> Result<(), sapling::pczt::SignerError>,
+    {
         let spend = self
             .sapling
             .spends_mut()
@@ -187,9 +249,8 @@ impl Signer {
         }
         .map_err(Error::SaplingVerify)?;
 
-        spend
-            .sign(self.shielded_sighash, ask, OsRng)
-            .map_err(Error::SaplingSign)?;
+        // Generate or apply the signature.
+        f(spend, self.shielded_sighash).map_err(Error::SaplingSign)?;
 
         // Update transaction modifiability: all transaction effects have been committed
         // to by the signature.
@@ -212,6 +273,30 @@ impl Signer {
         index: usize,
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
+        self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
+            spend.sign(shielded_sighash, ask, OsRng)
+        })
+    }
+
+    /// Applies the given signature to the Orchard spend.
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn apply_orchard_signature(
+        &mut self,
+        index: usize,
+        signature: secp256k1::ecdsa::Signature,
+    ) -> Result<(), Error> {
+        self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
+            spend.append_signature(index, shielded_sighash, signature)
+        })
+    }
+
+    fn generate_or_apply_orchard_signature<F>(&mut self, index: usize, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&mut orchard::pczt::Action, [u8; 32]) -> Result<(), orchard::pczt::SignerError>,
+    {
         let action = self
             .orchard
             .actions_mut()
@@ -230,9 +315,8 @@ impl Signer {
         }
         .map_err(Error::OrchardVerify)?;
 
-        action
-            .sign(self.shielded_sighash, ask, OsRng)
-            .map_err(Error::OrchardSign)?;
+        // Generate or apply the signature.
+        f(action, self.shielded_sighash).map_err(Error::OrchardSign)?;
 
         // Update transaction modifiability: all transaction effects have been committed
         // to by the signature.
@@ -308,6 +392,18 @@ impl Authorization for EffectsOnly {
     type OrchardAuth = orchard::bundle::EffectsOnly;
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = core::convert::Infallible;
+}
+
+/// Helper to produce the correct sighash for a PCZT.
+fn sighash(
+    tx_data: &TransactionData<EffectsOnly>,
+    signable_input: &SignableInput,
+    txid_parts: &TxDigests<Blake2bHash>,
+) -> [u8; 32] {
+    v5_signature_hash(tx_data, signable_input, txid_parts)
+        .as_ref()
+        .try_into()
+        .expect("correct length")
 }
 
 /// Errors that can occur while creating signatures for a PCZT.

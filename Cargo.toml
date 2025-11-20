@@ -226,3 +226,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "2308caf68c48c02468b66cfc452dad54e355e32f" }
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "2308caf68c48c02468b66cfc452dad54e355e32f" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "22d46302faf7fcfb53922160588e5a4c5bee07af" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "1d756ee69a2597db26b0858f446e6ed210c7426d" }
