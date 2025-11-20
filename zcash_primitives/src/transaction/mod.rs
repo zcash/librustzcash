@@ -1447,7 +1447,7 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
-                issue_bundle: issue_bundle,
+                issue_bundle,
             }
         }
     }

@@ -33,6 +33,13 @@ pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
+/// The creation cost for issuance of a Zcash Shielded Asset (ZSA), in equivalent logical actions,
+/// as defined in [ZIP 317].
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+#[cfg(zcash_unstable = "nu7")]
+pub const CREATION_COST: usize = 100;
+
 /// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
@@ -41,7 +48,7 @@ pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
-/// This fee rule supports Orchard, Sapling, and (P2PKH only) transparent inputs.
+/// This fee rule supports OrchardZSA, Orchard, Sapling, and (P2PKH only) transparent inputs.
 /// Returns an error if a coin containing a non-P2PKH script is provided as an input.
 ///
 /// This fee rule may slightly overestimate fees in case where the user is attempting
@@ -57,6 +64,8 @@ pub struct FeeRule {
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
+    #[cfg(zcash_unstable = "nu7")]
+    creation_cost: usize,
 }
 
 impl FeeRule {
@@ -69,6 +78,8 @@ impl FeeRule {
             grace_actions: GRACE_ACTIONS,
             p2pkh_standard_input_size: P2PKH_STANDARD_INPUT_SIZE,
             p2pkh_standard_output_size: P2PKH_STANDARD_OUTPUT_SIZE,
+            #[cfg(zcash_unstable = "nu7")]
+            creation_cost: CREATION_COST,
         }
     }
 
@@ -90,6 +101,7 @@ impl FeeRule {
         grace_actions: usize,
         p2pkh_standard_input_size: usize,
         p2pkh_standard_output_size: usize,
+        #[cfg(zcash_unstable = "nu7")] creation_cost: usize,
     ) -> Option<Self> {
         if p2pkh_standard_input_size == 0 || p2pkh_standard_output_size == 0 {
             None
@@ -99,6 +111,8 @@ impl FeeRule {
                 grace_actions,
                 p2pkh_standard_input_size,
                 p2pkh_standard_output_size,
+                #[cfg(zcash_unstable = "nu7")]
+                creation_cost,
             })
         }
     }
@@ -118,6 +132,11 @@ impl FeeRule {
     /// Returns the ZIP 317 standard P2PKH output size
     pub fn p2pkh_standard_output_size(&self) -> usize {
         self.p2pkh_standard_output_size
+    }
+    /// Returns the ZIP 317 creation cost for Zcash Shielded Asset (ZSA) issuance.
+    #[cfg(zcash_unstable = "nu7")]
+    pub fn creation_cost(&self) -> usize {
+        self.creation_cost
     }
 }
 
@@ -161,6 +180,8 @@ impl super::FeeRule for FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        #[cfg(zcash_unstable = "nu7")] asset_creation_count: usize,
+        #[cfg(zcash_unstable = "nu7")] total_issue_note_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         let mut t_in_total_size: usize = 0;
         let mut non_p2pkh_outpoints = vec![];
@@ -183,11 +204,19 @@ impl super::FeeRule for FeeRule {
 
         let ceildiv = |num: usize, den: usize| num.div_ceil(den);
 
+        #[cfg(not(zcash_unstable = "nu7"))]
+        let issuance_logical_actions: usize = 0;
+
+        #[cfg(zcash_unstable = "nu7")]
+        let issuance_logical_actions: usize =
+            total_issue_note_count + (self.creation_cost * asset_creation_count);
+
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
             ceildiv(t_out_total_size, self.p2pkh_standard_output_size),
         ) + max(sapling_input_count, sapling_output_count)
-            + orchard_action_count;
+            + orchard_action_count
+            + issuance_logical_actions;
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())

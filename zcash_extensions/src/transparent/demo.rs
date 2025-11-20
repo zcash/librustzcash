@@ -478,6 +478,7 @@ mod tests {
 
     use blake2b_simd::Params;
     use ff::Field;
+    use orchard::note::AssetBase;
     use rand_core::OsRng;
 
     use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
@@ -539,6 +540,12 @@ mod tests {
         };
 
         (hash_1(preimage_1, &hash_2), hash_2)
+    }
+
+    /// This is a helper function for testing that indicates no assets are newly created.
+    #[cfg(zcash_unstable = "nu7")]
+    fn no_new_assets(_: &AssetBase) -> bool {
+        false
     }
 
     #[test]
@@ -844,6 +851,8 @@ mod tests {
                 &prover,
                 &prover,
                 &fee_rule,
+                #[cfg(zcash_unstable = "nu7")]
+                no_new_assets,
             )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
@@ -873,6 +882,8 @@ mod tests {
                 &prover,
                 &prover,
                 &fee_rule,
+                #[cfg(zcash_unstable = "nu7")]
+                no_new_assets,
             )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
@@ -909,6 +920,8 @@ mod tests {
                 &prover,
                 &prover,
                 &fee_rule,
+                #[cfg(zcash_unstable = "nu7")]
+                no_new_assets,
             )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();

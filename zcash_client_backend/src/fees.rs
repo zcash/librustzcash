@@ -45,6 +45,8 @@ impl FeeRule for StandardFeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        #[cfg(zcash_unstable = "nu7")] asset_creation_count: usize,
+        #[cfg(zcash_unstable = "nu7")] total_issue_note_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         #[allow(deprecated)]
         match self {
@@ -56,6 +58,10 @@ impl FeeRule for StandardFeeRule {
                 sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
+                #[cfg(zcash_unstable = "nu7")]
+                asset_creation_count,
+                #[cfg(zcash_unstable = "nu7")]
+                total_issue_note_count,
             ),
         }
     }

@@ -109,6 +109,7 @@ use {
 
 #[cfg(feature = "orchard")]
 use orchard::note::AssetBase;
+
 #[cfg(all(feature = "orchard", feature = "pczt"))]
 use zcash_primitives::transaction::OrchardBundle;
 
@@ -1631,6 +1632,8 @@ where
         spend_prover,
         output_prover,
         fee_rule,
+        #[cfg(zcash_unstable = "nu7")]
+        |_| false,
     )?;
 
     #[cfg(feature = "orchard")]
@@ -1806,7 +1809,12 @@ where
     )?;
 
     // Build the transaction with the specified fee rule
-    let build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+    let build_result = build_state.builder.build_for_pczt(
+        OsRng,
+        fee_rule,
+        #[cfg(zcash_unstable = "nu7")]
+        |_| false,
+    )?;
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
 

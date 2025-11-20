@@ -40,10 +40,7 @@ use {
     },
 };
 
-use orchard::builder::BundleType;
-use orchard::note::AssetBase;
-use orchard::orchard_flavor::OrchardVanilla;
-use orchard::Address;
+use orchard::{builder::BundleType, note::AssetBase, orchard_flavor::OrchardVanilla, Address};
 
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::builder::TransparentInputInfo;
@@ -737,7 +734,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Zatoshis, FeeError<FR::Error>> {
+    pub fn get_fee<FR: FeeRule>(
+        &self,
+        fee_rule: &FR,
+        #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&AssetBase) -> bool,
+    ) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
@@ -775,6 +776,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                             .num_actions(builder.spends().len(), builder.outputs().len())
                             .map_err(FeeError::Bundle)
                     })?,
+                #[cfg(zcash_unstable = "nu7")]
+                self.issuance_builder.as_ref().map_or(0, |bundle| {
+                    bundle
+                        .actions()
+                        .iter()
+                        .filter(|&action| {
+                            is_new_asset(&AssetBase::derive(bundle.ik(), action.asset_desc_hash()))
+                        })
+                        .count()
+                }),
+                #[cfg(zcash_unstable = "nu7")]
+                self.issuance_builder
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.get_all_notes().len()),
             )
             .map_err(FeeError::FeeRule)
     }
@@ -783,6 +798,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     pub fn get_fee_zfuture<FR: FeeRule + FutureFeeRule>(
         &self,
         fee_rule: &FR,
+        #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&AssetBase) -> bool,
     ) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
@@ -821,6 +837,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                             .num_actions(builder.spends().len(), builder.outputs().len())
                             .map_err(FeeError::Bundle)
                     })?,
+                #[cfg(zcash_unstable = "nu7")]
+                self.issuance_builder.as_ref().map_or(0, |bundle| {
+                    bundle
+                        .actions()
+                        .iter()
+                        .filter(|&action| {
+                            is_new_asset(&AssetBase::derive(bundle.ik(), action.asset_desc_hash()))
+                        })
+                        .count()
+                }),
+                #[cfg(zcash_unstable = "nu7")]
+                self.issuance_builder
+                    .as_ref()
+                    .map_or(0, |bundle| bundle.get_all_notes().len()),
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
             )
@@ -847,8 +877,15 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
+        #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&AssetBase) -> bool,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        let fee = self
+            .get_fee(
+                fee_rule,
+                #[cfg(zcash_unstable = "nu7")]
+                is_new_asset,
+            )
+            .map_err(Error::Fee)?;
         self.build_internal(
             transparent_signing_set,
             sapling_extsks,
@@ -879,8 +916,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
+        #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&AssetBase) -> bool,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
+        let fee = self
+            .get_fee_zfuture(fee_rule, is_new_asset)
+            .map_err(Error::Fee)?;
         self.build_internal(
             transparent_signing_set,
             sapling_extsks,
@@ -1123,8 +1163,15 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         self,
         mut rng: R,
         fee_rule: &FR,
+        #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&AssetBase) -> bool,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
-        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        let fee = self
+            .get_fee(
+                fee_rule,
+                #[cfg(zcash_unstable = "nu7")]
+                is_new_asset,
+            )
+            .map_err(Error::Fee)?;
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
         // determine transaction version
@@ -1275,6 +1322,7 @@ mod testing {
             transparent_signing_set: &TransparentSigningSet,
             sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
             orchard_saks: &[orchard::keys::SpendAuthorizingKey],
+            #[cfg(zcash_unstable = "nu7")] is_new_asset: impl Fn(&orchard::note::AssetBase) -> bool,
             rng: R,
         ) -> Result<BuildResult, Error<zip317::FeeError>> {
             struct FakeCryptoRng<R: RngCore>(R);
@@ -1306,6 +1354,8 @@ mod testing {
                 &MockOutputProver,
                 #[allow(deprecated)]
                 &zip317::FeeRule::standard(),
+                #[cfg(zcash_unstable = "nu7")]
+                is_new_asset,
             )
         }
     }
@@ -1345,6 +1395,31 @@ mod tests {
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::AccountId,
     };
+
+    #[cfg(zcash_unstable = "nu7")]
+    use {
+        crate::transaction::fees::zip317,
+        nonempty::NonEmpty,
+        orchard::{
+            issuance::{compute_asset_desc_hash, IssueInfo},
+            issuance_auth::{IssueAuthKey, IssueValidatingKey},
+            keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey},
+            note::AssetBase,
+            orchard_flavor::OrchardVanilla,
+            primitives::OrchardDomain,
+            tree::MerkleHashOrchard,
+            value::NoteValue,
+        },
+        shardtree::{store::memory::MemoryShardStore, ShardTree},
+        zcash_note_encryption::try_note_decryption,
+        zcash_protocol::memo::Memo,
+    };
+
+    /// This is a helper function for testing that indicates no assets are newly created.
+    #[cfg(zcash_unstable = "nu7")]
+    fn no_new_assets(_: &AssetBase) -> bool {
+        false
+    }
 
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.
@@ -1413,7 +1488,14 @@ mod tests {
             .unwrap();
 
         let res = builder
-            .mock_build(&transparent_signing_set, &[], &[], OsRng)
+            .mock_build(
+                &transparent_signing_set,
+                &[],
+                &[],
+                #[cfg(zcash_unstable = "nu7")]
+                no_new_assets,
+                OsRng,
+            )
             .unwrap();
         // No binding signature, because only t input and outputs
         assert!(res.transaction().sapling_bundle.is_none());
@@ -1460,7 +1542,14 @@ mod tests {
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
         let res = builder
-            .mock_build(&TransparentSigningSet::new(), &[extsk], &[], OsRng)
+            .mock_build(
+                &TransparentSigningSet::new(),
+                &[extsk],
+                &[],
+                #[cfg(zcash_unstable = "nu7")]
+                no_new_assets,
+                OsRng,
+            )
             .unwrap();
         assert!(res.transaction().sapling_bundle().is_some());
     }
@@ -1486,7 +1575,14 @@ mod tests {
             };
             let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), &[], &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    &[],
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng,
+                ),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
@@ -1514,7 +1610,14 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng
+                ),
                 Err(Error::InsufficientFunds(expected)) if
                     expected == (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1535,7 +1638,14 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng
+                ),
                 Err(Error::InsufficientFunds(expected)) if expected ==
                     (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1553,7 +1663,14 @@ mod tests {
             builder.set_zip233_amount(Zatoshis::const_from_u64(50000));
 
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng
+                ),
                 Err(Error::InsufficientFunds(expected)) if expected ==
                     (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1598,7 +1715,14 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng
+                ),
                 Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
             );
         }
@@ -1635,7 +1759,14 @@ mod tests {
                 .unwrap();
             builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
             assert_matches!(
-                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                builder.mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng
+                ),
                 Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
             );
         }
@@ -1686,7 +1817,14 @@ mod tests {
                 )
                 .unwrap();
             let res = builder
-                .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
+                .mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng,
+                )
                 .unwrap();
             assert_eq!(
                 res.transaction()
@@ -1735,7 +1873,14 @@ mod tests {
                 .unwrap();
             builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
             let res = builder
-                .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
+                .mock_build(
+                    &TransparentSigningSet::new(),
+                    extsks,
+                    &[],
+                    #[cfg(zcash_unstable = "nu7")]
+                    no_new_assets,
+                    OsRng,
+                )
                 .unwrap();
             assert_eq!(
                 res.transaction()
@@ -1744,5 +1889,161 @@ mod tests {
                 Some(Zatoshis::const_from_u64(15_000))
             );
         }
+    }
+
+    #[cfg(zcash_unstable = "nu7")]
+    #[test]
+    fn check_zsa_issuance_fees() {
+        const OLD_NOTE_VALUE: u64 = 10_000_000;
+
+        // The scenario in the test issues:
+        // - one note of a previously issued asset (asset_desc_hash_1), and
+        // - two notes of a newly created asset (asset_desc_hash_2): the first note is the
+        //   reference note and the second note is another note of the same newly created asset.
+        // The expected number of logical actions is:
+        // - 2 Orchard Actions (the minimum required for an Orchard bundle),
+        // - 3 issued notes in total,
+        // - 1 * 100 for the contribution of the newly created asset.
+        // The logical_actions is therefore 105, leading to a fee of 105 * 5_000 = 525_000 zatoshis.
+        const EXPECTED_FEE: u64 = 525_000;
+
+        let mut rng = OsRng;
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Nu6_1)
+            .unwrap();
+
+        // Generate keys
+        let sk = SpendingKey::from_zip32_seed(&[1u8; 32], 1, AccountId::ZERO).unwrap();
+        let fvk = FullViewingKey::from(&sk);
+        let recipient = fvk.address_at(0u32, Scope::External);
+        let isk = IssueAuthKey::from_zip32_seed(&[1u8; 32], 1, 0).unwrap();
+        let ik = IssueValidatingKey::from(&isk);
+
+        // Create a test note in the Orchard tree
+        let note = {
+            let mut builder = orchard::builder::Builder::new(
+                orchard::builder::BundleType::DEFAULT_VANILLA,
+                orchard::Anchor::empty_tree(),
+            );
+            builder
+                .add_output(
+                    None,
+                    recipient,
+                    NoteValue::from_raw(OLD_NOTE_VALUE),
+                    AssetBase::native(),
+                    Memo::Empty.encode().into_bytes(),
+                )
+                .unwrap();
+            let (bundle, meta) = builder.build::<i64, OrchardVanilla>(&mut rng).unwrap();
+            let action = bundle
+                .actions()
+                .get(meta.output_action_index(0).unwrap())
+                .unwrap();
+            let (note, _, _) = try_note_decryption(
+                &OrchardDomain::for_action(action),
+                &fvk.to_ivk(Scope::External).prepare(),
+                action,
+            )
+            .unwrap();
+            note
+        };
+
+        let (anchor, merkle_path) = {
+            let leaf = MerkleHashOrchard::from_cmx(&note.commitment().into());
+            let mut tree = ShardTree::<_, 32, 16>::new(
+                MemoryShardStore::<MerkleHashOrchard, u32>::empty(),
+                100,
+            );
+            tree.append(leaf, incrementalmerkletree::Retention::Marked)
+                .unwrap();
+            tree.checkpoint(9_999_999).unwrap();
+            let path = tree
+                .witness_at_checkpoint_depth(0.into(), 0)
+                .unwrap()
+                .unwrap();
+            (path.root(leaf).into(), path.into())
+        };
+
+        let mut builder = Builder::new(
+            TEST_NETWORK,
+            tx_height,
+            BuildConfig::TxV6 {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(anchor),
+            },
+        );
+
+        // Define two assets: one previously issued, one newly created
+        let asset_1 = compute_asset_desc_hash(&NonEmpty::from_slice(b"This is Asset 1").unwrap());
+        let asset_2 = compute_asset_desc_hash(&NonEmpty::from_slice(b"This is Asset 2").unwrap());
+
+        /// Returns a predicate closure that determines if the given asset is newly created (not in the previously issued list).
+        fn new_asset_predicate(
+            previously_issued: &[AssetBase],
+        ) -> impl Fn(&AssetBase) -> bool + '_ {
+            move |asset: &AssetBase| {
+                if *asset == AssetBase::native() {
+                    return false;
+                }
+                !previously_issued.contains(asset)
+            }
+        }
+
+        let prev_issued = [AssetBase::derive(&ik, &asset_1)];
+        let is_new_asset = new_asset_predicate(&prev_issued);
+
+        // Add spend and output for fees
+        builder
+            .add_orchard_spend::<zip317::FeeRule>(fvk.clone(), note, merkle_path)
+            .unwrap();
+        builder
+            .add_orchard_output::<zip317::FeeRule>(
+                Some(fvk.to_ovk(Scope::External)),
+                recipient,
+                (OLD_NOTE_VALUE - EXPECTED_FEE).into(),
+                AssetBase::native(),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+
+        // Issue previously issued asset and newly created asset
+        builder
+            .init_issuance_bundle::<zip317::FeeRule>(
+                isk,
+                asset_1,
+                Some(IssueInfo {
+                    recipient,
+                    value: NoteValue::from_raw(1),
+                }),
+                false,
+            )
+            .unwrap();
+        builder
+            .add_recipient::<zip317::FeeRule>(asset_2, recipient, NoteValue::from_raw(1), true)
+            .unwrap();
+
+        let tx = builder
+            .mock_build(
+                &TransparentSigningSet::new(),
+                &[],
+                &[SpendAuthorizingKey::from(&sk)],
+                #[cfg(zcash_unstable = "nu7")]
+                is_new_asset,
+                OsRng,
+            )
+            .unwrap()
+            .into_transaction();
+
+        // Verify: 2 Orchard actions, 3 issued notes,
+        // fee = 5000 * (2 + 3 + 100) = 525_000 (as in the EXPECTED_FEE calculation above).
+        assert_eq!(
+            tx.orchard_bundle().unwrap().as_zsa_bundle().actions().len(),
+            2
+        );
+        assert_eq!(tx.issue_bundle().unwrap().get_all_notes().len(), 3);
+        assert_eq!(
+            tx.fee_paid(|_| Err(BalanceError::Overflow)).unwrap(),
+            Some(Zatoshis::const_from_u64(EXPECTED_FEE))
+        );
     }
 }

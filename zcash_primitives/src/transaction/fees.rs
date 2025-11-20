@@ -24,6 +24,12 @@ pub trait FeeRule {
     /// Implementations of this method should compute the fee amount given exactly the inputs and
     /// outputs specified, and should NOT compute speculative fees given any additional change
     /// outputs that may need to be created in order for inputs and outputs to balance.
+    ///
+    /// The asset_creation_count and total_issue_note_count parameters are only included with the
+    /// NU7 network upgrade.
+    /// - asset_creation_count: The number of assets created for the first time in the transaction.
+    ///   This needs to be obtained from the global issuance state.
+    /// - total_issue_note_count: The total number of issue notes across all assets in the transaction.
     #[allow(clippy::too_many_arguments)]
     fn fee_required<P: consensus::Parameters>(
         &self,
@@ -34,6 +40,8 @@ pub trait FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        #[cfg(zcash_unstable = "nu7")] asset_creation_count: usize,
+        #[cfg(zcash_unstable = "nu7")] total_issue_note_count: usize,
     ) -> Result<Zatoshis, Self::Error>;
 }
 
@@ -56,6 +64,8 @@ pub trait FutureFeeRule: FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        #[cfg(zcash_unstable = "nu7")] asset_creation_count: usize,
+        #[cfg(zcash_unstable = "nu7")] total_issue_note_count: usize,
         tze_inputs: &[impl tze::InputView],
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<Zatoshis, Self::Error>;

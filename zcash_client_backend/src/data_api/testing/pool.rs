@@ -2123,6 +2123,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             &test_prover,
             &test_prover,
             &zip317::FeeRule::standard(),
+            #[cfg(zcash_unstable = "nu7")]
+            |_| false,
         )
         .unwrap();
     let txid = build_result.transaction().txid();
