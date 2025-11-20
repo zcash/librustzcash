@@ -30,8 +30,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.halo2_gadgets]]
-version = "0.3.1"
-when = "2024-12-16"
+version = "0.4.0"
+when = "2025-12-04"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -51,10 +51,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.halo2_proofs]]
-version = "0.3.0"
-when = "2023-03-22"
-user-id = 1244
-user-login = "ebfull"
+version = "0.3.2"
+when = "2025-12-04"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.incrementalmerkletree]]
 version = "0.8.2"
@@ -78,11 +79,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.11.0"
-when = "2025-02-21"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.12.0"
+when = "2025-12-05"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.pczt]]
 version = "0.5.0"
@@ -92,11 +93,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.sapling-crypto]]
-version = "0.5.0"
-when = "2025-02-21"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.6.0"
+when = "2025-12-05"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.schemerz]]
 version = "0.2.0"

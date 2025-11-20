@@ -11,6 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified
   to reflect the view that a single outgoing viewing key should be uniformly
   applied to encrypt all external transaction outputs, irrespective of which
