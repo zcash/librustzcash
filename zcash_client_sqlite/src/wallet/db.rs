@@ -1127,9 +1127,10 @@ pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
 WITH unioned AS (
     -- select all outputs received by the wallet
-    SELECT transactions.id_tx           AS transaction_id,
-           transactions.txid            AS txid,
-           transactions.mined_height    AS mined_height,
+    SELECT t.id_tx                      AS transaction_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           IFNULL(t.trust_status, 0)    AS trust_status,
            ro.pool                      AS output_pool,
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
@@ -1141,8 +1142,8 @@ WITH unioned AS (
            ro.memo                      AS memo,
            a.key_scope                  AS recipient_key_scope
     FROM v_received_outputs ro
-    JOIN transactions
-        ON transactions.id_tx = ro.transaction_id
+    JOIN transactions t
+        ON t.id_tx = ro.transaction_id
     LEFT JOIN addresses a ON a.id = ro.address_id
     -- join to the sent_notes table to obtain `from_account_id`
     LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
@@ -1151,9 +1152,10 @@ WITH unioned AS (
     LEFT JOIN accounts to_account ON to_account.id = ro.account_id
     UNION ALL
     -- select all outputs sent from the wallet to external recipients
-    SELECT transactions.id_tx           AS transaction_id,
-           transactions.txid            AS txid,
-           transactions.mined_height    AS mined_height,
+    SELECT t.id_tx                      AS transaction_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           IFNULL(t.trust_status, 0)    AS trust_status,
            sent_notes.output_pool       AS output_pool,
            sent_notes.output_index      AS output_index,
            from_account.uuid            AS from_account_uuid,
@@ -1165,8 +1167,8 @@ WITH unioned AS (
            sent_notes.memo              AS memo,
            NULL                         AS recipient_key_scope
     FROM sent_notes
-    JOIN transactions
-        ON transactions.id_tx = sent_notes.transaction_id
+    JOIN transactions t
+        ON t.id_tx = sent_notes.transaction_id
     LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
     -- join on the accounts table to obtain account UUIDs
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
@@ -1174,17 +1176,18 @@ WITH unioned AS (
 -- merge duplicate rows while retaining maximum information
 SELECT
     transaction_id,
-    MAX(txid),
-    MAX(mined_height) AS mined_height,
+    MAX(txid)                   AS txid,
+    MAX(mined_height)           AS tx_mined_height,
+    MIN(trust_status)           AS tx_trust_status,
     output_pool,
     output_index,
-    MAX(from_account_uuid) AS from_account_uuid,
-    MAX(to_account_uuid) AS to_account_uuid,
-    MAX(to_address) AS to_address,
-    MAX(value) AS value,
-    MAX(is_change) AS is_change,
-    MAX(memo) AS memo,
-    MAX(recipient_key_scope) AS recipient_key_scope
+    MAX(from_account_uuid)      AS from_account_uuid,
+    MAX(to_account_uuid)        AS to_account_uuid,
+    MAX(to_address)             AS to_address,
+    MAX(value)                  AS value,
+    MAX(is_change)              AS is_change,
+    MAX(memo)                   AS memo,
+    MAX(recipient_key_scope)    AS recipient_key_scope
 FROM unioned
 GROUP BY transaction_id, output_pool, output_index";
 

@@ -75,7 +75,7 @@ use std::{
 
 use encoding::{
     KeyScope, ReceiverFlags, account_kind_code, decode_diversifier_index_be,
-    encode_diversifier_index_be, memo_repr, pool_code,
+    encode_diversifier_index_be, memo_repr, parse_pool_code, pool_code,
 };
 use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, Connection, OptionalExtension, named_params, params};
@@ -89,9 +89,9 @@ use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio, SAPLING_SHARD_HEIGHT,
-        SentTransaction, SentTransactionOutput, TransactionDataRequest, TransactionStatus,
-        WalletSummary, Zip32Derivation,
+        AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio,
+        ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput,
+        TransactionDataRequest, TransactionStatus, WalletSummary, Zip32Derivation,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -4763,6 +4763,78 @@ pub(crate) fn get_block_range(
         },
     )
     .map_err(SqliteClientError::from)
+}
+
+pub(crate) fn get_received_outputs(
+    conn: &rusqlite::Connection,
+    txid: TxId,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<Vec<ReceivedTransactionOutput>, SqliteClientError> {
+    let mut stmt_received_outputs = conn.prepare_cached(
+        "SELECT
+             vto.output_pool,
+             vto.output_index,
+             vto.recipient_key_scope,
+             vto.value,
+             vto.tx_mined_height,
+             IFNULL(vto.tx_trust_status, 0) AS tx_trust_status,
+             MAX(tt.mined_height) AS max_shielding_input_height,
+             MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
+         FROM v_tx_outputs vto
+         LEFT OUTER JOIN transparent_received_output_spends ros
+            ON ros.transaction_id = vto.transaction_id
+         LEFT OUTER JOIN transparent_received_outputs tro
+            ON tro.id = ros.transparent_received_output_id
+         LEFT OUTER JOIN transactions tt
+            ON tt.id_tx = tro.transaction_id
+         WHERE vto.txid = :txid
+         GROUP BY vto.output_pool, vto.output_index",
+    )?;
+
+    let results = stmt_received_outputs
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![":txid": txid.as_ref()],
+            |row| {
+                let pool_type = parse_pool_code(row.get("output_pool")?)?;
+                let output_index = row.get("output_index")?;
+                let value = Zatoshis::from_nonnegative_i64(row.get("value")?)?;
+                let mined_height = row
+                    .get::<_, Option<u32>>("tx_mined_height")?
+                    .map(BlockHeight::from);
+                let max_shielding_input_height = row
+                    .get::<_, Option<u32>>("max_shielding_input_height")?
+                    .map(BlockHeight::from);
+                let tx_shielding_inputs_trusted =
+                    row.get::<_, bool>("min_shielding_input_trust")?;
+                let key_scope = row
+                    .get::<_, Option<i64>>("recipient_key_scope")?
+                    .map(KeyScope::decode)
+                    .transpose()?;
+                let tx_trusted = row.get::<_, bool>("tx_trust_status")?;
+
+                let confirmations_until_spendable = confirmations_policy
+                    .confirmations_until_spendable(
+                        target_height,
+                        pool_type,
+                        key_scope.and_then(|s| zip32::Scope::try_from(s).ok()),
+                        mined_height,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    );
+
+                Ok(ReceivedTransactionOutput::from_parts(
+                    pool_type,
+                    output_index,
+                    value,
+                    confirmations_until_spendable,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(results)
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
