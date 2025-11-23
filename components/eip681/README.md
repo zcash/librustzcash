@@ -1,8 +1,7 @@
 # eip681
 
 This library contains Rust parsing functions and data types for working
-with [Ethereum EIP 681 Payment Request
-URIs](https://eips.ethereum.org/EIPS/eip-681).
+with [Ethereum EIP 681 Payment Request URIs](https://eips.ethereum.org/EIPS/eip-681).
 
 ## License
 
