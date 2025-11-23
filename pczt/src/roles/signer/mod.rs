@@ -107,6 +107,34 @@ impl Signer {
         }
     }
 
+    /// Gets the signature hash for a transparent input at the given index.
+    pub fn get_transparent_sighash(&self, index: usize) -> Result<[u8; 32], Error> {
+        use ::transparent::address::Script;
+        use ::transparent::sighash::SignableInput as TransparentSignableInput;
+
+        let input = self
+            .transparent
+            .inputs()
+            .get(index)
+            .ok_or(Error::InvalidIndex)?;
+
+        let script_pubkey = input.script_pubkey();
+        let script_code = input.redeem_script().as_ref().unwrap_or(script_pubkey);
+
+        let script_code_script = Script::from(script_code);
+        let script_pubkey_script = Script::from(script_pubkey);
+
+        let signable_input = SignableInput::Transparent(TransparentSignableInput::from_parts(
+            *input.sighash_type(),
+            index,
+            &script_code_script,
+            &script_pubkey_script,
+            *input.value(),
+        ));
+
+        Ok(self.sighash(&signable_input))
+    }
+
     /// Signs the transparent spend at the given index with the given spending key.
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
