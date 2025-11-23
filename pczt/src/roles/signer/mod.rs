@@ -15,6 +15,8 @@
 
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
+use orchard::primitives::redpallas;
+use redjubjub;
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
@@ -221,10 +223,10 @@ impl Signer {
     pub fn apply_sapling_signature(
         &mut self,
         index: usize,
-        signature: secp256k1::ecdsa::Signature,
+        signature: redjubjub::Signature<redjubjub::SpendAuth>,
     ) -> Result<(), Error> {
         self.generate_or_apply_sapling_signature(index, |spend, shielded_sighash| {
-            spend.append_signature(index, shielded_sighash, signature)
+            spend.apply_signature(shielded_sighash, signature)
         })
     }
 
@@ -286,10 +288,10 @@ impl Signer {
     pub fn apply_orchard_signature(
         &mut self,
         index: usize,
-        signature: secp256k1::ecdsa::Signature,
+        signature: redpallas::Signature<redpallas::SpendAuth>,
     ) -> Result<(), Error> {
         self.generate_or_apply_orchard_signature(index, |spend, shielded_sighash| {
-            spend.append_signature(index, shielded_sighash, signature)
+            spend.apply_signature(shielded_sighash, signature)
         })
     }
 
