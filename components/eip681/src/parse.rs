@@ -33,7 +33,7 @@ pub enum ParseError<'a> {
     #[snafu(display("Missing ENS name"))]
     EnsMissing,
 
-    /// The ENS name was was not a valid domain.
+    /// The ENS name was not a valid domain.
     #[snafu(display("Not a domain"))]
     EnsDomain,
 
