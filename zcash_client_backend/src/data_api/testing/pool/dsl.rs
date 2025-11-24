@@ -71,7 +71,7 @@ where
     ///     .with_account_from_sapling_activation(BlockHash([0; 32]))
     ///     .into();
     /// ```
-    pub fn with_standard_sapling_account(dsf: Dsf, tc: Cache) -> Self {
+    pub fn with_sapling_birthday_account(dsf: Dsf, tc: Cache) -> Self {
         TestBuilder::new()
             .with_data_store_factory(dsf)
             .with_block_cache(tc)
@@ -153,22 +153,14 @@ impl<T: ShieldedPoolTester, C: TestCache> Default for AddFundsSummary<T, C> {
 
 impl<T: ShieldedPoolTester, C: TestCache> AddFundsSummary<T, C> {
     /// Return the first block height.
-    pub fn first_block_height(&self) -> BlockHeight {
-        if let Some(step) = self.steps.first() {
-            step.results.block_height
-        } else {
-            BlockHeight::from_u32(0)
-        }
+    pub fn first_block_height(&self) -> Option<BlockHeight> {
+        self.steps.first().map(|step| step.results.block_height)
     }
 
     /// Return the latest block height after generating the blocks
     /// that added funds.
-    pub fn block_height(&self) -> BlockHeight {
-        if let Some(step) = self.steps.last() {
-            step.results.block_height
-        } else {
-            BlockHeight::from_u32(0)
-        }
+    pub fn block_height(&self) -> Option<BlockHeight> {
+        self.steps.last().map(|step| step.results.block_height)
     }
 }
 
