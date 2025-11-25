@@ -234,7 +234,7 @@ where
     /// This also verifies that the test account contains the expected funds as
     /// part of the _total_, and that the funds are spendable with the minimum number
     /// of confirmations.
-    pub fn add_a_single_note(
+    pub fn add_a_single_note_checking_balance(
         &mut self,
         note: impl Into<TestNoteConfig<T>>,
     ) -> (
@@ -242,16 +242,24 @@ where
         Cache::InsertResult,
         <T::Fvk as TestFvk>::Nullifier,
     ) {
-        let mut summary = self.add_notes([[note]]);
+        let mut summary = self.add_notes_checking_balance([[note]]);
         let res = summary.steps.pop().unwrap().results;
         (res.block_height, res.insert_result, res.nullifiers[0])
+    }
+
+    fn scanned_block_height(&self) -> BlockHeight {
+        self.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .map(|meta| meta.block_height())
+            .unwrap_or_else(|| BlockHeight::from_u32(0))
     }
 
     /// Generates `N` empty blocks.
     ///
     /// Returns the current block height.
     pub fn add_empty_blocks(&mut self, n: usize) -> BlockHeight {
-        let mut out_height = BlockHeight::from_u32(0);
+        let mut out_height = self.scanned_block_height();
         for _ in 0..n {
             let (h, _) = self.generate_empty_block();
             out_height = h;
@@ -286,16 +294,23 @@ where
     ///
     /// Returns a summary of steps.
     ///
+    /// ## Parameters
+    ///
+    /// * `blocks` - A collection of "blocks", where each "block" is a collection of
+    ///   "notes". More specifically, "notes" can be anything that can be converted
+    ///   into a [`TestNoteConfig`]. This allows you to add multiple blocks that each
+    ///   containing zero or more notes with one call to `add_notes`.
+    ///
     /// ## Note
     /// Keep in mind:
     /// * Each block coalesces these notes into a single transaction.
     /// * Funds are added to the default test account.
-    pub fn add_notes(
+    pub fn add_notes_checking_balance(
         &mut self,
         blocks: impl IntoIterator<Item = impl IntoIterator<Item = impl Into<TestNoteConfig<T>>>>,
     ) -> AddFundsSummary<T, Cache> {
         let mut from_height = None;
-        let mut current_height = BlockHeight::from_u32(0);
+        let mut current_height = self.scanned_block_height();
         let mut limit = 0;
         let account = self.get_account();
         let starting_balance = self
