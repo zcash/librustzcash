@@ -698,7 +698,7 @@ pub(crate) fn select_unspent_note_meta(
     //
     // TODO: Deduplicate this in the future by introducing a view?
     let mut stmt = conn.prepare_cached(&format!(
-        "SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+        "SELECT rn.id AS id, txid, {output_index_col},
                 commitment_tree_position, value
          FROM {table_prefix}_received_notes rn
          INNER JOIN transactions ON transactions.id_tx = rn.tx
