@@ -152,9 +152,6 @@ pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
 
-#[deprecated(note = "use ::zcash_protocol::consensus::NetworkType instead")]
-pub type Network = zcash_protocol::consensus::NetworkType;
-
 use zcash_protocol::{consensus::NetworkType, PoolType};
 
 /// A Zcash address.
