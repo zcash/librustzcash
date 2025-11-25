@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.10] - 2025-11-25
+
 ### Fixed
 - Fixes a SQL bug that causes unspent note metadata queries to fail.
 

@@ -219,10 +219,6 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bounded-vec]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.bounded-vec-deque]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
@@ -517,10 +513,6 @@ criteria = "safe-to-run"
 
 [[exemptions.fixed-hash]]
 version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fixedbitset]]
-version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.fluid-let]]
