@@ -22,10 +22,11 @@ workspace.
 - Removed deprecated `zcash_primitives::transaction::sighash::SIGHASH_ANYONECANPAY`, use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead.
 - Removed deprecated `zcash_primitives::transaction::sighash::SighashType`, use `zcash_transparent::sighash::SighashType` instead.
 
-- Removed deprecated module `zcash_primitives::transaction::components::amount::testing`:
-  - `arb_positive_amount`, use `zcash_protocol::value::testing::arb_positive_zat_balance` instead.
-  - `arb_amount`, use `zcash_protocol::value::testing::arb_zat_balance`
-  - `arb_nonnegative_amount`, use `zcash_protocol::value::testing::arb_zatoshis` 
+- Removed deprecated module `zcash_primitives::transaction::components::amount::testing`,
+  use `zcash_protocol::value::testing` instead with the following renames:
+  - `arb_positive_amount` to `zcash_protocol::value::testing::arb_positive_zat_balance`
+  - `arb_amount` to `zcash_protocol::value::testing::arb_zat_balance`
+  - `arb_nonnegative_amount` to `zcash_protocol::value::testing::arb_zatoshis`.
 - Removed deprecated module `zcash_primitives::transaction::components::amount`, use `zcash_protocol::value` instead.
 - Removed deprecated module `zcash_primitives::transaction::components::transparent::builder`, use `zcash_transparent::builder` instead.
 - Removed deprecated module `zcash_primitives::transaction::components::transparent::pczt`, use `zcash_transparent::pczt` instead.
