@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["SIGHASH_ALL","SIGHASH_ANYONECANPAY","SIGHASH_MASK","SIGHASH_NONE","SIGHASH_SINGLE"],"enum":["SignableInput"],"fn":["signature_hash"],"struct":["SignatureHash"],"type":["SighashType"]};
+window.SIDEBAR_ITEMS = {"enum":["SignableInput"],"fn":["signature_hash"],"struct":["SignatureHash"]};

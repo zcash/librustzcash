@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["COIN"],"mod":["testing"],"type":["Amount","BalanceError","NonNegativeAmount"]};

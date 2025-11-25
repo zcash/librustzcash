@@ -1,9 +1,9 @@
 (function() {
-    var implementors = Object.fromEntries([["zcash_primitives",[]],["zcash_transparent",[]]]);
+    var implementors = Object.fromEntries([["zcash_transparent",[]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":57,"fragment_lengths":[23,25]}
+//{"start":57,"fragment_lengths":[24]}
