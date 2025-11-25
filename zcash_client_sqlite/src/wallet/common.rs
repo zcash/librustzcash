@@ -962,12 +962,12 @@ pub(crate) fn unspent_notes_meta(
 #[cfg(test)]
 mod tests {
     use zcash_client_backend::data_api::testing::{
-        pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, TestBuilder,
+        AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{value::Zatoshis, ShieldedProtocol};
+    use zcash_protocol::{ShieldedProtocol, value::Zatoshis};
 
-    use crate::testing::{db::TestDbFactory, BlockCache};
+    use crate::testing::{BlockCache, db::TestDbFactory};
 
     #[test]
     fn select_unspent_note_meta() {

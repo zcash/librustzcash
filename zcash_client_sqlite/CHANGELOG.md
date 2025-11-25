@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.10, 0.19.1] - 2025-11-25
+
+### Fixed
+- Fixes a SQL bug that causes unspent note metadata queries to fail.
+
 ## [0.19.0] - 2025-11-05
 
 ### Added
@@ -33,11 +38,6 @@ workspace.
 - A bug was fixed in `WalletDb::get_transaction` that could cause transaction
   retrieval to return an error instead of `None` for transactions for which the 
   raw transaction data was not available.
-
-## [0.18.10] - 2025-11-25
-
-### Fixed
-- Fixes a SQL bug that causes unspent note metadata queries to fail.
 
 ## [0.18.9] - 2025-10-22
 
