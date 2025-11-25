@@ -698,7 +698,7 @@ pub(crate) fn select_unspent_note_meta(
     //
     // TODO: Deduplicate this in the future by introducing a view?
     let mut stmt = conn.prepare_cached(&format!(
-        "SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+        "SELECT rn.id AS id, txid, {output_index_col},
                 commitment_tree_position, value
          FROM {table_prefix}_received_notes rn
          INNER JOIN transactions ON transactions.id_tx = rn.tx
@@ -919,5 +919,44 @@ pub(crate) fn spendable_notes_meta(
         )))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zcash_client_backend::data_api::testing::{
+        pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, TestBuilder,
+    };
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{value::Zatoshis, ShieldedProtocol};
+
+    use crate::testing::{db::TestDbFactory, BlockCache};
+
+    #[test]
+    fn select_unspent_note_meta() {
+        let cache = BlockCache::new();
+        let mut st = TestBuilder::new()
+            .with_block_cache(cache)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let birthday_height = st.test_account().unwrap().birthday().height();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+
+        // Add funds to the wallet in a single note
+        let value = Zatoshis::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        let unspent_note_meta = super::select_unspent_note_meta(
+            st.wallet().conn(),
+            ShieldedProtocol::Sapling,
+            birthday_height,
+            h,
+        )
+        .unwrap();
+
+        assert_eq!(unspent_note_meta.len(), 1);
     }
 }
