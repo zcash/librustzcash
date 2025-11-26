@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (c871d09d1 2025-11-24)" data-channel="nightly" data-search-js="search-680b2199.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (80d8f292d 2025-11-25)" data-channel="nightly" data-search-js="search-680b2199.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>incrementalmerkletree::Position;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>rusqlite::{Connection, Row, named_params, types::Value};
@@ -735,7 +735,7 @@
 <a href=#735 id=735 data-nosnippet>735</a>    //
 <a href=#736 id=736 data-nosnippet>736</a>    // TODO: Deduplicate this in the future by introducing a view?
 <a href=#737 id=737 data-nosnippet>737</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#738 id=738 data-nosnippet>738</a>        <span class="string">"SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+<a href=#738 id=738 data-nosnippet>738</a>        <span class="string">"SELECT rn.id AS id, txid, {output_index_col},
 <a href=#739 id=739 data-nosnippet>739</a>                commitment_tree_position, value
 <a href=#740 id=740 data-nosnippet>740</a>         FROM {table_prefix}_received_notes rn
 <a href=#741 id=741 data-nosnippet>741</a>         INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
@@ -958,4 +958,43 @@
 <a href=#958 id=958 data-nosnippet>958</a>        <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
 <a href=#959 id=959 data-nosnippet>959</a>    }
 <a href=#960 id=960 data-nosnippet>960</a>}
+<a href=#961 id=961 data-nosnippet>961</a>
+<a href=#962 id=962 data-nosnippet>962</a><span class="attr">#[cfg(test)]
+<a href=#963 id=963 data-nosnippet>963</a></span><span class="kw">mod </span>tests {
+<a href=#964 id=964 data-nosnippet>964</a>    <span class="kw">use </span>zcash_client_backend::data_api::testing::{
+<a href=#965 id=965 data-nosnippet>965</a>        AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+<a href=#966 id=966 data-nosnippet>966</a>    };
+<a href=#967 id=967 data-nosnippet>967</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
+<a href=#968 id=968 data-nosnippet>968</a>    <span class="kw">use </span>zcash_protocol::{ShieldedProtocol, value::Zatoshis};
+<a href=#969 id=969 data-nosnippet>969</a>
+<a href=#970 id=970 data-nosnippet>970</a>    <span class="kw">use </span><span class="kw">crate</span>::testing::{BlockCache, db::TestDbFactory};
+<a href=#971 id=971 data-nosnippet>971</a>
+<a href=#972 id=972 data-nosnippet>972</a>    <span class="attr">#[test]
+<a href=#973 id=973 data-nosnippet>973</a>    </span><span class="kw">fn </span>select_unspent_note_meta() {
+<a href=#974 id=974 data-nosnippet>974</a>        <span class="kw">let </span>cache = BlockCache::new();
+<a href=#975 id=975 data-nosnippet>975</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#976 id=976 data-nosnippet>976</a>            .with_block_cache(cache)
+<a href=#977 id=977 data-nosnippet>977</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#978 id=978 data-nosnippet>978</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#979 id=979 data-nosnippet>979</a>            .build();
+<a href=#980 id=980 data-nosnippet>980</a>
+<a href=#981 id=981 data-nosnippet>981</a>        <span class="kw">let </span>birthday_height = st.test_account().unwrap().birthday().height();
+<a href=#982 id=982 data-nosnippet>982</a>        <span class="kw">let </span>dfvk = SaplingPoolTester::test_account_fvk(<span class="kw-2">&amp;</span>st);
+<a href=#983 id=983 data-nosnippet>983</a>
+<a href=#984 id=984 data-nosnippet>984</a>        <span class="comment">// Add funds to the wallet in a single note
+<a href=#985 id=985 data-nosnippet>985</a>        </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">60000</span>);
+<a href=#986 id=986 data-nosnippet>986</a>        <span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
+<a href=#987 id=987 data-nosnippet>987</a>        st.scan_cached_blocks(h, <span class="number">1</span>);
+<a href=#988 id=988 data-nosnippet>988</a>
+<a href=#989 id=989 data-nosnippet>989</a>        <span class="kw">let </span>unspent_note_meta = <span class="kw">super</span>::select_unspent_note_meta(
+<a href=#990 id=990 data-nosnippet>990</a>            st.wallet().conn(),
+<a href=#991 id=991 data-nosnippet>991</a>            ShieldedProtocol::Sapling,
+<a href=#992 id=992 data-nosnippet>992</a>            birthday_height,
+<a href=#993 id=993 data-nosnippet>993</a>            h,
+<a href=#994 id=994 data-nosnippet>994</a>        )
+<a href=#995 id=995 data-nosnippet>995</a>        .unwrap();
+<a href=#996 id=996 data-nosnippet>996</a>
+<a href=#997 id=997 data-nosnippet>997</a>        <span class="macro">assert_eq!</span>(unspent_note_meta.len(), <span class="number">1</span>);
+<a href=#998 id=998 data-nosnippet>998</a>    }
+<a href=#999 id=999 data-nosnippet>999</a>}
 </code></pre></div></section></main></body></html>
