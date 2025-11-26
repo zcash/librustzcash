@@ -64,7 +64,7 @@ use transparent::{address::TransparentAddress, builder::TransparentSigningSet, b
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
-    keys::{OutgoingViewingKey, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::transaction::{
     Transaction, TxId,
@@ -1278,28 +1278,20 @@ where
         utxos_spent
     };
 
-    let external_ovk = match ovk_policy {
-        OvkPolicy::Sender => Some(
-            ufvk.select_ovk(zip32::Scope::External, &input_sources)
-                .ok_or(Error::KeyNotAvailable(input_sources.head))?,
+    let (external_ovk, internal_ovk) = match ovk_policy {
+        OvkPolicy::Sender => (
+            Some(
+                ufvk.select_ovk(zip32::Scope::External, &input_sources)
+                    .ok_or(Error::KeyNotAvailable(input_sources.head))?,
+            ),
+            None,
         ),
         OvkPolicy::Custom {
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        } => {
-            let mut ovk = Some(OutgoingViewingKey::from(sapling));
-            #[cfg(feature = "orchard")]
-            if input_sources.contains(&PoolType::ORCHARD) {
-                ovk = Some(OutgoingViewingKey::from(orchard));
-            }
-            ovk
-        }
-        OvkPolicy::Discard => None,
+            external_ovk,
+            internal_ovk,
+        } => (Some(external_ovk), internal_ovk),
+        OvkPolicy::Discard => (None, None),
     };
-    let internal_ovk = ufvk
-        .select_ovk(zip32::Scope::Internal, &input_sources)
-        .ok_or(Error::KeyNotAvailable(input_sources.head))?;
 
     #[cfg(feature = "orchard")]
     let mut orchard_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
@@ -1441,7 +1433,7 @@ where
         match output_pool {
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
-                    Some(internal_ovk.into()),
+                    internal_ovk.map(|k| k.into()),
                     ufvk.sapling()
                         .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?
                         .change_address()
@@ -1465,7 +1457,7 @@ where
                 #[cfg(feature = "orchard")]
                 {
                     builder.add_orchard_output(
-                        Some(internal_ovk.into()),
+                        internal_ovk.map(|k| k.into()),
                         ufvk.orchard()
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),

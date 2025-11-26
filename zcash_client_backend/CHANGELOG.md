@@ -10,6 +10,24 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::wallet::OvkPolicy` has been substantially modified
+  to reflect the view that a single outgoing viewing key should be uniformly
+  applied to encrypt all external transaction outputs, irrespective of which
+  pool those outputs are produced into, and that by default wallet-internal
+  outputs should not be decryptable using an OVK (and will therefore only
+  be recoverable using the wallet's internal IVK).
+  - The semantics of `OvkPolicy::Sender` have changed. This policy now
+    specifies that wallet-internal change outputs should be encrypted
+    using a random key, rendering them unrecoverable to entities that
+    do not posess the internal IVK for the wallet.
+  - The `OvkPolicy::Custom` variant has changed. Instead of pool-specific
+    OVKs, this now encapsulates a pair of OVKs, one to be used for all
+    shielded external outputs of the transaction, and a second (optional)
+    key that will be used to encrypt any wallet-internal change outputs
+    that would otherwise only be recoverable using the wallet's internal
+    IVK.
+
 ## [0.21.0] - 2025-11-05
 
 ### Added

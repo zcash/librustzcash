@@ -9,6 +9,7 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use zcash_address::ZcashAddress;
+use zcash_keys::keys::OutgoingViewingKey;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
@@ -602,8 +603,9 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 pub enum OvkPolicy {
     /// Use the outgoing viewing key from the sender's [`UnifiedFullViewingKey`].
     ///
-    /// Transaction outputs will be decryptable by the sender, in addition to the
-    /// recipients.
+    /// External transaction outputs will be decryptable by the sender, in addition to the
+    /// recipients. Wallet-internal transaction outputs will be decryptable only with the wallet's
+    /// internal-scoped incoming viewing key.
     ///
     /// [`UnifiedFullViewingKey`]: zcash_keys::keys::UnifiedFullViewingKey
     Sender,
@@ -614,9 +616,8 @@ pub enum OvkPolicy {
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
     /// the provided outgoing viewing keys.
     Custom {
-        sapling: sapling::keys::OutgoingViewingKey,
-        #[cfg(feature = "orchard")]
-        orchard: orchard::keys::OutgoingViewingKey,
+        external_ovk: OutgoingViewingKey,
+        internal_ovk: Option<OutgoingViewingKey>,
     },
     /// Use no outgoing viewing keys. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
@@ -624,15 +625,16 @@ pub enum OvkPolicy {
 }
 
 impl OvkPolicy {
-    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key.
+    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key with both the
+    /// external_ovk and internal_ovk components set to the same key.
     ///
-    /// Outputs of transactions created with this OVK policy will be recoverable using
-    /// this key irrespective of the output pool.
+    /// Outputs of transactions created with this OVK policy will be recoverable using this key
+    /// irrespective of whether they are external outputs or wallet-internal change outputs.
     pub fn custom_from_common_bytes(key: &[u8; 32]) -> Self {
+        let k = OutgoingViewingKey::from(*key);
         OvkPolicy::Custom {
-            sapling: sapling::keys::OutgoingViewingKey(*key),
-            #[cfg(feature = "orchard")]
-            orchard: orchard::keys::OutgoingViewingKey::from(*key),
+            external_ovk: k,
+            internal_ovk: Some(k),
         }
     }
 }
