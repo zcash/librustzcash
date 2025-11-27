@@ -700,8 +700,14 @@ impl Transaction {
         Transaction { txid, data }
     }
 
+    /// Consumes this [`Transaction`] and returns the wrapped [`TransactionData`] value.
     pub fn into_data(self) -> TransactionData<Authorized> {
         self.data
+    }
+
+    /// Accessor for the wrapped [`TransactionData`] value.
+    pub fn data(&self) -> &TransactionData<Authorized> {
+        &self.data
     }
 
     pub fn txid(&self) -> TxId {

@@ -25,6 +25,7 @@ use zcash_client_backend::{
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, Recipient, WalletTransparentOutput},
 };
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     PoolType,
     ShieldedProtocol::{self, Sapling},
@@ -617,7 +618,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<Self::AccountId>,
+        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         tracing::debug!("store_decrypted_tx");
         self.tx_table.put_tx_data(d_tx.tx(), None, None);

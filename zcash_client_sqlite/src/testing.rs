@@ -43,13 +43,15 @@ impl BlockCache {
     }
 }
 
-pub struct BlockCacheInsertionResult {
+pub(crate) struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
+    #[allow(dead_code)]
     note_commitments: NoteCommitments,
 }
 
 impl BlockCacheInsertionResult {
-    pub fn note_commitments(&self) -> &NoteCommitments {
+    #[allow(dead_code)]
+    pub(crate) fn note_commitments(&self) -> &NoteCommitments {
         &self.note_commitments
     }
 }
