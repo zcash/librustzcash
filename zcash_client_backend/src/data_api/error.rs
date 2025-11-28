@@ -43,6 +43,7 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// * spend a prior shielded output;
     /// * pay to an output pool for which the corresponding feature is not enabled;
     /// * pay to a TEX address if the "transparent-inputs" feature is not enabled.
+    /// * a proposal step has no inputs
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided ID.

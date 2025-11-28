@@ -1007,10 +1007,6 @@ where
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
     // prior step (when "transparent-inputs" is enabled).
-    //
-    // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
-    // a higher-level approach in the wallet that waits for transactions with shielded outputs to
-    // be mined and only then attempts to perform the next step.
     #[allow(clippy::never_loop)]
     for input_ref in proposal_step.prior_step_inputs() {
         let (prior_step, _) = prior_step_results
@@ -1141,6 +1137,27 @@ where
     #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
     let has_shielded_inputs = !(sapling_inputs.is_empty() && orchard_inputs.is_empty());
 
+    let input_sources = NonEmpty::from_vec({
+        let mut sources = vec![];
+        if !sapling_inputs.is_empty() {
+            sources.push(PoolType::SAPLING);
+        }
+        #[cfg(feature = "orchard")]
+        if !orchard_inputs.is_empty() {
+            sources.push(PoolType::ORCHARD);
+        }
+        // We assume here that prior step outputs cannot be shielded, due to checks above (and the
+        // fact that the witness required to spend such outputs could not be computed.)
+        #[cfg(feature = "transparent-inputs")]
+        if !(proposal_step.transparent_inputs().is_empty()
+            && proposal_step.prior_step_inputs().is_empty())
+        {
+            sources.push(PoolType::Transparent);
+        }
+        sources
+    })
+    .ok_or(Error::ProposalNotSupported)?;
+
     for (_sapling_key_scope, sapling_note, merkle_path) in sapling_inputs.into_iter() {
         let key = match _sapling_key_scope {
             Scope::External => ufvk.sapling().map(|k| k.fvk().clone()),
@@ -1259,43 +1276,19 @@ where
         utxos_spent
     };
 
-    #[cfg(feature = "orchard")]
-    let orchard_external_ovk = match &ovk_policy {
-        OvkPolicy::Sender => ufvk
-            .orchard()
-            .map(|fvk| fvk.to_ovk(orchard::keys::Scope::External)),
-        OvkPolicy::Custom { orchard, .. } => Some(orchard.clone()),
-        OvkPolicy::Discard => None,
-    };
-
-    #[cfg(feature = "orchard")]
-    let orchard_internal_ovk = || {
-        #[cfg(feature = "transparent-inputs")]
-        if proposal_step.is_shielding() {
-            return ufvk
-                .transparent()
-                .map(|k| orchard::keys::OutgoingViewingKey::from(k.internal_ovk().as_bytes()));
-        }
-
-        ufvk.orchard().map(|k| k.to_ovk(Scope::Internal))
-    };
-
-    // Apply the outgoing viewing key policy.
-    let sapling_external_ovk = match &ovk_policy {
-        OvkPolicy::Sender => ufvk.sapling().map(|k| k.to_ovk(Scope::External)),
-        OvkPolicy::Custom { sapling, .. } => Some(*sapling),
-        OvkPolicy::Discard => None,
-    };
-
-    let sapling_internal_ovk = || {
-        #[cfg(feature = "transparent-inputs")]
-        if proposal_step.is_shielding() {
-            return ufvk
-                .transparent()
-                .map(|k| sapling::keys::OutgoingViewingKey(k.internal_ovk().as_bytes()));
-        }
-
-        ufvk.sapling().map(|k| k.to_ovk(Scope::Internal))
+    let (external_ovk, internal_ovk) = match ovk_policy {
+        OvkPolicy::Sender => (
+            Some(
+                ufvk.select_ovk(zip32::Scope::External, &input_sources)
+                    .ok_or(Error::KeyNotAvailable(input_sources.head))?,
+            ),
+            None,
+        ),
+        OvkPolicy::Custom {
+            external_ovk,
+            internal_ovk,
+        } => (Some(external_ovk), internal_ovk),
+        OvkPolicy::Discard => (None, None),
     };
 
     #[cfg(feature = "orchard")]
@@ -1318,25 +1311,28 @@ where
             );
         let recipient_address = payment.recipient_address();
 
-        let add_sapling_output = |builder: &mut Builder<_, _>,
-                                  sapling_output_meta: &mut Vec<_>,
-                                  to: sapling::PaymentAddress|
-         -> Result<
-            (),
-            CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
-        > {
-            let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
-            builder.add_sapling_output(sapling_external_ovk, to, payment.amount(), memo.clone())?;
-            sapling_output_meta.push((
-                BuildRecipient::External {
-                    recipient_address: recipient_address.clone(),
-                    output_pool: PoolType::SAPLING,
-                },
-                payment.amount(),
-                Some(memo),
-            ));
-            Ok(())
-        };
+        let add_sapling_output =
+            |builder: &mut Builder<_, _>,
+             sapling_output_meta: &mut Vec<_>,
+             to: sapling::PaymentAddress|
+             -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
+                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
+                builder.add_sapling_output(
+                    external_ovk.map(|k| k.into()),
+                    to,
+                    payment.amount(),
+                    memo.clone(),
+                )?;
+                sapling_output_meta.push((
+                    BuildRecipient::External {
+                        recipient_address: recipient_address.clone(),
+                        output_pool: PoolType::SAPLING,
+                    },
+                    payment.amount(),
+                    Some(memo),
+                ));
+                Ok(())
+            };
 
         #[cfg(feature = "orchard")]
         let add_orchard_output =
@@ -1346,7 +1342,7 @@ where
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
                 let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_orchard_output(
-                    orchard_external_ovk.clone(),
+                    external_ovk.map(|k| k.into()),
                     to,
                     payment.amount().into(),
                     memo.clone(),
@@ -1435,7 +1431,7 @@ where
         match output_pool {
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
-                    sapling_internal_ovk(),
+                    internal_ovk.map(|k| k.into()),
                     ufvk.sapling()
                         .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?
                         .change_address()
@@ -1459,7 +1455,7 @@ where
                 #[cfg(feature = "orchard")]
                 {
                     builder.add_orchard_output(
-                        orchard_internal_ovk(),
+                        internal_ovk.map(|k| k.into()),
                         ufvk.orchard()
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),

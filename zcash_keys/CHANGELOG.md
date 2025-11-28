@@ -9,6 +9,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::OutgoingViewingKey`
+- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
+
 ### Changed
 - MSRV is now 1.85.1.
 
