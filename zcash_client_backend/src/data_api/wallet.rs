@@ -1007,10 +1007,6 @@ where
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
     // prior step (when "transparent-inputs" is enabled).
-    //
-    // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
-    // a higher-level approach in the wallet that waits for transactions with shielded outputs to
-    // be mined and only then attempts to perform the next step.
     #[allow(clippy::never_loop)]
     for input_ref in proposal_step.prior_step_inputs() {
         let (prior_step, _) = prior_step_results
@@ -1150,6 +1146,8 @@ where
         if !orchard_inputs.is_empty() {
             sources.push(PoolType::ORCHARD);
         }
+        // We assume here that prior step outputs cannot be shielded, due to checks above (and the
+        // fact that the witness required to spend such outputs could not be computed.)
         #[cfg(feature = "transparent-inputs")]
         if !(proposal_step.transparent_inputs().is_empty()
             && proposal_step.prior_step_inputs().is_empty())

@@ -17,10 +17,11 @@ workspace.
   pool those outputs are produced into, and that by default wallet-internal
   outputs should not be decryptable using an OVK (and will therefore only
   be recoverable using the wallet's internal IVK).
-  - The semantics of `OvkPolicy::Sender` have changed. This policy now
-    specifies that wallet-internal change outputs should be encrypted
-    using a random key, rendering them unrecoverable to entities that
-    do not posess the internal IVK for the wallet.
+  - The semantics of `OvkPolicy::Sender` have changed. In addition to using
+    a single OVK for all shielded outputs irrespective of pools, it now
+    specifies that wallet-internal change outputs should be treated as though
+    the policy for those outputs were `OvkPolicy::None`, rendering them only
+    recoverable using the wallet's internal IVK. 
   - The `OvkPolicy::Custom` variant has changed. Instead of pool-specific
     OVKs, this now encapsulates a pair of OVKs, one to be used for all
     shielded external outputs of the transaction, and a second (optional)

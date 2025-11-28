@@ -601,13 +601,15 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 #[derive(Debug, Clone)]
 pub enum OvkPolicy {
-    /// Use the outgoing viewing key from the sender's [`UnifiedFullViewingKey`].
+    /// Use an outgoing viewing key produced from the sender's [`UnifiedFullViewingKey`],
+    /// selected via the policy documented in [`UnifiedFullViewingKey::select_ovk`].
     ///
     /// External transaction outputs will be decryptable by the sender, in addition to the
     /// recipients. Wallet-internal transaction outputs will be decryptable only with the wallet's
     /// internal-scoped incoming viewing key.
     ///
     /// [`UnifiedFullViewingKey`]: zcash_keys::keys::UnifiedFullViewingKey
+    /// [`UnifiedFullViewingKey::select_ovk`]: zcash_keys::keys::UnifiedFullViewingKey::select_ovk
     Sender,
 
     /// Use custom outgoing viewing keys. These might for instance be derived from a

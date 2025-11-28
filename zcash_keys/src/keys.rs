@@ -1171,8 +1171,8 @@ impl UnifiedFullViewingKey {
             .then(|| {
                 self.transparent().map(|k| {
                     OutgoingViewingKey(match scope {
-                        Scope::External => k.external_ovk().as_bytes(),
-                        Scope::Internal => k.internal_ovk().as_bytes(),
+                        zip32::Scope::External => k.external_ovk().as_bytes(),
+                        zip32::Scope::Internal => k.internal_ovk().as_bytes(),
                     })
                 })
             })
