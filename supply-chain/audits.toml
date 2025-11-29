@@ -18,6 +18,12 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.82 -> 1.0.83"
 
+[[audits.anyhow]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.97 -> 1.0.100"
+notes = "Contains mostly configuration for no_std support and conditionally generating backtraces."
+
 [[audits.arti-client]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -173,15 +179,33 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
 
+[[audits.darling]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.20.10 -> 0.21.3"
+notes = "Mostly added tests and documentation. The bulk of the changes were made to `darling_core`."
+
 [[audits.darling_core]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
 
+[[audits.darling_core]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.20.10 -> 0.21.3"
+notes = "No unsafe, just helpers for proc-macros."
+
 [[audits.darling_macro]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
+
+[[audits.darling_macro]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.20.10 -> 0.20.11"
+notes = "Only includes changes to cargo packaging, the library source itself is unchanged."
 
 [[audits.derive-deftly]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -785,6 +809,17 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.4.8 -> 0.6.0"
 
+[[audits.schemars]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.12 -> 0.9.0"
+
+[[audits.schemars]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.0 -> 1.1.0"
+notes = "These changes improve security by forbidding unsafe code."
+
 [[audits.secp256k1]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -840,6 +875,18 @@ delta = "1.0.117 -> 1.0.120"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.6.8 -> 1.0.3"
+
+[[audits.serde_with]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.1 -> 3.16.0"
+notes = "No new unsafe, no new IO."
+
+[[audits.serde_with_macros]]
+who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.1 -> 3.16.0"
+notes = "No new IO, mostly just machinery for deriving serde traits from Display."
 
 [[audits.slotmap-careful]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -1820,6 +1867,18 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.6.0 -> 1.7.0"
 
+[[trusted.async-trait]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-07-23"
+end = "2026-11-23"
+
+[[trusted.dyn-clone]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-12-23"
+end = "2026-11-23"
+
 [[trusted.equihash]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1892,6 +1951,12 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-09-25"
 end = "2025-10-02"
 
+[[trusted.inventory]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-08-15"
+end = "2026-11-23"
+
 [[trusted.memuse]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1922,6 +1987,12 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-12"
 end = "2025-08-12"
 
+[[trusted.paste]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-19"
+end = "2026-11-23"
+
 [[trusted.pczt]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1934,11 +2005,41 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2025-12-17"
 
+[[trusted.prettyplease]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2022-01-04"
+end = "2026-11-23"
+
+[[trusted.proc-macro2]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-04-23"
+end = "2026-11-23"
+
 [[trusted.redjubjub]]
 criteria = "safe-to-deploy"
 user-id = 199950 # Daira-Emma Hopwood (daira)
 start = "2023-03-30"
 end = "2026-02-21"
+
+[[trusted.ref-cast]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-05"
+end = "2026-11-23"
+
+[[trusted.ref-cast-impl]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-05"
+end = "2026-11-23"
+
+[[trusted.ryu]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-02"
+end = "2026-11-23"
 
 [[trusted.sapling-crypto]]
 criteria = "safe-to-deploy"
@@ -1970,6 +2071,18 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2024-10-15"
 end = "2026-10-26"
 
+[[trusted.serde_ignored]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-08-18"
+end = "2026-11-23"
+
+[[trusted.serde_json]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-02-28"
+end = "2026-11-23"
+
 [[trusted.shardtree]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
@@ -1981,6 +2094,24 @@ criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-12-13"
 end = "2025-12-16"
+
+[[trusted.syn]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2026-11-23"
+
+[[trusted.thiserror]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-10-09"
+end = "2026-11-23"
+
+[[trusted.thiserror-impl]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-10-09"
+end = "2026-11-23"
 
 [[trusted.windows]]
 criteria = "safe-to-deploy"
