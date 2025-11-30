@@ -22,18 +22,7 @@ workspace.
   - `bundle`:
     - `Outpoint::null`
     - `TxIn::<builder::Coinbase>::coinbase`
-  - `coinbase`:
-    - `MAX_COINBASE_SCRIPT_LEN`
-    - `MIN_COINBASE_SCRIPT_LEN`
-    - `MAX_COINBASE_HEIGHT_LEN`
-    - `MAX_MINER_DATA_LEN`
-    - `MinerData` struct
-    - `impl Default for MinerData`
-    - `impl TryFrom<&[u8]> for MinerData`
-    - `impl AsRef<[u8]> for MinerData`
-    - `Error` enum
-    - `impl fmt::Display for Error`
-    - `impl std::error::Error for Error`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
   - Optional dependency on `serde` under the implicit `serde` feature.
 
 ### Changed
