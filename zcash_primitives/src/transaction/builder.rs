@@ -731,7 +731,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
     /// Builds a transaction from the configured spends and outputs.
     ///
-    /// Upon success, returns a [tuple] containing:
+    /// Upon success, returns a [`BuildResult`] containing:
     ///
     /// - the [final transaction],
     /// - the [Sapling metadata], and
@@ -741,7 +741,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     ///
     /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
     /// [Orchard metadata]: ::orchard::builder::BundleMetadata
-    /// [tuple]: BuildResult
     /// [final transaction]: Transaction
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "circuits")]
@@ -909,7 +908,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
     /// Builds a transaction from the configured spends and outputs.
     ///
-    /// Upon success, returns a [tuple] containing:
+    /// Upon success, returns a [`BuildResult`] containing:
     ///
     /// - the [final transaction],
     /// - the [Sapling metadata], and
@@ -919,7 +918,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     ///
     /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
     /// [Orchard metadata]: ::orchard::builder::BundleMetadata
-    /// [tuple]: BuildResult
     /// [final transaction]: Transaction
     #[cfg(zcash_unstable = "zfuture")]
     pub fn build_zfuture<
