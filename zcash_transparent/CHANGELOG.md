@@ -11,7 +11,14 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_transparent::bundle::Outpoint::NULL`
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+  - `bundle`:
+    - `Outpoint::NULL`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
 
 ## [0.6.1] - 2025-10-27
 
