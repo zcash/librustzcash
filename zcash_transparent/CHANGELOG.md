@@ -23,6 +23,7 @@ workspace.
     - `Outpoint::null`
     - `TxIn::<builder::Coinbase>::coinbase`
   - `coinbase` module, containing helpers for constructing coinbase transactions.
+  - Optional dependency on `serde` under the new `serde` Cargo feature.
 
 ### Changed
 - MSRV is now 1.85.1.

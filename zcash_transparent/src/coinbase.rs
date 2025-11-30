@@ -19,6 +19,7 @@ pub const MAX_COINBASE_HEIGHT_LEN: usize = 6;
 /// - The data is internally encoded as a transparent script push value.
 /// - The encoded form is limited to [`MAX_MINER_DATA_LEN`] bytes.
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MinerData(Vec<u8>);
 
 impl MinerData {
