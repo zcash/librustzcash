@@ -11,7 +11,14 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_transparent::bundle::Outpoint::null`
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+  - `bundle`:
+    - `Outpoint::null`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
 
 ### Changed
 - MSRV is now 1.85.1.
