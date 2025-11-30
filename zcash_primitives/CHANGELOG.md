@@ -21,8 +21,6 @@ workspace.
     - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
       instead of `u64`.
     - `Builder` now supports constructing coinbase transactions.
-  - `Coinbase` marker type
-  - `impl Authorization for Coinbase`
 
 ### Changed
 - MSRV is now 1.85.1.
