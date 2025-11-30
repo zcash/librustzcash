@@ -17,6 +17,7 @@ workspace.
     - `impl Authorization for Coinbase`
     - `impl MapAuth<Coinbase, Authorized> for Coinbase`
     - `impl TransparentAuthorizingContext for Coinbase`
+    - `TransparentBuilder::build_coinbase`
   - `bundle`:
     - `Outpoint::NULL`
     - `TxIn::<builder::Coinbase>::coinbase`

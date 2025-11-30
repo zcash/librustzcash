@@ -4,7 +4,10 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_protocol::{
+    consensus::BlockHeight,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
 
 use zcash_script::{
     op,
@@ -14,6 +17,7 @@ use zcash_script::{
 use crate::{
     address::{Script, TransparentAddress},
     bundle::{Authorization, Authorized, Bundle, MapAuth, TxIn, TxOut},
+    coinbase::{self, MinerData},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
@@ -424,6 +428,26 @@ impl TransparentBuilder {
                 },
             })
         }
+    }
+
+    /// Builds a coinbase bundle.
+    ///
+    /// Returns an error if any inputs were added to the builder.
+    pub fn build_coinbase(
+        self,
+        height: BlockHeight,
+        miner_data: &MinerData,
+    ) -> Result<Bundle<Coinbase>, coinbase::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        if !self.inputs.is_empty() {
+            return Err(coinbase::Error::ExcessiveInputs);
+        }
+
+        Ok(Bundle {
+            vin: vec![TxIn::coinbase(height, miner_data)?],
+            vout: self.vout,
+            authorization: Coinbase,
+        })
     }
 
     /// Builds a bundle containing the given inputs and outputs, for inclusion in a PCZT.
