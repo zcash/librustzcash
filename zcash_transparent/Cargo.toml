@@ -31,6 +31,7 @@ sha2.workspace = true
 
 # - Encodings
 core2.workspace = true
+serde = { workspace = true, optional = true, features = ["alloc"] }
 
 # - Secret management
 subtle.workspace = true
@@ -75,6 +76,9 @@ std = [
 
 ## Enables spending transparent notes with the transaction builder.
 transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
+
+## Enables de/serialization of some structs using `serde`.
+serde = ["dep:serde"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [

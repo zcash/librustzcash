@@ -23,6 +23,7 @@ workspace.
     - `Outpoint::NULL`
     - `TxIn::<builder::Coinbase>::coinbase`
   - `coinbase` module, containing helpers for constructing coinbase transactions.
+  - Optional dependency on `serde` under the new `serde` Cargo feature.
 
 ## [0.6.1] - 2025-10-27
 
