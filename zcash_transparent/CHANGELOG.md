@@ -15,6 +15,7 @@ workspace.
   - `builder`:
     - `Coinbase` marker type
     - `impl Authorization for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
   - `bundle`:
     - `Outpoint::NULL`
     - `TxIn::<builder::Coinbase>::coinbase`
