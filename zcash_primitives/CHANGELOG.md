@@ -24,6 +24,8 @@ workspace.
     - `BuildConfig`:
       -  Has a new `Coinbase` variant.
       -  Is not `Copy` anymore.
+    - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
+      instead of `u64`.
 - MSRV is now 1.85.1.
 
 ### Removed
