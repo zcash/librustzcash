@@ -19,6 +19,8 @@ workspace.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has a new `Coinbase` variant.
+  - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
+    instead of `u64`.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.
