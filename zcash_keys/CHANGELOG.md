@@ -249,7 +249,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
   - `AddressGenerationError`
   - `UnifiedAddressRequest`
 - A new `orchard` feature flag has been added to make it possible to
-  build client code without `orchard` dependendencies.
+  build client code without `orchard` dependencies.
 - `zcash_keys::address::Address::to_zcash_address`
 
 ### Changed

@@ -50,7 +50,7 @@ pub struct Input {
     #[getset(get = "pub")]
     pub(crate) sequence: Option<u32>,
 
-    /// The minimum Unix timstamp that this input requires to be set as the transaction's
+    /// The minimum Unix timestamp that this input requires to be set as the transaction's
     /// lock time.
     ///
     /// - This is set by the Constructor.

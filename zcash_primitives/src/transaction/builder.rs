@@ -933,7 +933,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         };
 
         // The unwrap() here is safe because the txid hashing
-        // of freeze() should be infalliable.
+        // of freeze() should be infallible.
         Ok(BuildResult {
             transaction: authorized_tx.freeze().unwrap(),
             sapling_meta,
