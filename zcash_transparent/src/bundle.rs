@@ -146,9 +146,17 @@ pub struct OutPoint {
 }
 
 impl OutPoint {
+    /// Returns the null [`OutPoint`] in the Bitcoin sense:
+    /// - [`TxId`] is set to all-zeroes, and
+    /// - output index is set to [`u32::MAX`].
+    pub const NULL: OutPoint = OutPoint {
+        hash: TxId::NULL,
+        n: u32::MAX,
+    };
+
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
-    pub fn new(hash: [u8; 32], n: u32) -> Self {
+    pub const fn new(hash: [u8; 32], n: u32) -> Self {
         OutPoint {
             hash: TxId::from_bytes(hash),
             n,
@@ -180,9 +188,7 @@ impl OutPoint {
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
-        // From `BaseOutPoint::IsNull()` in zcashd:
-        //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.is_null() && self.n == u32::MAX
+        *self == Self::NULL
     }
 
     /// Returns the output index of this `OutPoint`.
