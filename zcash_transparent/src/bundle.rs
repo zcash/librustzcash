@@ -3,15 +3,18 @@
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
-use zcash_script::script;
+use zcash_script::{opcode::Evaluable, pattern::push_num, script};
 
 use zcash_protocol::{
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder,
+    coinbase::{self, MinerData},
     sighash::TransparentAuthorizingContext,
 };
 
@@ -261,6 +264,71 @@ impl TxIn<Authorized> {
         self.prevout().write(&mut writer)?;
         self.script_sig().write(&mut writer)?;
         writer.write_all(&self.sequence().to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Creates an input for a coinbase transaction. Does not support creating inputs for the
+    /// genesis block.
+    pub fn coinbase(height: BlockHeight, miner_data: &MinerData) -> Result<Self, coinbase::Error> {
+        let mut script_sig = match i64::from(height) {
+            0 => Err(coinbase::Error::GenesisInputNotSupported)?,
+            h => push_num(h).to_bytes(),
+        };
+
+        // # Consensus
+        //
+        // > A coinbase transaction for a block at block height greater than 0 MUST have a script
+        // > that, as its first item, encodes the block height `height` as follows. For `height` in
+        // > the range {1 .. 16}, the encoding is a single byte of value `0x50` + `height`.
+        // > Otherwise, let `heightBytes` be the signed little-endian representation of `height`,
+        // > using the minimum nonzero number of bytes such that the most significant byte is <
+        // > `0x80`. The length of `heightBytes` MUST be in the range {1 .. 5}. Then the encoding is
+        // > the length of `heightBytes` encoded as one byte, followed by `heightBytes` itself. This
+        // > matches the encoding used by Bitcoin in the implementation of [BIP-34] (but the
+        // > description here is to be considered normative).
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // ## Note
+        //
+        // The height is encoded in the `push_num` fn above.
+        //
+        // [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
+        assert!(script_sig.is_empty());
+        if script_sig.len() > coinbase::MAX_COINBASE_HEIGHT_LEN {
+            Err(coinbase::Error::OversizedHeight)?;
+        }
+
+        // We can embed `miner_data` directly into `script_sig` since it is already encoded as a
+        // push value.
+        script_sig.extend(miner_data.as_ref());
+
+        // # Consensus
+        //
+        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // ## Note
+        //
+        // These bounds are met implicitly, but we check explicitly to document compliance with the
+        // consensus rule.
+        if script_sig.len() < coinbase::MIN_COINBASE_SCRIPT_LEN {
+            Err(coinbase::Error::UndersizedScript)?;
+        } else if script_sig.len() > coinbase::MAX_COINBASE_SCRIPT_LEN {
+            Err(coinbase::Error::OversizedScript)?;
+        }
+
+        // [§3.11] defines coinbase txs as those that have a single transparent input with a null
+        // `prevout` field.
+        //
+        // Setting the `sequence` field to [`u32::MAX`] disables time-locking, as described in the
+        // [Bitcoin Developer Reference].
+        //
+        // [§3.11]: <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+        // [Bitcoin Developer Reference]: <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
+        Ok(TxIn::from_parts(OutPoint::NULL, script_sig, u32::MAX))
     }
 }
 
