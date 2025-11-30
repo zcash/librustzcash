@@ -34,6 +34,8 @@ pub enum Error {
     OversizedHeight,
     /// Creating a coinbase input for the genesis block is not supported.
     GenesisInputNotSupported,
+    /// Coinbase transactions must contain only a dummy input.
+    UnexpectedInputs,
 }
 
 impl fmt::Display for Error {
@@ -51,6 +53,9 @@ impl fmt::Display for Error {
                 f,
                 "creating a coinbase input for the genesis block is not supported",
             ),
+            Error::UnexpectedInputs => {
+                write!(f, "coinbase transactions must contain only a dummy input",)
+            }
         }
     }
 }
