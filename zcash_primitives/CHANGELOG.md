@@ -10,7 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::is_coinbase`
+    - `Builder` now supports constructing coinbase transactions.
+
 ### Changed
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `Error` has a new `Coinbase` variant.
+    - `BuildConfig`:
+      -  Has a new `Coinbase` variant.
+      -  Is not `Copy` anymore.
 - MSRV is now 1.85.1.
 
 ### Removed
