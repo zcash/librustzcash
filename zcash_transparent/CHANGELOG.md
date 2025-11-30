@@ -14,6 +14,9 @@ workspace.
 - `zcash_transparent::pczt`:
   - `Input::with_signable_input`
   - `Input::append_signature`
+- `impl core::error::Error` for:
+  -` zcash_transparent::builder::Error`
+  - `zcash_transparent::coinbase::Error`
 
 ### Changed
 - MSRV is now 1.85.1.
