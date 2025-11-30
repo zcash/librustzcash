@@ -3,15 +3,18 @@
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
-use zcash_script::script;
+use zcash_script::{opcode::Evaluable, script};
 
 use zcash_protocol::{
     TxId,
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder,
+    coinbase::{self, MinerData},
     sighash::TransparentAuthorizingContext,
 };
 
@@ -146,9 +149,17 @@ pub struct OutPoint {
 }
 
 impl OutPoint {
+    /// Returns the null [`OutPoint`] in the Bitcoin sense:
+    /// - [`TxId`] is set to all-zeroes, and
+    /// - output index is set to [`u32::MAX`].
+    pub const NULL: OutPoint = OutPoint {
+        hash: TxId::NULL,
+        n: u32::MAX,
+    };
+
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
-    pub fn new(hash: [u8; 32], n: u32) -> Self {
+    pub const fn new(hash: [u8; 32], n: u32) -> Self {
         OutPoint {
             hash: TxId::from_bytes(hash),
             n,
@@ -180,9 +191,7 @@ impl OutPoint {
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
-        // From `BaseOutPoint::IsNull()` in zcashd:
-        //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.is_null() && self.n == u32::MAX
+        *self == Self::NULL
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -255,6 +264,29 @@ impl TxIn<Authorized> {
         self.prevout().write(&mut writer)?;
         self.script_sig().write(&mut writer)?;
         writer.write_all(&self.sequence().to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Creates an input for a coinbase transaction. Does not support creating inputs for the
+    /// genesis block.
+    pub fn coinbase(
+        height: BlockHeight,
+        miner_data: &MinerData,
+        sequence: u32,
+    ) -> Result<Self, coinbase::Error> {
+        let height = i64::from(height);
+
+        // Serialize the height. The serialization is specified in
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>.
+        let mut script_sig = match height {
+            0 => Err(coinbase::Error::GenesisInputNotSupported)?,
+            _ => zcash_script::pattern::push_num(height).to_bytes(),
+        };
+
+        script_sig.extend(miner_data.as_ref());
+
+        Ok(TxIn::from_parts(OutPoint::NULL, script_sig, sequence))
     }
 }
 

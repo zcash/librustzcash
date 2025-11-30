@@ -4,13 +4,20 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_protocol::{
+    consensus::BlockHeight,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
 
-use zcash_script::{op, script};
+use zcash_script::{
+    op,
+    script::{self, Code},
+};
 
 use crate::{
     address::{Script, TransparentAddress},
-    bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
+    bundle::{Authorization, Authorized, Bundle, MapAuth, TxIn, TxOut},
+    coinbase::{self, MinerData},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
@@ -91,6 +98,9 @@ impl fmt::Display for Error {
         }
     }
 }
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 /// A set of transparent signing keys.
 ///
@@ -259,6 +269,37 @@ pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k
     final_script_sigs: Vec<Option<script::Sig>>,
 }
 
+/// [`Authorization`] marker type for coinbase transactions without authorization data.
+#[derive(Debug, Clone)]
+pub struct Coinbase;
+
+impl Authorization for Coinbase {
+    type ScriptSig = Vec<u8>;
+}
+
+impl TransparentAuthorizingContext for Coinbase {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
+        vec![]
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        vec![]
+    }
+}
+
+impl MapAuth<Coinbase, Authorized> for Coinbase {
+    fn map_script_sig(
+        &self,
+        s: <Coinbase as Authorization>::ScriptSig,
+    ) -> <Authorized as Authorization>::ScriptSig {
+        Script(Code(s))
+    }
+
+    fn map_authorization(&self, _: Coinbase) -> Authorized {
+        Authorized
+    }
+}
+
 impl TransparentBuilder {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
@@ -410,6 +451,20 @@ impl TransparentBuilder {
                 },
             })
         }
+    }
+
+    /// Builds a coinbase bundle.
+    pub fn build_coinbase(
+        self,
+        height: BlockHeight,
+        miner_data: &MinerData,
+        sequence: u32,
+    ) -> Result<Bundle<Coinbase>, coinbase::Error> {
+        Ok(Bundle {
+            vin: vec![TxIn::coinbase(height, miner_data, sequence)?],
+            vout: self.vout,
+            authorization: Coinbase,
+        })
     }
 
     /// Builds a bundle containing the given inputs and outputs, for inclusion in a PCZT.

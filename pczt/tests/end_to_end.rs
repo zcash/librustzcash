@@ -94,7 +94,7 @@ fn transparent_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_ovk),
             recipient,
-            100_000,
+            Zatoshis::const_from_u64(100_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -102,7 +102,7 @@ fn transparent_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
-            885_000,
+            Zatoshis::const_from_u64(885_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -250,7 +250,7 @@ fn transparent_p2sh_multisig_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_ovk),
             recipient,
-            100_000,
+            Zatoshis::const_from_u64(100_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -258,7 +258,7 @@ fn transparent_p2sh_multisig_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
-            880_000,
+            Zatoshis::const_from_u64(880_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -450,7 +450,7 @@ fn sapling_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(sapling_dfvk.to_ovk(zip32::Scope::External).0.into()),
             recipient,
-            100_000,
+            Zatoshis::const_from_u64(100_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -609,7 +609,7 @@ fn orchard_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_ovk),
             recipient,
-            100_000,
+            Zatoshis::const_from_u64(100_000),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -617,7 +617,7 @@ fn orchard_to_orchard() {
         .add_orchard_output::<zip317::FeeRule>(
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
-            890_000,
+            Zatoshis::const_from_u64(890_000),
             MemoBytes::empty(),
         )
         .unwrap();

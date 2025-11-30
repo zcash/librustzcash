@@ -48,6 +48,10 @@ impl From<TxId> for [u8; 32] {
 }
 
 impl TxId {
+    /// The all-zeros txid. This is reserved as the txid of the transparent input to a coinbase
+    /// transaction.
+    pub const NULL: TxId = TxId([0u8; 32]);
+
     /// Wraps the given byte array as a TxId value
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         TxId(bytes)
@@ -66,9 +70,9 @@ impl TxId {
         Ok(())
     }
 
-    /// Returns true when the txid consists of all zeros; this only occurs for coinbase
-    /// transactions.
+    /// Returns true when the txid consists of all zeros, indicating the input
+    /// to a coinbase transaction.
     pub fn is_null(&self) -> bool {
-        self.0 == [0u8; 32]
+        *self == Self::NULL
     }
 }

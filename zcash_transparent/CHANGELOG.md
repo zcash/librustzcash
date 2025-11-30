@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
+    - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error`
+  - `bundle`:
+    - `Outpoint::null`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
+  - Optional dependency on `serde` under the implicit `serde` feature.
+
 ### Changed
 - MSRV is now 1.85.1.
 
