@@ -18,6 +18,7 @@ workspace.
     - `impl MapAuth<Coinbase, Authorized> for Coinbase`
     - `impl TransparentAuthorizingContext for Coinbase`
     - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error` when the `std` feature is enabled.
   - `bundle`:
     - `Outpoint::NULL`
     - `TxIn::<builder::Coinbase>::coinbase`
@@ -117,7 +118,7 @@ workspace.
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
-  return `Ok(None)` when this is the case. 
+  return `Ok(None)` when this is the case.
 
 ### Removed
 - Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
