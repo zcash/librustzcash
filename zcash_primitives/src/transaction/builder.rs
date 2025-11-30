@@ -729,8 +729,17 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
     /// Builds a transaction from the configured spends and outputs.
     ///
-    /// Upon success, returns a tuple containing the final transaction, and the
-    /// [`SaplingMetadata`] generated during the build process.
+    /// Upon success, returns a [`BuildResult`] containing:
+    ///
+    /// - the [final transaction],
+    /// - the [Sapling metadata], and
+    /// - the [Orchard metadata]
+    ///
+    /// generated during the build process.
+    ///
+    /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
+    /// [Orchard metadata]: ::orchard::builder::BundleMetadata
+    /// [final transaction]: Transaction
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "circuits")]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
@@ -784,8 +793,17 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
     /// Builds a transaction from the configured spends and outputs.
     ///
-    /// Upon success, returns a tuple containing the final transaction, and the
-    /// [`SaplingMetadata`] generated during the build process.
+    /// Upon success, returns a [`BuildResult`] containing:
+    ///
+    /// - the [final transaction],
+    /// - the [Sapling metadata], and
+    /// - the [Orchard metadata]
+    ///
+    /// generated during the build process.
+    ///
+    /// [Sapling metadata]: ::sapling::builder::SaplingMetadata
+    /// [Orchard metadata]: ::orchard::builder::BundleMetadata
+    /// [final transaction]: Transaction
     #[cfg(zcash_unstable = "zfuture")]
     pub fn build_zfuture<
         R: RngCore + CryptoRng,
