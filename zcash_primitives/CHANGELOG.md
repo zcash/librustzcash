@@ -1062,7 +1062,7 @@ and `zcash_encoding`.
 - `zcash_primitives::transaction::components::tze::TzeOutPoint` constructor
   now taxes a TxId rather than a raw byte array.
 - `zcash_primitives::transaction::components::Amount` addition, subtraction,
-  and summation now return `Option` rather than panicing on overflow.
+  and summation now return `Option` rather than panicking on overflow.
 - `zcash_primitives::transaction::builder`:
   - `Error` has been modified to wrap the error types produced by its child
     builders.
