@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::bundle::Outpoint::null`
+
 ### Changed
 - MSRV is now 1.85.1.
 
