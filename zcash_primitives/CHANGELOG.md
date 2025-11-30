@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `BuildConfig::is_coinbase`
+  - `Builder::set_coinbase_miner_data`
+
+### Fixed
+- `zcash_primitives::transaction::builder::Builder` has been modified to
+  support constructing transparent coinbase transactions. Previously, although
+  `BuildConfig::Coinbase` was a configuration that could be selected, the
+  transaction that was generated as a result would not be a valid coinbase
+  transaction.
+
 ## [0.26.1] - 2025-10-18
 
 ### Fixed
