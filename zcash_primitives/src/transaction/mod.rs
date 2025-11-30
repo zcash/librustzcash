@@ -267,7 +267,7 @@ impl Authorization for Authorized {
     type TzeAuth = tze::Authorized;
 }
 
-/// [`Authorization`] marker type for transactions without authorization data.
+/// [`Authorization`] marker type for non-coinbase transactions without authorization data.
 ///
 /// Currently this includes Sapling proofs because the types in this crate support v4
 /// transactions, which commit to the Sapling proofs in the transaction digest.
@@ -276,6 +276,21 @@ pub struct Unauthorized;
 #[cfg(feature = "circuits")]
 impl Authorization for Unauthorized {
     type TransparentAuth = ::transparent::builder::Unauthorized;
+    type SaplingAuth =
+        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
+    type OrchardAuth =
+        orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = tze::builder::Unauthorized;
+}
+
+/// [`Authorization`] marker type for coinbase transactions without authorization data.
+struct Coinbase;
+
+#[cfg(feature = "circuits")]
+impl Authorization for Coinbase {
+    type TransparentAuth = ::transparent::builder::Coinbase;
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
