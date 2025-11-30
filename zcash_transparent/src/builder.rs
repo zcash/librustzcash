@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use core::fmt;
+use core::{error, fmt};
 
 use zcash_protocol::{
     consensus::BlockHeight,
@@ -98,6 +98,8 @@ impl fmt::Display for Error {
         }
     }
 }
+
+impl error::Error for Error {}
 
 /// A set of transparent signing keys.
 ///
