@@ -5,7 +5,9 @@ use core::fmt;
 use rand::{CryptoRng, RngCore};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
-use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
+use ::transparent::{
+    address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut, coinbase,
+};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::MemoBytes,
@@ -105,6 +107,8 @@ pub enum Error<FE> {
     /// The builder was constructed with a target height before NU5 activation, but an Orchard
     /// spend or output was added.
     OrchardBuilderNotAvailable,
+    /// An error occurred in constructing a coinbase transaction.
+    Coinbase(coinbase::Error),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(zcash_unstable = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -136,6 +140,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
             ),
+            Error::Coinbase(err) => write!(
+                f,
+                "An error occurred in constructing a coinbase transaction: {err}"
+            ),
             #[cfg(zcash_unstable = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
         }
@@ -166,6 +174,12 @@ impl<FE> From<sapling::builder::Error> for Error<FE> {
 impl<FE> From<orchard::builder::SpendError> for Error<FE> {
     fn from(e: orchard::builder::SpendError) -> Self {
         Error::OrchardSpend(e)
+    }
+}
+
+impl<FE> From<coinbase::Error> for Error<FE> {
+    fn from(e: coinbase::Error) -> Self {
+        Error::Coinbase(e)
     }
 }
 
@@ -204,13 +218,15 @@ impl Progress {
 }
 
 /// Rules for how the builder should be configured for each shielded pool or coinbase tx.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum BuildConfig {
     Standard {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
-    Coinbase,
+    Coinbase {
+        miner_data: Option<PushValue>,
+    },
 }
 
 impl BuildConfig {
@@ -222,7 +238,7 @@ impl BuildConfig {
             BuildConfig::Standard { sapling_anchor, .. } => sapling_anchor
                 .as_ref()
                 .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
-            BuildConfig::Coinbase => Some((
+            BuildConfig::Coinbase { .. } => Some((
                 sapling::builder::BundleType::Coinbase,
                 sapling::Anchor::empty_tree(),
             )),
@@ -237,7 +253,7 @@ impl BuildConfig {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
                 .map(|a| (orchard::builder::BundleType::DEFAULT, *a)),
-            BuildConfig::Coinbase => Some((
+            BuildConfig::Coinbase { .. } => Some((
                 orchard::builder::BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
             )),
@@ -246,7 +262,7 @@ impl BuildConfig {
 
     /// Returns `true` if this configuration is for building a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
-        matches!(self, BuildConfig::Coinbase)
+        matches!(self, BuildConfig::Coinbase { .. })
     }
 }
 
@@ -321,7 +337,6 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
     tze_builder: core::marker::PhantomData<&'a ()>,
-    miner_data: Option<PushValue>,
     _progress_notifier: U,
 }
 
@@ -425,7 +440,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
             tze_builder: core::marker::PhantomData,
-            miner_data: None,
             _progress_notifier: (),
         }
     }
@@ -455,7 +469,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
             tze_builder: self.tze_builder,
-            miner_data: self.miner_data,
             _progress_notifier,
         }
     }
@@ -536,19 +549,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 memo.into_bytes(),
             )
             .map_err(Error::SaplingBuild)
-    }
-
-    /// Sets the miner data for coinbase transactions.
-    ///
-    /// This returns an error if the [`BuildConfig`] provided to this builder is not
-    /// [`BuildConfig::Coinbase`].
-    pub fn set_coinbase_miner_data(&mut self, miner_data: PushValue) -> Result<(), ()> {
-        if self.build_config.is_coinbase() {
-            self.miner_data = Some(miner_data);
-            Ok(())
-        } else {
-            Err(())
-        }
     }
 
     /// Adds a transparent P2PKH coin to be spent in this transaction.
@@ -752,42 +752,50 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        if self.build_config.is_coinbase() {
-            let target_height = self.target_height;
+        match &self.build_config {
+            BuildConfig::Coinbase { miner_data } => {
+                let target_height = self.target_height;
+                let miner_data = miner_data.clone();
 
-            self.build_internal::<Coinbase, _, _, _, _>(
-                |b, miner_data| build_transparent_coinbase(b, target_height, miner_data),
-                |b, _, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
-                #[cfg(zcash_unstable = "zfuture")]
-                |_| (None, vec![]),
-                #[cfg(zcash_unstable = "zfuture")]
-                |_, _, _| unreachable!(),
-                &[],
-                &[],
-                rng,
-                spend_prover,
-                output_prover,
-                None,
-            )
-        } else {
-            let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+                self.build_internal::<Coinbase, _, _, _, _>(
+                    |b| {
+                        b.build_coinbase(target_height, miner_data)
+                            .map(Some)
+                            .map_err(Error::Coinbase)
+                    },
+                    |b, _, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
+                    #[cfg(zcash_unstable = "zfuture")]
+                    |_| (None, vec![]),
+                    #[cfg(zcash_unstable = "zfuture")]
+                    |_, _, _| unreachable!(),
+                    &[],
+                    &[],
+                    rng,
+                    spend_prover,
+                    output_prover,
+                    None,
+                )
+            }
+            BuildConfig::Standard { .. } => {
+                let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
 
-            self.build_internal::<Unauthorized, _, _, _, _>(
-                |b, _| Ok(b.build()),
-                |b, unauthed_tx, txid_parts| {
-                    authorize_transparent(b, unauthed_tx, txid_parts, transparent_signing_set)
-                },
-                #[cfg(zcash_unstable = "zfuture")]
-                |_| (None, vec![]),
-                #[cfg(zcash_unstable = "zfuture")]
-                |_, _, _| unreachable!(),
-                sapling_extsks,
-                orchard_saks,
-                rng,
-                spend_prover,
-                output_prover,
-                Some(fee),
-            )
+                self.build_internal::<Unauthorized, _, _, _, _>(
+                    |b| Ok(b.build()),
+                    |b, unauthed_tx, txid_parts| {
+                        authorize_transparent(b, unauthed_tx, txid_parts, transparent_signing_set)
+                    },
+                    #[cfg(zcash_unstable = "zfuture")]
+                    |_| (None, vec![]),
+                    #[cfg(zcash_unstable = "zfuture")]
+                    |_, _, _| unreachable!(),
+                    sapling_extsks,
+                    orchard_saks,
+                    rng,
+                    spend_prover,
+                    output_prover,
+                    Some(fee),
+                )
+            }
         }
     }
 
@@ -820,38 +828,48 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        if self.build_config.is_coinbase() {
-            let target_height = self.target_height;
+        match &self.build_config {
+            BuildConfig::Coinbase { miner_data } => {
+                let target_height = self.target_height;
+                let miner_data = miner_data.clone();
 
-            self.build_internal::<Coinbase, _, _, _, _>(
-                |b, miner_data| build_transparent_coinbase(b, target_height, miner_data),
-                |b, _, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
-                |_| (None, vec![]),
-                |_, _, _| unreachable!(),
-                &[],
-                &[],
-                rng,
-                spend_prover,
-                output_prover,
-                None,
-            )
-        } else {
-            let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
+                self.build_internal::<Coinbase, _, _, _, _>(
+                    |b| {
+                        b.build_coinbase(target_height, miner_data)
+                            .map(Some)
+                            .map_err(Error::Coinbase)
+                    },
+                    |b, _, _| Ok(b.clone().map_authorization(transparent::builder::Coinbase)),
+                    |_| (None, vec![]),
+                    |_, _, _| unreachable!(),
+                    &[],
+                    &[],
+                    rng,
+                    spend_prover,
+                    output_prover,
+                    None,
+                )
+            }
+            BuildConfig::Standard { .. } => {
+                let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
 
-            self.build_internal::<Unauthorized, _, _, _, _>(
-                |b, _| Ok(b.build()),
-                |b, unauthed_tx, txid_parts| {
-                    authorize_transparent(b, unauthed_tx, txid_parts, transparent_signing_set)
-                },
-                |b| b.build(),
-                |b, unauthed_tx, tze_signers| b.clone().into_authorized(&unauthed_tx, tze_signers),
-                sapling_extsks,
-                orchard_saks,
-                rng,
-                spend_prover,
-                output_prover,
-                Some(fee),
-            )
+                self.build_internal::<Unauthorized, _, _, _, _>(
+                    |b| Ok(b.build()),
+                    |b, unauthed_tx, txid_parts| {
+                        authorize_transparent(b, unauthed_tx, txid_parts, transparent_signing_set)
+                    },
+                    |b| b.build(),
+                    |b, unauthed_tx, tze_signers| {
+                        b.clone().into_authorized(&unauthed_tx, tze_signers)
+                    },
+                    sapling_extsks,
+                    orchard_saks,
+                    rng,
+                    spend_prover,
+                    output_prover,
+                    Some(fee),
+                )
+            }
         }
     }
 
@@ -861,7 +879,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         self,
         build_transparent: impl FnOnce(
             TransparentBuilder,
-            Option<PushValue>,
         ) -> Result<
             Option<transparent::bundle::Bundle<A::TransparentAuth>>,
             Error<FE>,
@@ -937,7 +954,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             };
         }
 
-        let transparent_bundle = build_transparent(self.transparent_builder, self.miner_data)?;
+        let transparent_bundle = build_transparent(self.transparent_builder)?;
 
         let (sapling_bundle, sapling_meta) = match self
             .sapling_builder
@@ -1172,23 +1189,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 }
 
 #[cfg(feature = "circuits")]
-fn build_transparent_coinbase<FE>(
-    b: TransparentBuilder,
-    target_height: BlockHeight,
-    miner_data: Option<PushValue>,
-) -> Result<Option<transparent::bundle::Bundle<transparent::builder::Coinbase>>, Error<FE>> {
-    b.build_coinbase(target_height, miner_data)
-        .map(Some)
-        // TODO: in a future breaking release of `zcash_primitives`, this `map_err` should be
-        // removed in favor of a specific `Error::Coinbase` variant. For now we are shoving all
-        // errors in coinbase output construction into `UnsupportedScript` to allow for a
-        // semver-compatible release of `zcash_primitives`.
-        .map_err(|_| {
-            Error::<FE>::TransparentBuild(::transparent::builder::Error::UnsupportedScript)
-        })
-}
-
-#[cfg(feature = "circuits")]
 fn authorize_transparent(
     b: &transparent::bundle::Bundle<transparent::builder::Unauthorized>,
     unauthed_tx: &TransactionData<Unauthorized>,
@@ -1359,7 +1359,6 @@ mod tests {
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
             tze_builder: core::marker::PhantomData,
-            miner_data: None,
             _progress_notifier: (),
         };
 

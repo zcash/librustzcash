@@ -10,9 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `impl<FE> From<coinbase::Error> for Error<FE>`
+
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- `zcash_primitives::transaction::builder`:
+  - `Error` has a new `Coinbase` variant.
+  - `BuildConfig`:
+    -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
+    -  No longer implements `Copy`.
 
 ### Removed
 - `zcash_primitives::consensus` module (use `zcash_protocol::consensus` instead).
@@ -20,6 +29,8 @@ workspace.
 - `zcash_primitives::legacy` module (use the `zcash_transparent` crate instead).
 - `zcash_primitives::memo` module (use `zcash_protocol::memo` instead)
 - `zcash_primitives::transaction`:
+  - `builder::Builder::set_coinbase_miner_data` use the added
+    `BuildConfig::Coinbase` payload instead.
   - `components`:
     - `amount::testing` module; use `zcash_protocol::value::testing` instead
       with the following renames:
