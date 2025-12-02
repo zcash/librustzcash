@@ -130,12 +130,12 @@ impl ShieldedPoolTester for SaplingPoolTester {
             .map(|n| n.take_sapling())
     }
 
-    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize {
+    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<Transaction, A>) -> usize {
         d_tx.sapling_outputs().len()
     }
 
     fn with_decrypted_pool_memos<A>(
-        d_tx: &DecryptedTransaction<'_, A>,
+        d_tx: &DecryptedTransaction<Transaction, A>,
         mut f: impl FnMut(&MemoBytes),
     ) {
         for output in d_tx.sapling_outputs() {

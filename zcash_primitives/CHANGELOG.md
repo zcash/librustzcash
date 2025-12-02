@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::Transaction::data`
+
 ### Changed
 - MSRV is now 1.85.1.
 
