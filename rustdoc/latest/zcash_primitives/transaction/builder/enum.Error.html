@@ -3,7 +3,7 @@
     ChangeRequired(ZatBalance),
     Fee(<a class="enum" href="enum.FeeError.html" title="enum zcash_primitives::transaction::builder::FeeError">FeeError</a>&lt;FE&gt;),
     Balance(BalanceError),
-    TransparentBuild(<a class="enum" href="../../../zcash_transparent/builder/enum.Error.html" title="enum zcash_transparent::builder::Error">Error</a>),
+    TransparentBuild(Error),
     SaplingBuild(Error),
     OrchardBuild(BuildError),
     OrchardSpend(SpendError),
@@ -17,7 +17,7 @@ additional amount is required in order to construct the transaction.</p>
 add a change output.</p>
 </div><section id="variant.Fee" class="variant"><a href="#variant.Fee" class="anchor">§</a><h3 class="code-header">Fee(<a class="enum" href="enum.FeeError.html" title="enum zcash_primitives::transaction::builder::FeeError">FeeError</a>&lt;FE&gt;)</h3></section><div class="docblock"><p>An error occurred in computing the fees for a transaction.</p>
 </div><section id="variant.Balance" class="variant"><a href="#variant.Balance" class="anchor">§</a><h3 class="code-header">Balance(BalanceError)</h3></section><div class="docblock"><p>An overflow or underflow occurred when computing value balances</p>
-</div><section id="variant.TransparentBuild" class="variant"><a href="#variant.TransparentBuild" class="anchor">§</a><h3 class="code-header">TransparentBuild(<a class="enum" href="../../../zcash_transparent/builder/enum.Error.html" title="enum zcash_transparent::builder::Error">Error</a>)</h3></section><div class="docblock"><p>An error occurred in constructing the transparent parts of a transaction.</p>
+</div><section id="variant.TransparentBuild" class="variant"><a href="#variant.TransparentBuild" class="anchor">§</a><h3 class="code-header">TransparentBuild(Error)</h3></section><div class="docblock"><p>An error occurred in constructing the transparent parts of a transaction.</p>
 </div><section id="variant.SaplingBuild" class="variant"><a href="#variant.SaplingBuild" class="anchor">§</a><h3 class="code-header">SaplingBuild(Error)</h3></section><div class="docblock"><p>An error occurred in constructing the Sapling parts of a transaction.</p>
 </div><section id="variant.OrchardBuild" class="variant"><a href="#variant.OrchardBuild" class="anchor">§</a><h3 class="code-header">OrchardBuild(BuildError)</h3></section><div class="docblock"><p>An error occurred in constructing the Orchard parts of a transaction.</p>
 </div><section id="variant.OrchardSpend" class="variant"><a href="#variant.OrchardSpend" class="anchor">§</a><h3 class="code-header">OrchardSpend(SpendError)</h3></section><div class="docblock"><p>An error occurred in adding an Orchard Spend to a transaction.</p>
