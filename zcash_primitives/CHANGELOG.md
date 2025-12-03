@@ -10,7 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::is_coinbase`
+    - `Builder` now supports constructing coinbase transactions.
+
 ### Changed
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `Error` has a new `Coinbase` variant.
+    - `BuildConfig`:
+      -  Has a new `Coinbase` variant.
+      -  Is not `Copy` anymore.
+    - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
+      instead of `u64`.
 - MSRV is now 1.85.1.
 
 ### Removed
