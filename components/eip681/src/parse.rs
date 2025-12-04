@@ -565,17 +565,7 @@ impl EthereumAbiTypeName {
     }
 }
 
-/// A key-value pair.
-///
-/// The type of the value is dependent upon the key.
-///
-/// ```abnf
-/// key = "value" / "gas" / "gasLimit" / "gasPrice" / TYPE
-/// ```
-///
-/// > If _key_ in the parameter list is "value", "gasLimit", "gasPrice" or "gas" then
-/// _value_ MUST be a number. Otherwise, it must correspond to the TYPE string
-/// used as key.
+/// The key of a parameter.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Key {
     Value,
@@ -615,13 +605,35 @@ impl Key {
 }
 
 /// A key-value pair, where the the type of the value depends upon the key.
+///
+/// ```abnf
+/// key = "value" / "gas" / "gasLimit" / "gasPrice" / TYPE
+/// ```
+///
+/// > If _key_ in the parameter list is "value", "gasLimit", "gasPrice" or "gas" then
+///   _value_ MUST be a number. Otherwise, it must correspond to the TYPE string
+///   used as key.
+///
+/// > ... gasLimit and gasPrice are suggested user-editable values for gas
+///   limit and gas price, respectively, for the requested transaction. It is
+///   acceptable to abbreviate gasLimit as gas, the two are treated synonymously.
 #[derive(Debug, PartialEq)]
 pub enum Parameter {
+    /// The amount to be paid, in the atomic unit of the native token of the blockchain.
+    ///
+    /// In most cases this will denote wei on the ether blockchain, but it depends on
+    /// context outside the scope of this library.
     Value(Number),
+    /// Gas number value.
     Gas(Number),
+    /// Synonym for "gas".
     GasLimit(Number),
+    /// Synonym for "gas".
     GasPrice(Number),
-    Type(EthereumAbiTypeName, Value),
+    /// A "type" parameter denotes a positional parameter provided to the function
+    /// named by `function_name`. For information about `function_name` see the ABNF
+    /// spec in the module-level docs.
+    AbiType(EthereumAbiTypeName, Value),
 }
 
 impl core::fmt::Display for Parameter {
@@ -638,7 +650,9 @@ impl Parameter {
             Parameter::Gas(_) => Key::Gas,
             Parameter::GasLimit(_) => Key::GasLimit,
             Parameter::GasPrice(_) => Key::GasPrice,
-            Parameter::Type(ethereum_abi_type_name, _) => Key::Type(ethereum_abi_type_name.clone()),
+            Parameter::AbiType(ethereum_abi_type_name, _) => {
+                Key::Type(ethereum_abi_type_name.clone())
+            }
         }
     }
 
@@ -649,7 +663,7 @@ impl Parameter {
             Parameter::Gas(number) => Value::Number(number.clone()),
             Parameter::GasLimit(number) => Value::Number(number.clone()),
             Parameter::GasPrice(number) => Value::Number(number.clone()),
-            Parameter::Type(_, value) => value.clone(),
+            Parameter::AbiType(_, value) => value.clone(),
         }
     }
 
@@ -683,7 +697,7 @@ impl Parameter {
                     Value::parse(i).map_err(|_| ParseError::InvalidParameterValue {
                         ty: type_name.to_string(),
                     })?;
-                Ok((i, Parameter::Type(type_name, value)))
+                Ok((i, Parameter::AbiType(type_name, value)))
             }
         }
     }
@@ -726,7 +740,7 @@ impl Parameters {
         }
     }
 
-    /// Return the value of the parameter with the given `key`, if any.
+    /// Return the _first_ value of the parameter with the given `key`, if any.
     pub fn get_value(&self, key: &Key) -> Option<Value> {
         for param in self.0.iter() {
             if &param.key() == key {
@@ -1371,7 +1385,7 @@ mod test {
         arb_key().prop_flat_map(|key| {
             if let Key::Type(name) = key {
                 arb_non_number_value()
-                    .prop_map(move |value| Parameter::Type(name.clone(), value))
+                    .prop_map(move |value| Parameter::AbiType(name.clone(), value))
                     .boxed()
             } else {
                 arb_valid_number()
