@@ -18,6 +18,7 @@
 //! number           = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
 //! ```
 
+pub mod error;
 mod parse;
 pub use parse::{
     Digits, EnsName, EthereumAbiTypeName, EthereumAddress, EthereumTransactionRequest, HexDigits,
