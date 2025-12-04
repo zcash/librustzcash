@@ -1,13 +1,6 @@
 
 # cargo-vet imports lock
 
-[[publisher.async-trait]]
-version = "0.1.81"
-when = "2024-07-07"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -21,13 +14,6 @@ when = "2023-04-03"
 user-id = 5946
 user-login = "jrmuizel"
 user-name = "Jeff Muizelaar"
-
-[[publisher.dyn-clone]]
-version = "1.0.17"
-when = "2024-02-26"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
 
 [[publisher.equihash]]
 version = "0.2.2"
@@ -85,13 +71,6 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
-[[publisher.inventory]]
-version = "0.3.15"
-when = "2024-01-26"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
 [[publisher.memuse]]
 version = "0.2.2"
 when = "2024-12-13"
@@ -106,54 +85,12 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.paste]]
-version = "1.0.15"
-when = "2024-05-07"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
 [[publisher.pczt]]
 version = "0.5.0"
 when = "2025-11-05"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
-
-[[publisher.prettyplease]]
-version = "0.2.20"
-when = "2024-05-07"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.proc-macro2]]
-version = "1.0.103"
-when = "2025-10-23"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.ref-cast]]
-version = "1.0.25"
-when = "2025-09-28"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.ref-cast-impl]]
-version = "1.0.25"
-when = "2025-09-28"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.ryu]]
-version = "1.0.18"
-when = "2024-05-07"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
 
 [[publisher.sapling-crypto]]
 version = "0.6.0"
@@ -176,20 +113,6 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.serde_ignored]]
-version = "0.1.10"
-when = "2024-01-02"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.serde_json]]
-version = "1.0.145"
-when = "2025-09-14"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
 [[publisher.shardtree]]
 version = "0.6.1"
 when = "2025-01-31"
@@ -203,34 +126,6 @@ when = "2024-12-14"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
-
-[[publisher.syn]]
-version = "1.0.109"
-when = "2023-02-24"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.syn]]
-version = "2.0.100"
-when = "2025-03-09"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.thiserror]]
-version = "2.0.12"
-when = "2025-03-03"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.thiserror-impl]]
-version = "2.0.12"
-when = "2025-03-03"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
 
 [[publisher.unicode-normalization]]
 version = "0.1.24"
@@ -3022,6 +2917,12 @@ who = "Nika Layzell <nika@thelayzells.com>"
 criteria = "safe-to-deploy"
 version = "0.2.0"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.paste]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.10 -> 1.0.15"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.percent-encoding]]
 who = "Valentin Gosu <valentin.gosu@gmail.com>"

@@ -1,5 +1,6 @@
 [workspace]
-members = [ "components/eip681",
+members = [
+    "components/eip681",
     "components/equihash",
     "components/f4jumble",
     "components/zcash_address",

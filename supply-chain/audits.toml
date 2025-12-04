@@ -1867,18 +1867,6 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.6.0 -> 1.7.0"
 
-[[trusted.async-trait]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-07-23"
-end = "2026-11-23"
-
-[[trusted.dyn-clone]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-12-23"
-end = "2026-11-23"
-
 [[trusted.equihash]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1957,12 +1945,6 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-09-25"
 end = "2025-10-02"
 
-[[trusted.inventory]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-08-15"
-end = "2026-11-23"
-
 [[trusted.memuse]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -1999,12 +1981,6 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-12"
 end = "2025-08-12"
 
-[[trusted.paste]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-03-19"
-end = "2026-11-23"
-
 [[trusted.pczt]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -2017,41 +1993,11 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2025-12-17"
 
-[[trusted.prettyplease]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2022-01-04"
-end = "2026-11-23"
-
-[[trusted.proc-macro2]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-04-23"
-end = "2026-11-23"
-
 [[trusted.redjubjub]]
 criteria = "safe-to-deploy"
 user-id = 199950 # Daira-Emma Hopwood (daira)
 start = "2023-03-30"
 end = "2026-02-21"
-
-[[trusted.ref-cast]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-05-05"
-end = "2026-11-23"
-
-[[trusted.ref-cast-impl]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-05-05"
-end = "2026-11-23"
-
-[[trusted.ryu]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-05-02"
-end = "2026-11-23"
 
 [[trusted.sapling-crypto]]
 criteria = "safe-to-deploy"
@@ -2089,18 +2035,6 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2024-10-15"
 end = "2026-10-26"
 
-[[trusted.serde_ignored]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-08-18"
-end = "2026-11-23"
-
-[[trusted.serde_json]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-02-28"
-end = "2026-11-23"
-
 [[trusted.shardtree]]
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
@@ -2112,24 +2046,6 @@ criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2024-12-13"
 end = "2025-12-16"
-
-[[trusted.syn]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-03-01"
-end = "2026-11-23"
-
-[[trusted.thiserror]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-10-09"
-end = "2026-11-23"
-
-[[trusted.thiserror-impl]]
-criteria = "safe-to-deploy"
-user-id = 3618 # David Tolnay (dtolnay)
-start = "2019-10-09"
-end = "2026-11-23"
 
 [[trusted.windows]]
 criteria = "safe-to-deploy"
