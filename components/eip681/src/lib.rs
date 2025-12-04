@@ -22,5 +22,5 @@ pub mod error;
 mod parse;
 pub use parse::{
     Digits, EnsName, EthereumAbiTypeName, EthereumAddress, EthereumTransactionRequest, HexDigits,
-    Key, Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
+    Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
 };

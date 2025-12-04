@@ -427,7 +427,7 @@ impl EthereumAddress {
 
 /// A URL-encoded unicode string of arbitrary length, where delimiters and the
 /// percentage symbol are mandatorily hex-encoded with a `%` prefix.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UrlEncodedUnicodeString(String);
 
 impl core::fmt::Display for UrlEncodedUnicodeString {
@@ -465,7 +465,7 @@ impl UrlEncodedUnicodeString {
 /// ```abnf
 /// value = number / ethereum_address / STRING
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Number(Number),
     Address(EthereumAddress),
@@ -565,11 +565,17 @@ impl EthereumAbiTypeName {
     }
 }
 
-/// A parameter key.
+/// A key-value pair.
+///
+/// The type of the value is dependent upon the key.
 ///
 /// ```abnf
 /// key = "value" / "gas" / "gasLimit" / "gasPrice" / TYPE
 /// ```
+///
+/// > If _key_ in the parameter list is "value", "gasLimit", "gasPrice" or "gas" then
+/// _value_ MUST be a number. Otherwise, it must correspond to the TYPE string
+/// used as key.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Key {
     Value,
@@ -608,40 +614,78 @@ impl Key {
     }
 }
 
-/// A key-value pair.
+/// A key-value pair, where the the type of the value depends upon the key.
 #[derive(Debug, PartialEq)]
-pub struct Parameter {
-    key: Key,
-    value: Value,
+pub enum Parameter {
+    Value(Number),
+    Gas(Number),
+    GasLimit(Number),
+    GasPrice(Number),
+    Type(EthereumAbiTypeName, Value),
 }
 
 impl core::fmt::Display for Parameter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}={}", self.key, self.value))
+        f.write_fmt(format_args!("{}={}", self.key(), self.value()))
     }
 }
 
 impl Parameter {
+    /// Returns just the key of this parameter.
+    pub fn key(&self) -> Key {
+        match self {
+            Parameter::Value(_) => Key::Value,
+            Parameter::Gas(_) => Key::Gas,
+            Parameter::GasLimit(_) => Key::GasLimit,
+            Parameter::GasPrice(_) => Key::GasPrice,
+            Parameter::Type(ethereum_abi_type_name, _) => Key::Type(ethereum_abi_type_name.clone()),
+        }
+    }
+
+    /// Returns just the value of this parameter.
+    pub fn value(&self) -> Value {
+        match self {
+            Parameter::Value(number) => Value::Number(number.clone()),
+            Parameter::Gas(number) => Value::Number(number.clone()),
+            Parameter::GasLimit(number) => Value::Number(number.clone()),
+            Parameter::GasPrice(number) => Value::Number(number.clone()),
+            Parameter::Type(_, value) => value.clone(),
+        }
+    }
+
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         let (i, key) = Key::parse(i)?;
         let (i, _eq) = nom::character::complete::char('=')(i)?;
+
+        fn parse_number(
+            i: &str,
+            f: fn(Number) -> Parameter,
+        ) -> nom::IResult<&str, Parameter, ParseError<'_>> {
+            let (i, number) =
+                Number::parse
+                    .parse(i)
+                    .map_err(|_| ParseError::InvalidParameterValue {
+                        ty: "Number".to_string(),
+                    })?;
+            Ok((i, f(number)))
+        }
+
         // If key in the parameter list is value, gasLimit, gasPrice or gas then
         // value MUST be a number. Otherwise, it must correspond to the TYPE
         // string used as key.
-        let (i, value) = match &key {
-            Key::Value | Key::Gas | Key::GasLimit | Key::GasPrice => Number::parse
-                .map(Value::Number)
-                .parse(i)
-                .map_err(|_| ParseError::InvalidParameterValue {
-                    ty: "Number".to_string(),
-                })?,
+        match key {
+            Key::Value => parse_number(i, Parameter::Value),
+            Key::Gas => parse_number(i, Parameter::Gas),
+            Key::GasLimit => parse_number(i, Parameter::GasLimit),
+            Key::GasPrice => parse_number(i, Parameter::GasPrice),
             Key::Type(type_name) => {
-                Value::parse(i).map_err(|_| ParseError::InvalidParameterValue {
-                    ty: type_name.to_string(),
-                })?
+                let (i, value) =
+                    Value::parse(i).map_err(|_| ParseError::InvalidParameterValue {
+                        ty: type_name.to_string(),
+                    })?;
+                Ok((i, Parameter::Type(type_name, value)))
             }
-        };
-        Ok((i, Parameter { key, value }))
+        }
     }
 }
 
@@ -683,10 +727,10 @@ impl Parameters {
     }
 
     /// Return the value of the parameter with the given `key`, if any.
-    pub fn get_value(&self, key: &Key) -> Option<&Value> {
+    pub fn get_value(&self, key: &Key) -> Option<Value> {
         for param in self.0.iter() {
-            if &param.key == key {
-                return Some(&param.value);
+            if &param.key() == key {
+                return Some(param.value());
             }
         }
         None
@@ -1325,18 +1369,18 @@ mod test {
 
     fn arb_parameter() -> impl Strategy<Value = Parameter> {
         arb_key().prop_flat_map(|key| {
-            if matches!(key, Key::Value | Key::Gas | Key::GasLimit | Key::GasPrice) {
-                arb_valid_number()
-                    .prop_map(move |n| Parameter {
-                        key: key.clone(),
-                        value: Value::Number(n),
-                    })
+            if let Key::Type(name) = key {
+                arb_non_number_value()
+                    .prop_map(move |value| Parameter::Type(name.clone(), value))
                     .boxed()
             } else {
-                arb_non_number_value()
-                    .prop_map(move |v| Parameter {
-                        key: key.clone(),
-                        value: v,
+                arb_valid_number()
+                    .prop_map(move |n| match key {
+                        Key::Value => Parameter::Value(n),
+                        Key::Gas => Parameter::Gas(n),
+                        Key::GasLimit => Parameter::GasLimit(n),
+                        Key::GasPrice => Parameter::GasPrice(n),
+                        Key::Type(_) => unreachable!("we checked this is not TYPE"),
                     })
                     .boxed()
             }
@@ -1420,13 +1464,9 @@ mod test {
             "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359",
             seen.target_address.to_string()
         );
-        let value = seen
-            .parameters
-            .get_value(&Key::Value)
-            .unwrap()
-            .as_number()
-            .unwrap();
-        assert_eq!(2, value.integer().unwrap());
-        assert_eq!(2.014e18 as i128, value.as_i128().unwrap());
+        let value = seen.parameters.get_value(&Key::Value).unwrap();
+        let number = value.as_number().unwrap();
+        assert_eq!(2, number.integer().unwrap());
+        assert_eq!(2.014e18 as i128, number.as_i128().unwrap());
     }
 }
