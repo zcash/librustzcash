@@ -24,6 +24,7 @@ use crate::{
 use {
     crate::wallet::transparent::SchedulingError,
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    zcash_client_backend::data_api::ll::wallet::GapAddressesError,
     zcash_keys::encoding::TransparentCodecError,
 };
 
@@ -164,6 +165,9 @@ pub enum SqliteClientError {
         actual: BlockHeight,
     },
 
+    #[cfg(feature = "transparent-inputs")]
+    GapAddresses,
+
     /// An attempt to import a transparent pubkey failed because that pubkey had already been
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
@@ -179,6 +183,17 @@ impl error::Error for SqliteClientError {
             SqliteClientError::BalanceError(e) => Some(e),
             SqliteClientError::AddressGeneration(e) => Some(e),
             _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<GapAddressesError<SqliteClientError>> for SqliteClientError {
+    fn from(err: GapAddressesError<SqliteClientError>) -> Self {
+        match err {
+            GapAddressesError::Storage(e) => e,
+            GapAddressesError::AddressGeneration(e) => SqliteClientError::AddressGeneration(e),
+            GapAddressesError::AccountUnknown => SqliteClientError::AccountUnknown,
         }
     }
 }
@@ -283,6 +298,13 @@ impl fmt::Display for SqliteClientError {
                     f,
                     "An address has already been exposed for diversifier index {}",
                     u128::from(*i)
+                )
+            }
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::GapAddresses => {
+                write!(
+                    f,
+                    "An error occured while generating a transparent gap addresses"
                 )
             }
             SqliteClientError::AddressReuse(address_str, txids) => {

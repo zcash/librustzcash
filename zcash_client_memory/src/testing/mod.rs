@@ -23,9 +23,12 @@ use shardtree::store::ShardStore;
 use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::{
-    data_api::{InputSource, WalletRead, wallet::TargetHeight},
-    wallet::{WalletTransparentOutput, transparent::GapLimits},
+use {
+    zcash_client_backend::{
+        data_api::{InputSource, WalletRead, wallet::TargetHeight},
+        wallet::WalletTransparentOutput,
+    },
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
 pub mod pool;
