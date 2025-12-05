@@ -512,6 +512,90 @@ impl ConfirmationsPolicy {
     pub fn allow_zero_conf_shielding(&self) -> bool {
         self.allow_zero_conf_shielding
     }
+
+    /// Returns the number of confirmations until a transaction output is considered spendable,
+    /// given information about the output and the inputs to the transaction that produced it.
+    ///
+    /// # Parameters
+    /// - `target_height`: The minimum height at which the output will be potentially spent.
+    /// - `pool_type`: The Zcash pool that the output was received into.
+    /// - `receiving_key_scope`: The ZIP 32 [`Scope`] of the key that received the output,
+    ///   or `None` if the scope is unknown or corresponds to the ephemeral transparent
+    ///   key scope.
+    /// - `mined_height`: The block height at which the transaction that produced the output was
+    ///   mined, if any.
+    /// - `tx_trusted`: A boolean flag indicating whether the received transaction has been
+    ///   explicitly marked as trusted by the user.
+    /// - `max_shielding_input_height`: For outputs that are the result of wallet-internal
+    ///   shielding transactions, the maximum height at which any transparent input to that
+    ///   transaction was received.
+    /// - `tx_shielding_inputs_trusted`: For outputs that are the result of wallet-internal
+    ///   shielding transactions, a flag indicating whether all transparent inputs to that
+    ///   transaction have been explicitly marked as trusted by the user.
+    #[allow(clippy::too_many_arguments)]
+    pub fn confirmations_until_spendable(
+        &self,
+        target_height: TargetHeight,
+        pool_type: PoolType,
+        receiving_key_scope: Option<Scope>,
+        mined_height: Option<BlockHeight>,
+        tx_trusted: bool,
+        max_shielding_input_height: Option<BlockHeight>,
+        tx_shielding_inputs_trusted: bool,
+    ) -> u32 {
+        // Trusted outputs of transactions mined at heights greater than `trusted_height` will not
+        // be treated as spendable.
+        let trusted_height = target_height.saturating_sub(u32::from(self.trusted));
+        // Untrusted outputs of transactions mined at heights greater than `untrusted_height` will
+        // not be treated as spendable.
+        let untrusted_height = target_height.saturating_sub(u32::from(self.untrusted));
+
+        // Calculate the possible options for confirmations.
+        // - If the output's tx is unmined, we are constantly waiting for the maximum number of
+        //   confirmations.
+        // - If the output's tx is mined, the required number of confirmations decreases to a floor
+        //   of zero.
+        let confs_for_trusted =
+            mined_height.map_or(u32::from(self.trusted), |h| h - trusted_height);
+        let confs_for_untrusted =
+            mined_height.map_or(u32::from(self.untrusted), |h| h - untrusted_height);
+        match pool_type {
+            PoolType::Transparent => {
+                #[cfg(feature = "transparent-inputs")]
+                let zc_shielding = self.allow_zero_conf_shielding;
+                #[cfg(not(feature = "transparent-inputs"))]
+                let zc_shielding = false;
+
+                if zc_shielding {
+                    0
+                } else if tx_trusted || receiving_key_scope == Some(Scope::Internal) {
+                    confs_for_trusted
+                } else {
+                    confs_for_untrusted
+                }
+            }
+            PoolType::Shielded(_) => {
+                if tx_trusted {
+                    confs_for_trusted
+                } else if receiving_key_scope == Some(Scope::Internal) {
+                    // If the note was the output of a shielding transaction, we use the mined
+                    // height of the transparent source funds & their trust status instead of the
+                    // height at which the shielding transaction was mined.
+                    if let Some(h) = max_shielding_input_height {
+                        if tx_shielding_inputs_trusted {
+                            h - trusted_height
+                        } else {
+                            h - untrusted_height
+                        }
+                    } else {
+                        confs_for_trusted
+                    }
+                } else {
+                    confs_for_untrusted
+                }
+            }
+        }
+    }
 }
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series

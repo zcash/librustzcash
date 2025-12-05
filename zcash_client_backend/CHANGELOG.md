@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified

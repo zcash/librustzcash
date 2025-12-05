@@ -3,7 +3,6 @@
 use incrementalmerkletree::Position;
 use rusqlite::{Connection, Row, named_params, types::Value};
 use std::{num::NonZeroU64, rc::Rc};
-use zip32::Scope;
 
 use zcash_client_backend::{
     data_api::{
@@ -456,13 +455,9 @@ where
         },
     )?;
 
-    let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-    let untrusted_height =
-        target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
-
     row_results
         .map(|t| match t? {
-            (Some(note), max_shard_priority, trusted, tx_shielding_inputs_trusted) => {
+            (Some(note), max_shard_priority, tx_trusted, tx_shielding_inputs_trusted) => {
                 let shard_scanned = max_shard_priority
                     .iter()
                     .any(|p| *p <= ScanPriority::Scanned);
@@ -472,27 +467,15 @@ where
                     .zip(note_request.anchor_height())
                     .is_some_and(|(h, ah)| h <= ah);
 
-                let has_confirmations = match (note.mined_height(), note.spending_key_scope()) {
-                    (None, _) => false,
-                    (Some(received_height), Scope::Internal) => {
-                        // The note has the required number of confirmations for a trusted note.
-                        received_height <= trusted_height &&
-                        // if the note was the output of a shielding transaction
-                        note.max_shielding_input_height().iter().all(|h| {
-                            // its inputs have at least `untrusted` confirmations
-                            h <= &untrusted_height ||
-                            // or its inputs are trusted and have at least `trusted` confirmations
-                            (h <= &trusted_height && tx_shielding_inputs_trusted)
-                        })
-                    }
-                    (Some(received_height), Scope::External) => {
-                        // The note has the required number of confirmations for an untrusted note.
-                        received_height <= untrusted_height ||
-                        // or it is the output of an explicitly trusted tx and has at least
-                        // `trusted` confirmations
-                        (received_height <= trusted_height && trusted)
-                    }
-                };
+                let has_confirmations = confirmations_policy.confirmations_until_spendable(
+                    target_height,
+                    PoolType::Shielded(protocol),
+                    Some(note.spending_key_scope()),
+                    note.mined_height(),
+                    tx_trusted,
+                    note.max_shielding_input_height(),
+                    tx_shielding_inputs_trusted,
+                ) == 0;
 
                 match (
                     note_request,
@@ -637,50 +620,47 @@ where
         ],
         |row| {
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
+            let max_shielding_input_height = row
+                .get::<_, Option<u32>>("max_shielding_input_height")?
+                .map(BlockHeight::from);
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let note = to_spendable_note(params, row)?;
 
-            Ok(note.map(|n| (n, tx_trust_status, tx_shielding_inputs_trusted)))
+            Ok(note.map(|n| {
+                (
+                    n,
+                    tx_trust_status,
+                    max_shielding_input_height,
+                    tx_shielding_inputs_trusted,
+                )
+            }))
         },
     )?;
-
-    let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-    let untrusted_height =
-        target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
 
     notes
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
             result_note
-                .map(|(note, trusted, tx_shielding_inputs_trusted)| {
-                    let received_height = note
-                        .mined_height()
-                        .expect("mined height checked to be non-null");
+                .map(
+                    |(
+                        note,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    )| {
+                        let has_confirmations = confirmations_policy.confirmations_until_spendable(
+                            target_height,
+                            PoolType::Shielded(protocol),
+                            Some(note.spending_key_scope()),
+                            note.mined_height(),
+                            tx_trusted,
+                            max_shielding_input_height,
+                            tx_shielding_inputs_trusted,
+                        ) == 0;
 
-                    let has_confirmations = match note.spending_key_scope() {
-                        Scope::Internal => {
-                            // The note was has at least `trusted` confirmations.
-                            received_height <= trusted_height &&
-                            // And, if the note was the output of a shielding transaction, its
-                            // transparent inputs have at least `untrusted` confirmations.
-                            note.max_shielding_input_height().iter().all(|h| {
-                                // its inputs have at least `untrusted` confirmations
-                                h <= &untrusted_height ||
-                                // or its inputs are trusted and have at least `trusted` confirmations
-                                (h <= &trusted_height && tx_shielding_inputs_trusted)
-                            })
-                        }
-                        Scope::External => {
-                            // The note has the required number of confirmations for an untrusted note.
-                            received_height <= untrusted_height ||
-                            // or it is the output of an explicitly trusted tx and has at least
-                            // `trusted` confirmations
-                            (received_height <= trusted_height && trusted)
-                        }
-                    };
-
-                    has_confirmations.then_some(note)
-                })
+                        has_confirmations.then_some(note)
+                    },
+                )
                 .transpose()
         })
         .collect::<Result<Vec<_>, _>>()

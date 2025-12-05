@@ -132,7 +132,7 @@ mod tests {
             TestDsl::with_sapling_birthday_account(dsf, cache).build::<SaplingPoolTester>();
 
         // Add funds to the wallet in a single note
-        let (h, _, _) = st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+        let (_h, _, _) = st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
 
         let mut stmt = st.wallet().conn().prepare(
             "SELECT transaction_id, output_pool, output_index, value, recipient_key_scope FROM v_tx_outputs"

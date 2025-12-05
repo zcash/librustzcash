@@ -2144,8 +2144,6 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-        let untrusted_height =
-            target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
 
         let any_spendable =
             anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
@@ -2153,8 +2151,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
-                    t.mined_height AS mined_height,
-                    MAX(tt.mined_height) AS max_shielding_input_height
+                    t.mined_height,
+                    IFNULL(t.trust_status, 0) AS trust_status,
+                    MAX(tt.mined_height) AS max_shielding_input_height,
+                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
@@ -2213,25 +2213,28 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .get::<_, Option<u32>>("mined_height")?
                 .map(BlockHeight::from);
 
+            let tx_trusted = row.get::<_, bool>("trust_status")?;
+
             let max_shielding_input_height = row
                 .get::<_, Option<u32>>("max_shielding_input_height")?
                 .map(BlockHeight::from);
+
+            let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
             // A note is spendable if we have enough chain tip information to construct witnesses,
             // the shard that its witness resides in is sufficiently scanned that we can construct
             // the witness for the note, and the note has enough confirmations to be spent.
             let is_spendable = any_spendable
                 && max_priority <= ScanPriority::Scanned
-                && match recipient_key_scope {
-                    Some(KeyScope::INTERNAL) => {
-                        // The note was has at least `trusted` confirmations.
-                        received_height.iter().any(|h| h <= &trusted_height) &&
-                        // And, if the note was the output of a shielding transaction, its
-                        // transparent inputs have at least `untrusted` confirmations.
-                        max_shielding_input_height.iter().all(|h| h <= &untrusted_height)
-                    }
-                    _ => received_height.iter().any(|h| h <= &untrusted_height),
-                };
+                && confirmations_policy.confirmations_until_spendable(
+                    target_height,
+                    PoolType::Shielded(protocol),
+                    recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                    received_height,
+                    tx_trusted,
+                    max_shielding_input_height,
+                    tx_shielding_inputs_trusted,
+                ) == 0;
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
