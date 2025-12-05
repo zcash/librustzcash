@@ -12,6 +12,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 
 ### Removed
 - `zcash_primitives::consensus` module (use `zcash_protocol::consensus` instead).

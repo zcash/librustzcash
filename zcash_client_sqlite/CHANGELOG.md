@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+
 ## [0.18.10, 0.19.1] - 2025-11-25
 
 ### Fixed

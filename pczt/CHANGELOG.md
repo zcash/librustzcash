@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `pczt::roles::signer`:
+  - `Signer::sighash`
+  - `Signer::append_transparent_signature`
+  - `Signer::apply_sapling_signature`
+  - `Signer::apply_orchard_signature`
+
+### Changed
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+
 ## [0.5.0] - 2025-11-05
 
 ### Changed
