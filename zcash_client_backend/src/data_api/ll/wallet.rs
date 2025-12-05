@@ -29,10 +29,16 @@ use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{data_api::ll::ReceivedSaplingOutput as _, wallet::WalletTransparentOutput},
+    crate::{
+        data_api::{Account, ll::ReceivedSaplingOutput as _},
+        wallet::WalletTransparentOutput,
+    },
     std::collections::HashSet,
     transparent::{bundle::OutPoint, keys::TransparentKeyScope},
-    zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest},
+    zcash_keys::keys::{
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest,
+        transparent::{gap_limits::GapLimits, wallet::GapLimitsWalletAccess},
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -114,6 +120,64 @@ where
 
 /// Errors that can result as a consequence of attemping to insert block data for a sequence of
 /// blocks into the data store.
+#[cfg(feature = "transparent-inputs")]
+pub enum GapAddressesError<SE> {
+    Storage(SE),
+    AddressGeneration(AddressGenerationError),
+    AccountUnknown,
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub fn generate_transparent_gap_addresses<DbT, SE>(
+    wallet_db: &mut DbT,
+    gap_limits: GapLimits,
+    account_id: <DbT as LowLevelWalletRead>::AccountId,
+    key_scope: TransparentKeyScope,
+    request: UnifiedAddressRequest,
+) -> Result<(), GapAddressesError<SE>>
+where
+    DbT: LowLevelWalletWrite<Error = SE>
+        + GapLimitsWalletAccess<Error = SE, AccountRef = <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT::TxRef: Eq + Hash,
+{
+    let account_ref = wallet_db
+        .get_account_ref(account_id)
+        .map_err(GapAddressesError::Storage)?;
+
+    let gap_limit = match key_scope {
+        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
+        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
+        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
+        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
+            key_scope,
+        )),
+    }
+    .map_err(GapAddressesError::AddressGeneration)?;
+
+    if let Some(gap_start) = wallet_db
+        .find_gap_start(account_ref, key_scope, gap_limit)
+        .map_err(GapAddressesError::Storage)?
+    {
+        let account = wallet_db
+            .get_account_internal(account_ref)
+            .map_err(GapAddressesError::Storage)?
+            .ok_or(GapAddressesError::AccountUnknown)?;
+        wallet_db
+            .generate_address_range_internal(
+                account_ref,
+                &account.uivk(),
+                account.ufvk(),
+                key_scope,
+                request,
+                gap_start..gap_start.saturating_add(gap_limit),
+                false,
+            )
+            .map_err(GapAddressesError::Storage)?
+    }
+
+    Ok(())
+}
+
 pub enum PutBlocksError<SE, TE> {
     /// Returned if a provided block sequence has gaps.
     NonSequentialBlocks {
@@ -124,12 +188,53 @@ pub enum PutBlocksError<SE, TE> {
     Storage(SE),
     /// Wraps an error produced by [`shardtree`] insertion.
     ShardTree(ShardTreeError<TE>),
+    #[cfg(feature = "transparent-inputs")]
+    GapAddresses(GapAddressesError<SE>),
 }
 
 impl<SE, TE> From<ShardTreeError<TE>> for PutBlocksError<SE, TE> {
     fn from(value: ShardTreeError<TE>) -> Self {
         PutBlocksError::ShardTree(value)
     }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<SE, TE> From<GapAddressesError<SE>> for PutBlocksError<SE, TE> {
+    fn from(value: GapAddressesError<SE>) -> Self {
+        PutBlocksError::GapAddresses(value)
+    }
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait PutBlocksDbT<SE, TE, AR>:
+    LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>
+{
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>, SE, TE, AR>
+    PutBlocksDbT<SE, TE, AR> for T
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub trait PutBlocksDbT<SE, TE, AR>:
+    LowLevelWalletWrite<Error = SE>
+    + WalletCommitmentTrees<Error = TE>
+    + GapLimitsWalletAccess<Error = SE, AccountRef = AR>
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<
+    T: LowLevelWalletWrite<Error = SE>
+        + WalletCommitmentTrees<Error = TE>
+        + GapLimitsWalletAccess<Error = SE, AccountRef = AR>,
+    SE,
+    TE,
+    AR,
+> PutBlocksDbT<SE, TE, AR> for T
+{
 }
 
 /// Adds information about a sequence of scanned blocks to the provided data store.
@@ -143,11 +248,12 @@ impl<SE, TE> From<ShardTreeError<TE>> for PutBlocksError<SE, TE> {
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
 pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
-    blocks: Vec<ScannedBlock<DbT::AccountId>>,
+    blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
 ) -> Result<(), PutBlocksError<SE, TE>>
 where
-    DbT: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>,
+    DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
 {
     struct BlockPositions {
@@ -330,13 +436,14 @@ where
     {
         if let Some(t_key_scope) = key_scope {
             use ReceiverRequirement::*;
-            wallet_db
-                .generate_transparent_gap_addresses(
-                    account_id,
-                    t_key_scope,
-                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                )
-                .map_err(PutBlocksError::Storage)?;
+            generate_transparent_gap_addresses(
+                wallet_db,
+                gap_limits,
+                account_id,
+                t_key_scope,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            )
+            .map_err(PutBlocksError::GapAddresses)?;
         }
     }
 
@@ -569,16 +676,54 @@ where
     Ok(())
 }
 
+#[cfg(not(feature = "transparent-inputs"))]
+type GapError<DbT> = <DbT as LowLevelWalletRead>::Error;
+
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait StoreDecryptedTxDbT: LowLevelWalletWrite {}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite> StoreDecryptedTxDbT for T {}
+
+#[cfg(feature = "transparent-inputs")]
+type GapError<DbT> = GapAddressesError<<DbT as LowLevelWalletRead>::Error>;
+
+#[cfg(feature = "transparent-inputs")]
+pub trait StoreDecryptedTxDbT:
+    LowLevelWalletWrite
+    + GapLimitsWalletAccess<
+        Error = <Self as LowLevelWalletRead>::Error,
+        AccountRef = <Self as LowLevelWalletRead>::AccountRef,
+    >
+where
+    <Self as LowLevelWalletRead>::Error: From<GapError<Self>>,
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<
+    T: LowLevelWalletWrite
+        + GapLimitsWalletAccess<
+            Error = <T as LowLevelWalletRead>::Error,
+            AccountRef = <T as LowLevelWalletRead>::AccountRef,
+        >,
+> StoreDecryptedTxDbT for T
+where
+    <T as LowLevelWalletRead>::Error: From<GapError<T>>,
+{
+}
+
 pub fn store_decrypted_tx<DbT, P>(
     wallet_db: &mut DbT,
     params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     chain_tip_height: BlockHeight,
     d_tx: DecryptedTransaction<Transaction, <DbT as LowLevelWalletRead>::AccountId>,
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
 where
-    DbT: LowLevelWalletWrite,
-    DbT::AccountId: core::fmt::Debug,
-    DbT::Error: From<BalanceError>,
+    DbT: StoreDecryptedTxDbT,
+    <DbT as LowLevelWalletRead>::AccountId: core::fmt::Debug,
+    <DbT as LowLevelWalletRead>::Error: From<BalanceError> + From<GapError<DbT>>,
     P: consensus::Parameters,
 {
     let funding_accounts = wallet_db.get_funding_accounts(d_tx.tx())?;
@@ -876,7 +1021,9 @@ where
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in gap_update_set {
         use ReceiverRequirement::*;
-        wallet_db.generate_transparent_gap_addresses(
+        generate_transparent_gap_addresses(
+            wallet_db,
+            gap_limits,
             account_id,
             key_scope,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),

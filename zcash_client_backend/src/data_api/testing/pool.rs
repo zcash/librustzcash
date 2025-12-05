@@ -1016,10 +1016,8 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::{
-        data_api::{MaxSpendMode, OutputOfSentTx},
-        wallet::transparent::GapLimits,
-    };
+    use crate::data_api::{MaxSpendMode, OutputOfSentTx};
+    use zcash_keys::keys::transparent::gap_limits::GapLimits;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
@@ -1176,7 +1174,8 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::{data_api::OutputOfSentTx, wallet::transparent::GapLimits};
+    use crate::data_api::OutputOfSentTx;
+    use zcash_keys::keys::transparent::gap_limits::GapLimits;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
@@ -1330,10 +1329,8 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::{
-        data_api::{MaxSpendMode, OutputOfSentTx},
-        wallet::transparent::GapLimits,
-    };
+    use crate::data_api::{MaxSpendMode, OutputOfSentTx};
+    use zcash_keys::keys::transparent::gap_limits::GapLimits;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
@@ -1650,8 +1647,9 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 {
     use crate::{
         data_api::{OutputOfSentTx, TransactionStatus},
-        wallet::{Exposure, TransparentAddressSource, transparent::GapLimits},
+        wallet::{Exposure, TransparentAddressSource},
     };
+    use zcash_keys::keys::transparent::gap_limits::GapLimits;
 
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
@@ -2154,7 +2152,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::{data_api::OutputOfSentTx, wallet::transparent::GapLimits};
+    use crate::data_api::OutputOfSentTx;
+    use zcash_keys::keys::transparent::gap_limits::GapLimits;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))

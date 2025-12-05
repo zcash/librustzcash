@@ -22,7 +22,6 @@ use transparent::{
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
-use zcash_client_backend::wallet::transparent::GapLimits;
 use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
     data_api::{
@@ -32,6 +31,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
+use zcash_keys::keys::transparent::gap_limits::GapLimits;
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -624,6 +624,8 @@ pub(crate) fn generate_external_address(
 ///
 /// [`WalletWrite::get_next_available_address`]: zcash_client_backend::data_api::WalletWrite::get_next_available_address
 /// [`WalletWrite::get_address_for_index`]: zcash_client_backend::data_api::WalletWrite::get_address_for_index
+// We could remove this and many children if we're able to
+// call what's shared from zcash_client_backend in this codebase
 pub(crate) fn generate_address_range<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
