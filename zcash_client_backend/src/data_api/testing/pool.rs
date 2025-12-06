@@ -391,13 +391,28 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     let txid = r.txids()[0];
 
     // Mark the external input as explicitly trusted, if so requested
-    if input_trust == InputTrust::ExternalTrusted {
+    let trusted = input_trust == InputTrust::ExternalTrusted;
+    if trusted {
         st.wallet_mut().set_tx_trust(txid, true).unwrap();
     }
 
     let add_confirmation = |i: u32| {
         let (h, _) = st.generate_empty_block();
         st.scan_cached_blocks(h, 1);
+        let outputs = st
+            .wallet()
+            .get_received_outputs(txid, TargetHeight::from(h + 1), confirmations_policy)
+            .unwrap();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(
+            outputs[0].confirmations_until_spendable(),
+            u32::from(if trusted {
+                confirmations_policy.trusted()
+            } else {
+                confirmations_policy.untrusted()
+            })
+            .saturating_sub(i + 1)
+        );
         ConfirmationStep {
             i,
             confirmation_requirement: min_confirmations,

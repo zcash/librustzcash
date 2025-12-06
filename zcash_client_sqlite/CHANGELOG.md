@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- The following columns have been added to the exposed `v_tx_outputs` view:
+  - `transaction_id`
+  - `mined_height`
+  - `recipient_key_scope`
+
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 

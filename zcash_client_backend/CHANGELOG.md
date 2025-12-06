@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::ReceivedTransactionOutput`
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified
@@ -29,6 +33,7 @@ workspace.
     key that will be used to encrypt any wallet-internal change outputs
     that would otherwise only be recoverable using the wallet's internal
     IVK.
+- `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs.
 
 ## [0.21.0] - 2025-11-05
 
