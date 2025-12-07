@@ -20,6 +20,7 @@ workspace.
 - `impl<'a> Borrow<rusqlite::Transaction<'a>> for zcash_client_sqlite::SqlTransaction<'a>`
 - `impl zcash_client_backend::data_api::ll::LowLevelWalletRead for WalletDb`
 - `impl zcash_client_backend::data_api::ll::LowLevelWalletWrite for WalletDb`
+- `impl zcash_keys::keys::transparent::GapLimitsWalletAccess for WalletDb`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
