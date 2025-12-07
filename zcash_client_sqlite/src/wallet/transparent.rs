@@ -22,7 +22,6 @@ use transparent::{
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
-use zcash_client_backend::wallet::transparent::GapLimits;
 use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
     data_api::{
@@ -32,6 +31,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
+use zcash_keys::keys::transparent::gap_limits::GapLimits;
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -753,14 +753,9 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    let gap_limit = match key_scope {
-        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
-        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
-        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
-        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
-            key_scope,
-        )),
-    }?;
+    let gap_limit = gap_limits.limit_for(key_scope).ok_or(
+        AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
+    )?;
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
         generate_address_range(

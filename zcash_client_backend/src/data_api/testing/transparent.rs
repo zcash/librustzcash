@@ -7,7 +7,10 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use sapling::zip32::ExtendedSpendingKey;
-use zcash_keys::{address::Address, keys::UnifiedAddressRequest};
+use zcash_keys::{
+    address::Address,
+    keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+};
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
@@ -24,7 +27,7 @@ use crate::{
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
-    wallet::{WalletTransparentOutput, transparent::GapLimits},
+    wallet::WalletTransparentOutput,
 };
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
