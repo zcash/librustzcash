@@ -26,8 +26,9 @@ use crate::{
 use {
     crate::wallet::transparent::SchedulingError,
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
-    zcash_client_backend::data_api::ll::wallet::GapAddressesError,
-    zcash_keys::encoding::TransparentCodecError,
+    zcash_keys::{
+        encoding::TransparentCodecError, keys::transparent::gap_limits::wallet::GapAddressesError,
+    },
 };
 
 /// The primary error type for the SQLite wallet backend.

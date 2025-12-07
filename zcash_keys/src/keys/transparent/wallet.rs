@@ -23,7 +23,7 @@ pub trait GapLimitsWalletAccess {
     ) -> Result<Option<NonHardenedChildIndex>, Self::Error>;
 
     #[allow(clippy::too_many_arguments)]
-    fn generate_address_range_internal(
+    fn generate_address_range(
         &self,
         account_id: Self::AccountRef,
         account_uivk: &UnifiedIncomingViewingKey,

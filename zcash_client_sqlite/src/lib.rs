@@ -1,3 +1,5 @@
+//! *An SQLite-based Zcash light client.*
+//!
 //! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 //! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
 //! combination with [`zcash_client_backend`], it provides a full implementation of a SQLite-backed
@@ -2192,7 +2194,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::transparent::find_gap_start(self.conn.borrow(), account_ref, key_scope, gap_limit)
     }
 
-    fn generate_address_range_internal(
+    fn generate_address_range(
         &self,
         account_id: Self::AccountRef,
         account_uivk: &UnifiedIncomingViewingKey,

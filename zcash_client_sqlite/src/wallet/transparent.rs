@@ -624,8 +624,6 @@ pub(crate) fn generate_external_address(
 ///
 /// [`WalletWrite::get_next_available_address`]: zcash_client_backend::data_api::WalletWrite::get_next_available_address
 /// [`WalletWrite::get_address_for_index`]: zcash_client_backend::data_api::WalletWrite::get_address_for_index
-// We could remove this and many children if we're able to
-// call what's shared from zcash_client_backend in this codebase
 pub(crate) fn generate_address_range<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -755,14 +753,9 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    let gap_limit = match key_scope {
-        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
-        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
-        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
-        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
-            key_scope,
-        )),
-    }?;
+    let gap_limit = gap_limits.limit_for(key_scope).ok_or(
+        AddressGenerationError::UnsupportedTransparentKeyScope(key_scope),
+    )?;
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
         generate_address_range(

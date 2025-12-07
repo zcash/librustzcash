@@ -2,6 +2,9 @@
 //! received by the wallet.
 use transparent::keys::TransparentKeyScope;
 
+#[cfg(feature = "transparent-inputs")]
+pub mod wallet;
+
 /// A data structure that can be used to configure custom gap limits for use in transparent address
 /// rotation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -36,8 +36,11 @@ use {
     std::collections::HashSet,
     transparent::{bundle::OutPoint, keys::TransparentKeyScope},
     zcash_keys::keys::{
-        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest,
-        transparent::{gap_limits::GapLimits, wallet::GapLimitsWalletAccess},
+        ReceiverRequirement, UnifiedAddressRequest,
+        transparent::{
+            gap_limits::{self, GapLimits, wallet::GapAddressesError},
+            wallet::GapLimitsWalletAccess,
+        },
     },
 };
 
@@ -121,13 +124,6 @@ where
 /// Errors that can result as a consequence of attemping to insert block data for a sequence of
 /// blocks into the data store.
 #[cfg(feature = "transparent-inputs")]
-pub enum GapAddressesError<SE> {
-    Storage(SE),
-    AddressGeneration(AddressGenerationError),
-    AccountUnknown,
-}
-
-#[cfg(feature = "transparent-inputs")]
 pub fn generate_transparent_gap_addresses<DbT, SE>(
     wallet_db: &mut DbT,
     gap_limits: GapLimits,
@@ -144,36 +140,21 @@ where
         .get_account_ref(account_id)
         .map_err(GapAddressesError::Storage)?;
 
-    let gap_limit = match key_scope {
-        TransparentKeyScope::EXTERNAL => Ok(gap_limits.external()),
-        TransparentKeyScope::INTERNAL => Ok(gap_limits.internal()),
-        TransparentKeyScope::EPHEMERAL => Ok(gap_limits.ephemeral()),
-        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
-            key_scope,
-        )),
-    }
-    .map_err(GapAddressesError::AddressGeneration)?;
-
-    if let Some(gap_start) = wallet_db
-        .find_gap_start(account_ref, key_scope, gap_limit)
+    let account = wallet_db
+        .get_account_internal(account_ref)
         .map_err(GapAddressesError::Storage)?
-    {
-        let account = wallet_db
-            .get_account_internal(account_ref)
-            .map_err(GapAddressesError::Storage)?
-            .ok_or(GapAddressesError::AccountUnknown)?;
-        wallet_db
-            .generate_address_range_internal(
-                account_ref,
-                &account.uivk(),
-                account.ufvk(),
-                key_scope,
-                request,
-                gap_start..gap_start.saturating_add(gap_limit),
-                false,
-            )
-            .map_err(GapAddressesError::Storage)?
-    }
+        .ok_or(GapAddressesError::AccountUnknown)?;
+
+    gap_limits::wallet::generate_gap_addresses(
+        wallet_db,
+        &gap_limits,
+        account_ref,
+        &account.uivk(),
+        account.ufvk(),
+        key_scope,
+        request,
+        false,
+    )?;
 
     Ok(())
 }
