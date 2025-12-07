@@ -13,6 +13,9 @@ workspace.
 ### Added
 - `zcash_client_backend::wallet::transparent`
 - `zcash_client_backend::data_api::ll`
+- `LowLevelWalletRead::get_account_ref`
+- `LowLevelWalletRead::get_account_internal`
+- `GapLimitsWalletAccess::generate_transparent_gap_addresses`
 
 ### Changed
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified
@@ -39,6 +42,8 @@ workspace.
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use
   `zcash_client_backend::wallet::transparent::GapLimits` instead.
+- `zcash_client_backend::wallet::transparent::GapLimits` has been moved to
+  `zcash_keys::keys::transparent::GapLimits`, use that instead.
 
 ## [0.21.0] - 2025-11-05
 
