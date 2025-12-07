@@ -22,6 +22,7 @@ workspace.
 - `impl zcash_client_backend::data_api::ll::LowLevelWalletWrite for WalletDb`
 - `impl Hash for zcash_client_sqlite::{ReceivedNoteId, UtxoId, TxRef}`
 - `impl {PartialOrd, Ord} for zcash_client_sqlite::{UtxoId, PartialOrd, Ord}`
+- `impl zcash_keys::keys::transparent::GapLimitsWalletAccess for WalletDb`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
