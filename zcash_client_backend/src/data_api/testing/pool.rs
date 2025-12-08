@@ -4939,3 +4939,81 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
         assert_eq!(T::note_value(note.note()), value);
     }
 }
+
+/// Tests that immature coinbase outputs are excluded from note selection.
+pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in two identical notes
+    let value = Zatoshis::const_from_u64(60000);
+    let outputs = [FakeCompactOutput::new(
+        &dfvk,
+        AddressType::DefaultExternal,
+        value,
+    )];
+    let total_value = value;
+
+    // `st.generate_next_block` with multiple outputs.
+    let pre_activation_block = CachedBlock::none(st.sapling_activation_height() - 1);
+    let prior_cached_block = st.latest_cached_block().unwrap_or(&pre_activation_block);
+    let h = prior_cached_block.height() + 1;
+    st.generate_block_at(
+        h,
+        prior_cached_block.chain_state.block_hash(),
+        &outputs,
+        prior_cached_block.sapling_end_size,
+        prior_cached_block.orchard_end_size,
+        false,
+    );
+
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    // Spendable balance matches total balance.
+    assert_eq!(st.get_total_balance(account.id()), total_value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        total_value
+    );
+
+    let target_height = (h + 1).into();
+
+    // Both notes are unspent.
+    let unspent_notes = T::select_unspent_notes(&st, account.id(), target_height, &[]).unwrap();
+    assert_eq!(unspent_notes.len(), 2);
+    for note in unspent_notes {
+        assert_eq!(T::note_value(note.note()), value);
+    }
+
+    // Both notes are spendable with 1 confirmation.
+    let spendable_notes = T::select_spendable_notes(
+        &st,
+        account.id(),
+        TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+        target_height,
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(spendable_notes.len(), 2);
+    for note in spendable_notes {
+        assert_eq!(T::note_value(note.note()), value);
+    }
+}

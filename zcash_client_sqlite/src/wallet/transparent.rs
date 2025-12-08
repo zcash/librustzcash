@@ -1015,7 +1015,7 @@ pub(crate) fn tx_unexpired_condition_minconf_0(tx: &str) -> String {
 ///   `accounts.id = transparent_received_outputs.account_id`
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
 /// - The parent is responsible for ensuring that this condition will only be checked for
-///   outputs that have already otherwise been verified to be spendible, i.e. it must be
+///   outputs that have already otherwise been verified to be spendable, i.e. it must be
 ///   used as a strictly constricting clause on the set of outputs.
 pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
     transparent_received_outputs: &str,
@@ -1045,6 +1045,27 @@ pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
     )
 }
 
+/// Generates a SQL condition that checks the coinbase maturity rule.
+///
+/// # Usage requirements
+/// - `tx` must be set to the SQL variable name for the transaction in the parent.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+/// - The parent is responsible for ensuring that this condition will only be checked for
+///   outputs that have already otherwise been verified to be spendable, i.e. it must be
+///   used as a strictly constricting clause on the set of outputs.
+pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
+    format!(
+        r#"
+        -- the output is _not_ a coinbase output
+        {tx}.tx_index != 0
+        -- or tx is mined and has at least 100 confirmations
+        OR (
+            {tx}.mined_height < :target_height -- tx is mined
+            AND :target_height - {tx}.mined_height >= 100
+        )
+        "#
+    )
+}
 /// Get information about a transparent output controlled by the wallet.
 ///
 /// # Parameters
@@ -1110,7 +1131,8 @@ pub(crate) fn get_wallet_transparent_output(
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
 ///   confirmations required by the specified confirmations policy; and
-/// * the output is unspent as of the current chain tip.
+/// * the output is unspent as of the current chain tip; and
+/// * the output adheres to the coinbase maturity requirement, if it is a coinbase output.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded
 /// iff the spending transaction will not be expired at `target_height`.
@@ -1139,9 +1161,11 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
+        // AND ({}) -- exclude immature coinbase outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        // excluding_immature_coinbase_outputs("t"),
     ))?;
 
     let addr_str = address.encode(params);
