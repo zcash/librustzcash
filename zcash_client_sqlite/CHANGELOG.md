@@ -13,7 +13,8 @@ workspace.
 ### Added
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`
-  - `mined_height`
+  - `tx_mined_height`
+  - `tx_trust_status`
   - `recipient_key_scope`
 
 ### Changed

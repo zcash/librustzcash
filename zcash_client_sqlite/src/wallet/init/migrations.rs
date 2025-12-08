@@ -131,6 +131,8 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
+    //                                                      |
+    //                                           v_tx_outputs_key_scopes
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![

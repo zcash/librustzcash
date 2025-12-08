@@ -1096,7 +1096,7 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   Sapling `OutputDescription` values, or the vector of Orchard actions.
 /// - `tx_mined_height`: An optional value identifying the block height at which the transaction that
 ///   produced this output was mined, or NULL if the transaction is unmined.
-/// - `tx_trust_status`: A flag indicating whether the transaction that produced these outputs
+/// - `tx_trust_status`: A flag indicating whether the transaction that produced this output
 ///   should be considered "trusted". When set to `1`, outputs of this transaction will be considered
 ///   spendable with `trusted` confirmations instead of `untrusted` confirmations.
 /// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
