@@ -38,7 +38,11 @@ impl Digits {
         let mut total = 0u64;
         for (mag, digit) in self.places.iter().rev().enumerate() {
             let increment = (*digit as u64)
-                .checked_mul(10u64.checked_pow(mag as u32).context(OverflowSnafu)?)
+                .checked_mul(
+                    10u64
+                        .checked_pow(u32::try_from(mag).context(IntegerSnafu)?)
+                        .context(OverflowSnafu)?,
+                )
                 .context(OverflowSnafu)?;
             total = total.checked_add(increment).context(OverflowSnafu)?;
         }
@@ -47,9 +51,9 @@ impl Digits {
 
     /// Returns the digits as a ratio, where prefixed zeros
     /// are treated as a denominator.
-    pub fn as_decimal_ratio(&self) -> Result<(u64, u64), ValidationError> {
+    fn as_decimal_ratio(&self) -> Result<(u64, u64), ValidationError> {
         let denominator = 10u64
-            .checked_pow(self.places.len() as u32)
+            .checked_pow(u32::try_from(self.places.len()).context(IntegerSnafu)?)
             .context(OverflowSnafu)?;
         let mut numerator = 0u64;
 
@@ -256,7 +260,7 @@ impl Number {
 
     /// Returns the value of the decimal portion of the number as a ratio
     /// of `u64`s.
-    pub fn decimal(&self) -> Result<(u64, u64), ValidationError> {
+    fn decimal(&self) -> Result<(u64, u64), ValidationError> {
         Ok(self
             .decimal
             .as_ref()
@@ -281,7 +285,9 @@ impl Number {
             .as_ref()
             .and_then(|(_, maybe_exp)| maybe_exp.as_ref().map(|digits| digits.as_u64()))
             .transpose()?
-            .unwrap_or_default() as u32;
+            .unwrap_or_default()
+            .try_into()
+            .context(IntegerSnafu)?;
         let multiplier = 10i128.checked_pow(exp).context(LargeExponentSnafu {
             expected: u128::MAX.ilog10() as usize,
             seen: exp as u64,

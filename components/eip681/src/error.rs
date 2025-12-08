@@ -110,4 +110,8 @@ pub enum ValidationError {
 
     #[snafu(display("Could not decode url-encoded string: {source}"))]
     UrlEncoding { source: std::str::Utf8Error },
+
+    /// An attempt to convert an integer failed.
+    #[snafu(display("Integer conversion failed: {source}"))]
+    Integer { source: std::num::TryFromIntError },
 }
