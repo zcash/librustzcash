@@ -43,7 +43,7 @@ use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zcash_primitives::transaction::fees::zip317;
 use zcash_protocol::{
     TxId,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
     value::{ZatBalance, Zatoshis},
 };
 use zcash_script::script;
@@ -1015,7 +1015,7 @@ pub(crate) fn tx_unexpired_condition_minconf_0(tx: &str) -> String {
 ///   `accounts.id = transparent_received_outputs.account_id`
 /// - The parent is responsible for enclosing this condition in parentheses as appropriate.
 /// - The parent is responsible for ensuring that this condition will only be checked for
-///   outputs that have already otherwise been verified to be spendible, i.e. it must be
+///   outputs that have already otherwise been verified to be spendable, i.e. it must be
 ///   used as a strictly constricting clause on the set of outputs.
 pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
     transparent_received_outputs: &str,
@@ -1045,6 +1045,34 @@ pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
     )
 }
 
+/// Generates a SQL condition that checks the coinbase maturity rule.
+///
+/// # Usage requirements
+/// - `tx` must be set to the SQL variable name for the transaction in the parent.
+/// - The parent is responsible for enclosing this condition in parentheses as appropriate.
+/// - The parent is responsible for ensuring that this condition will only be checked for
+///   outputs that have already otherwise been verified to be spendable, i.e. it must be
+///   used as a strictly constricting clause on the set of outputs.
+pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
+    // FIXME: If a coinbase transaction is discovered via the get_compact_utxos RPC call
+    // we won't have sufficient info to identify it as coinbase, so it may not be excluded
+    // unless decrypt_and_store_transaction has been called on the transaction that produced it.
+    //
+    // To fix this we'll need to add the `tx_index` field to the GetAddressUtxosReply proto type.
+    format!(
+        r#"
+        NOT (
+            -- the output is a coinbase output
+            -- -- TODO(schell): After https://github.com/zcash/librustzcash/pull/2036 merges we may be able
+            -- -- to simplify this query to:
+            -- -- {tx}.tx_index == 0
+            IFNULL({tx}.tx_index, 1) == 0
+            -- the coinbase output is immature (< 100 confirmations)
+            AND :target_height - {tx}.mined_height < {COINBASE_MATURITY_BLOCKS}
+        )
+        "#
+    )
+}
 /// Get information about a transparent output controlled by the wallet.
 ///
 /// # Parameters
@@ -1110,7 +1138,8 @@ pub(crate) fn get_wallet_transparent_output(
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
 ///   confirmations required by the specified confirmations policy; and
-/// * the output is unspent as of the current chain tip.
+/// * the output is unspent as of the current chain tip; and
+/// * the output adheres to the coinbase maturity requirement, if it is a coinbase output.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded
 /// iff the spending transaction will not be expired at `target_height`.
@@ -1138,10 +1167,12 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          AND u.value_zat >= :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+         AND ({}) -- exclude immature coinbase outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        excluding_immature_coinbase_outputs("t"),
     ))?;
 
     let addr_str = address.encode(params);
