@@ -1160,12 +1160,12 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          AND u.value_zat >= :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
-        // AND ({}) -- exclude immature coinbase outputs",
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+         AND ({}) -- exclude immature coinbase outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        // excluding_immature_coinbase_outputs("t"),
+        "true" //excluding_immature_coinbase_outputs("t"),
     ))?;
 
     let addr_str = address.encode(params);

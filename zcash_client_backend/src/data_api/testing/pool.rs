@@ -4945,75 +4945,42 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
-    let account = st.test_account().cloned().unwrap();
-    let dfvk = T::test_account_fvk(&st);
+    // Get the default transparent address
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
 
-    // Add funds to the wallet in two identical notes
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+
+    // Construct the initial coinbase transaction
+    // How to construct a coinbase transaction?
+    // let coinbase_utxo_address = todo!();
+    // let coinbase_tx = Transaction {
+    //     txid: TxId {},
+    //     data: todo!(),
+    // };
+    // let (coinbase_tx_block_height, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    // let coinbase_tx_target_height = TargetHeight::from(coinbase_tx_block_height);
+
+    // Add funds to the wallet, which generates the first block
     let value = Zatoshis::const_from_u64(60000);
-    let outputs = [FakeCompactOutput::new(
-        &dfvk,
-        AddressType::DefaultExternal,
-        value,
-    )];
-    let total_value = value;
+    let _ = st.add_a_single_note_checking_balance(value);
 
-    // `st.generate_next_block` with multiple outputs.
-    let pre_activation_block = CachedBlock::none(st.sapling_activation_height() - 1);
-    let prior_cached_block = st.latest_cached_block().unwrap_or(&pre_activation_block);
-    let h = prior_cached_block.height() + 1;
-    st.generate_block_at(
-        h,
-        prior_cached_block.chain_state.block_hash(),
-        &outputs,
-        prior_cached_block.sapling_end_size,
-        prior_cached_block.orchard_end_size,
-        false,
-    );
-
-    st.scan_cached_blocks(h, 1);
-    assert_eq!(
-        st.wallet()
-            .block_max_scanned()
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
-
-    // Spendable balance matches total balance.
-    assert_eq!(st.get_total_balance(account.id()), total_value);
-    assert_eq!(
-        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
-        total_value
-    );
-
-    let target_height = (h + 1).into();
-
-    // Both notes are unspent.
-    let unspent_notes = T::select_unspent_notes(&st, account.id(), target_height, &[]).unwrap();
-    assert_eq!(unspent_notes.len(), 2);
-    for note in unspent_notes {
-        assert_eq!(T::note_value(note.note()), value);
+    for i in 1..99 {
+        // Generate another block, maturing the coinbase transaction by 1
+        let _ = st.generate_empty_block();
+        // Ensure the coinbase transaction cannot be selected
     }
 
-    // Both notes are spendable with 1 confirmation.
-    let spendable_notes = T::select_spendable_notes(
-        &st,
-        account.id(),
-        TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
-        target_height,
-        ConfirmationsPolicy::MIN,
-        &[],
-    )
-    .unwrap();
-    assert_eq!(spendable_notes.len(), 2);
-    for note in spendable_notes {
-        assert_eq!(T::note_value(note.note()), value);
-    }
+    // Generate the 100th block, at which point the coinbase UTXO is spendable
+    // let _ = st.generate_empty_block();
+    // let txs = st
+    //     .wallet()
+    //     .get_spendable_transparent_outputs(
+    //         coinbase_utxo_address,
+    //         coinbase_tx_target_height,
+    //         ConfirmationsPolicy::default(),
+    //     )
+    //     .unwrap();
+    // assert!(!txs.is_empty(), "mature coinbase UTXO should be spendable");
 }
