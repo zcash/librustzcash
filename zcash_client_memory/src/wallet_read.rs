@@ -7,7 +7,8 @@ use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
 use zcash_client_backend::data_api::{
-    AddressInfo, BlockMetadata, NullifierQuery, WalletRead, WalletSummary, Zip32Derivation,
+    AddressInfo, BlockMetadata, NullifierQuery, ReceivedTransactionOutput, WalletRead,
+    WalletSummary, Zip32Derivation,
     scanning::ScanRange,
     wallet::{ConfirmationsPolicy, TargetHeight},
 };
@@ -736,6 +737,15 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
     #[cfg(feature = "transparent-inputs")]
     fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        todo!()
+    }
+
+    fn get_received_outputs(
+        &self,
+        _txid: TxId,
+        _target_height: TargetHeight,
+        _confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<Vec<ReceivedTransactionOutput>, Self::Error> {
         todo!()
     }
 }

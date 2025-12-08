@@ -83,7 +83,7 @@ use zcash_keys::{
 };
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
+    PoolType, ShieldedProtocol, TxId,
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
@@ -1897,6 +1897,17 @@ pub trait WalletRead {
     /// transaction data requests, such as when it is necessary to fill in purely-transparent
     /// transaction history by walking the chain backwards via transparent inputs.
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error>;
+
+    /// Returns a vector of [`ReceivedTransactionOutput`] values describing the outputs of the
+    /// specified transaction that were received by the wallet. The number of confirmations until
+    /// each received output will be considered spendable is determined based upon the specified
+    /// target height and confirmations policy.
+    fn get_received_outputs(
+        &self,
+        txid: TxId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<Vec<ReceivedTransactionOutput>, Self::Error>;
 }
 
 /// Read-only operations required for testing light wallet functions.
@@ -2466,6 +2477,57 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// Returns the block height that this transaction was created to target.
     pub fn target_height(&self) -> TargetHeight {
         self.target_height
+    }
+}
+
+/// High-level information about the output of a transaction received by the wallet.
+///
+/// This type is capable of representing both shielded and transparent outputs. It does not
+/// internally store the transaction ID, so it must be interpreted in the context of a caller
+/// having requested output information for a specific transaction.
+pub struct ReceivedTransactionOutput {
+    pool_type: PoolType,
+    output_index: usize,
+    value: Zatoshis,
+    confirmations_until_spendable: u32,
+}
+
+impl ReceivedTransactionOutput {
+    /// Constructs a [`ReceivedTransactionOutput`] from its constituent parts.
+    pub fn from_parts(
+        pool_type: PoolType,
+        output_index: usize,
+        value: Zatoshis,
+        confirmations_until_spendable: u32,
+    ) -> Self {
+        Self {
+            pool_type,
+            output_index,
+            value,
+            confirmations_until_spendable,
+        }
+    }
+
+    /// Returns the pool in which the output value was received.
+    pub fn pool_type(&self) -> PoolType {
+        self.pool_type
+    }
+
+    /// Returns the index of the output among the transaction's outputs to the associated pool.
+    pub fn output_index(&self) -> usize {
+        self.output_index
+    }
+
+    /// Returns the value of the output.
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    /// Returns the number of confirmations required for the output to be treated as spendable,
+    /// given a [`ConfirmationsPolicy`] that was specified at the time of the request for this
+    /// data.
+    pub fn confirmations_until_spendable(&self) -> u32 {
+        self.confirmations_until_spendable
     }
 }
 

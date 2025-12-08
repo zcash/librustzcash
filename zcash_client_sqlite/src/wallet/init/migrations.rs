@@ -48,6 +48,7 @@ mod v_transactions_net;
 mod v_transactions_note_uniqueness;
 mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
+mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
@@ -130,6 +131,8 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
+    //                                                      |
+    //                                           v_tx_outputs_key_scopes
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -215,6 +218,7 @@ pub(super) fn all_migrations<
         Box::new(v_received_output_spends_account::Migration),
         Box::new(add_transaction_trust_marker::Migration),
         Box::new(account_delete_cascade::Migration),
+        Box::new(v_tx_outputs_key_scopes::Migration),
     ]
 }
 
@@ -355,7 +359,7 @@ pub const V_0_18_5: &[Uuid] = &[
 pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
-pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[v_tx_outputs_key_scopes::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

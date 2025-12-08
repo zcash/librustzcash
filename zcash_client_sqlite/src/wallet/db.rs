@@ -1081,7 +1081,12 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   and as change.
 ///
 /// # Columns
-/// - `txid`: The id of the transaction in which the output was sent or received.
+/// - `transaction_id`: The database-internal identifier for the transaction that produced this
+///   output. This is intended for use when it is necessary to perform efficient joins against
+///   other tables and views. It should not ever be exposed to end-users.
+/// - `txid`: The byte representation of the consensus transaction ID for the transaction that
+///   produced thid outout. This byte vector must be reversed and hex-encoded for display to
+///   users.
 /// - `output_pool`: The value pool for the transaction; valid values for this are:
 ///   - 0: Transparent
 ///   - 2: Sapling
@@ -1089,6 +1094,11 @@ GROUP BY notes.account_id, notes.transaction_id";
 /// - `output_index`: The index of the output within the transaction bundle associated with
 ///   the `output_pool` value; that is, within `vout` for transparent, the vector of
 ///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+/// - `tx_mined_height`: An optional value identifying the block height at which the transaction that
+///   produced this output was mined, or NULL if the transaction is unmined.
+/// - `tx_trust_status`: A flag indicating whether the transaction that produced this output
+///   should be considered "trusted". When set to `1`, outputs of this transaction will be considered
+///   spendable with `trusted` confirmations instead of `untrusted` confirmations.
 /// - `from_account_uuid`: The UUID of the wallet account that created the output, if the wallet
 ///   spent notes in creating the transaction. Note that if multiple accounts in the wallet
 ///   contributed funds in creating the associated transaction, redundant rows will exist in the
@@ -1110,11 +1120,17 @@ GROUP BY notes.account_id, notes.transaction_id";
 /// - `memo`: The binary content of the memo associated with the output, if the output is a
 ///   shielded output and the memo was received by the wallet, sent by the wallet or was able to be
 ///   decrypted with the wallet's outgoing viewing key.
+/// - `recipient_key_scope`: the ZIP 32 key scope of the key that received or decrypted this
+///   output, encoded as `0` for external scope, `1` for internal scope, and `2` for ephemeral
+///   scope.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
 WITH unioned AS (
     -- select all outputs received by the wallet
-    SELECT transactions.txid            AS txid,
+    SELECT t.id_tx                      AS transaction_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           IFNULL(t.trust_status, 0)    AS trust_status,
            ro.pool                      AS output_pool,
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
@@ -1123,10 +1139,11 @@ WITH unioned AS (
            a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
-           ro.memo                      AS memo
+           ro.memo                      AS memo,
+           a.key_scope                  AS recipient_key_scope
     FROM v_received_outputs ro
-    JOIN transactions
-        ON transactions.id_tx = ro.transaction_id
+    JOIN transactions t
+        ON t.id_tx = ro.transaction_id
     LEFT JOIN addresses a ON a.id = ro.address_id
     -- join to the sent_notes table to obtain `from_account_id`
     LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
@@ -1135,7 +1152,10 @@ WITH unioned AS (
     LEFT JOIN accounts to_account ON to_account.id = ro.account_id
     UNION ALL
     -- select all outputs sent from the wallet to external recipients
-    SELECT transactions.txid            AS txid,
+    SELECT t.id_tx                      AS transaction_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           IFNULL(t.trust_status, 0)    AS trust_status,
            sent_notes.output_pool       AS output_pool,
            sent_notes.output_index      AS output_index,
            from_account.uuid            AS from_account_uuid,
@@ -1144,27 +1164,32 @@ WITH unioned AS (
            NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
-           sent_notes.memo              AS memo
+           sent_notes.memo              AS memo,
+           NULL                         AS recipient_key_scope
     FROM sent_notes
-    JOIN transactions
-        ON transactions.id_tx = sent_notes.transaction_id
+    JOIN transactions t
+        ON t.id_tx = sent_notes.transaction_id
     LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
     -- join on the accounts table to obtain account UUIDs
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
 )
 -- merge duplicate rows while retaining maximum information
 SELECT
-    txid,
+    transaction_id,
+    MAX(txid)                   AS txid,
+    MAX(mined_height)           AS tx_mined_height,
+    MIN(trust_status)           AS tx_trust_status,
     output_pool,
     output_index,
-    max(from_account_uuid) AS from_account_uuid,
-    max(to_account_uuid) AS to_account_uuid,
-    max(to_address) AS to_address,
-    max(value) AS value,
-    max(is_change) AS is_change,
-    max(memo) AS memo
+    MAX(from_account_uuid)      AS from_account_uuid,
+    MAX(to_account_uuid)        AS to_account_uuid,
+    MAX(to_address)             AS to_address,
+    MAX(value)                  AS value,
+    MAX(is_change)              AS is_change,
+    MAX(memo)                   AS memo,
+    MAX(recipient_key_scope)    AS recipient_key_scope
 FROM unioned
-GROUP BY txid, output_pool, output_index";
+GROUP BY transaction_id, output_pool, output_index";
 
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(

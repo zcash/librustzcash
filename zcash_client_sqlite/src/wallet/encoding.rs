@@ -42,6 +42,17 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     }
 }
 
+pub(crate) fn parse_pool_code(code: i64) -> Result<PoolType, SqliteClientError> {
+    match code {
+        0i64 => Ok(PoolType::Transparent),
+        2i64 => Ok(PoolType::SAPLING),
+        3i64 => Ok(PoolType::ORCHARD),
+        _ => Err(SqliteClientError::CorruptedData(format!(
+            "Invalid pool code: {code}"
+        ))),
+    }
+}
+
 pub(crate) fn account_kind_code(value: &AccountSource) -> u32 {
     match value {
         AccountSource::Derived { .. } => 0,
