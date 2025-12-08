@@ -24,7 +24,7 @@ use crate::{
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
-    wallet::WalletTransparentOutput,
+    wallet::{WalletTransparentOutput, transparent::GapLimits},
 };
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
@@ -411,35 +411,6 @@ where
         ConfirmationsPolicy::new_symmetrical_unchecked(2, true),
         &zero_or_one_conf_value,
     );
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct GapLimits {
-    external: u32,
-    internal: u32,
-    ephemeral: u32,
-}
-
-impl GapLimits {
-    pub fn new(external: u32, internal: u32, ephemeral: u32) -> Self {
-        Self {
-            external,
-            internal,
-            ephemeral,
-        }
-    }
-
-    pub fn external(&self) -> u32 {
-        self.external
-    }
-
-    pub fn internal(&self) -> u32 {
-        self.internal
-    }
-
-    pub fn ephemeral(&self) -> u32 {
-        self.ephemeral
-    }
 }
 
 pub fn gap_limits<DSF>(ds_factory: DSF, cache: impl TestCache, gap_limits: GapLimits)

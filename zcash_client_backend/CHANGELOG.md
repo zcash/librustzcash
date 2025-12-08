@@ -13,6 +13,9 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::ReceivedTransactionOutput`
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+- `zcash_client_backend::wallet::transparent` module, behind the
+- `transparent-inputs` feature flag.
+- `zcash_client_backend::data_api::ll`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
@@ -26,7 +29,7 @@ workspace.
     a single OVK for all shielded outputs irrespective of pools, it now
     specifies that wallet-internal change outputs should be treated as though
     the policy for those outputs were `OvkPolicy::None`, rendering them only
-    recoverable using the wallet's internal IVK. 
+    recoverable using the wallet's internal IVK.
   - The `OvkPolicy::Custom` variant has changed. Instead of pool-specific
     OVKs, this now encapsulates a pair of OVKs, one to be used for all
     shielded external outputs of the transaction, and a second (optional)
@@ -34,6 +37,16 @@ workspace.
     that would otherwise only be recoverable using the wallet's internal
     IVK.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs.
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
+- Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
+  have been modified. It now abstracts over the transaction type, to permit
+  use with partial or compact transaction data instead of full transactions.
+
+### Removed
+- `zcash_client_backend::data_api::testing::transparent::GapLimits` use
+  `zcash_client_backend::wallet::transparent::GapLimits` instead.
 
 ## [0.21.0] - 2025-11-05
 

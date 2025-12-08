@@ -14,6 +14,7 @@ workspace.
 - `zcash_transparent::pczt`:
   - `Input::with_signable_input`
   - `Input::append_signature`
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
 
 ### Changed
 - MSRV is now 1.85.1.
@@ -117,7 +118,7 @@ workspace.
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
-  return `Ok(None)` when this is the case. 
+  return `Ok(None)` when this is the case.
 
 ### Removed
 - Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
