@@ -331,6 +331,7 @@ where
     let range = service::BlockRange {
         start: Some(start),
         end: Some(end),
+        pool_types: vec![],
     };
     let compact_blocks = client
         .get_block_range(range)
