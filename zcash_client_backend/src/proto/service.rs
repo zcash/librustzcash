@@ -10,12 +10,22 @@ pub struct BlockId {
 }
 /// BlockRange specifies a series of blocks from start to end inclusive.
 /// Both BlockIDs must be heights; specification by hash is not yet supported.
+///
+/// If no pool types are specified, the server should default to the legacy
+/// behavior of returning only data relevant to the shielded (Sapling and
+/// Orchard) pools; otherwise, the server should prune `CompactBlocks` returned
+/// to include only data relevant to the requested pool types. Clients MUST
+/// verify that the version of the server they are connected to are capable
+/// of returning pruned and/or transparent data before setting `poolTypes`
+/// to a non-empty value.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BlockRange {
     #[prost(message, optional, tag = "1")]
     pub start: ::core::option::Option<BlockId>,
     #[prost(message, optional, tag = "2")]
     pub end: ::core::option::Option<BlockId>,
+    #[prost(enumeration = "PoolType", repeated, tag = "3")]
+    pub pool_types: ::prost::alloc::vec::Vec<i32>,
 }
 /// A TxFilter contains the information needed to identify a particular
 /// transaction: either a block and an index, or a direct transaction hash.
@@ -123,15 +133,29 @@ pub struct LightdInfo {
     /// Zcash donation UA address
     #[prost(string, tag = "15")]
     pub donation_address: ::prost::alloc::string::String,
+    /// name of next pending network upgrade, empty if none scheduled
+    #[prost(string, tag = "16")]
+    pub upgrade_name: ::prost::alloc::string::String,
+    /// height of next pending upgrade, zero if none is scheduled
+    #[prost(uint64, tag = "17")]
+    pub upgrade_height: u64,
+    /// version of <https://github.com/zcash/lightwallet-protocol> served by this server
+    #[prost(string, tag = "18")]
+    pub lightwallet_protocol_version: ::prost::alloc::string::String,
 }
-/// TransparentAddressBlockFilter restricts the results to the given address
-/// or block range.
+/// TransparentAddressBlockFilter restricts the results of the GRPC methods that
+/// use it to the transactions that involve the given address and were mined in
+/// the specified block range. Non-default values for both the address and the
+/// block range must be specified. Mempool transactions are not included.
+///
+/// The `poolTypes` field of the `range` argument should be ignored.
+/// Implementations MAY consider it an error if any pool types are specified.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransparentAddressBlockFilter {
     /// t-address
     #[prost(string, tag = "1")]
     pub address: ::prost::alloc::string::String,
-    /// start, end heights
+    /// start, end heights only
     #[prost(message, optional, tag = "2")]
     pub range: ::core::option::Option<BlockRange>,
 }
@@ -168,12 +192,23 @@ pub struct Balance {
     #[prost(int64, tag = "1")]
     pub value_zat: i64,
 }
-/// The a shortened transaction ID is the prefix in big-endian (hex) format
-/// (then converted to binary).
+/// Request parameters for the `GetMempoolTx` RPC.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Exclude {
+pub struct GetMempoolTxRequest {
+    /// A list of transaction ID byte string suffixes that should be excluded
+    /// from the response. These suffixes may be produced either directly from
+    /// the underlying txid bytes, or, if the source values are encoded txid
+    /// strings, by truncating the hexadecimal representation of each
+    /// transaction ID to an even number of characters, and then hex-decoding
+    /// and then byte-reversing this value to obtain the byte representation.
     #[prost(bytes = "vec", repeated, tag = "1")]
-    pub txid: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    pub exclude_txid_suffixes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    /// The server must prune `CompactTx`s returned to include only data
+    /// relevant to the requested pool types. If no pool types are specified,
+    /// the server should default to the legacy behavior of returning only data
+    /// relevant to the shielded (Sapling and Orchard) pools.
+    #[prost(enumeration = "PoolType", repeated, tag = "3")]
+    pub pool_types: ::prost::alloc::vec::Vec<i32>,
 }
 /// The TreeState is derived from the Zcash z_gettreestate rpc.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -252,6 +287,39 @@ pub struct GetAddressUtxosReply {
 pub struct GetAddressUtxosReplyList {
     #[prost(message, repeated, tag = "1")]
     pub address_utxos: ::prost::alloc::vec::Vec<GetAddressUtxosReply>,
+}
+/// An identifier for a Zcash value pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PoolType {
+    Invalid = 0,
+    Transparent = 1,
+    Sapling = 2,
+    Orchard = 3,
+}
+impl PoolType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Invalid => "POOL_TYPE_INVALID",
+            Self::Transparent => "TRANSPARENT",
+            Self::Sapling => "SAPLING",
+            Self::Orchard => "ORCHARD",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POOL_TYPE_INVALID" => Some(Self::Invalid),
+            "TRANSPARENT" => Some(Self::Transparent),
+            "SAPLING" => Some(Self::Sapling),
+            "ORCHARD" => Some(Self::Orchard),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -417,7 +485,11 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Same as GetBlock except actions contain only nullifiers
+        /// Same as GetBlock except the returned CompactBlock value contains only
+        /// nullifiers.
+        ///
+        /// Note: this method is deprecated. Implementations should ignore any
+        /// `PoolType::TRANSPARENT` member of the `poolTypes` argument.
         pub async fn get_block_nullifiers(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockId>,
@@ -447,7 +519,11 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Return a list of consecutive compact blocks
+        /// Return a list of consecutive compact blocks in the specified range,
+        /// which is inclusive of `range.end`.
+        ///
+        /// If range.start <= range.end, blocks are returned increasing height order;
+        /// otherwise blocks are returned in decreasing height order.
         pub async fn get_block_range(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockRange>,
@@ -479,7 +555,11 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Same as GetBlockRange except actions contain only nullifiers
+        /// Same as GetBlockRange except the returned CompactBlock values contain
+        /// only nullifiers.
+        ///
+        /// Note: this method is deprecated. Implementations should ignore any
+        /// `PoolType::TRANSPARENT` member of the `poolTypes` argument.
         pub async fn get_block_range_nullifiers(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockRange>,
@@ -565,8 +645,9 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Return the transactions corresponding to the given t-address within the given block range
-        /// NB - this method is misnamed, it returns transactions, not transaction IDs.
+        /// Return RawTransactions that match the given transparent address filter.
+        ///
+        /// Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
         /// NOTE: this method is deprecated, please use GetTaddressTransactions instead.
         pub async fn get_taddress_txids(
             &mut self,
@@ -597,7 +678,8 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Return the transactions corresponding to the given t-address within the given block range
+        /// Return the transactions corresponding to the given t-address within the given block range.
+        /// Mempool transactions are not included in the results.
         pub async fn get_taddress_transactions(
             &mut self,
             request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,
@@ -679,21 +761,21 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.client_streaming(req, path, codec).await
         }
-        /// Return the compact transactions currently in the mempool; the results
-        /// can be a few seconds out of date. If the Exclude list is empty, return
-        /// all transactions; otherwise return all *except* those in the Exclude list
-        /// (if any); this allows the client to avoid receiving transactions that it
-        /// already has (from an earlier call to this rpc). The transaction IDs in the
-        /// Exclude list can be shortened to any number of bytes to make the request
-        /// more bandwidth-efficient; if two or more transactions in the mempool
-        /// match a shortened txid, they are all sent (none is excluded). Transactions
-        /// in the exclude list that don't exist in the mempool are ignored.
-        ///
-        /// The a shortened transaction ID is the prefix in big-endian (hex) format
-        /// (then converted to binary). See smoke-test.bash for examples.
+        /// Returns a stream of the compact transaction representation for transactions
+        /// currently in the mempool. The results of this operation may be a few
+        /// seconds out of date. If the `exclude_txid_suffixes` list is empty,
+        /// return all transactions; otherwise return all *except* those in the
+        /// `exclude_txid_suffixes` list (if any); this allows the client to avoid
+        /// receiving transactions that it already has (from an earlier call to this
+        /// RPC). The transaction IDs in the `exclude_txid_suffixes` list can be
+        /// shortened to any number of bytes to make the request more
+        /// bandwidth-efficient; if two or more transactions in the mempool match a
+        /// txid suffix, none of the matching transactions are excluded. Txid
+        /// suffixes in the exclude list that don't match any transactions in the
+        /// mempool are ignored.
         pub async fn get_mempool_tx(
             &mut self,
-            request: impl tonic::IntoRequest<super::Exclude>,
+            request: impl tonic::IntoRequest<super::GetMempoolTxRequest>,
         ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<crate::proto::compact_formats::CompactTx>,

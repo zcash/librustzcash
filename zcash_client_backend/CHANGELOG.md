@@ -13,9 +13,24 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::ReceivedTransactionOutput`
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+- in `zcash_client_backend::proto::compact_formats`:
+  - `CompactTx` has added fields `vin` and `vout`
+  - Added types `CompactTxIn`, `TxOut`
+- in `zcash_client_backend::proto::service`:
+  - Added enum `PoolType`
+  - `BlockRange` has added field `pool_types`
+  - `LightdInfo` has added fields `upgrade_name`, `upgrade_height`, and `lighwallet_protocol_version`
+  - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
+  changes:
+  - in `zcash_client_backend::proto::compact_formats`:
+    - `CompactTx::hash` has been renamed to `CompactTx::txid`
+  - in `zcash_client_backend::proto::service`:
+    - `Exclude` has been renamed to `GetMempoolTxRequest`
+    - `Exclude::txid` has been renamed to `GetMempoolTxRequest::exclude_txid_suffixes`
 - `zcash_client_backend::wallet::OvkPolicy` has been substantially modified
   to reflect the view that a single outgoing viewing key should be uniformly
   applied to encrypt all external transaction outputs, irrespective of which
@@ -26,7 +41,7 @@ workspace.
     a single OVK for all shielded outputs irrespective of pools, it now
     specifies that wallet-internal change outputs should be treated as though
     the policy for those outputs were `OvkPolicy::None`, rendering them only
-    recoverable using the wallet's internal IVK. 
+    recoverable using the wallet's internal IVK.
   - The `OvkPolicy::Custom` variant has changed. Instead of pool-specific
     OVKs, this now encapsulates a pair of OVKs, one to be used for all
     shielded external outputs of the transaction, and a second (optional)
