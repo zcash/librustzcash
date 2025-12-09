@@ -8,18 +8,35 @@ option go_package = "lightwalletd/walletrpc";
 option swift_prefix = "";
 import "compact_formats.proto";
 
+// An identifier for a Zcash value pool.
+enum PoolType {
+    POOL_TYPE_INVALID = 0;
+    TRANSPARENT = 1;
+    SAPLING = 2;
+    ORCHARD = 3;
+}
+
 // A BlockID message contains identifiers to select a block: a height or a
 // hash. Specification by hash is not implemented, but may be in the future.
 message BlockID {
-     uint64 height = 1;
-     bytes hash = 2;
+    uint64 height = 1;
+    bytes hash = 2;
 }
 
 // BlockRange specifies a series of blocks from start to end inclusive.
 // Both BlockIDs must be heights; specification by hash is not yet supported.
+//
+// If no pool types are specified, the server should default to the legacy
+// behavior of returning only data relevant to the shielded (Sapling and
+// Orchard) pools; otherwise, the server should prune `CompactBlocks` returned
+// to include only data relevant to the requested pool types. Clients MUST 
+// verify that the version of the server they are connected to are capable
+// of returning pruned and/or transparent data before setting `poolTypes`
+// to a non-empty value.
 message BlockRange {
     BlockID start = 1;
     BlockID end = 2;
+    repeated PoolType poolTypes = 3;
 }
 
 // A TxFilter contains the information needed to identify a particular
@@ -93,13 +110,21 @@ message LightdInfo {
     string zcashdBuild = 13;            // example: "v4.1.1-877212414"
     string zcashdSubversion = 14;       // example: "/MagicBean:4.1.1/"
     string donationAddress = 15;        // Zcash donation UA address
+    string upgradeName = 16;            // name of next pending network upgrade, empty if none scheduled
+    uint64 upgradeHeight = 17;          // height of next pending upgrade, zero if none is scheduled
+    string lightwalletProtocolVersion = 18; // version of https://github.com/zcash/lightwallet-protocol served by this server
 }
 
-// TransparentAddressBlockFilter restricts the results to the given address
-// or block range.
+// TransparentAddressBlockFilter restricts the results of the GRPC methods that
+// use it to the transactions that involve the given address and were mined in
+// the specified block range. Non-default values for both the address and the
+// block range must be specified. Mempool transactions are not included.
+//
+// The `poolTypes` field of the `range` argument should be ignored.
+// Implementations MAY consider it an error if any pool types are specified.
 message TransparentAddressBlockFilter {
     string address = 1;     // t-address
-    BlockRange range = 2;   // start, end heights
+    BlockRange range = 2;   // start, end heights only
 }
 
 // Duration is currently used only for testing, so that the Ping rpc
@@ -127,10 +152,23 @@ message Balance {
     int64 valueZat = 1;
 }
 
-// The a shortened transaction ID is the prefix in big-endian (hex) format
-// (then converted to binary).
-message Exclude {
-    repeated bytes txid = 1;
+// Request parameters for the `GetMempoolTx` RPC.
+message GetMempoolTxRequest {
+    // A list of transaction ID byte string suffixes that should be excluded
+    // from the response. These suffixes may be produced either directly from
+    // the underlying txid bytes, or, if the source values are encoded txid
+    // strings, by truncating the hexadecimal representation of each
+    // transaction ID to an even number of characters, and then hex-decoding
+    // and then byte-reversing this value to obtain the byte representation.
+    repeated bytes exclude_txid_suffixes = 1;
+    // We reserve field number 2 for a potential future `exclude_txid_prefixes`
+    // field.
+    reserved 2;
+    // The server must prune `CompactTx`s returned to include only data
+    // relevant to the requested pool types. If no pool types are specified,
+    // the server should default to the legacy behavior of returning only data
+    // relevant to the shielded (Sapling and Orchard) pools.
+    repeated PoolType poolTypes = 3;
 }
 
 // The TreeState is derived from the Zcash z_gettreestate rpc.
@@ -181,44 +219,63 @@ message GetAddressUtxosReplyList {
 service CompactTxStreamer {
     // Return the BlockID of the block at the tip of the best chain
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
+
     // Return the compact block corresponding to the given block identifier
     rpc GetBlock(BlockID) returns (CompactBlock) {}
-    // Same as GetBlock except actions contain only nullifiers
+
+    // Same as GetBlock except the returned CompactBlock value contains only
+    // nullifiers.
+    //
+    // Note: this method is deprecated. Implementations should ignore any
+    // `PoolType::TRANSPARENT` member of the `poolTypes` argument.
     rpc GetBlockNullifiers(BlockID) returns (CompactBlock) {}
-    // Return a list of consecutive compact blocks
+
+    // Return a list of consecutive compact blocks in the specified range,
+    // which is inclusive of `range.end`.
+    //
+    // If range.start <= range.end, blocks are returned increasing height order;
+    // otherwise blocks are returned in decreasing height order.
     rpc GetBlockRange(BlockRange) returns (stream CompactBlock) {}
-    // Same as GetBlockRange except actions contain only nullifiers
+
+    // Same as GetBlockRange except the returned CompactBlock values contain
+    // only nullifiers.
+    //
+    // Note: this method is deprecated. Implementations should ignore any
+    // `PoolType::TRANSPARENT` member of the `poolTypes` argument.
     rpc GetBlockRangeNullifiers(BlockRange) returns (stream CompactBlock) {}
 
     // Return the requested full (not compact) transaction (as from zcashd)
     rpc GetTransaction(TxFilter) returns (RawTransaction) {}
+
     // Submit the given transaction to the Zcash network
     rpc SendTransaction(RawTransaction) returns (SendResponse) {}
 
-    // Return the transactions corresponding to the given t-address within the given block range
-    // NB - this method is misnamed, it returns transactions, not transaction IDs.
+    // Return RawTransactions that match the given transparent address filter.
+    //
+    // Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
     // NOTE: this method is deprecated, please use GetTaddressTransactions instead.
     rpc GetTaddressTxids(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
 
-    // Return the transactions corresponding to the given t-address within the given block range
+    // Return the transactions corresponding to the given t-address within the given block range.
+    // Mempool transactions are not included in the results.
     rpc GetTaddressTransactions(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
 
     rpc GetTaddressBalance(AddressList) returns (Balance) {}
     rpc GetTaddressBalanceStream(stream Address) returns (Balance) {}
 
-    // Return the compact transactions currently in the mempool; the results
-    // can be a few seconds out of date. If the Exclude list is empty, return
-    // all transactions; otherwise return all *except* those in the Exclude list
-    // (if any); this allows the client to avoid receiving transactions that it
-    // already has (from an earlier call to this rpc). The transaction IDs in the
-    // Exclude list can be shortened to any number of bytes to make the request
-    // more bandwidth-efficient; if two or more transactions in the mempool
-    // match a shortened txid, they are all sent (none is excluded). Transactions
-    // in the exclude list that don't exist in the mempool are ignored.
-    //
-    // The a shortened transaction ID is the prefix in big-endian (hex) format
-    // (then converted to binary). See smoke-test.bash for examples.
-    rpc GetMempoolTx(Exclude) returns (stream CompactTx) {}
+    // Returns a stream of the compact transaction representation for transactions
+    // currently in the mempool. The results of this operation may be a few
+    // seconds out of date. If the `exclude_txid_suffixes` list is empty,
+    // return all transactions; otherwise return all *except* those in the
+    // `exclude_txid_suffixes` list (if any); this allows the client to avoid
+    // receiving transactions that it already has (from an earlier call to this
+    // RPC). The transaction IDs in the `exclude_txid_suffixes` list can be
+    // shortened to any number of bytes to make the request more
+    // bandwidth-efficient; if two or more transactions in the mempool match a
+    // txid suffix, none of the matching transactions are excluded. Txid
+    // suffixes in the exclude list that don't match any transactions in the
+    // mempool are ignored.
+    rpc GetMempoolTx(GetMempoolTxRequest) returns (stream CompactTx) {}
 
     // Return a stream of current Mempool transactions. This will keep the output stream open while
     // there are mempool transactions. It will close the returned stream when a new block is mined.
@@ -240,6 +297,7 @@ service CompactTxStreamer {
 
     // Return information about this lightwalletd instance and the blockchain
     rpc GetLightdInfo(Empty) returns (LightdInfo) {}
+
     // Testing-only, requires lightwalletd --ping-very-insecure (do not enable in production)
     rpc Ping(Duration) returns (PingResponse) {}
 }

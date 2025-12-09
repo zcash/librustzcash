@@ -645,7 +645,7 @@ mod tests {
         let tx = res.transaction();
 
         let mut compact_tx = CompactTx {
-            hash: tx.txid().as_ref()[..].into(),
+            txid: tx.txid().as_ref()[..].into(),
             ..Default::default()
         };
         for output in tx.sapling_bundle().unwrap().shielded_outputs() {

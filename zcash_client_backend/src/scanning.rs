@@ -1234,7 +1234,7 @@ pub mod testing {
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
+        ctx.txid = txid;
         ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         ctx
@@ -1300,7 +1300,7 @@ pub mod testing {
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
+        ctx.txid = txid;
         ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         ctx.index = cb.vtx.len() as u64;
