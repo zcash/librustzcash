@@ -2,14 +2,14 @@
 <details class="toggle type-contents-toggle"><summary class="hideme"><span>Show 15 variants</span></summary>    RequestTotalInvalid,
     Overflow,
     BalanceError {
-        input_total: <a class="struct" href="../../zcash_protocol/value/struct.Zatoshis.html" title="struct zcash_protocol::value::Zatoshis">Zatoshis</a>,
-        output_total: <a class="struct" href="../../zcash_protocol/value/struct.Zatoshis.html" title="struct zcash_protocol::value::Zatoshis">Zatoshis</a>,
+        input_total: Zatoshis,
+        output_total: Zatoshis,
     },
     ShieldingInvalid,
-    AnchorNotFound(<a class="struct" href="../../zcash_protocol/consensus/struct.BlockHeight.html" title="struct zcash_protocol::consensus::BlockHeight">BlockHeight</a>),
+    AnchorNotFound(BlockHeight),
     ReferenceError(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>),
     StepDoubleSpend(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>),
-    ChainDoubleSpend(<a class="enum" href="../../zcash_protocol/enum.PoolType.html" title="enum zcash_protocol::PoolType">PoolType</a>, <a class="struct" href="../../zcash_protocol/txid/struct.TxId.html" title="struct zcash_protocol::txid::TxId">TxId</a>, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>),
+    ChainDoubleSpend(PoolType, TxId, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>),
     PaymentPoolsMismatch,
     SpendsChange(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>),
     Zip321(<a class="enum" href="../zip321/enum.Zip321Error.html" title="enum zcash_client_backend::zip321::Zip321Error">Zip321Error</a>),
@@ -23,17 +23,17 @@
 </div><section id="variant.BalanceError" class="variant"><a href="#variant.BalanceError" class="anchor">§</a><h3 class="code-header">BalanceError</h3></section><div class="docblock"><p>The input total and output total of the payment request are not equal to one another. The
 sum of transaction outputs, change, and fees is required to be exactly equal to the value
 of provided inputs.</p>
-</div><div class="sub-variant" id="variant.BalanceError.fields"><h4>Fields</h4><div class="sub-variant-field"><span id="variant.BalanceError.field.input_total" class="section-header"><a href="#variant.BalanceError.field.input_total" class="anchor field">§</a><code>input_total: <a class="struct" href="../../zcash_protocol/value/struct.Zatoshis.html" title="struct zcash_protocol::value::Zatoshis">Zatoshis</a></code></span></div><div class="sub-variant-field"><span id="variant.BalanceError.field.output_total" class="section-header"><a href="#variant.BalanceError.field.output_total" class="anchor field">§</a><code>output_total: <a class="struct" href="../../zcash_protocol/value/struct.Zatoshis.html" title="struct zcash_protocol::value::Zatoshis">Zatoshis</a></code></span></div></div><section id="variant.ShieldingInvalid" class="variant"><a href="#variant.ShieldingInvalid" class="anchor">§</a><h3 class="code-header">ShieldingInvalid</h3></section><div class="docblock"><p>The <code>is_shielding</code> flag may only be set to <code>true</code> under the following conditions:</p>
+</div><div class="sub-variant" id="variant.BalanceError.fields"><h4>Fields</h4><div class="sub-variant-field"><span id="variant.BalanceError.field.input_total" class="section-header"><a href="#variant.BalanceError.field.input_total" class="anchor field">§</a><code>input_total: Zatoshis</code></span></div><div class="sub-variant-field"><span id="variant.BalanceError.field.output_total" class="section-header"><a href="#variant.BalanceError.field.output_total" class="anchor field">§</a><code>output_total: Zatoshis</code></span></div></div><section id="variant.ShieldingInvalid" class="variant"><a href="#variant.ShieldingInvalid" class="anchor">§</a><h3 class="code-header">ShieldingInvalid</h3></section><div class="docblock"><p>The <code>is_shielding</code> flag may only be set to <code>true</code> under the following conditions:</p>
 <ul>
 <li>The total of transparent inputs is nonzero</li>
 <li>There exist no Sapling inputs</li>
 <li>There provided transaction request is empty; i.e. the only output values specified
 are change and fee amounts.</li>
 </ul>
-</div><section id="variant.AnchorNotFound" class="variant"><a href="#variant.AnchorNotFound" class="anchor">§</a><h3 class="code-header">AnchorNotFound(<a class="struct" href="../../zcash_protocol/consensus/struct.BlockHeight.html" title="struct zcash_protocol::consensus::BlockHeight">BlockHeight</a>)</h3></section><div class="docblock"><p>No anchor information could be obtained for the specified block height.</p>
+</div><section id="variant.AnchorNotFound" class="variant"><a href="#variant.AnchorNotFound" class="anchor">§</a><h3 class="code-header">AnchorNotFound(BlockHeight)</h3></section><div class="docblock"><p>No anchor information could be obtained for the specified block height.</p>
 </div><section id="variant.ReferenceError" class="variant"><a href="#variant.ReferenceError" class="anchor">§</a><h3 class="code-header">ReferenceError(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>)</h3></section><div class="docblock"><p>A reference to the output of a prior step is invalid.</p>
 </div><section id="variant.StepDoubleSpend" class="variant"><a href="#variant.StepDoubleSpend" class="anchor">§</a><h3 class="code-header">StepDoubleSpend(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>)</h3></section><div class="docblock"><p>An attempted double-spend of a prior step output was detected.</p>
-</div><section id="variant.ChainDoubleSpend" class="variant"><a href="#variant.ChainDoubleSpend" class="anchor">§</a><h3 class="code-header">ChainDoubleSpend(<a class="enum" href="../../zcash_protocol/enum.PoolType.html" title="enum zcash_protocol::PoolType">PoolType</a>, <a class="struct" href="../../zcash_protocol/txid/struct.TxId.html" title="struct zcash_protocol::txid::TxId">TxId</a>, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)</h3></section><div class="docblock"><p>An attempted double-spend of an output belonging to the wallet was detected.</p>
+</div><section id="variant.ChainDoubleSpend" class="variant"><a href="#variant.ChainDoubleSpend" class="anchor">§</a><h3 class="code-header">ChainDoubleSpend(PoolType, TxId, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)</h3></section><div class="docblock"><p>An attempted double-spend of an output belonging to the wallet was detected.</p>
 </div><section id="variant.PaymentPoolsMismatch" class="variant"><a href="#variant.PaymentPoolsMismatch" class="anchor">§</a><h3 class="code-header">PaymentPoolsMismatch</h3></section><div class="docblock"><p>There was a mismatch between the payments in the proposal’s transaction request
 and the payment pool selection values.</p>
 </div><section id="variant.SpendsChange" class="variant"><a href="#variant.SpendsChange" class="anchor">§</a><h3 class="code-header">SpendsChange(<a class="struct" href="struct.StepOutput.html" title="struct zcash_client_backend::proposal::StepOutput">StepOutput</a>)</h3></section><div class="docblock"><p>The proposal tried to spend a change output. Mark the <code>ChangeValue</code> as ephemeral if this is intended.</p>

@@ -109,9 +109,9 @@
 <a href=#109 id=109 data-nosnippet>109</a><span class="kw">impl </span>compact_formats::CompactTx {
 <a href=#110 id=110 data-nosnippet>110</a>    <span class="doccomment">/// Returns the transaction Id
 <a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">pub fn </span>txid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TxId {
-<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span><span class="kw-2">mut </span>hash = [<span class="number">0u8</span>; <span class="number">32</span>];
-<a href=#113 id=113 data-nosnippet>113</a>        hash.copy_from_slice(<span class="kw-2">&amp;</span><span class="self">self</span>.hash);
-<a href=#114 id=114 data-nosnippet>114</a>        TxId::from_bytes(hash)
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span><span class="kw-2">mut </span>txid_bytes = [<span class="number">0u8</span>; <span class="number">32</span>];
+<a href=#113 id=113 data-nosnippet>113</a>        txid_bytes.copy_from_slice(<span class="kw-2">&amp;</span><span class="self">self</span>.txid);
+<a href=#114 id=114 data-nosnippet>114</a>        TxId::from_bytes(txid_bytes)
 <a href=#115 id=115 data-nosnippet>115</a>    }
 <a href=#116 id=116 data-nosnippet>116</a>}
 <a href=#117 id=117 data-nosnippet>117</a>

@@ -2199,7 +2199,7 @@
 <a href=#2199 id=2199 data-nosnippet>2199</a>    <span class="kw">let </span><span class="kw-2">mut </span>ctx = CompactTx::default();
 <a href=#2200 id=2200 data-nosnippet>2200</a>    <span class="kw">let </span><span class="kw-2">mut </span>txid = <span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">32</span>];
 <a href=#2201 id=2201 data-nosnippet>2201</a>    rng.fill_bytes(<span class="kw-2">&amp;mut </span>txid);
-<a href=#2202 id=2202 data-nosnippet>2202</a>    ctx.hash = txid;
+<a href=#2202 id=2202 data-nosnippet>2202</a>    ctx.txid = txid;
 <a href=#2203 id=2203 data-nosnippet>2203</a>
 <a href=#2204 id=2204 data-nosnippet>2204</a>    ctx
 <a href=#2205 id=2205 data-nosnippet>2205</a>}
@@ -2294,7 +2294,7 @@
 <a href=#2294 id=2294 data-nosnippet>2294</a>    <span class="comment">// Create a fake CompactTx containing the transaction.
 <a href=#2295 id=2295 data-nosnippet>2295</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>ctx = CompactTx {
 <a href=#2296 id=2296 data-nosnippet>2296</a>        index: tx_index <span class="kw">as </span>u64,
-<a href=#2297 id=2297 data-nosnippet>2297</a>        hash: tx.txid().as_ref().to_vec(),
+<a href=#2297 id=2297 data-nosnippet>2297</a>        txid: tx.txid().as_ref().to_vec(),
 <a href=#2298 id=2298 data-nosnippet>2298</a>        ..Default::default()
 <a href=#2299 id=2299 data-nosnippet>2299</a>    };
 <a href=#2300 id=2300 data-nosnippet>2300</a>

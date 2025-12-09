@@ -6,8 +6,8 @@
     // Required methods
     fn <a href="#tymethod.get_spendable_note" class="fn">get_spendable_note</a>(
         &amp;self,
-        txid: &amp;<a class="struct" href="../../zcash_protocol/txid/struct.TxId.html" title="struct zcash_protocol::txid::TxId">TxId</a>,
-        protocol: <a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>,
+        txid: &amp;TxId,
+        protocol: ShieldedProtocol,
         index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
         target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.ReceivedNote.html" title="struct zcash_client_backend::wallet::ReceivedNote">ReceivedNote</a>&lt;Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>, <a class="enum" href="../wallet/enum.Note.html" title="enum zcash_client_backend::wallet::Note">Note</a>&gt;&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;;
@@ -15,7 +15,7 @@
         &amp;self,
         account: Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::InputSource::AccountId">AccountId</a>,
         target_value: <a class="enum" href="enum.TargetValue.html" title="enum zcash_client_backend::data_api::TargetValue">TargetValue</a>,
-        sources: &amp;[<a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>],
+        sources: &amp;[ShieldedProtocol],
         target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
         confirmations_policy: <a class="struct" href="wallet/struct.ConfirmationsPolicy.html" title="struct zcash_client_backend::data_api::wallet::ConfirmationsPolicy">ConfirmationsPolicy</a>,
         exclude: &amp;[Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>],
@@ -23,7 +23,7 @@
 <span class="item-spacer"></span>    fn <a href="#tymethod.select_unspent_notes" class="fn">select_unspent_notes</a>(
         &amp;self,
         account: Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::InputSource::AccountId">AccountId</a>,
-        sources: &amp;[<a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>],
+        sources: &amp;[ShieldedProtocol],
         target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
         exclude: &amp;[Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>],
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="struct.ReceivedNotes.html" title="struct zcash_client_backend::data_api::ReceivedNotes">ReceivedNotes</a>&lt;Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;;
@@ -38,12 +38,12 @@
     // Provided methods
     fn <a href="#method.get_unspent_transparent_output" class="fn">get_unspent_transparent_output</a>(
         &amp;self,
-        _outpoint: &amp;<a class="struct" href="../../zcash_transparent/bundle/struct.OutPoint.html" title="struct zcash_transparent::bundle::OutPoint">OutPoint</a>,
+        _outpoint: &amp;OutPoint,
         _target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="struct.WalletUtxo.html" title="struct zcash_client_backend::data_api::WalletUtxo">WalletUtxo</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt; { ... }
 <span class="item-spacer"></span>    fn <a href="#method.get_spendable_transparent_outputs" class="fn">get_spendable_transparent_outputs</a>(
         &amp;self,
-        _address: &amp;<a class="enum" href="../../zcash_transparent/address/enum.TransparentAddress.html" title="enum zcash_transparent::address::TransparentAddress">TransparentAddress</a>,
+        _address: &amp;TransparentAddress,
         _target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
         _confirmations_policy: <a class="struct" href="wallet/struct.ConfirmationsPolicy.html" title="struct zcash_client_backend::data_api::wallet::ConfirmationsPolicy">ConfirmationsPolicy</a>,
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="struct.WalletUtxo.html" title="struct zcash_client_backend::data_api::WalletUtxo">WalletUtxo</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt; { ... }
@@ -59,8 +59,8 @@ or a UUID.</p>
 <p>For example, this might be a database identifier type or a UUID.</p>
 </div></details></div><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.get_spendable_note" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1473-1479">Source</a><h4 class="code-header">fn <a href="#tymethod.get_spendable_note" class="fn">get_spendable_note</a>(
     &amp;self,
-    txid: &amp;<a class="struct" href="../../zcash_protocol/txid/struct.TxId.html" title="struct zcash_protocol::txid::TxId">TxId</a>,
-    protocol: <a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>,
+    txid: &amp;TxId,
+    protocol: ShieldedProtocol,
     index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
     target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.ReceivedNote.html" title="struct zcash_client_backend::wallet::ReceivedNote">ReceivedNote</a>&lt;Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>, <a class="enum" href="../wallet/enum.Note.html" title="enum zcash_client_backend::wallet::Note">Note</a>&gt;&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Fetches a spendable note by indexing into a transaction’s shielded outputs for the
@@ -71,7 +71,7 @@ is not spendable as of the given height.</p>
     &amp;self,
     account: Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::InputSource::AccountId">AccountId</a>,
     target_value: <a class="enum" href="enum.TargetValue.html" title="enum zcash_client_backend::data_api::TargetValue">TargetValue</a>,
-    sources: &amp;[<a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>],
+    sources: &amp;[ShieldedProtocol],
     target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
     confirmations_policy: <a class="struct" href="wallet/struct.ConfirmationsPolicy.html" title="struct zcash_client_backend::data_api::wallet::ConfirmationsPolicy">ConfirmationsPolicy</a>,
     exclude: &amp;[Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>],
@@ -81,7 +81,7 @@ be included.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.select_unspent_notes" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1496-1502">Source</a><h4 class="code-header">fn <a href="#tymethod.select_unspent_notes" class="fn">select_unspent_notes</a>(
     &amp;self,
     account: Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::InputSource::AccountId">AccountId</a>,
-    sources: &amp;[<a class="enum" href="../../zcash_protocol/enum.ShieldedProtocol.html" title="enum zcash_protocol::ShieldedProtocol">ShieldedProtocol</a>],
+    sources: &amp;[ShieldedProtocol],
     target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
     exclude: &amp;[Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>],
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="struct.ReceivedNotes.html" title="struct zcash_client_backend::data_api::ReceivedNotes">ReceivedNotes</a>&lt;Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.NoteRef" title="type zcash_client_backend::data_api::InputSource::NoteRef">NoteRef</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Returns the list of notes belonging to the wallet that are unspent as of the specified
@@ -103,7 +103,7 @@ target height.</p>
 limitations should be clearly documented for the implementing type.</p>
 </div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.get_unspent_transparent_output" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1527-1535">Source</a><h4 class="code-header">fn <a href="#method.get_unspent_transparent_output" class="fn">get_unspent_transparent_output</a>(
     &amp;self,
-    _outpoint: &amp;<a class="struct" href="../../zcash_transparent/bundle/struct.OutPoint.html" title="struct zcash_transparent::bundle::OutPoint">OutPoint</a>,
+    _outpoint: &amp;OutPoint,
     _target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="struct.WalletUtxo.html" title="struct zcash_client_backend::data_api::WalletUtxo">WalletUtxo</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Fetches the transparent output corresponding to the provided <code>outpoint</code> if it is considered
 spendable as of the provided <code>target_height</code>.</p>
@@ -111,7 +111,7 @@ spendable as of the provided <code>target_height</code>.</p>
 spendable in a transaction mined in the block at the target height.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.get_spendable_transparent_outputs" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1547-1556">Source</a><h4 class="code-header">fn <a href="#method.get_spendable_transparent_outputs" class="fn">get_spendable_transparent_outputs</a>(
     &amp;self,
-    _address: &amp;<a class="enum" href="../../zcash_transparent/address/enum.TransparentAddress.html" title="enum zcash_transparent::address::TransparentAddress">TransparentAddress</a>,
+    _address: &amp;TransparentAddress,
     _target_height: <a class="struct" href="wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
     _confirmations_policy: <a class="struct" href="wallet/struct.ConfirmationsPolicy.html" title="struct zcash_client_backend::data_api::wallet::ConfirmationsPolicy">ConfirmationsPolicy</a>,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="struct.WalletUtxo.html" title="struct zcash_client_backend::data_api::WalletUtxo">WalletUtxo</a>&gt;, Self::<a class="associatedtype" href="trait.InputSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::InputSource::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Returns the list of unspent transparent outputs received by this wallet at <code>address</code>
