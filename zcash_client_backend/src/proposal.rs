@@ -51,6 +51,8 @@ pub enum ProposalError {
     SpendsChange(StepOutput),
     /// The proposal results in an invalid payment request according to ZIP-321.
     Zip321(Zip321Error),
+    /// The ZIP 321 payment request at the wrapped index lacked payment amount information.
+    PaymentAmountMissing(usize),
     /// A proposal step created an ephemeral output that was not spent in any later step.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputLeftUnspent(StepOutput),
@@ -115,6 +117,12 @@ impl Display for ProposalError {
             ),
             ProposalError::Zip321(r) => {
                 write!(f, "The proposal results in an invalid payment {r:?}.",)
+            }
+            ProposalError::PaymentAmountMissing(idx) => {
+                write!(
+                    f,
+                    "Payment amount not specified for requested payment at index {idx}."
+                )
             }
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputLeftUnspent(r) => write!(
@@ -419,12 +427,14 @@ impl<NoteRef> Step<NoteRef> {
             return Err(ProposalError::PaymentPoolsMismatch);
         }
         for (idx, pool) in &payment_pools {
-            if !transaction_request
-                .payments()
-                .get(idx)
-                .iter()
-                .any(|payment| payment.recipient_address().can_receive_as(*pool))
-            {
+            if let Some(payment) = transaction_request.payments().get(idx) {
+                if !payment.recipient_address().can_receive_as(*pool) {
+                    return Err(ProposalError::PaymentPoolsMismatch);
+                }
+                if payment.amount().is_none() {
+                    return Err(ProposalError::PaymentAmountMissing(*idx));
+                }
+            } else {
                 return Err(ProposalError::PaymentPoolsMismatch);
             }
         }
@@ -455,7 +465,8 @@ impl<NoteRef> Step<NoteRef> {
                         .payments()
                         .get(&i)
                         .ok_or(ProposalError::ReferenceError(*s_ref))?
-                        .amount(),
+                        .amount()
+                        .ok_or(ProposalError::PaymentAmountMissing(i))?,
                     StepOutputIndex::Change(i) => step
                         .balance
                         .proposed_change()
@@ -474,7 +485,8 @@ impl<NoteRef> Step<NoteRef> {
 
         let request_total = transaction_request
             .total()
-            .map_err(|_| ProposalError::RequestTotalInvalid)?;
+            .map_err(|_| ProposalError::RequestTotalInvalid)?
+            .expect("all payments previously checked to have amount values");
         let output_total = (request_total + balance.total()).ok_or(ProposalError::Overflow)?;
 
         if is_shielding
