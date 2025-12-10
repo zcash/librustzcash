@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-12-10
+
 ### Added
 - `zcash_protocol::txid::TxId::NULL`
 
