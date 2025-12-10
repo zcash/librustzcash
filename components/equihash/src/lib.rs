@@ -24,7 +24,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, doc(auto_cfg))]
 
 #[cfg(feature = "std")]
 extern crate std;
