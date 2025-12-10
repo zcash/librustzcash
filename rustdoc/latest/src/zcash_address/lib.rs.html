@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_address/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (ba2142a19 2025-12-07)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_address/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *Parser for all defined Zcash address types.*
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_address/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (c61a3a44d 2025-12-09)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_address/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *Parser for all defined Zcash address types.*
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This crate implements address parsing as a two-phase process, built around the opaque
 <a href=#4 id=4 data-nosnippet>4</a>//! [`ZcashAddress`] type.
@@ -317,95 +317,114 @@
 <a href=#317 id=317 data-nosnippet>317</a>        }
 <a href=#318 id=318 data-nosnippet>318</a>    }
 <a href=#319 id=319 data-nosnippet>319</a>
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="doccomment">/// Returns whether or not this address contains or corresponds to the given unified address
-<a href=#321 id=321 data-nosnippet>321</a>    /// receiver.
-<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub fn </span>matches_receiver(<span class="kw-2">&amp;</span><span class="self">self</span>, receiver: <span class="kw-2">&amp;</span>Receiver) -&gt; bool {
-<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.kind, receiver) {
-<a href=#324 id=324 data-nosnippet>324</a>            (AddressKind::Unified(ua), r) =&gt; ua.contains_receiver(r),
-<a href=#325 id=325 data-nosnippet>325</a>            (AddressKind::Sapling(d), Receiver::Sapling(r)) =&gt; r == d,
-<a href=#326 id=326 data-nosnippet>326</a>            (AddressKind::P2pkh(d), Receiver::P2pkh(r)) =&gt; r == d,
-<a href=#327 id=327 data-nosnippet>327</a>            (AddressKind::Tex(d), Receiver::P2pkh(r)) =&gt; r == d,
-<a href=#328 id=328 data-nosnippet>328</a>            (AddressKind::P2sh(d), Receiver::P2sh(r)) =&gt; r == d,
-<a href=#329 id=329 data-nosnippet>329</a>            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
-<a href=#330 id=330 data-nosnippet>330</a>        }
-<a href=#331 id=331 data-nosnippet>331</a>    }
-<a href=#332 id=332 data-nosnippet>332</a>}
-<a href=#333 id=333 data-nosnippet>333</a>
-<a href=#334 id=334 data-nosnippet>334</a><span class="attr">#[cfg(feature = <span class="string">"test-dependencies"</span>)]
-<a href=#335 id=335 data-nosnippet>335</a></span><span class="kw">pub mod </span>testing {
-<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">use </span>core::convert::TryInto;
-<a href=#337 id=337 data-nosnippet>337</a>
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">use </span>proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
-<a href=#339 id=339 data-nosnippet>339</a>
-<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">use crate</span>::{unified::address::testing::arb_unified_address, AddressKind, ZcashAddress};
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">use </span>zcash_protocol::consensus::NetworkType;
-<a href=#342 id=342 data-nosnippet>342</a>
-<a href=#343 id=343 data-nosnippet>343</a>    <span class="macro">prop_compose!</span> {
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">fn </span>arb_sprout_addr_kind()(
-<a href=#345 id=345 data-nosnippet>345</a>            r_bytes <span class="kw">in </span>vec(any::&lt;u8&gt;(), <span class="number">64</span>)
-<a href=#346 id=346 data-nosnippet>346</a>        ) -&gt; AddressKind {
-<a href=#347 id=347 data-nosnippet>347</a>            AddressKind::Sprout(r_bytes.try_into().unwrap())
-<a href=#348 id=348 data-nosnippet>348</a>        }
-<a href=#349 id=349 data-nosnippet>349</a>    }
-<a href=#350 id=350 data-nosnippet>350</a>
-<a href=#351 id=351 data-nosnippet>351</a>    <span class="macro">prop_compose!</span> {
-<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">fn </span>arb_sapling_addr_kind()(
-<a href=#353 id=353 data-nosnippet>353</a>            r_bytes <span class="kw">in </span>vec(any::&lt;u8&gt;(), <span class="number">43</span>)
-<a href=#354 id=354 data-nosnippet>354</a>        ) -&gt; AddressKind {
-<a href=#355 id=355 data-nosnippet>355</a>            AddressKind::Sapling(r_bytes.try_into().unwrap())
-<a href=#356 id=356 data-nosnippet>356</a>        }
-<a href=#357 id=357 data-nosnippet>357</a>    }
+<a href=#320 id=320 data-nosnippet>320</a>    <span class="doccomment">/// Returns whether the only recognized receivers of this address are transparent protocol
+<a href=#321 id=321 data-nosnippet>321</a>    /// receivers.
+<a href=#322 id=322 data-nosnippet>322</a>    ///
+<a href=#323 id=323 data-nosnippet>323</a>    /// A unified address with unknown receivers may be considered transparent-only if it does not
+<a href=#324 id=324 data-nosnippet>324</a>    /// also contain a Sapling or Orchard receiver, i.e. if ordinary transaction construction
+<a href=#325 id=325 data-nosnippet>325</a>    /// methods would produce a transaction sending to a transparent address.
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub fn </span>is_transparent_only(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">use </span>AddressKind::<span class="kw-2">*</span>;
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.kind {
+<a href=#329 id=329 data-nosnippet>329</a>            Sprout(<span class="kw">_</span>) | Sapling(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+<a href=#330 id=330 data-nosnippet>330</a>            Unified(addr) =&gt; {
+<a href=#331 id=331 data-nosnippet>331</a>                addr.has_receiver_of_type(PoolType::Transparent)
+<a href=#332 id=332 data-nosnippet>332</a>                    &amp;&amp; !(addr.has_receiver_of_type(PoolType::SAPLING)
+<a href=#333 id=333 data-nosnippet>333</a>                        || addr.has_receiver_of_type(PoolType::ORCHARD))
+<a href=#334 id=334 data-nosnippet>334</a>            }
+<a href=#335 id=335 data-nosnippet>335</a>            P2pkh(<span class="kw">_</span>) | P2sh(<span class="kw">_</span>) | Tex(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+<a href=#336 id=336 data-nosnippet>336</a>        }
+<a href=#337 id=337 data-nosnippet>337</a>    }
+<a href=#338 id=338 data-nosnippet>338</a>
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="doccomment">/// Returns whether or not this address contains or corresponds to the given unified address
+<a href=#340 id=340 data-nosnippet>340</a>    /// receiver.
+<a href=#341 id=341 data-nosnippet>341</a>    </span><span class="kw">pub fn </span>matches_receiver(<span class="kw-2">&amp;</span><span class="self">self</span>, receiver: <span class="kw-2">&amp;</span>Receiver) -&gt; bool {
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.kind, receiver) {
+<a href=#343 id=343 data-nosnippet>343</a>            (AddressKind::Unified(ua), r) =&gt; ua.contains_receiver(r),
+<a href=#344 id=344 data-nosnippet>344</a>            (AddressKind::Sapling(d), Receiver::Sapling(r)) =&gt; r == d,
+<a href=#345 id=345 data-nosnippet>345</a>            (AddressKind::P2pkh(d), Receiver::P2pkh(r)) =&gt; r == d,
+<a href=#346 id=346 data-nosnippet>346</a>            (AddressKind::Tex(d), Receiver::P2pkh(r)) =&gt; r == d,
+<a href=#347 id=347 data-nosnippet>347</a>            (AddressKind::P2sh(d), Receiver::P2sh(r)) =&gt; r == d,
+<a href=#348 id=348 data-nosnippet>348</a>            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#349 id=349 data-nosnippet>349</a>        }
+<a href=#350 id=350 data-nosnippet>350</a>    }
+<a href=#351 id=351 data-nosnippet>351</a>}
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a><span class="attr">#[cfg(feature = <span class="string">"test-dependencies"</span>)]
+<a href=#354 id=354 data-nosnippet>354</a></span><span class="kw">pub mod </span>testing {
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">use </span>core::convert::TryInto;
+<a href=#356 id=356 data-nosnippet>356</a>
+<a href=#357 id=357 data-nosnippet>357</a>    <span class="kw">use </span>proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
 <a href=#358 id=358 data-nosnippet>358</a>
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="macro">prop_compose!</span> {
-<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">fn </span>arb_p2pkh_addr_kind()(
-<a href=#361 id=361 data-nosnippet>361</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
-<a href=#362 id=362 data-nosnippet>362</a>        ) -&gt; AddressKind {
-<a href=#363 id=363 data-nosnippet>363</a>            AddressKind::P2pkh(r_bytes)
-<a href=#364 id=364 data-nosnippet>364</a>        }
-<a href=#365 id=365 data-nosnippet>365</a>    }
-<a href=#366 id=366 data-nosnippet>366</a>
-<a href=#367 id=367 data-nosnippet>367</a>    <span class="macro">prop_compose!</span> {
-<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">fn </span>arb_p2sh_addr_kind()(
-<a href=#369 id=369 data-nosnippet>369</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
-<a href=#370 id=370 data-nosnippet>370</a>        ) -&gt; AddressKind {
-<a href=#371 id=371 data-nosnippet>371</a>            AddressKind::P2sh(r_bytes)
-<a href=#372 id=372 data-nosnippet>372</a>        }
-<a href=#373 id=373 data-nosnippet>373</a>    }
-<a href=#374 id=374 data-nosnippet>374</a>
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="macro">prop_compose!</span> {
-<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">fn </span>arb_unified_addr_kind()(
-<a href=#377 id=377 data-nosnippet>377</a>            uaddr <span class="kw">in </span>arb_unified_address()
-<a href=#378 id=378 data-nosnippet>378</a>        ) -&gt; AddressKind {
-<a href=#379 id=379 data-nosnippet>379</a>            AddressKind::Unified(uaddr)
-<a href=#380 id=380 data-nosnippet>380</a>        }
-<a href=#381 id=381 data-nosnippet>381</a>    }
-<a href=#382 id=382 data-nosnippet>382</a>
-<a href=#383 id=383 data-nosnippet>383</a>    <span class="macro">prop_compose!</span> {
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">fn </span>arb_tex_addr_kind()(
-<a href=#385 id=385 data-nosnippet>385</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
-<a href=#386 id=386 data-nosnippet>386</a>        ) -&gt; AddressKind {
-<a href=#387 id=387 data-nosnippet>387</a>            AddressKind::Tex(r_bytes)
-<a href=#388 id=388 data-nosnippet>388</a>        }
-<a href=#389 id=389 data-nosnippet>389</a>    }
-<a href=#390 id=390 data-nosnippet>390</a>
-<a href=#391 id=391 data-nosnippet>391</a>    <span class="macro">prop_compose!</span> {
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="doccomment">/// Create an arbitrary, structurally-valid `ZcashAddress` value.
-<a href=#393 id=393 data-nosnippet>393</a>        ///
-<a href=#394 id=394 data-nosnippet>394</a>        /// Note that the data contained in the generated address does _not_ necessarily correspond
-<a href=#395 id=395 data-nosnippet>395</a>        /// to a valid address according to the Zcash protocol; binary data in the resulting value
-<a href=#396 id=396 data-nosnippet>396</a>        /// is entirely random.
-<a href=#397 id=397 data-nosnippet>397</a>        </span><span class="kw">pub fn </span>arb_address(net: NetworkType)(
-<a href=#398 id=398 data-nosnippet>398</a>            kind <span class="kw">in </span><span class="macro">prop_oneof!</span>(
-<a href=#399 id=399 data-nosnippet>399</a>                arb_sprout_addr_kind(),
-<a href=#400 id=400 data-nosnippet>400</a>                arb_sapling_addr_kind(),
-<a href=#401 id=401 data-nosnippet>401</a>                arb_p2pkh_addr_kind(),
-<a href=#402 id=402 data-nosnippet>402</a>                arb_p2sh_addr_kind(),
-<a href=#403 id=403 data-nosnippet>403</a>                arb_unified_addr_kind(),
-<a href=#404 id=404 data-nosnippet>404</a>                arb_tex_addr_kind()
-<a href=#405 id=405 data-nosnippet>405</a>            )
-<a href=#406 id=406 data-nosnippet>406</a>        ) -&gt; ZcashAddress {
-<a href=#407 id=407 data-nosnippet>407</a>            ZcashAddress { net, kind }
-<a href=#408 id=408 data-nosnippet>408</a>        }
-<a href=#409 id=409 data-nosnippet>409</a>    }
-<a href=#410 id=410 data-nosnippet>410</a>}
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">use crate</span>::{unified::address::testing::arb_unified_address, AddressKind, ZcashAddress};
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">use </span>zcash_protocol::consensus::NetworkType;
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="macro">prop_compose!</span> {
+<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">fn </span>arb_sprout_addr_kind()(
+<a href=#364 id=364 data-nosnippet>364</a>            r_bytes <span class="kw">in </span>vec(any::&lt;u8&gt;(), <span class="number">64</span>)
+<a href=#365 id=365 data-nosnippet>365</a>        ) -&gt; AddressKind {
+<a href=#366 id=366 data-nosnippet>366</a>            AddressKind::Sprout(r_bytes.try_into().unwrap())
+<a href=#367 id=367 data-nosnippet>367</a>        }
+<a href=#368 id=368 data-nosnippet>368</a>    }
+<a href=#369 id=369 data-nosnippet>369</a>
+<a href=#370 id=370 data-nosnippet>370</a>    <span class="macro">prop_compose!</span> {
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="kw">fn </span>arb_sapling_addr_kind()(
+<a href=#372 id=372 data-nosnippet>372</a>            r_bytes <span class="kw">in </span>vec(any::&lt;u8&gt;(), <span class="number">43</span>)
+<a href=#373 id=373 data-nosnippet>373</a>        ) -&gt; AddressKind {
+<a href=#374 id=374 data-nosnippet>374</a>            AddressKind::Sapling(r_bytes.try_into().unwrap())
+<a href=#375 id=375 data-nosnippet>375</a>        }
+<a href=#376 id=376 data-nosnippet>376</a>    }
+<a href=#377 id=377 data-nosnippet>377</a>
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="macro">prop_compose!</span> {
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">fn </span>arb_p2pkh_addr_kind()(
+<a href=#380 id=380 data-nosnippet>380</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
+<a href=#381 id=381 data-nosnippet>381</a>        ) -&gt; AddressKind {
+<a href=#382 id=382 data-nosnippet>382</a>            AddressKind::P2pkh(r_bytes)
+<a href=#383 id=383 data-nosnippet>383</a>        }
+<a href=#384 id=384 data-nosnippet>384</a>    }
+<a href=#385 id=385 data-nosnippet>385</a>
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="macro">prop_compose!</span> {
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">fn </span>arb_p2sh_addr_kind()(
+<a href=#388 id=388 data-nosnippet>388</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
+<a href=#389 id=389 data-nosnippet>389</a>        ) -&gt; AddressKind {
+<a href=#390 id=390 data-nosnippet>390</a>            AddressKind::P2sh(r_bytes)
+<a href=#391 id=391 data-nosnippet>391</a>        }
+<a href=#392 id=392 data-nosnippet>392</a>    }
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a>    <span class="macro">prop_compose!</span> {
+<a href=#395 id=395 data-nosnippet>395</a>        <span class="kw">fn </span>arb_unified_addr_kind()(
+<a href=#396 id=396 data-nosnippet>396</a>            uaddr <span class="kw">in </span>arb_unified_address()
+<a href=#397 id=397 data-nosnippet>397</a>        ) -&gt; AddressKind {
+<a href=#398 id=398 data-nosnippet>398</a>            AddressKind::Unified(uaddr)
+<a href=#399 id=399 data-nosnippet>399</a>        }
+<a href=#400 id=400 data-nosnippet>400</a>    }
+<a href=#401 id=401 data-nosnippet>401</a>
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="macro">prop_compose!</span> {
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">fn </span>arb_tex_addr_kind()(
+<a href=#404 id=404 data-nosnippet>404</a>            r_bytes <span class="kw">in </span>uniform20(any::&lt;u8&gt;())
+<a href=#405 id=405 data-nosnippet>405</a>        ) -&gt; AddressKind {
+<a href=#406 id=406 data-nosnippet>406</a>            AddressKind::Tex(r_bytes)
+<a href=#407 id=407 data-nosnippet>407</a>        }
+<a href=#408 id=408 data-nosnippet>408</a>    }
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="macro">prop_compose!</span> {
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="doccomment">/// Create an arbitrary, structurally-valid `ZcashAddress` value.
+<a href=#412 id=412 data-nosnippet>412</a>        ///
+<a href=#413 id=413 data-nosnippet>413</a>        /// Note that the data contained in the generated address does _not_ necessarily correspond
+<a href=#414 id=414 data-nosnippet>414</a>        /// to a valid address according to the Zcash protocol; binary data in the resulting value
+<a href=#415 id=415 data-nosnippet>415</a>        /// is entirely random.
+<a href=#416 id=416 data-nosnippet>416</a>        </span><span class="kw">pub fn </span>arb_address(net: NetworkType)(
+<a href=#417 id=417 data-nosnippet>417</a>            kind <span class="kw">in </span><span class="macro">prop_oneof!</span>(
+<a href=#418 id=418 data-nosnippet>418</a>                arb_sprout_addr_kind(),
+<a href=#419 id=419 data-nosnippet>419</a>                arb_sapling_addr_kind(),
+<a href=#420 id=420 data-nosnippet>420</a>                arb_p2pkh_addr_kind(),
+<a href=#421 id=421 data-nosnippet>421</a>                arb_p2sh_addr_kind(),
+<a href=#422 id=422 data-nosnippet>422</a>                arb_unified_addr_kind(),
+<a href=#423 id=423 data-nosnippet>423</a>                arb_tex_addr_kind()
+<a href=#424 id=424 data-nosnippet>424</a>            )
+<a href=#425 id=425 data-nosnippet>425</a>        ) -&gt; ZcashAddress {
+<a href=#426 id=426 data-nosnippet>426</a>            ZcashAddress { net, kind }
+<a href=#427 id=427 data-nosnippet>427</a>        }
+<a href=#428 id=428 data-nosnippet>428</a>    }
+<a href=#429 id=429 data-nosnippet>429</a>}
 </code></pre></div></section></main></body></html>
