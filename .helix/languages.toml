@@ -1,5 +1,19 @@
 [language-server.rust-analyzer.config.cargo]
 features = "all"
 
+[language-server.rust-analyzer.config]
+# Ensure tests are enabled for rust-analyzer
+# See: https://rust-analyzer.github.io/manual.html#configuration
+# This enables test discovery and code lenses for tests.
+# If you want to further customize, see rust-analyzer docs.
+cargo = { features = "all" }
+# Enable test support
+# (This is the default, but we set it explicitly for clarity)
+# You can also set "runnables.command" if you want to use a custom test runner.
+# For more options, see rust-analyzer docs.
+# https://rust-analyzer.github.io/manual.html#configuration
+# test = true is default, but we set it explicitly.
+test = true
+
 [language-server.rust-analyzer.config.server.extraEnv]
 RUSTUP_TOOLCHAIN = "stable"
