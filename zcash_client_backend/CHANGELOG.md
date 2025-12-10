@@ -21,9 +21,10 @@ workspace.
   - `BlockRange` has added field `pool_types`
   - `LightdInfo` has added fields `upgrade_name`, `upgrade_height`, and `lighwallet_protocol_version`
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
+- `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
 
 ### Changed
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
 - Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
   changes:
   - in `zcash_client_backend::proto::compact_formats`:
@@ -48,7 +49,8 @@ workspace.
     key that will be used to encrypt any wallet-internal change outputs
     that would otherwise only be recoverable using the wallet's internal
     IVK.
-- `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs.
+- `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
+- `zcash_client_backend::proposal::ProposalError` has added variant `PaymentAmountMissing`
 
 ## [0.21.0] - 2025-11-05
 

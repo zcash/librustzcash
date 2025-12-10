@@ -701,7 +701,7 @@ where
     let request = zip321::TransactionRequest::new(vec![
         Payment::new(
             to.to_zcash_address(params),
-            amount,
+            Some(amount),
             memo,
             None,
             None,
@@ -1393,6 +1393,9 @@ where
             .expect(
                 "The mapping between payment index and payment is checked in step construction",
             );
+        let payment_amount = payment
+            .amount()
+            .ok_or(ProposalError::PaymentAmountMissing(payment_index))?;
         let recipient_address = payment.recipient_address();
 
         let add_sapling_output =
@@ -1404,7 +1407,7 @@ where
                 builder.add_sapling_output(
                     external_ovk.map(|k| k.into()),
                     to,
-                    payment.amount(),
+                    payment_amount,
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -1412,7 +1415,7 @@ where
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::SAPLING,
                     },
-                    payment.amount(),
+                    payment_amount,
                     Some(memo),
                 ));
                 Ok(())
@@ -1428,7 +1431,7 @@ where
                 builder.add_orchard_output(
                     external_ovk.map(|k| k.into()),
                     to,
-                    payment.amount().into(),
+                    payment_amount.into(),
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
@@ -1436,7 +1439,7 @@ where
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::ORCHARD,
                     },
-                    payment.amount(),
+                    payment_amount,
                     Some(memo),
                 ));
                 Ok(())
@@ -1450,14 +1453,14 @@ where
                 if payment.memo().is_some() {
                     return Err(Error::MemoForbidden);
                 }
-                builder.add_transparent_output(&to, payment.amount())?;
+                builder.add_transparent_output(&to, payment_amount)?;
                 transparent_output_meta.push((
                     BuildRecipient::External {
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::TRANSPARENT,
                     },
                     to,
-                    payment.amount(),
+                    payment_amount,
                     StepOutputIndex::Payment(payment_index),
                 ));
                 Ok(())

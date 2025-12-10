@@ -8,10 +8,28 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.7.0] - PENDING
 
 ### Changed
 - MSRV is now 1.85.1.
+- `zip321::Payment::amount` now returns `Option<Zatoshis>` instead of `Zatoshis`.
+  Previously, the amount field of the payment would be set to zero if no amount
+  parameter was present; however, this behavior is not specified by ZIP 321.
+  The semantics of this field have now been altered such that if no amount is
+  specified by a payment request, this should be interpreted to mean that the
+  sender of the transaction should specify an amount for the payment.
+- `zip321::Payment::new` now takes its `amount` parameter as `Option<Zatoshis>`
+  instead of `Zatoshis`. It now returns `None` if the payment requests that a
+  zero-valued output OR a memo be sent to a transparent-only address.
+- `zip321::Zip321Error` has added variant `Zip321Error::ZeroValuedTransparentOutput`.
+  Zero-valued transparent outputs are rejected by the Zcash consensus rules,
+  and so payments to transparent addresses with the `amount` parameter explicitly
+  set to zero are now disallowed.
+- The return type of `zip321::TransactionRequest::total` has been modified;
+  it now returns `Ok(None)` if any payment amount is `None`, as the total
+  is not well-defined in this case.
+- `zip321::Zip321Error` has been marked `#[non_exhaustive]` to permit future
+  semver-compatible additions to the errors that can be identified at parse time.
 
 ## [0.6.0] - 2025-10-02
 

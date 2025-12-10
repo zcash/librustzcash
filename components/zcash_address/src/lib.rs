@@ -317,6 +317,25 @@ impl ZcashAddress {
         }
     }
 
+    /// Returns whether the only recognized receivers of this address are transparent protocol
+    /// receivers.
+    ///
+    /// A unified address with unknown receivers may be considered transparent-only if it does not
+    /// also contain a Sapling or Orchard receiver, i.e. if ordinary transaction construction
+    /// methods would produce a transaction sending to a transparent address.
+    pub fn is_transparent_only(&self) -> bool {
+        use AddressKind::*;
+        match &self.kind {
+            Sprout(_) | Sapling(_) => false,
+            Unified(addr) => {
+                addr.has_receiver_of_type(PoolType::Transparent)
+                    && !(addr.has_receiver_of_type(PoolType::SAPLING)
+                        || addr.has_receiver_of_type(PoolType::ORCHARD))
+            }
+            P2pkh(_) | P2sh(_) | Tex(_) => true,
+        }
+    }
+
     /// Returns whether or not this address contains or corresponds to the given unified address
     /// receiver.
     pub fn matches_receiver(&self, receiver: &Receiver) -> bool {

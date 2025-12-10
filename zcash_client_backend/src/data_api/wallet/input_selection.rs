@@ -150,6 +150,12 @@ impl<E, S, C, N> From<ChangeError<C, N>> for InputSelectorError<E, S, C, N> {
     }
 }
 
+impl<E, S, C, N> From<ProposalError> for InputSelectorError<E, S, C, N> {
+    fn from(err: ProposalError) -> Self {
+        InputSelectorError::Proposal(err)
+    }
+}
+
 /// A strategy for selecting transaction inputs and proposing transaction outputs.
 ///
 /// Proposals should include only economically useful inputs, as determined by `Self::FeeRule`;
@@ -414,6 +420,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut total_ephemeral = Zatoshis::ZERO;
 
         for (idx, payment) in transaction_request.payments() {
+            let payment_amount = payment
+                .amount()
+                .ok_or(ProposalError::PaymentAmountMissing(*idx))?;
             let recipient_address: Address = payment
                 .recipient_address()
                 .clone()
@@ -422,7 +431,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             match recipient_address {
                 Address::Transparent(addr) => {
                     payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                    transparent_outputs.push(TxOut::new(payment.amount(), addr.script().into()));
+                    transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
                 }
                 #[cfg(feature = "transparent-inputs")]
                 Address::Tex(data) => {
@@ -430,7 +439,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
                     tr1_payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     tr1_transparent_outputs
-                        .push(TxOut::new(payment.amount(), p2pkh_addr.script().into()));
+                        .push(TxOut::new(payment_amount, p2pkh_addr.script().into()));
                     tr1_payments.push(
                         Payment::new(
                             payment.recipient_address().clone(),
@@ -442,7 +451,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         )
                         .expect("cannot fail because memo is None"),
                     );
-                    total_ephemeral = (total_ephemeral + payment.amount())
+                    total_ephemeral = (total_ephemeral + payment_amount)
                         .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                 }
                 #[cfg(not(feature = "transparent-inputs"))]
@@ -453,26 +462,25 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::SAPLING);
-                    sapling_outputs.push(SaplingPayment(payment.amount()));
+                    sapling_outputs.push(SaplingPayment(payment_amount));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.has_orchard() {
                         payment_pools.insert(*idx, PoolType::ORCHARD);
-                        orchard_outputs.push(OrchardPayment(payment.amount()));
+                        orchard_outputs.push(OrchardPayment(payment_amount));
                         continue;
                     }
 
                     if addr.has_sapling() {
                         payment_pools.insert(*idx, PoolType::SAPLING);
-                        sapling_outputs.push(SaplingPayment(payment.amount()));
+                        sapling_outputs.push(SaplingPayment(payment_amount));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
                         payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                        transparent_outputs
-                            .push(TxOut::new(payment.amount(), addr.script().into()));
+                        transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
                         continue;
                     }
 
@@ -879,12 +887,19 @@ where
     let tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
         .expect("the sum of an single-element vector of fee values cannot overflow");
 
-    let payment = zip321::Payment::new(recipient, total_to_recipient, memo, None, None, vec![])
-        .ok_or_else(|| {
-            InputSelectorError::Proposal(ProposalError::Zip321(
-                zip321::Zip321Error::TransparentMemo(0),
-            ))
-        })?;
+    let payment = zip321::Payment::new(
+        recipient,
+        Some(total_to_recipient),
+        memo,
+        None,
+        None,
+        vec![],
+    )
+    .ok_or_else(|| {
+        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
+            0,
+        )))
+    })?;
 
     let transaction_request =
         TransactionRequest::new(vec![payment.clone()]).map_err(|payment_error| {
