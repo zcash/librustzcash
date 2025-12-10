@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::ZcashAddress::is_transparent_only`
+
 ### Removed
 
 - Removed deprecated `zcash_address::Network`, use `zcash_protocol::consensus::Network` instead.
