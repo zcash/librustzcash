@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.26.2] - 2025-12-12
+
 ### Added
 - `zcash_primitives::transaction::builder`:
   - `BuildConfig::is_coinbase`
