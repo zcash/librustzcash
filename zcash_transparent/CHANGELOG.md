@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.2] - 2025-12-12
+
 ### Added
 - `zcash_transparent`:
   - `builder`:
