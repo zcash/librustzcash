@@ -167,10 +167,6 @@ criteria = "safe-to-deploy"
 version = "1.0.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-waker]]
-version = "1.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.backtrace]]
 version = "0.3.69"
 criteria = "safe-to-deploy"
@@ -221,10 +217,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bls12_381]]
 version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.bounded-vec]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bounded-vec-deque]]
@@ -475,10 +467,6 @@ criteria = "safe-to-deploy"
 version = "0.13.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.embedded-io]]
-version = "0.6.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.enum-ordinalize]]
 version = "3.1.15"
 criteria = "safe-to-deploy"
@@ -525,10 +513,6 @@ criteria = "safe-to-run"
 
 [[exemptions.fixed-hash]]
 version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fixedbitset]]
-version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.fluid-let]]
@@ -1441,10 +1425,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
 version = "0.1.27"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-log]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-test]]
