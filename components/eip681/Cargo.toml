@@ -32,7 +32,7 @@ proptest.workspace = true
 
 [features]
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
-# test-dependencies = ["dep:proptest"]
+test-dependencies = ["dep:proptest"]
 
 [lints]
 workspace = true
