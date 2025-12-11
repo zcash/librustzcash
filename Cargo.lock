@@ -1481,8 +1481,6 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "snafu",
- "zcash_address",
- "zcash_protocol",
 ]
 
 [[package]]

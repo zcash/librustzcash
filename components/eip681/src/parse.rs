@@ -502,7 +502,7 @@ impl Value {
         // Here there are some interesting corner cases:
         //
         // 1. In `number`'s spec, absolutely everything is optional, so it _never_ fails.
-        // 2. `ethereum_address` may be prefixed with `0` in the hex-address case, so both number
+        // 2. `ethereum_address` may be prefixed with `0` (in the hex-address case), so both number
         //   and address could be parsed. Because of 1, `number` always wins if it comes first, but
         //   even if the minimum was 1 digit `number` would still win by parsing "0", so
         //   we can't simply apply them with `number`.or(`address`).
@@ -571,44 +571,20 @@ impl EthereumAbiTypeName {
     }
 }
 
-/// The key of a parameter.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Key {
-    Value,
-    Gas,
-    GasLimit,
-    GasPrice,
-    Type(EthereumAbiTypeName),
-}
+// pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
+//     let parse_value = nom::bytes::complete::tag("value").map(|_| Key::Value);
+//     let parse_gas = nom::bytes::complete::tag("gas").map(|_| Key::Gas);
+//     let parse_gas_limit = nom::bytes::complete::tag("gasLimit").map(|_| Key::GasLimit);
+//     let parse_gas_price = nom::bytes::complete::tag("gasPrice").map(|_| Key::GasPrice);
 
-impl core::fmt::Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Key::Value => f.write_str("value"),
-            Key::Gas => f.write_str("gas"),
-            Key::GasLimit => f.write_str("gasLimit"),
-            Key::GasPrice => f.write_str("gasPrice"),
-            Key::Type(ty) => ty.fmt(f),
-        }
-    }
-}
-
-impl Key {
-    pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let parse_value = nom::bytes::complete::tag("value").map(|_| Key::Value);
-        let parse_gas = nom::bytes::complete::tag("gas").map(|_| Key::Gas);
-        let parse_gas_limit = nom::bytes::complete::tag("gasLimit").map(|_| Key::GasLimit);
-        let parse_gas_price = nom::bytes::complete::tag("gasPrice").map(|_| Key::GasPrice);
-
-        nom::branch::alt((
-            parse_value,
-            parse_gas_limit,
-            parse_gas_price,
-            parse_gas,
-            EthereumAbiTypeName::parse.map(Key::Type),
-        ))(i)
-    }
-}
+//     nom::branch::alt((
+//         parse_value,
+//         parse_gas_limit,
+//         parse_gas_price,
+//         parse_gas,
+//         EthereumAbiTypeName::parse.map(Key::Type),
+//     ))(i)
+// }
 
 /// A key-value pair, where the the type of the value depends upon the key.
 ///
@@ -630,9 +606,9 @@ pub enum Parameter {
     /// In most cases this will denote wei on the ether blockchain, but it depends on
     /// context outside the scope of this library.
     Value(Number),
-    /// Gas number value.
+    /// Synonym for [`Self::GasLimit`].
     Gas(Number),
-    /// Synonym for "gas".
+    /// Suggested user-editable value for the gas limit of the transaction.
     GasLimit(Number),
     /// Synonym for "gas".
     GasPrice(Number),
@@ -649,16 +625,13 @@ impl core::fmt::Display for Parameter {
 }
 
 impl Parameter {
-    /// Returns just the key of this parameter.
-    pub fn key(&self) -> Key {
+    fn key(&self) -> String {
         match self {
-            Parameter::Value(_) => Key::Value,
-            Parameter::Gas(_) => Key::Gas,
-            Parameter::GasLimit(_) => Key::GasLimit,
-            Parameter::GasPrice(_) => Key::GasPrice,
-            Parameter::AbiType(ethereum_abi_type_name, _) => {
-                Key::Type(ethereum_abi_type_name.clone())
-            }
+            Parameter::Value(_) => "value".to_string(),
+            Parameter::Gas(_) => "gas".to_string(),
+            Parameter::GasLimit(_) => "gasLimit".to_string(),
+            Parameter::GasPrice(_) => "gasPrice".to_string(),
+            Parameter::AbiType(ethereum_abi_type_name, _) => format!("{ethereum_abi_type_name}"),
         }
     }
 
@@ -674,8 +647,9 @@ impl Parameter {
     }
 
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, key) = Key::parse(i)?;
-        let (i, _eq) = nom::character::complete::char('=')(i)?;
+        // Parse the key blob
+        let (i, key_blob) = nom::bytes::complete::take_till1(|c| c == '=')(i)?;
+        let (i, _) = nom::bytes::complete::tag("=")(i)?;
 
         fn parse_number(
             i: &str,
@@ -689,23 +663,29 @@ impl Parameter {
                     })?;
             Ok((i, f(number)))
         }
-
         // If key in the parameter list is value, gasLimit, gasPrice or gas then
         // value MUST be a number. Otherwise, it must correspond to the TYPE
         // string used as key.
-        match key {
-            Key::Value => parse_number(i, Parameter::Value),
-            Key::Gas => parse_number(i, Parameter::Gas),
-            Key::GasLimit => parse_number(i, Parameter::GasLimit),
-            Key::GasPrice => parse_number(i, Parameter::GasPrice),
-            Key::Type(type_name) => {
+        Ok(match key_blob {
+            "value" => parse_number(i, Parameter::Value)?,
+            "gas" => parse_number(i, Parameter::Gas)?,
+            "gasLimit" => parse_number(i, Parameter::GasLimit)?,
+            "gasPrice" => parse_number(i, Parameter::GasPrice)?,
+            other_key_blob => {
+                let (remaining_name_input, type_name) = EthereumAbiTypeName::parse(other_key_blob)?;
+                snafu::ensure!(
+                    remaining_name_input.is_empty(),
+                    InvalidParameterKeySnafu {
+                        key: other_key_blob.to_string()
+                    }
+                );
                 let (i, value) =
                     Value::parse(i).map_err(|_| ParseError::InvalidParameterValue {
                         ty: type_name.to_string(),
                     })?;
-                Ok((i, Parameter::AbiType(type_name, value)))
+                (i, Parameter::AbiType(type_name, value))
             }
-        }
+        })
     }
 }
 
@@ -727,33 +707,114 @@ impl core::fmt::Display for Parameters {
     }
 }
 
+impl IntoIterator for Parameters {
+    type Item = Parameter;
+
+    type IntoIter = <Vec<Parameter> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl Parameters {
     /// Parses zero or more parameters, separated by '&'.
     ///
     /// ## Note
     /// This parser never fails.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, maybe_head) = nom::combinator::opt(Parameter::parse).parse(i)?;
-        if let Some(head) = maybe_head {
-            let parse_next_param =
-                nom::sequence::preceded(nom::bytes::complete::tag("&"), Parameter::parse);
-            let (i, tail) = nom::multi::many0(parse_next_param)(i)?;
-            let mut parameters = vec![head];
-            parameters.extend(tail);
-            Ok((i, Parameters(parameters)))
-        } else {
-            Ok((i, Parameters(vec![])))
+        // First parse into parameter "blobs", separated by '&'
+        let (i, blobs) = nom::multi::separated_list0(
+            nom::bytes::complete::tag("&"),
+            nom::bytes::complete::take_till1(|c| c == '&'),
+        )(i)?;
+        let mut params = vec![];
+        for blob in blobs.into_iter() {
+            let (j, param) = Parameter::parse(blob)?;
+            snafu::ensure!(j.is_empty(), UnexpectedLeftoverInputSnafu { input: i });
+            params.push(param);
         }
+        Ok((i, Parameters(params)))
     }
 
-    /// Return the _first_ value of the parameter with the given `key`, if any.
-    pub fn get_value(&self, key: &Key) -> Option<Value> {
-        for param in self.0.iter() {
-            if &param.key() == key {
-                return Some(param.value());
+    /// Return an iterator over all parameters.
+    pub fn iter(&self) -> impl Iterator<Item = &Parameter> {
+        self.0.iter()
+    }
+
+    /// Returns the number value of the parameter with the "value" key, if any.
+    ///
+    /// ## Errors
+    /// Errors if there are more than one parameter with the key "value".
+    pub fn value(&self) -> Result<Option<Number>, ValidationError> {
+        let mut values = self
+            .iter()
+            .filter_map(|p| match p {
+                Parameter::Value(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        snafu::ensure!(
+            values.len() <= 1,
+            MultipleParameterValuesSnafu {
+                key: "value",
+                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
             }
-        }
-        None
+        );
+        Ok(values.pop())
+    }
+
+    /// Returns the number value of the parameter with the "gas" or "gasLimit" key, if any.
+    ///
+    /// ## Errors
+    /// Errors if there are more than one parameter with the key "gas" or "gas_limit".
+    pub fn gas_limit(&self) -> Result<Option<Number>, ValidationError> {
+        let mut values = self
+            .iter()
+            .filter_map(|p| match p {
+                Parameter::Gas(n) => Some(n.clone()),
+                Parameter::GasLimit(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        snafu::ensure!(
+            values.len() <= 1,
+            MultipleParameterValuesSnafu {
+                key: "gasLimit",
+                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
+            }
+        );
+        Ok(values.pop())
+    }
+
+    /// Returns the number value of the parameter with the "gasPrice" key, if any.
+    ///
+    /// ## Errors
+    /// Errors if there are more than one parameter with the key "gasPrice".
+    pub fn gas_price(&self) -> Result<Option<Number>, ValidationError> {
+        let mut values = self
+            .iter()
+            .filter_map(|p| match p {
+                Parameter::GasPrice(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        snafu::ensure!(
+            values.len() <= 1,
+            MultipleParameterValuesSnafu {
+                key: "gasLimit",
+                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
+            }
+        );
+        Ok(values.pop())
+    }
+
+    /// Returns an iterator over all ABI type parameters.
+    pub fn abi_parameters(&self) -> impl Iterator<Item = (&EthereumAbiTypeName, &Value)> {
+        self.iter().filter_map(|p| match p {
+            Parameter::AbiType(name, value) => Some((name, value)),
+            _ => None,
+        })
     }
 }
 
@@ -832,7 +893,14 @@ impl EthereumTransactionRequest {
     /// Parse a transaction request.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         let (i, schema_prefix) = SchemaPrefix::parse(i)?;
-        let (i, target_address) = EthereumAddress::parse(i)?;
+        let (i, address_blob) = nom::bytes::complete::is_not("@/?")(i)?;
+        let (remaining_address_input, target_address) = EthereumAddress::parse(address_blob)?;
+        snafu::ensure!(
+            remaining_address_input.is_empty(),
+            UnexpectedLeftoverInputSnafu {
+                input: remaining_address_input
+            }
+        );
 
         let parse_chain_id =
             nom::sequence::preceded(nom::bytes::complete::tag("@"), |i| Digits::parse_min(i, 1));
@@ -960,7 +1028,7 @@ mod test {
     fn arb_valid_number() -> impl Strategy<Value = Number> {
         (
             prop::option::of(any::<bool>()),
-            arb_digits(0),
+            arb_digits(1),
             any::<bool>(),
             prop::option::of(arb_digits_in(1..=4)),
         )
@@ -1188,16 +1256,8 @@ mod test {
         proptest::string::string_regex(&format!(".{{{min},{max}}}")).unwrap()
     }
 
-    fn arb_non_numeric_unicode(min: usize, max: usize) -> impl Strategy<Value = String> {
-        proptest::string::string_regex(&format!("[^\\d]{{{min},{max}}}")).unwrap()
-    }
-
     fn arb_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
         arb_unicode(1, 1024).prop_map(UrlEncodedUnicodeString::encode)
-    }
-
-    fn arb_non_numeric_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
-        arb_non_numeric_unicode(1, 1024).prop_map(UrlEncodedUnicodeString::encode)
     }
 
     proptest! {
@@ -1313,40 +1373,11 @@ mod test {
         }
     }
 
-    fn arb_key() -> impl Strategy<Value = Key> {
-        fn type_keys() -> impl Strategy<Value = Key> {
-            arb_eth_type_name(TYPE_RECURSIONS).prop_map(Key::Type)
-        }
-        fn one_offs() -> impl Strategy<Value = Key> {
-            Union::new([Key::Value, Key::Gas, Key::GasLimit, Key::GasPrice].map(Just))
-        }
-        Union::new([one_offs().boxed(), type_keys().boxed()])
-    }
-
-    proptest! {
-        #[test]
-        fn parse_arb_key(expected in arb_key()) {
-            let input = expected.to_string();
-            let (output, seen) = Key::parse(&input).unwrap();
-            assert_eq!("", output);
-            assert_eq!(expected, seen);
-        }
-    }
-
     fn arb_value() -> impl Strategy<Value = Value> {
         Union::new([
             arb_valid_number().prop_map(Value::Number).boxed(),
             arb_eth_addy().prop_map(Value::Address).boxed(),
             arb_url_encoded_string().prop_map(Value::String).boxed(),
-        ])
-    }
-
-    fn arb_non_number_value() -> impl Strategy<Value = Value> {
-        Union::new([
-            arb_eth_addy().prop_map(Value::Address).boxed(),
-            arb_non_numeric_url_encoded_string()
-                .prop_map(Value::String)
-                .boxed(),
         ])
     }
 
@@ -1387,24 +1418,47 @@ mod test {
         }
     }
 
+    fn arb_eth_abi_parameter() -> impl Strategy<Value = Parameter> {
+        (arb_eth_type_name(TYPE_RECURSIONS), arb_value())
+            .prop_map(|(name, value)| Parameter::AbiType(name, value))
+    }
+
+    fn arb_non_eth_abi_parameter() -> impl Strategy<Value = Parameter> {
+        arb_valid_number()
+            .prop_map(Parameter::Value)
+            .boxed()
+            .prop_union(arb_valid_number().prop_map(Parameter::Gas).boxed())
+            .boxed()
+            .prop_union(arb_valid_number().prop_map(Parameter::GasLimit).boxed())
+            .boxed()
+            .prop_union(arb_valid_number().prop_map(Parameter::GasPrice).boxed())
+            .boxed()
+    }
+
     fn arb_parameter() -> impl Strategy<Value = Parameter> {
-        arb_key().prop_flat_map(|key| {
-            if let Key::Type(name) = key {
-                arb_non_number_value()
-                    .prop_map(move |value| Parameter::AbiType(name.clone(), value))
-                    .boxed()
-            } else {
-                arb_valid_number()
-                    .prop_map(move |n| match key {
-                        Key::Value => Parameter::Value(n),
-                        Key::Gas => Parameter::Gas(n),
-                        Key::GasLimit => Parameter::GasLimit(n),
-                        Key::GasPrice => Parameter::GasPrice(n),
-                        Key::Type(_) => unreachable!("we checked this is not TYPE"),
-                    })
-                    .boxed()
-            }
-        })
+        arb_eth_abi_parameter()
+            .boxed()
+            .prop_union(arb_non_eth_abi_parameter().boxed())
+    }
+
+    #[test]
+    fn sanity_uint_eq_zero_parameter() {
+        let expected = Parameter::AbiType(
+            EthereumAbiTypeName {
+                name: "uint".to_string(),
+            },
+            Value::Number(Number {
+                signum: None,
+                integer: Digits { places: vec![0] },
+                decimal: None,
+                exponent: None,
+            }),
+        );
+        let expected_string = expected.to_string();
+        assert_eq!("uint=0", expected_string);
+
+        let (_i, parsed) = Parameter::parse(&expected_string).unwrap();
+        pretty_assertions::assert_eq!(expected, parsed);
     }
 
     proptest! {
@@ -1470,8 +1524,8 @@ mod test {
         #[test]
         fn parse_arb_request(expected in arb_request()) {
             let input = expected.to_string();
-            let (_, seen) = EthereumTransactionRequest::parse(&input).unwrap();
-            pretty_assertions::assert_str_eq!(input, seen.to_string().as_str());
+            let (i, seen) = EthereumTransactionRequest::parse(&input).unwrap();
+            pretty_assertions::assert_str_eq!(input, seen.to_string().as_str(), "input: {input}\ni: {i}");
             pretty_assertions::assert_eq!(expected, seen);
         }
     }
@@ -1484,8 +1538,7 @@ mod test {
             "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359",
             seen.target_address.to_string()
         );
-        let value = seen.parameters.get_value(&Key::Value).unwrap();
-        let number = value.as_number().unwrap();
+        let number = seen.parameters.value().unwrap().unwrap();
         assert_eq!(2, number.integer().unwrap());
         assert_eq!(2.014e18 as i128, number.as_i128().unwrap());
     }

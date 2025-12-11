@@ -2,7 +2,7 @@
 
 use snafu::prelude::*;
 
-use crate::Number;
+use crate::{Number, Value};
 
 /// Errors discovered during parsing.
 #[derive(Debug, Snafu)]
@@ -51,6 +51,14 @@ pub enum ParseError<'a> {
     /// A parameter value had an unexpected value.
     #[snafu(display("Invalid parameter value. Expected a {ty}."))]
     InvalidParameterValue { ty: String },
+
+    /// A parameter key had an unexpected value.
+    #[snafu(display("Invalid parameter key '{key}'."))]
+    InvalidParameterKey { key: String },
+
+    /// Unexpected leftover parsing input.
+    #[snafu(display("Unexpected leftover parsing input '{input}'"))]
+    UnexpectedLeftoverInput { input: &'a str },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
@@ -114,4 +122,12 @@ pub enum ValidationError {
     /// An attempt to convert an integer failed.
     #[snafu(display("Integer conversion failed: {source}"))]
     Integer { source: std::num::TryFromIntError },
+
+    /// More than one value exists in a parameter list with a key
+    /// that denotes a single value.
+    #[snafu(display("More than one parameter by the key '{key}', saw: [{}]", values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")))]
+    MultipleParameterValues {
+        key: &'static str,
+        values: Vec<Value>,
+    },
 }
