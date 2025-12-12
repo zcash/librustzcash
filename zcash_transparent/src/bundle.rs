@@ -295,7 +295,7 @@ impl TxIn<builder::Coinbase> {
         // The height is encoded in the `push_num` fn above.
         //
         // [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
-        assert!(script_sig.is_empty());
+        assert!(!script_sig.is_empty());
         if script_sig.len() > coinbase::MAX_COINBASE_HEIGHT_LEN {
             Err(coinbase::Error::OversizedHeight)?;
         }
