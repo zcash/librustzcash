@@ -3,15 +3,22 @@
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
-use zcash_script::script;
+use zcash_script::{
+    opcode::{Evaluable as _, PushValue},
+    pattern::push_num,
+    pv,
+    script::{self, Evaluable as _},
+};
 
 use zcash_protocol::{
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder, coinbase,
     sighash::TransparentAuthorizingContext,
 };
 
@@ -146,9 +153,17 @@ pub struct OutPoint {
 }
 
 impl OutPoint {
+    /// Returns the null [`OutPoint`] in the Bitcoin sense:
+    /// - [`TxId`] is set to all-zeroes, and
+    /// - output index is set to [`u32::MAX`].
+    pub const NULL: OutPoint = OutPoint {
+        hash: TxId::NULL,
+        n: u32::MAX,
+    };
+
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
-    pub fn new(hash: [u8; 32], n: u32) -> Self {
+    pub const fn new(hash: [u8; 32], n: u32) -> Self {
         OutPoint {
             hash: TxId::from_bytes(hash),
             n,
@@ -180,9 +195,7 @@ impl OutPoint {
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
-        // From `BaseOutPoint::IsNull()` in zcashd:
-        //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.is_null() && self.n == u32::MAX
+        *self == Self::NULL
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -255,6 +268,91 @@ impl TxIn<Authorized> {
         self.prevout().write(&mut writer)?;
         self.script_sig().write(&mut writer)?;
         writer.write_all(&self.sequence().to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Creates an input for a coinbase transaction.
+    ///
+    /// - Does not support creating inputs for the genesis block.
+    /// - The `miner_data` parameter can carry arbitrary data, which will be included in the input's
+    ///   `script_sig` field, as long as the field's length stays within
+    ///   [`coinbase::MAX_COINBASE_SCRIPT_LEN`] bytes.
+    pub fn coinbase(
+        height: BlockHeight,
+        miner_data: Option<PushValue>,
+    ) -> Result<Self, coinbase::Error> {
+        let h = match i64::from(height) {
+            0 => Err(coinbase::Error::GenesisInputNotSupported),
+            h => Ok(push_num(h)),
+        }?;
+
+        let h_len = h.byte_len();
+        assert!(h_len > 0);
+
+        // # Consensus
+        //
+        // > A coinbase transaction for a block at block height greater than 0 MUST have a script
+        // > that, as its first item, encodes the block height `height` as follows. For `height` in
+        // > the range {1 .. 16}, the encoding is a single byte of value `0x50` + `height`.
+        // > Otherwise, let `heightBytes` be the signed little-endian representation of `height`,
+        // > using the minimum nonzero number of bytes such that the most significant byte is <
+        // > `0x80`. The length of `heightBytes` MUST be in the range {1 .. 5}. Then the encoding is
+        // > the length of `heightBytes` encoded as one byte, followed by `heightBytes` itself. This
+        // > matches the encoding used by Bitcoin in the implementation of [BIP-34] (but the
+        // > description here is to be considered normative).
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // ## Note
+        //
+        // The height is encoded in `push_num`, which always returns an opcode, and every opcode
+        // serializes to at least one byte, so we assert the lower bound.
+        //
+        // [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
+        if h_len > coinbase::MAX_COINBASE_HEIGHT_LEN {
+            return Err(coinbase::Error::OversizedHeight);
+        }
+
+        let script_sig = script::Component(
+            [
+                Some(h),
+                // Consensus rule: coinbase script must be at least 2 bytes.
+                (h_len < coinbase::MIN_COINBASE_SCRIPT_LEN && miner_data.is_none())
+                    .then_some(pv::_0),
+                miner_data,
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        );
+
+        let s_len = script_sig.byte_len();
+        assert!(s_len >= coinbase::MIN_COINBASE_SCRIPT_LEN);
+
+        // # Consensus
+        //
+        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // ## Note
+        //
+        // The `miner_data` param always contains an opcode, and every opcode serializes to at least
+        // one byte, so we assert the lower bound.
+        if s_len > coinbase::MAX_COINBASE_SCRIPT_LEN {
+            return Err(coinbase::Error::OversizedScript);
+        }
+
+        // We set the `prevout` argument to [`OutPoint::NULL`] since [§ 3.11] defines coinbase txs
+        // as those that have a single transparent input with a null `prevout` field.
+        //
+        // We set the `sequence` field to [`u32::MAX`] to disable time-locking, as described in the
+        // [Bitcoin Developer Reference].
+        //
+        // [§ 3.11]: <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+        // [Bitcoin Developer Reference]: <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
+        Ok(TxIn::from_parts(OutPoint::NULL, script_sig, u32::MAX))
     }
 }
 

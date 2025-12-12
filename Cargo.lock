@@ -6705,7 +6705,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "core2",
  "document-features",
@@ -6744,7 +6744,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bip32",
  "blake2b_simd",
