@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["address","builder","bundle","keys","pczt","sighash","zip48"]};
+window.SIDEBAR_ITEMS = {"mod":["address","builder","bundle","coinbase","keys","pczt","sighash","zip48"]};

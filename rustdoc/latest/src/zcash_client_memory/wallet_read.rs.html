@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_memory/src/wallet_read.rs`."><title>wallet_read.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_memory" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (c61a3a44d 2025-12-09)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_memory/</div>wallet_read.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>std::{
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_memory/src/wallet_read.rs`."><title>wallet_read.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_memory" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (f52090008 2025-12-10)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_memory/</div>wallet_read.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>std::{
 <a href=#2 id=2 data-nosnippet>2</a>    collections::{HashMap, hash_map::Entry},
 <a href=#3 id=3 data-nosnippet>3</a>    num::NonZeroU32,
 <a href=#4 id=4 data-nosnippet>4</a>};
@@ -548,243 +548,248 @@
 <a href=#548 id=548 data-nosnippet>548</a>                        BranchId::for_height(<span class="kw-2">&amp;</span><span class="self">self</span>.params, expiry_height),
 <a href=#549 id=549 data-nosnippet>549</a>                        tx_data.lock_time(),
 <a href=#550 id=550 data-nosnippet>550</a>                        expiry_height,
-<a href=#551 id=551 data-nosnippet>551</a>                        tx_data.transparent_bundle().cloned(),
-<a href=#552 id=552 data-nosnippet>552</a>                        tx_data.sprout_bundle().cloned(),
-<a href=#553 id=553 data-nosnippet>553</a>                        tx_data.sapling_bundle().cloned(),
-<a href=#554 id=554 data-nosnippet>554</a>                        tx_data.orchard_bundle().cloned(),
-<a href=#555 id=555 data-nosnippet>555</a>                    )
-<a href=#556 id=556 data-nosnippet>556</a>                        .freeze()<span class="question-mark">?</span>)
-<a href=#557 id=557 data-nosnippet>557</a>                } <span class="kw">else </span>{
-<a href=#558 id=558 data-nosnippet>558</a>                    <span class="prelude-val">Err</span>(<span class="self">Self</span>::Error::CorruptedData(
-<a href=#559 id=559 data-nosnippet>559</a>                        <span class="string">"Consensus branch ID not known, cannot parse this transaction until it is mined"
-<a href=#560 id=560 data-nosnippet>560</a>                            </span>.to_string(),
-<a href=#561 id=561 data-nosnippet>561</a>                    ))
-<a href=#562 id=562 data-nosnippet>562</a>                }
-<a href=#563 id=563 data-nosnippet>563</a>            })
-<a href=#564 id=564 data-nosnippet>564</a>            .transpose()
-<a href=#565 id=565 data-nosnippet>565</a>    }
-<a href=#566 id=566 data-nosnippet>566</a>
-<a href=#567 id=567 data-nosnippet>567</a>    <span class="kw">fn </span>get_sapling_nullifiers(
-<a href=#568 id=568 data-nosnippet>568</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#569 id=569 data-nosnippet>569</a>        query: NullifierQuery,
-<a href=#570 id=570 data-nosnippet>570</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(<span class="self">Self</span>::AccountId, sapling::Nullifier)&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#571 id=571 data-nosnippet>571</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_sapling_nullifiers"</span>);
-<a href=#572 id=572 data-nosnippet>572</a>        <span class="kw">let </span>nullifiers = <span class="self">self</span>.received_notes.get_sapling_nullifiers();
-<a href=#573 id=573 data-nosnippet>573</a>        <span class="prelude-val">Ok</span>(<span class="kw">match </span>query {
-<a href=#574 id=574 data-nosnippet>574</a>            NullifierQuery::All =&gt; nullifiers
-<a href=#575 id=575 data-nosnippet>575</a>                .map(|(account_id, <span class="kw">_</span>, nf)| (account_id, nf))
-<a href=#576 id=576 data-nosnippet>576</a>                .collect(),
-<a href=#577 id=577 data-nosnippet>577</a>            NullifierQuery::Unspent =&gt; nullifiers
-<a href=#578 id=578 data-nosnippet>578</a>                .filter_map(|(account_id, <span class="kw">_</span>, nf)| {
-<a href=#579 id=579 data-nosnippet>579</a>                    <span class="comment">// find any tx we know of that spends this nullifier and if so require that it is unmined or expired
-<a href=#580 id=580 data-nosnippet>580</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((height, tx_index)) = <span class="self">self</span>.nullifiers.get(<span class="kw-2">&amp;</span>Nullifier::Sapling(nf)) {
-<a href=#581 id=581 data-nosnippet>581</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(spending_tx) =
-<a href=#582 id=582 data-nosnippet>582</a>                            <span class="self">self</span>.tx_table.get_by_height_and_index(<span class="kw-2">*</span>height, <span class="kw-2">*</span>tx_index)
-<a href=#583 id=583 data-nosnippet>583</a>                        {
-<a href=#584 id=584 data-nosnippet>584</a>                            <span class="kw">if </span><span class="macro">matches!</span>(spending_tx.status(), TransactionStatus::Mined(<span class="kw">_</span>))
-<a href=#585 id=585 data-nosnippet>585</a>                                || spending_tx.expiry_height().is_none()
-<a href=#586 id=586 data-nosnippet>586</a>                            {
-<a href=#587 id=587 data-nosnippet>587</a>                                <span class="prelude-val">None
-<a href=#588 id=588 data-nosnippet>588</a>                            </span>} <span class="kw">else </span>{
-<a href=#589 id=589 data-nosnippet>589</a>                                <span class="prelude-val">Some</span>((account_id, nf))
-<a href=#590 id=590 data-nosnippet>590</a>                            }
-<a href=#591 id=591 data-nosnippet>591</a>                        } <span class="kw">else </span>{
-<a href=#592 id=592 data-nosnippet>592</a>                            <span class="prelude-val">None
-<a href=#593 id=593 data-nosnippet>593</a>                        </span>}
-<a href=#594 id=594 data-nosnippet>594</a>                    } <span class="kw">else </span>{
-<a href=#595 id=595 data-nosnippet>595</a>                        <span class="prelude-val">Some</span>((account_id, nf))
-<a href=#596 id=596 data-nosnippet>596</a>                    }
-<a href=#597 id=597 data-nosnippet>597</a>                })
-<a href=#598 id=598 data-nosnippet>598</a>                .collect(),
-<a href=#599 id=599 data-nosnippet>599</a>        })
-<a href=#600 id=600 data-nosnippet>600</a>    }
-<a href=#601 id=601 data-nosnippet>601</a>
-<a href=#602 id=602 data-nosnippet>602</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#603 id=603 data-nosnippet>603</a>    </span><span class="kw">fn </span>get_orchard_nullifiers(
-<a href=#604 id=604 data-nosnippet>604</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#605 id=605 data-nosnippet>605</a>        query: NullifierQuery,
-<a href=#606 id=606 data-nosnippet>606</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(<span class="self">Self</span>::AccountId, orchard::note::Nullifier)&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#607 id=607 data-nosnippet>607</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_orchard_nullifiers"</span>);
-<a href=#608 id=608 data-nosnippet>608</a>        <span class="kw">let </span>nullifiers = <span class="self">self</span>.received_notes.get_orchard_nullifiers();
-<a href=#609 id=609 data-nosnippet>609</a>        <span class="prelude-val">Ok</span>(<span class="kw">match </span>query {
-<a href=#610 id=610 data-nosnippet>610</a>            NullifierQuery::All =&gt; nullifiers
-<a href=#611 id=611 data-nosnippet>611</a>                .map(|(account_id, <span class="kw">_</span>, nf)| (account_id, nf))
-<a href=#612 id=612 data-nosnippet>612</a>                .collect(),
-<a href=#613 id=613 data-nosnippet>613</a>            NullifierQuery::Unspent =&gt; nullifiers
-<a href=#614 id=614 data-nosnippet>614</a>                .filter_map(|(account_id, <span class="kw">_</span>, nf)| {
-<a href=#615 id=615 data-nosnippet>615</a>                    <span class="comment">// find any tx we know of that spends this nullifier and if so require that it is unmined or expired
-<a href=#616 id=616 data-nosnippet>616</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((height, tx_index)) = <span class="self">self</span>.nullifiers.get(<span class="kw-2">&amp;</span>Nullifier::Orchard(nf)) {
-<a href=#617 id=617 data-nosnippet>617</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(spending_tx) =
-<a href=#618 id=618 data-nosnippet>618</a>                            <span class="self">self</span>.tx_table.get_by_height_and_index(<span class="kw-2">*</span>height, <span class="kw-2">*</span>tx_index)
-<a href=#619 id=619 data-nosnippet>619</a>                        {
-<a href=#620 id=620 data-nosnippet>620</a>                            <span class="kw">if </span><span class="macro">matches!</span>(spending_tx.status(), TransactionStatus::Mined(<span class="kw">_</span>))
-<a href=#621 id=621 data-nosnippet>621</a>                                || spending_tx.expiry_height().is_none()
-<a href=#622 id=622 data-nosnippet>622</a>                            {
-<a href=#623 id=623 data-nosnippet>623</a>                                <span class="prelude-val">None
-<a href=#624 id=624 data-nosnippet>624</a>                            </span>} <span class="kw">else </span>{
-<a href=#625 id=625 data-nosnippet>625</a>                                <span class="prelude-val">Some</span>((account_id, nf))
-<a href=#626 id=626 data-nosnippet>626</a>                            }
-<a href=#627 id=627 data-nosnippet>627</a>                        } <span class="kw">else </span>{
-<a href=#628 id=628 data-nosnippet>628</a>                            <span class="prelude-val">None
-<a href=#629 id=629 data-nosnippet>629</a>                        </span>}
-<a href=#630 id=630 data-nosnippet>630</a>                    } <span class="kw">else </span>{
-<a href=#631 id=631 data-nosnippet>631</a>                        <span class="prelude-val">Some</span>((account_id, nf))
-<a href=#632 id=632 data-nosnippet>632</a>                    }
-<a href=#633 id=633 data-nosnippet>633</a>                })
-<a href=#634 id=634 data-nosnippet>634</a>                .collect(),
-<a href=#635 id=635 data-nosnippet>635</a>        })
-<a href=#636 id=636 data-nosnippet>636</a>    }
-<a href=#637 id=637 data-nosnippet>637</a>
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#639 id=639 data-nosnippet>639</a>    </span><span class="kw">fn </span>get_transparent_receivers(
-<a href=#640 id=640 data-nosnippet>640</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#641 id=641 data-nosnippet>641</a>        account_id: <span class="self">Self</span>::AccountId,
-<a href=#642 id=642 data-nosnippet>642</a>        _include_change: bool,
-<a href=#643 id=643 data-nosnippet>643</a>        _include_standalone: bool,
-<a href=#644 id=644 data-nosnippet>644</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, TransparentAddressMetadata&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#645 id=645 data-nosnippet>645</a>        <span class="kw">let </span>account = <span class="self">self
-<a href=#646 id=646 data-nosnippet>646</a>            </span>.get_account(account_id)<span class="question-mark">?
-<a href=#647 id=647 data-nosnippet>647</a>            </span>.ok_or(Error::AccountUnknown(account_id))<span class="question-mark">?</span>;
-<a href=#648 id=648 data-nosnippet>648</a>
-<a href=#649 id=649 data-nosnippet>649</a>        <span class="kw">if </span>_include_change {
-<a href=#650 id=650 data-nosnippet>650</a>            <span class="macro">unimplemented!</span>(<span class="string">"include_change is not yet supported"</span>);
-<a href=#651 id=651 data-nosnippet>651</a>        }
-<a href=#652 id=652 data-nosnippet>652</a>        <span class="kw">if </span>_include_standalone {
-<a href=#653 id=653 data-nosnippet>653</a>            <span class="macro">unimplemented!</span>(<span class="string">"include_standalone is not yet supported"</span>);
-<a href=#654 id=654 data-nosnippet>654</a>        }
-<a href=#655 id=655 data-nosnippet>655</a>
-<a href=#656 id=656 data-nosnippet>656</a>        <span class="kw">let </span>t_addresses = account
-<a href=#657 id=657 data-nosnippet>657</a>            .addresses()
-<a href=#658 id=658 data-nosnippet>658</a>            .iter()
-<a href=#659 id=659 data-nosnippet>659</a>            .filter_map(|(diversifier_index, ua)| {
-<a href=#660 id=660 data-nosnippet>660</a>                ua.transparent().map(|ta| {
-<a href=#661 id=661 data-nosnippet>661</a>                    <span class="kw">let </span>metadata = TransparentAddressMetadata::derived(
-<a href=#662 id=662 data-nosnippet>662</a>                        Scope::External.into(),
-<a href=#663 id=663 data-nosnippet>663</a>                        NonHardenedChildIndex::from_index((<span class="kw-2">*</span>diversifier_index).try_into().unwrap())
-<a href=#664 id=664 data-nosnippet>664</a>                            .expect(
-<a href=#665 id=665 data-nosnippet>665</a>                                <span class="string">"diversifier index corresponds to a valid NonHardenedChildIndex"</span>,
-<a href=#666 id=666 data-nosnippet>666</a>                            ),
-<a href=#667 id=667 data-nosnippet>667</a>                        Exposure::Unknown,
-<a href=#668 id=668 data-nosnippet>668</a>                        <span class="prelude-val">None</span>,
-<a href=#669 id=669 data-nosnippet>669</a>                    );
-<a href=#670 id=670 data-nosnippet>670</a>
-<a href=#671 id=671 data-nosnippet>671</a>                    (<span class="kw-2">*</span>ta, metadata)
-<a href=#672 id=672 data-nosnippet>672</a>                })
-<a href=#673 id=673 data-nosnippet>673</a>            })
-<a href=#674 id=674 data-nosnippet>674</a>            .collect();
-<a href=#675 id=675 data-nosnippet>675</a>        <span class="prelude-val">Ok</span>(t_addresses)
-<a href=#676 id=676 data-nosnippet>676</a>    }
-<a href=#677 id=677 data-nosnippet>677</a>
-<a href=#678 id=678 data-nosnippet>678</a>    <span class="doccomment">/// Returns a mapping from each transparent receiver associated with the specified account
-<a href=#679 id=679 data-nosnippet>679</a>    /// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
-<a href=#680 id=680 data-nosnippet>680</a>    /// at a block height less than or equal to `summary_height`.
-<a href=#681 id=681 data-nosnippet>681</a>    ///
-<a href=#682 id=682 data-nosnippet>682</a>    /// Only non-ephemeral transparent receivers with a non-zero balance at the summary height
-<a href=#683 id=683 data-nosnippet>683</a>    /// will be included.
-<a href=#684 id=684 data-nosnippet>684</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#685 id=685 data-nosnippet>685</a>    </span><span class="kw">fn </span>get_transparent_balances(
-<a href=#686 id=686 data-nosnippet>686</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#687 id=687 data-nosnippet>687</a>        account_id: <span class="self">Self</span>::AccountId,
-<a href=#688 id=688 data-nosnippet>688</a>        target_height: TargetHeight,
-<a href=#689 id=689 data-nosnippet>689</a>        confirmations_policy: ConfirmationsPolicy,
-<a href=#690 id=690 data-nosnippet>690</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, (TransparentKeyScope, Balance)&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#691 id=691 data-nosnippet>691</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_transparent_balances"</span>);
-<a href=#692 id=692 data-nosnippet>692</a>
-<a href=#693 id=693 data-nosnippet>693</a>        <span class="kw">let </span><span class="kw-2">mut </span>balances = HashMap::new();
-<a href=#694 id=694 data-nosnippet>694</a>
-<a href=#695 id=695 data-nosnippet>695</a>        <span class="kw">for </span>(outpoint, txo) <span class="kw">in </span><span class="self">self</span>.transparent_received_outputs.iter().filter(|(<span class="kw">_</span>, txo)| {
-<a href=#696 id=696 data-nosnippet>696</a>            <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(txo_account_id)) =
-<a href=#697 id=697 data-nosnippet>697</a>                <span class="self">self</span>.find_account_for_transparent_address(<span class="kw-2">&amp;</span>txo.address)
-<a href=#698 id=698 data-nosnippet>698</a>            {
-<a href=#699 id=699 data-nosnippet>699</a>                txo_account_id == account_id
-<a href=#700 id=700 data-nosnippet>700</a>            } <span class="kw">else </span>{
-<a href=#701 id=701 data-nosnippet>701</a>                <span class="bool-val">false
-<a href=#702 id=702 data-nosnippet>702</a>            </span>}
-<a href=#703 id=703 data-nosnippet>703</a>        }) {
-<a href=#704 id=704 data-nosnippet>704</a>            <span class="kw">if </span><span class="self">self</span>.utxo_is_spendable(outpoint, target_height, confirmations_policy)<span class="question-mark">? </span>{
-<a href=#705 id=705 data-nosnippet>705</a>                <span class="kw">let </span>address = txo.address;
-<a href=#706 id=706 data-nosnippet>706</a>                <span class="kw">let </span>entry = balances
-<a href=#707 id=707 data-nosnippet>707</a>                    .entry(address)
-<a href=#708 id=708 data-nosnippet>708</a>                    .or_insert((txo.key_scope, Balance::ZERO));
-<a href=#709 id=709 data-nosnippet>709</a>
-<a href=#710 id=710 data-nosnippet>710</a>                entry.<span class="number">1</span>.add_spendable_value(txo.txout.value())<span class="question-mark">?</span>;
-<a href=#711 id=711 data-nosnippet>711</a>            }
-<a href=#712 id=712 data-nosnippet>712</a>        }
-<a href=#713 id=713 data-nosnippet>713</a>
-<a href=#714 id=714 data-nosnippet>714</a>        <span class="prelude-val">Ok</span>(balances)
-<a href=#715 id=715 data-nosnippet>715</a>    }
-<a href=#716 id=716 data-nosnippet>716</a>
-<a href=#717 id=717 data-nosnippet>717</a>    <span class="kw">fn </span>transaction_data_requests(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionDataRequest&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#718 id=718 data-nosnippet>718</a>        <span class="macro">tracing::debug!</span>(<span class="string">"transaction_data_requests"</span>);
-<a href=#719 id=719 data-nosnippet>719</a>        <span class="prelude-val">Ok</span>(<span class="self">self
-<a href=#720 id=720 data-nosnippet>720</a>            </span>.transaction_data_request_queue
-<a href=#721 id=721 data-nosnippet>721</a>            .iter()
-<a href=#722 id=722 data-nosnippet>722</a>            .cloned()
-<a href=#723 id=723 data-nosnippet>723</a>            .collect())
-<a href=#724 id=724 data-nosnippet>724</a>    }
-<a href=#725 id=725 data-nosnippet>725</a>
-<a href=#726 id=726 data-nosnippet>726</a>    <span class="kw">fn </span>list_addresses(<span class="kw-2">&amp;</span><span class="self">self</span>, _account: <span class="self">Self</span>::AccountId) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AddressInfo&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#727 id=727 data-nosnippet>727</a>        <span class="macro">todo!</span>()
-<a href=#728 id=728 data-nosnippet>728</a>    }
-<a href=#729 id=729 data-nosnippet>729</a>
-<a href=#730 id=730 data-nosnippet>730</a>    <span class="kw">fn </span>get_last_generated_address_matching(
-<a href=#731 id=731 data-nosnippet>731</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#732 id=732 data-nosnippet>732</a>        _account: <span class="self">Self</span>::AccountId,
-<a href=#733 id=733 data-nosnippet>733</a>        _address_filter: UnifiedAddressRequest,
-<a href=#734 id=734 data-nosnippet>734</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#735 id=735 data-nosnippet>735</a>        <span class="macro">todo!</span>()
-<a href=#736 id=736 data-nosnippet>736</a>    }
-<a href=#737 id=737 data-nosnippet>737</a>
-<a href=#738 id=738 data-nosnippet>738</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#739 id=739 data-nosnippet>739</a>    </span><span class="kw">fn </span>utxo_query_height(<span class="kw-2">&amp;</span><span class="self">self</span>, _account: <span class="self">Self</span>::AccountId) -&gt; <span class="prelude-ty">Result</span>&lt;BlockHeight, <span class="self">Self</span>::Error&gt; {
+<a href=#551 id=551 data-nosnippet>551</a>                        <span class="attr">#[cfg(all(
+<a href=#552 id=552 data-nosnippet>552</a>                            any(zcash_unstable = <span class="string">"nu7"</span>, zcash_unstable = <span class="string">"zfuture"</span>),
+<a href=#553 id=553 data-nosnippet>553</a>                            feature = <span class="string">"zip-233"
+<a href=#554 id=554 data-nosnippet>554</a>                        </span>))]
+<a href=#555 id=555 data-nosnippet>555</a>                        </span>tx_data.zip233_amount(),
+<a href=#556 id=556 data-nosnippet>556</a>                        tx_data.transparent_bundle().cloned(),
+<a href=#557 id=557 data-nosnippet>557</a>                        tx_data.sprout_bundle().cloned(),
+<a href=#558 id=558 data-nosnippet>558</a>                        tx_data.sapling_bundle().cloned(),
+<a href=#559 id=559 data-nosnippet>559</a>                        tx_data.orchard_bundle().cloned(),
+<a href=#560 id=560 data-nosnippet>560</a>                    )
+<a href=#561 id=561 data-nosnippet>561</a>                        .freeze()<span class="question-mark">?</span>)
+<a href=#562 id=562 data-nosnippet>562</a>                } <span class="kw">else </span>{
+<a href=#563 id=563 data-nosnippet>563</a>                    <span class="prelude-val">Err</span>(<span class="self">Self</span>::Error::CorruptedData(
+<a href=#564 id=564 data-nosnippet>564</a>                        <span class="string">"Consensus branch ID not known, cannot parse this transaction until it is mined"
+<a href=#565 id=565 data-nosnippet>565</a>                            </span>.to_string(),
+<a href=#566 id=566 data-nosnippet>566</a>                    ))
+<a href=#567 id=567 data-nosnippet>567</a>                }
+<a href=#568 id=568 data-nosnippet>568</a>            })
+<a href=#569 id=569 data-nosnippet>569</a>            .transpose()
+<a href=#570 id=570 data-nosnippet>570</a>    }
+<a href=#571 id=571 data-nosnippet>571</a>
+<a href=#572 id=572 data-nosnippet>572</a>    <span class="kw">fn </span>get_sapling_nullifiers(
+<a href=#573 id=573 data-nosnippet>573</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#574 id=574 data-nosnippet>574</a>        query: NullifierQuery,
+<a href=#575 id=575 data-nosnippet>575</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(<span class="self">Self</span>::AccountId, sapling::Nullifier)&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_sapling_nullifiers"</span>);
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="kw">let </span>nullifiers = <span class="self">self</span>.received_notes.get_sapling_nullifiers();
+<a href=#578 id=578 data-nosnippet>578</a>        <span class="prelude-val">Ok</span>(<span class="kw">match </span>query {
+<a href=#579 id=579 data-nosnippet>579</a>            NullifierQuery::All =&gt; nullifiers
+<a href=#580 id=580 data-nosnippet>580</a>                .map(|(account_id, <span class="kw">_</span>, nf)| (account_id, nf))
+<a href=#581 id=581 data-nosnippet>581</a>                .collect(),
+<a href=#582 id=582 data-nosnippet>582</a>            NullifierQuery::Unspent =&gt; nullifiers
+<a href=#583 id=583 data-nosnippet>583</a>                .filter_map(|(account_id, <span class="kw">_</span>, nf)| {
+<a href=#584 id=584 data-nosnippet>584</a>                    <span class="comment">// find any tx we know of that spends this nullifier and if so require that it is unmined or expired
+<a href=#585 id=585 data-nosnippet>585</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((height, tx_index)) = <span class="self">self</span>.nullifiers.get(<span class="kw-2">&amp;</span>Nullifier::Sapling(nf)) {
+<a href=#586 id=586 data-nosnippet>586</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(spending_tx) =
+<a href=#587 id=587 data-nosnippet>587</a>                            <span class="self">self</span>.tx_table.get_by_height_and_index(<span class="kw-2">*</span>height, <span class="kw-2">*</span>tx_index)
+<a href=#588 id=588 data-nosnippet>588</a>                        {
+<a href=#589 id=589 data-nosnippet>589</a>                            <span class="kw">if </span><span class="macro">matches!</span>(spending_tx.status(), TransactionStatus::Mined(<span class="kw">_</span>))
+<a href=#590 id=590 data-nosnippet>590</a>                                || spending_tx.expiry_height().is_none()
+<a href=#591 id=591 data-nosnippet>591</a>                            {
+<a href=#592 id=592 data-nosnippet>592</a>                                <span class="prelude-val">None
+<a href=#593 id=593 data-nosnippet>593</a>                            </span>} <span class="kw">else </span>{
+<a href=#594 id=594 data-nosnippet>594</a>                                <span class="prelude-val">Some</span>((account_id, nf))
+<a href=#595 id=595 data-nosnippet>595</a>                            }
+<a href=#596 id=596 data-nosnippet>596</a>                        } <span class="kw">else </span>{
+<a href=#597 id=597 data-nosnippet>597</a>                            <span class="prelude-val">None
+<a href=#598 id=598 data-nosnippet>598</a>                        </span>}
+<a href=#599 id=599 data-nosnippet>599</a>                    } <span class="kw">else </span>{
+<a href=#600 id=600 data-nosnippet>600</a>                        <span class="prelude-val">Some</span>((account_id, nf))
+<a href=#601 id=601 data-nosnippet>601</a>                    }
+<a href=#602 id=602 data-nosnippet>602</a>                })
+<a href=#603 id=603 data-nosnippet>603</a>                .collect(),
+<a href=#604 id=604 data-nosnippet>604</a>        })
+<a href=#605 id=605 data-nosnippet>605</a>    }
+<a href=#606 id=606 data-nosnippet>606</a>
+<a href=#607 id=607 data-nosnippet>607</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#608 id=608 data-nosnippet>608</a>    </span><span class="kw">fn </span>get_orchard_nullifiers(
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#610 id=610 data-nosnippet>610</a>        query: NullifierQuery,
+<a href=#611 id=611 data-nosnippet>611</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(<span class="self">Self</span>::AccountId, orchard::note::Nullifier)&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#612 id=612 data-nosnippet>612</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_orchard_nullifiers"</span>);
+<a href=#613 id=613 data-nosnippet>613</a>        <span class="kw">let </span>nullifiers = <span class="self">self</span>.received_notes.get_orchard_nullifiers();
+<a href=#614 id=614 data-nosnippet>614</a>        <span class="prelude-val">Ok</span>(<span class="kw">match </span>query {
+<a href=#615 id=615 data-nosnippet>615</a>            NullifierQuery::All =&gt; nullifiers
+<a href=#616 id=616 data-nosnippet>616</a>                .map(|(account_id, <span class="kw">_</span>, nf)| (account_id, nf))
+<a href=#617 id=617 data-nosnippet>617</a>                .collect(),
+<a href=#618 id=618 data-nosnippet>618</a>            NullifierQuery::Unspent =&gt; nullifiers
+<a href=#619 id=619 data-nosnippet>619</a>                .filter_map(|(account_id, <span class="kw">_</span>, nf)| {
+<a href=#620 id=620 data-nosnippet>620</a>                    <span class="comment">// find any tx we know of that spends this nullifier and if so require that it is unmined or expired
+<a href=#621 id=621 data-nosnippet>621</a>                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>((height, tx_index)) = <span class="self">self</span>.nullifiers.get(<span class="kw-2">&amp;</span>Nullifier::Orchard(nf)) {
+<a href=#622 id=622 data-nosnippet>622</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(spending_tx) =
+<a href=#623 id=623 data-nosnippet>623</a>                            <span class="self">self</span>.tx_table.get_by_height_and_index(<span class="kw-2">*</span>height, <span class="kw-2">*</span>tx_index)
+<a href=#624 id=624 data-nosnippet>624</a>                        {
+<a href=#625 id=625 data-nosnippet>625</a>                            <span class="kw">if </span><span class="macro">matches!</span>(spending_tx.status(), TransactionStatus::Mined(<span class="kw">_</span>))
+<a href=#626 id=626 data-nosnippet>626</a>                                || spending_tx.expiry_height().is_none()
+<a href=#627 id=627 data-nosnippet>627</a>                            {
+<a href=#628 id=628 data-nosnippet>628</a>                                <span class="prelude-val">None
+<a href=#629 id=629 data-nosnippet>629</a>                            </span>} <span class="kw">else </span>{
+<a href=#630 id=630 data-nosnippet>630</a>                                <span class="prelude-val">Some</span>((account_id, nf))
+<a href=#631 id=631 data-nosnippet>631</a>                            }
+<a href=#632 id=632 data-nosnippet>632</a>                        } <span class="kw">else </span>{
+<a href=#633 id=633 data-nosnippet>633</a>                            <span class="prelude-val">None
+<a href=#634 id=634 data-nosnippet>634</a>                        </span>}
+<a href=#635 id=635 data-nosnippet>635</a>                    } <span class="kw">else </span>{
+<a href=#636 id=636 data-nosnippet>636</a>                        <span class="prelude-val">Some</span>((account_id, nf))
+<a href=#637 id=637 data-nosnippet>637</a>                    }
+<a href=#638 id=638 data-nosnippet>638</a>                })
+<a href=#639 id=639 data-nosnippet>639</a>                .collect(),
+<a href=#640 id=640 data-nosnippet>640</a>        })
+<a href=#641 id=641 data-nosnippet>641</a>    }
+<a href=#642 id=642 data-nosnippet>642</a>
+<a href=#643 id=643 data-nosnippet>643</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#644 id=644 data-nosnippet>644</a>    </span><span class="kw">fn </span>get_transparent_receivers(
+<a href=#645 id=645 data-nosnippet>645</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#646 id=646 data-nosnippet>646</a>        account_id: <span class="self">Self</span>::AccountId,
+<a href=#647 id=647 data-nosnippet>647</a>        _include_change: bool,
+<a href=#648 id=648 data-nosnippet>648</a>        _include_standalone: bool,
+<a href=#649 id=649 data-nosnippet>649</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, TransparentAddressMetadata&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#650 id=650 data-nosnippet>650</a>        <span class="kw">let </span>account = <span class="self">self
+<a href=#651 id=651 data-nosnippet>651</a>            </span>.get_account(account_id)<span class="question-mark">?
+<a href=#652 id=652 data-nosnippet>652</a>            </span>.ok_or(Error::AccountUnknown(account_id))<span class="question-mark">?</span>;
+<a href=#653 id=653 data-nosnippet>653</a>
+<a href=#654 id=654 data-nosnippet>654</a>        <span class="kw">if </span>_include_change {
+<a href=#655 id=655 data-nosnippet>655</a>            <span class="macro">unimplemented!</span>(<span class="string">"include_change is not yet supported"</span>);
+<a href=#656 id=656 data-nosnippet>656</a>        }
+<a href=#657 id=657 data-nosnippet>657</a>        <span class="kw">if </span>_include_standalone {
+<a href=#658 id=658 data-nosnippet>658</a>            <span class="macro">unimplemented!</span>(<span class="string">"include_standalone is not yet supported"</span>);
+<a href=#659 id=659 data-nosnippet>659</a>        }
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="kw">let </span>t_addresses = account
+<a href=#662 id=662 data-nosnippet>662</a>            .addresses()
+<a href=#663 id=663 data-nosnippet>663</a>            .iter()
+<a href=#664 id=664 data-nosnippet>664</a>            .filter_map(|(diversifier_index, ua)| {
+<a href=#665 id=665 data-nosnippet>665</a>                ua.transparent().map(|ta| {
+<a href=#666 id=666 data-nosnippet>666</a>                    <span class="kw">let </span>metadata = TransparentAddressMetadata::derived(
+<a href=#667 id=667 data-nosnippet>667</a>                        Scope::External.into(),
+<a href=#668 id=668 data-nosnippet>668</a>                        NonHardenedChildIndex::from_index((<span class="kw-2">*</span>diversifier_index).try_into().unwrap())
+<a href=#669 id=669 data-nosnippet>669</a>                            .expect(
+<a href=#670 id=670 data-nosnippet>670</a>                                <span class="string">"diversifier index corresponds to a valid NonHardenedChildIndex"</span>,
+<a href=#671 id=671 data-nosnippet>671</a>                            ),
+<a href=#672 id=672 data-nosnippet>672</a>                        Exposure::Unknown,
+<a href=#673 id=673 data-nosnippet>673</a>                        <span class="prelude-val">None</span>,
+<a href=#674 id=674 data-nosnippet>674</a>                    );
+<a href=#675 id=675 data-nosnippet>675</a>
+<a href=#676 id=676 data-nosnippet>676</a>                    (<span class="kw-2">*</span>ta, metadata)
+<a href=#677 id=677 data-nosnippet>677</a>                })
+<a href=#678 id=678 data-nosnippet>678</a>            })
+<a href=#679 id=679 data-nosnippet>679</a>            .collect();
+<a href=#680 id=680 data-nosnippet>680</a>        <span class="prelude-val">Ok</span>(t_addresses)
+<a href=#681 id=681 data-nosnippet>681</a>    }
+<a href=#682 id=682 data-nosnippet>682</a>
+<a href=#683 id=683 data-nosnippet>683</a>    <span class="doccomment">/// Returns a mapping from each transparent receiver associated with the specified account
+<a href=#684 id=684 data-nosnippet>684</a>    /// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
+<a href=#685 id=685 data-nosnippet>685</a>    /// at a block height less than or equal to `summary_height`.
+<a href=#686 id=686 data-nosnippet>686</a>    ///
+<a href=#687 id=687 data-nosnippet>687</a>    /// Only non-ephemeral transparent receivers with a non-zero balance at the summary height
+<a href=#688 id=688 data-nosnippet>688</a>    /// will be included.
+<a href=#689 id=689 data-nosnippet>689</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#690 id=690 data-nosnippet>690</a>    </span><span class="kw">fn </span>get_transparent_balances(
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#692 id=692 data-nosnippet>692</a>        account_id: <span class="self">Self</span>::AccountId,
+<a href=#693 id=693 data-nosnippet>693</a>        target_height: TargetHeight,
+<a href=#694 id=694 data-nosnippet>694</a>        confirmations_policy: ConfirmationsPolicy,
+<a href=#695 id=695 data-nosnippet>695</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, (TransparentKeyScope, Balance)&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#696 id=696 data-nosnippet>696</a>        <span class="macro">tracing::debug!</span>(<span class="string">"get_transparent_balances"</span>);
+<a href=#697 id=697 data-nosnippet>697</a>
+<a href=#698 id=698 data-nosnippet>698</a>        <span class="kw">let </span><span class="kw-2">mut </span>balances = HashMap::new();
+<a href=#699 id=699 data-nosnippet>699</a>
+<a href=#700 id=700 data-nosnippet>700</a>        <span class="kw">for </span>(outpoint, txo) <span class="kw">in </span><span class="self">self</span>.transparent_received_outputs.iter().filter(|(<span class="kw">_</span>, txo)| {
+<a href=#701 id=701 data-nosnippet>701</a>            <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(txo_account_id)) =
+<a href=#702 id=702 data-nosnippet>702</a>                <span class="self">self</span>.find_account_for_transparent_address(<span class="kw-2">&amp;</span>txo.address)
+<a href=#703 id=703 data-nosnippet>703</a>            {
+<a href=#704 id=704 data-nosnippet>704</a>                txo_account_id == account_id
+<a href=#705 id=705 data-nosnippet>705</a>            } <span class="kw">else </span>{
+<a href=#706 id=706 data-nosnippet>706</a>                <span class="bool-val">false
+<a href=#707 id=707 data-nosnippet>707</a>            </span>}
+<a href=#708 id=708 data-nosnippet>708</a>        }) {
+<a href=#709 id=709 data-nosnippet>709</a>            <span class="kw">if </span><span class="self">self</span>.utxo_is_spendable(outpoint, target_height, confirmations_policy)<span class="question-mark">? </span>{
+<a href=#710 id=710 data-nosnippet>710</a>                <span class="kw">let </span>address = txo.address;
+<a href=#711 id=711 data-nosnippet>711</a>                <span class="kw">let </span>entry = balances
+<a href=#712 id=712 data-nosnippet>712</a>                    .entry(address)
+<a href=#713 id=713 data-nosnippet>713</a>                    .or_insert((txo.key_scope, Balance::ZERO));
+<a href=#714 id=714 data-nosnippet>714</a>
+<a href=#715 id=715 data-nosnippet>715</a>                entry.<span class="number">1</span>.add_spendable_value(txo.txout.value())<span class="question-mark">?</span>;
+<a href=#716 id=716 data-nosnippet>716</a>            }
+<a href=#717 id=717 data-nosnippet>717</a>        }
+<a href=#718 id=718 data-nosnippet>718</a>
+<a href=#719 id=719 data-nosnippet>719</a>        <span class="prelude-val">Ok</span>(balances)
+<a href=#720 id=720 data-nosnippet>720</a>    }
+<a href=#721 id=721 data-nosnippet>721</a>
+<a href=#722 id=722 data-nosnippet>722</a>    <span class="kw">fn </span>transaction_data_requests(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionDataRequest&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#723 id=723 data-nosnippet>723</a>        <span class="macro">tracing::debug!</span>(<span class="string">"transaction_data_requests"</span>);
+<a href=#724 id=724 data-nosnippet>724</a>        <span class="prelude-val">Ok</span>(<span class="self">self
+<a href=#725 id=725 data-nosnippet>725</a>            </span>.transaction_data_request_queue
+<a href=#726 id=726 data-nosnippet>726</a>            .iter()
+<a href=#727 id=727 data-nosnippet>727</a>            .cloned()
+<a href=#728 id=728 data-nosnippet>728</a>            .collect())
+<a href=#729 id=729 data-nosnippet>729</a>    }
+<a href=#730 id=730 data-nosnippet>730</a>
+<a href=#731 id=731 data-nosnippet>731</a>    <span class="kw">fn </span>list_addresses(<span class="kw-2">&amp;</span><span class="self">self</span>, _account: <span class="self">Self</span>::AccountId) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AddressInfo&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#732 id=732 data-nosnippet>732</a>        <span class="macro">todo!</span>()
+<a href=#733 id=733 data-nosnippet>733</a>    }
+<a href=#734 id=734 data-nosnippet>734</a>
+<a href=#735 id=735 data-nosnippet>735</a>    <span class="kw">fn </span>get_last_generated_address_matching(
+<a href=#736 id=736 data-nosnippet>736</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#737 id=737 data-nosnippet>737</a>        _account: <span class="self">Self</span>::AccountId,
+<a href=#738 id=738 data-nosnippet>738</a>        _address_filter: UnifiedAddressRequest,
+<a href=#739 id=739 data-nosnippet>739</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt; {
 <a href=#740 id=740 data-nosnippet>740</a>        <span class="macro">todo!</span>()
 <a href=#741 id=741 data-nosnippet>741</a>    }
 <a href=#742 id=742 data-nosnippet>742</a>
-<a href=#743 id=743 data-nosnippet>743</a>    <span class="kw">fn </span>get_received_outputs(
-<a href=#744 id=744 data-nosnippet>744</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#745 id=745 data-nosnippet>745</a>        _txid: TxId,
-<a href=#746 id=746 data-nosnippet>746</a>        _target_height: TargetHeight,
-<a href=#747 id=747 data-nosnippet>747</a>        _confirmations_policy: ConfirmationsPolicy,
-<a href=#748 id=748 data-nosnippet>748</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;ReceivedTransactionOutput&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#749 id=749 data-nosnippet>749</a>        <span class="macro">todo!</span>()
-<a href=#750 id=750 data-nosnippet>750</a>    }
-<a href=#751 id=751 data-nosnippet>751</a>}
-<a href=#752 id=752 data-nosnippet>752</a>
-<a href=#753 id=753 data-nosnippet>753</a><span class="doccomment">/// Copied from zcash_client_sqlite::wallet::seed_matches_derived_account
-<a href=#754 id=754 data-nosnippet>754</a></span><span class="kw">fn </span>seed_matches_derived_account&lt;P: consensus::Parameters&gt;(
-<a href=#755 id=755 data-nosnippet>755</a>    params: <span class="kw-2">&amp;</span>P,
-<a href=#756 id=756 data-nosnippet>756</a>    seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
-<a href=#757 id=757 data-nosnippet>757</a>    seed_fingerprint: <span class="kw-2">&amp;</span>SeedFingerprint,
-<a href=#758 id=758 data-nosnippet>758</a>    account_index: zip32::AccountId,
-<a href=#759 id=759 data-nosnippet>759</a>    uivk: <span class="kw-2">&amp;</span>UnifiedIncomingViewingKey,
-<a href=#760 id=760 data-nosnippet>760</a>) -&gt; <span class="prelude-ty">Result</span>&lt;bool, Error&gt; {
-<a href=#761 id=761 data-nosnippet>761</a>    <span class="kw">let </span>seed_fingerprint_match =
-<a href=#762 id=762 data-nosnippet>762</a>        <span class="kw-2">&amp;</span>SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
-<a href=#763 id=763 data-nosnippet>763</a>            Error::BadAccountData(<span class="string">"Seed must be between 32 and 252 bytes in length."</span>.to_owned())
-<a href=#764 id=764 data-nosnippet>764</a>        })<span class="question-mark">? </span>== seed_fingerprint;
-<a href=#765 id=765 data-nosnippet>765</a>
-<a href=#766 id=766 data-nosnippet>766</a>    <span class="comment">// Keys are not comparable with `Eq`, but addresses are, so we derive what should
-<a href=#767 id=767 data-nosnippet>767</a>    // be equivalent addresses for each key and use those to check for key equality.
-<a href=#768 id=768 data-nosnippet>768</a>    </span><span class="kw">let </span>uivk_match =
-<a href=#769 id=769 data-nosnippet>769</a>        <span class="kw">match </span>UnifiedSpendingKey::from_seed(params, <span class="kw-2">&amp;</span>seed.expose_secret()[..], account_index) {
-<a href=#770 id=770 data-nosnippet>770</a>            <span class="comment">// If we can't derive a USK from the given seed with the account's ZIP 32
-<a href=#771 id=771 data-nosnippet>771</a>            // account index, then we immediately know the UIVK won't match because wallet
-<a href=#772 id=772 data-nosnippet>772</a>            // accounts are required to have a known UIVK.
-<a href=#773 id=773 data-nosnippet>773</a>            </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
-<a href=#774 id=774 data-nosnippet>774</a>            <span class="prelude-val">Ok</span>(usk) =&gt; {
-<a href=#775 id=775 data-nosnippet>775</a>                usk.to_unified_full_viewing_key()
-<a href=#776 id=776 data-nosnippet>776</a>                    .default_address(UnifiedAddressRequest::AllAvailableKeys)<span class="question-mark">?
-<a href=#777 id=777 data-nosnippet>777</a>                    </span>== uivk.default_address(UnifiedAddressRequest::AllAvailableKeys)<span class="question-mark">?
-<a href=#778 id=778 data-nosnippet>778</a>            </span>}
-<a href=#779 id=779 data-nosnippet>779</a>        };
-<a href=#780 id=780 data-nosnippet>780</a>
-<a href=#781 id=781 data-nosnippet>781</a>    <span class="kw">if </span><span class="macro">seed_fingerprint_match !</span>= uivk_match {
-<a href=#782 id=782 data-nosnippet>782</a>        <span class="comment">// If these mismatch, it suggests database corruption.
-<a href=#783 id=783 data-nosnippet>783</a>        </span><span class="prelude-val">Err</span>(Error::CorruptedData(<span class="macro">format!</span>(
-<a href=#784 id=784 data-nosnippet>784</a>            <span class="string">"Seed fingerprint match: {seed_fingerprint_match}, uivk match: {uivk_match}"
-<a href=#785 id=785 data-nosnippet>785</a>        </span>)))
-<a href=#786 id=786 data-nosnippet>786</a>    } <span class="kw">else </span>{
-<a href=#787 id=787 data-nosnippet>787</a>        <span class="prelude-val">Ok</span>(seed_fingerprint_match &amp;&amp; uivk_match)
-<a href=#788 id=788 data-nosnippet>788</a>    }
-<a href=#789 id=789 data-nosnippet>789</a>}
+<a href=#743 id=743 data-nosnippet>743</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#744 id=744 data-nosnippet>744</a>    </span><span class="kw">fn </span>utxo_query_height(<span class="kw-2">&amp;</span><span class="self">self</span>, _account: <span class="self">Self</span>::AccountId) -&gt; <span class="prelude-ty">Result</span>&lt;BlockHeight, <span class="self">Self</span>::Error&gt; {
+<a href=#745 id=745 data-nosnippet>745</a>        <span class="macro">todo!</span>()
+<a href=#746 id=746 data-nosnippet>746</a>    }
+<a href=#747 id=747 data-nosnippet>747</a>
+<a href=#748 id=748 data-nosnippet>748</a>    <span class="kw">fn </span>get_received_outputs(
+<a href=#749 id=749 data-nosnippet>749</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#750 id=750 data-nosnippet>750</a>        _txid: TxId,
+<a href=#751 id=751 data-nosnippet>751</a>        _target_height: TargetHeight,
+<a href=#752 id=752 data-nosnippet>752</a>        _confirmations_policy: ConfirmationsPolicy,
+<a href=#753 id=753 data-nosnippet>753</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;ReceivedTransactionOutput&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#754 id=754 data-nosnippet>754</a>        <span class="macro">todo!</span>()
+<a href=#755 id=755 data-nosnippet>755</a>    }
+<a href=#756 id=756 data-nosnippet>756</a>}
+<a href=#757 id=757 data-nosnippet>757</a>
+<a href=#758 id=758 data-nosnippet>758</a><span class="doccomment">/// Copied from zcash_client_sqlite::wallet::seed_matches_derived_account
+<a href=#759 id=759 data-nosnippet>759</a></span><span class="kw">fn </span>seed_matches_derived_account&lt;P: consensus::Parameters&gt;(
+<a href=#760 id=760 data-nosnippet>760</a>    params: <span class="kw-2">&amp;</span>P,
+<a href=#761 id=761 data-nosnippet>761</a>    seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
+<a href=#762 id=762 data-nosnippet>762</a>    seed_fingerprint: <span class="kw-2">&amp;</span>SeedFingerprint,
+<a href=#763 id=763 data-nosnippet>763</a>    account_index: zip32::AccountId,
+<a href=#764 id=764 data-nosnippet>764</a>    uivk: <span class="kw-2">&amp;</span>UnifiedIncomingViewingKey,
+<a href=#765 id=765 data-nosnippet>765</a>) -&gt; <span class="prelude-ty">Result</span>&lt;bool, Error&gt; {
+<a href=#766 id=766 data-nosnippet>766</a>    <span class="kw">let </span>seed_fingerprint_match =
+<a href=#767 id=767 data-nosnippet>767</a>        <span class="kw-2">&amp;</span>SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+<a href=#768 id=768 data-nosnippet>768</a>            Error::BadAccountData(<span class="string">"Seed must be between 32 and 252 bytes in length."</span>.to_owned())
+<a href=#769 id=769 data-nosnippet>769</a>        })<span class="question-mark">? </span>== seed_fingerprint;
+<a href=#770 id=770 data-nosnippet>770</a>
+<a href=#771 id=771 data-nosnippet>771</a>    <span class="comment">// Keys are not comparable with `Eq`, but addresses are, so we derive what should
+<a href=#772 id=772 data-nosnippet>772</a>    // be equivalent addresses for each key and use those to check for key equality.
+<a href=#773 id=773 data-nosnippet>773</a>    </span><span class="kw">let </span>uivk_match =
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="kw">match </span>UnifiedSpendingKey::from_seed(params, <span class="kw-2">&amp;</span>seed.expose_secret()[..], account_index) {
+<a href=#775 id=775 data-nosnippet>775</a>            <span class="comment">// If we can't derive a USK from the given seed with the account's ZIP 32
+<a href=#776 id=776 data-nosnippet>776</a>            // account index, then we immediately know the UIVK won't match because wallet
+<a href=#777 id=777 data-nosnippet>777</a>            // accounts are required to have a known UIVK.
+<a href=#778 id=778 data-nosnippet>778</a>            </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+<a href=#779 id=779 data-nosnippet>779</a>            <span class="prelude-val">Ok</span>(usk) =&gt; {
+<a href=#780 id=780 data-nosnippet>780</a>                usk.to_unified_full_viewing_key()
+<a href=#781 id=781 data-nosnippet>781</a>                    .default_address(UnifiedAddressRequest::AllAvailableKeys)<span class="question-mark">?
+<a href=#782 id=782 data-nosnippet>782</a>                    </span>== uivk.default_address(UnifiedAddressRequest::AllAvailableKeys)<span class="question-mark">?
+<a href=#783 id=783 data-nosnippet>783</a>            </span>}
+<a href=#784 id=784 data-nosnippet>784</a>        };
+<a href=#785 id=785 data-nosnippet>785</a>
+<a href=#786 id=786 data-nosnippet>786</a>    <span class="kw">if </span><span class="macro">seed_fingerprint_match !</span>= uivk_match {
+<a href=#787 id=787 data-nosnippet>787</a>        <span class="comment">// If these mismatch, it suggests database corruption.
+<a href=#788 id=788 data-nosnippet>788</a>        </span><span class="prelude-val">Err</span>(Error::CorruptedData(<span class="macro">format!</span>(
+<a href=#789 id=789 data-nosnippet>789</a>            <span class="string">"Seed fingerprint match: {seed_fingerprint_match}, uivk match: {uivk_match}"
+<a href=#790 id=790 data-nosnippet>790</a>        </span>)))
+<a href=#791 id=791 data-nosnippet>791</a>    } <span class="kw">else </span>{
+<a href=#792 id=792 data-nosnippet>792</a>        <span class="prelude-val">Ok</span>(seed_fingerprint_match &amp;&amp; uivk_match)
+<a href=#793 id=793 data-nosnippet>793</a>    }
+<a href=#794 id=794 data-nosnippet>794</a>}
 </code></pre></div></section></main></body></html>
