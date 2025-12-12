@@ -64,8 +64,8 @@ pub enum Error {
     OversizedMinerData,
     /// Creating a coinbase input for the genesis block is not supported.
     GenesisInputNotSupported,
-    /// Coinbase transactions can contain only predefined inputs.
-    ExcessiveInputs,
+    /// Coinbase transactions must contain only a dummy input.
+    UnexpectedInputs,
 }
 
 impl fmt::Display for Error {
@@ -82,11 +82,11 @@ impl fmt::Display for Error {
             ),
             Error::OversizedHeight => write!(
                 f,
-                "encoded block height exceeds the limit of {MAX_COINBASE_HEIGHT_LEN}",
+                "encoded block height exceeds the limit of {MAX_COINBASE_HEIGHT_LEN} bytes",
             ),
             Error::OversizedMinerData => write!(
                 f,
-                "encoded miner data exceeds the limit of {}",
+                "encoded miner data exceeds the limit of {} bytes",
                 MinerData::MAX_LEN,
             ),
             Error::GenesisInputNotSupported => write!(

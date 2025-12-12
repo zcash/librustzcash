@@ -443,7 +443,7 @@ impl TransparentBuilder {
     ) -> Result<Bundle<Coinbase>, coinbase::Error> {
         #[cfg(feature = "transparent-inputs")]
         if !self.inputs.is_empty() {
-            return Err(coinbase::Error::ExcessiveInputs);
+            return Err(coinbase::Error::UnexpectedInputs);
         }
 
         Ok(Bundle {
