@@ -10,9 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `impl<FE> From<coinbase::Error> for Error<FE>`
+
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- `zcash_primitives::transaction::builder`:
+  - `Error` has a new `Coinbase` variant.
+  - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
+    instead of `u64`.
+  - `BuildConfig`:
+    -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
+    -  No longer implements `Copy`.
 
 ### Removed
 - `zcash_primitives::consensus` module (use `zcash_protocol::consensus` instead).
@@ -20,6 +31,8 @@ workspace.
 - `zcash_primitives::legacy` module (use the `zcash_transparent` crate instead).
 - `zcash_primitives::memo` module (use `zcash_protocol::memo` instead)
 - `zcash_primitives::transaction`:
+  - `builder::Builder::set_coinbase_miner_data` use the added
+    `BuildConfig::Coinbase` payload instead.
   - `components`:
     - `amount::testing` module; use `zcash_protocol::value::testing` instead
       with the following renames:
@@ -44,6 +57,20 @@ workspace.
     - `SIGHASH_ANYONECANPAY` (use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead).
     - `SighashType` (use `zcash_transparent::sighash::SighashType` instead).
 - `zcash_primitives::zip32` module (use the `zip32` crate instead).
+
+## [0.26.2] - 2025-12-12
+
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `BuildConfig::is_coinbase`
+  - `Builder::set_coinbase_miner_data`
+
+### Fixed
+- `zcash_primitives::transaction::builder::Builder` has been modified to
+  support constructing transparent coinbase transactions. Previously, although
+  `BuildConfig::Coinbase` was a configuration that could be selected, the
+  transaction that was generated as a result would not be a valid coinbase
+  transaction.
 
 ## [0.26.1] - 2025-10-18
 

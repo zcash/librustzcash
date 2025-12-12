@@ -14,6 +14,9 @@ workspace.
 - `zcash_transparent::pczt`:
   - `Input::with_signable_input`
   - `Input::append_signature`
+- `impl core::error::Error` for:
+  -` zcash_transparent::builder::Error`
+  - `zcash_transparent::coinbase::Error`
 
 ### Changed
 - MSRV is now 1.85.1.
@@ -22,6 +25,22 @@ workspace.
     - `InvalidExternalSignature`
     - `MissingPreimage`
     - `UnsupportedPubkey`
+
+## [0.6.2] - 2025-12-12
+
+### Added
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
+    - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error` when the `std` feature is enabled.
+  - `bundle`:
+    - `Outpoint::NULL`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
 
 ## [0.6.1] - 2025-10-27
 
@@ -117,7 +136,7 @@ workspace.
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
-  return `Ok(None)` when this is the case. 
+  return `Ok(None)` when this is the case.
 
 ### Removed
 - Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
