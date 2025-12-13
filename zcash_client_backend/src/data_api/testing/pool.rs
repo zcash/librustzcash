@@ -4954,3 +4954,48 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
         assert_eq!(T::note_value(note.note()), value);
     }
 }
+
+/// Tests that immature coinbase outputs are excluded from note selection.
+pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Get the default transparent address
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+
+    // Construct the initial coinbase transaction
+    // How to construct a coinbase transaction?
+    // let coinbase_utxo_address = todo!();
+    // let coinbase_tx = Transaction {
+    //     txid: TxId {},
+    //     data: todo!(),
+    // };
+    // let (coinbase_tx_block_height, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    // let coinbase_tx_target_height = TargetHeight::from(coinbase_tx_block_height);
+
+    // Add funds to the wallet, which generates the first block
+    let value = Zatoshis::const_from_u64(60000);
+    let _ = st.add_a_single_note_checking_balance(value);
+
+    for i in 1..99 {
+        // Generate another block, maturing the coinbase transaction by 1
+        let _ = st.generate_empty_block();
+        // Ensure the coinbase transaction cannot be selected
+    }
+
+    // Generate the 100th block, at which point the coinbase UTXO is spendable
+    // let _ = st.generate_empty_block();
+    // let txs = st
+    //     .wallet()
+    //     .get_spendable_transparent_outputs(
+    //         coinbase_utxo_address,
+    //         coinbase_tx_target_height,
+    //         ConfirmationsPolicy::default(),
+    //     )
+    //     .unwrap();
+    // assert!(!txs.is_empty(), "mature coinbase UTXO should be spendable");
+}
