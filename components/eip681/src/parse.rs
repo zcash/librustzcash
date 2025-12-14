@@ -593,12 +593,12 @@ impl EthereumAbiTypeName {
 /// ```
 ///
 /// > If _key_ in the parameter list is "value", "gasLimit", "gasPrice" or "gas" then
-///   _value_ MUST be a number. Otherwise, it must correspond to the TYPE string
-///   used as key.
+/// > _value_ MUST be a number. Otherwise, it must correspond to the TYPE string
+/// > used as key.
 ///
 /// > ... gasLimit and gasPrice are suggested user-editable values for gas
-///   limit and gas price, respectively, for the requested transaction. It is
-///   acceptable to abbreviate gasLimit as gas, the two are treated synonymously.
+/// > limit and gas price, respectively, for the requested transaction. It is
+/// > acceptable to abbreviate gasLimit as gas, the two are treated synonymously.
 #[derive(Debug, PartialEq)]
 pub enum Parameter {
     /// The amount to be paid, in the atomic unit of the native token of the blockchain.
