@@ -58,7 +58,7 @@ workspace.
     - `SighashType` (use `zcash_transparent::sighash::SighashType` instead).
 - `zcash_primitives::zip32` module (use the `zip32` crate instead).
 
-## [0.26.2] - 2025-12-12
+## [0.26.3] - 2025-12-15
 
 ### Added
 - `zcash_primitives::transaction::builder`:
@@ -71,6 +71,12 @@ workspace.
   `BuildConfig::Coinbase` was a configuration that could be selected, the
   transaction that was generated as a result would not be a valid coinbase
   transaction.
+- Fixed a problem in the `zcash_primitives-0.26.2` release where we missed
+  updating to `zcash_transparent 0.6.2`; without this change, downstream crates
+  using `cargo update -p zcash_primitives` would end up with their codebase
+  failing to compile unless they also manually updated `zcash_transparent`.
+
+## [0.26.2] - YANKED
 
 ## [0.26.1] - 2025-10-18
 
