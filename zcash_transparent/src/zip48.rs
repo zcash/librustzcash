@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use bip32::{ChildNumber, ExtendedPrivateKey, ExtendedPublicKey, Prefix};
+use nonempty::NonEmpty;
 use secp256k1::{PublicKey, SecretKey};
 use zcash_protocol::consensus::{self, NetworkConstants};
 use zcash_script::{
@@ -82,7 +83,7 @@ impl AccountPrivKey {
     pub fn to_account_pubkey(&self) -> AccountPubKey {
         AccountPubKey {
             origin: self.origin.clone(),
-            key: ExtendedPublicKey::from(&self.key),
+            key: self.key.public_key(),
         }
     }
 
@@ -212,7 +213,7 @@ impl AccountPubKey {
 /// [ZIP 48]: https://zips.z.cash/zip-0048
 pub struct FullViewingKey {
     threshold: u8,
-    key_info: Vec<AccountPubKey>,
+    key_info: NonEmpty<AccountPubKey>,
 }
 
 impl FullViewingKey {
@@ -226,9 +227,8 @@ impl FullViewingKey {
         threshold: u8,
         key_info: Vec<AccountPubKey>,
     ) -> Result<Self, FullViewingKeyError> {
-        if key_info.is_empty() {
-            Err(FullViewingKeyError::NoPubKeys)
-        } else if key_info.len() > 15 {
+        let key_info = NonEmpty::from_vec(key_info).ok_or(FullViewingKeyError::NoPubKeys)?;
+        if key_info.len() > 15 {
             Err(FullViewingKeyError::TooManyPubKeys)
         } else if usize::from(threshold) > key_info.len() {
             Err(FullViewingKeyError::InvalidThreshold)
@@ -259,14 +259,9 @@ impl FullViewingKey {
 
     /// Returns the ZIP 48 coin type and account ID for this full viewing key.
     fn coin_type_and_account(&self) -> (u32, AccountId) {
-        // By construction of `Self`:
-        // - `key_info` contains at least one key.
-        // - All keys in `key_info` have the same derivation information, so we only need
-        //   to look at the first.
-        self.key_info
-            .first()
-            .expect("at least one key")
-            .coin_type_and_account()
+        // By construction of `Self`, all keys in `key_info` have the same derivation
+        // information, so we only need to look at the first.
+        self.key_info.first().coin_type_and_account()
     }
 
     /// Returns the [BIP 388 wallet descriptor template] for this full viewing key.

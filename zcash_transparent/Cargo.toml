@@ -52,6 +52,7 @@ zcash_script = { workspace = true, features = ["descriptor"] }
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Boilerplate
 getset.workspace = true
+nonempty.workspace = true
 
 # - Documentation
 document-features = { workspace = true, optional = true }
