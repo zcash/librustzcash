@@ -45,11 +45,20 @@ impl AccountPrivKey {
         seed: &[u8],
         account: AccountId,
     ) -> Result<AccountPrivKey, bip32::Error> {
+        Self::from_seed_with_coin_type(seed, params.coin_type(), account)
+    }
+
+    /// Internal helper constructor that doesn't depend on [`consensus::Parameters`].
+    fn from_seed_with_coin_type(
+        seed: &[u8],
+        coin_type: u32,
+        account: AccountId,
+    ) -> Result<AccountPrivKey, bip32::Error> {
         let root = ExtendedPrivateKey::new(seed)?;
         let fingerprint = root.public_key().fingerprint();
         let derivation = vec![
             BIP_48_PURPOSE(),
-            ChildNumber::new(params.coin_type(), true)?,
+            ChildNumber::new(coin_type, true)?,
             ChildNumber::new(account.into(), true)?,
             ZCASH_P2SH_SCRIPT_TYPE(),
         ];
@@ -141,6 +150,25 @@ impl AccountPubKey {
         }
     }
 
+    /// Returns the ZIP 48 coin type and account ID for this public key.
+    fn coin_type_and_account(&self) -> (u32, AccountId) {
+        // By construction, the derivation is always a ZIP 48 path.
+        let derivation = self.origin.derivation();
+        (
+            derivation
+                .get(1)
+                .expect("valid ZIP 48 derivation path")
+                .index(),
+            AccountId::try_from(
+                derivation
+                    .get(2)
+                    .expect("valid ZIP 48 derivation path")
+                    .index(),
+            )
+            .expect("valid"),
+        )
+    }
+
     /// Encodes this public key as a [BIP 388 `KEY_INFO` expression].
     ///
     /// [BIP 388 `KEY_INFO` expression]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#key-information-vector
@@ -229,6 +257,18 @@ impl FullViewingKey {
         }
     }
 
+    /// Returns the ZIP 48 coin type and account ID for this full viewing key.
+    fn coin_type_and_account(&self) -> (u32, AccountId) {
+        // By construction of `Self`:
+        // - `key_info` contains at least one key.
+        // - All keys in `key_info` have the same derivation information, so we only need
+        //   to look at the first.
+        self.key_info
+            .first()
+            .expect("at least one key")
+            .coin_type_and_account()
+    }
+
     /// Returns the [BIP 388 wallet descriptor template] for this full viewing key.
     ///
     /// [BIP 388 wallet descriptor template]: https://github.com/bitcoin/bips/blob/master/bip-0388.mediawiki#wallet-descriptor-template
@@ -253,6 +293,28 @@ impl FullViewingKey {
         }
         t.push_str("))");
         t
+    }
+
+    /// Derives the [`AccountPrivKey`] from the given seed that matches this full viewing
+    /// key.
+    ///
+    /// Returns `Ok(None)` if the given seed does not match any of the public keys.
+    pub fn derive_matching_account_priv_key(
+        &self,
+        seed: &[u8],
+    ) -> Result<Option<AccountPrivKey>, bip32::Error> {
+        let (coin_type, account) = self.coin_type_and_account();
+        let candiate_privkey = AccountPrivKey::from_seed_with_coin_type(seed, coin_type, account)?;
+        let candiate_pubkey = candiate_privkey.to_account_pubkey();
+
+        for key in &self.key_info {
+            if key == &candiate_pubkey {
+                return Ok(Some(candiate_privkey));
+            }
+        }
+
+        // Nothing matched.
+        Ok(None)
     }
 
     /// Derives the scoped P2SH address for this account at the given index, along with
@@ -418,6 +480,20 @@ mod tests {
                     Some(key),
                 );
                 assert_eq!(&key.key_info_expression(&params), expected);
+            }
+
+            for (i, seed) in seeds.iter().enumerate() {
+                if i < tv.key_information_vector.len() {
+                    assert!(matches!(
+                        fvk.derive_matching_account_priv_key(seed),
+                        Ok(Some(_)),
+                    ));
+                } else {
+                    assert!(matches!(
+                        fvk.derive_matching_account_priv_key(seed),
+                        Ok(None),
+                    ));
+                }
             }
 
             for (i, address) in tv.external_addresses {

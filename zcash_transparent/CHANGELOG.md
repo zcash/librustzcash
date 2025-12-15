@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::zip48`:
+  - `FullViewingKey::derive_matching_account_priv_key`
+
 ## [0.6.2] - 2025-12-12
 
 ### Added
