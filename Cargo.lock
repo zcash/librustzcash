@@ -6634,7 +6634,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.26.2"
+version = "0.26.3"
 dependencies = [
  "assert_matches",
  "bip32",

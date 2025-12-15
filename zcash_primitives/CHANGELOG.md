@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.26.3] - 2025-12-15
+
+### Fixed
+- Fixed missing update to `zcash_transparent 0.6.2`; without this change,
+  downstream crates using `cargo update -p zcash_primitives` would end up
+  with their codebase failing to compile unless they also manually update
+  `zcash_transparent`.
+
 ## [0.26.2] - 2025-12-12
 
 ### Added
