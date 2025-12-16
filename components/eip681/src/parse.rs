@@ -276,8 +276,7 @@ impl Number {
     pub fn as_i128(&self) -> Result<i128, ValidationError> {
         let signum = self
             .signum
-            .map(|is_positive| if is_positive { 1 } else { -1 })
-            .unwrap_or(1i128);
+            .map_or(1i128, |is_positive| if is_positive { 1 } else { -1 });
         let integer = self.integer()?;
         let (decimal_numerator, decimal_denominator) = self.decimal()?;
         let exp = self
@@ -285,7 +284,7 @@ impl Number {
             .as_ref()
             .and_then(|(_, maybe_exp)| maybe_exp.as_ref().map(|digits| digits.as_u64()))
             .transpose()?
-            .unwrap_or_default()
+            .unwrap_or(0)
             .try_into()
             .context(IntegerSnafu)?;
         let multiplier = 10i128.checked_pow(exp).context(LargeExponentSnafu {
@@ -731,7 +730,7 @@ impl Parameters {
         let mut params = vec![];
         for blob in blobs.into_iter() {
             let (j, param) = Parameter::parse(blob)?;
-            snafu::ensure!(j.is_empty(), UnexpectedLeftoverInputSnafu { input: i });
+            snafu::ensure!(j.is_empty(), UnexpectedLeftoverInputSnafu { input: j });
             params.push(param);
         }
         Ok((i, Parameters(params)))
@@ -1256,6 +1255,25 @@ mod test {
         proptest::string::string_regex(&format!(".{{{min},{max}}}")).unwrap()
     }
 
+    /// Used to produce url encoded unicode strings that are **not** numbers.
+    ///
+    /// This is used for arbitrary unicode values that should not roundtrip to a number.
+    ///
+    /// Imagine this scenario:
+    ///
+    /// 1. arb_url_encoded_string produces `input = UrlEncodedString(0)`.
+    /// 2. serialize to "0"
+    /// 3. parse from "0" produces `output = Number(0)`
+    /// 4. input != output
+    fn arb_non_numeric_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
+        {
+            let min = 1;
+            let max = 1024;
+            proptest::string::string_regex(&format!("[^\\d]{{{min},{max}}}")).unwrap()
+        }
+        .prop_map(UrlEncodedUnicodeString::encode)
+    }
+
     fn arb_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
         arb_unicode(1, 1024).prop_map(UrlEncodedUnicodeString::encode)
     }
@@ -1377,7 +1395,9 @@ mod test {
         Union::new([
             arb_valid_number().prop_map(Value::Number).boxed(),
             arb_eth_addy().prop_map(Value::Address).boxed(),
-            arb_url_encoded_string().prop_map(Value::String).boxed(),
+            arb_non_numeric_url_encoded_string()
+                .prop_map(Value::String)
+                .boxed(),
         ])
     }
 
@@ -1524,7 +1544,7 @@ mod test {
         #[test]
         fn parse_arb_request(expected in arb_request()) {
             let input = expected.to_string();
-            let (i, seen) = EthereumTransactionRequest::parse(&input).unwrap();
+            let (i, seen) = EthereumTransactionRequest::parse(&input).unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
             pretty_assertions::assert_str_eq!(input, seen.to_string().as_str(), "input: {input}\ni: {i}");
             pretty_assertions::assert_eq!(expected, seen);
         }
