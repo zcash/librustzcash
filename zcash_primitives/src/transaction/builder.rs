@@ -304,7 +304,7 @@ pub struct PcztParts<P: Parameters> {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
+pub struct Builder<'a, P, U> {
     params: P,
     build_config: BuildConfig,
     target_height: BlockHeight,
@@ -325,7 +325,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     _progress_notifier: U,
 }
 
-impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
+impl<P, U> Builder<'_, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -461,7 +461,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 }
 
-impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
+impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -726,7 +726,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
+}
 
+impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a [`BuildResult`] containing:
@@ -1090,7 +1092,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             orchard_meta,
         })
     }
+}
 
+impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     /// Builds a PCZT from the configured spends and outputs.
     ///
     /// Upon success, returns a struct containing the PCZT components, and the
