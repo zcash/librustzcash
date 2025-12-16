@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.26.4] - PLANNED
+## [0.26.4] - 2025-12-17
 
 ### Changed
 - Enabling the `std` feature now enables `orchard/std`, `sapling/std`, and

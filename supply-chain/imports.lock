@@ -1,6 +1,10 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_primitives]]
+version = "0.26.4"
+audited_as = "0.26.3"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -372,8 +376,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.6.2"
-when = "2025-12-12"
+version = "0.6.3"
+when = "2025-12-18"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
