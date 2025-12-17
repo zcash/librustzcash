@@ -1,6 +1,13 @@
-use crate::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
-use core::{hash::Hash, ops::Range};
-use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use crate::address::Address;
+use core::hash::Hash;
+use std::vec::Vec;
+use transparent::{
+    address::TransparentAddress,
+    keys::{NonHardenedChildIndex, TransparentKeyScope},
+};
+use zcash_protocol::{TxId, consensus::BlockHeight};
+
+use super::gap_limits::GapLimits;
 
 #[cfg(feature = "transparent-inputs")]
 pub trait GapLimitsWalletAccess {
@@ -22,15 +29,17 @@ pub trait GapLimitsWalletAccess {
         gap_limit: u32,
     ) -> Result<Option<NonHardenedChildIndex>, Self::Error>;
 
-    #[allow(clippy::too_many_arguments)]
-    fn generate_address_range(
+    fn store_address_range(
         &self,
         account_id: Self::AccountRef,
-        account_uivk: &UnifiedIncomingViewingKey,
-        account_ufvk: Option<&UnifiedFullViewingKey>,
         key_scope: TransparentKeyScope,
-        request: UnifiedAddressRequest,
-        range_to_store: Range<NonHardenedChildIndex>,
-        require_key: bool,
+        list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
+    ) -> Result<(), Self::Error>;
+
+    fn update_gap_limits(
+        &self,
+        gap_limits: &GapLimits,
+        txid: TxId,
+        observation_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 }

@@ -14,13 +14,13 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, Row, named_params};
 use tracing::debug;
 
-use transparent::keys::{NonHardenedChildRange, TransparentKeyScope};
+use transparent::keys::TransparentKeyScope;
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
-use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
 use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
@@ -31,7 +31,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
-use zcash_keys::keys::transparent::gap_limits::GapLimits;
+use zcash_keys::keys::transparent::gap_limits::{self, GapLimits};
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -47,7 +47,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
 };
 use zcash_script::script;
-use zip32::{DiversifierIndex, Scope};
+use zip32::Scope;
 
 #[cfg(feature = "transparent-key-import")]
 use bip32::{PublicKey, PublicKeyBytes};
@@ -581,37 +581,6 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
         .collect())
 }
 
-pub(crate) fn generate_external_address(
-    uivk: &UnifiedIncomingViewingKey,
-    ua_request: UnifiedAddressRequest,
-    index: NonHardenedChildIndex,
-) -> Result<(Address, TransparentAddress), AddressGenerationError> {
-    let ua = uivk.address(index.into(), ua_request);
-    let transparent_address = uivk
-        .transparent()
-        .as_ref()
-        .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
-        .derive_address(index)
-        .map_err(|_| {
-            AddressGenerationError::InvalidTransparentChildIndex(DiversifierIndex::from(index))
-        })?;
-    Ok((
-        ua.map_or_else(
-            |e| {
-                if matches!(e, AddressGenerationError::ShieldedReceiverRequired) {
-                    // fall back to the transparent-only address
-                    Ok(Address::from(transparent_address))
-                } else {
-                    // other address generation errors are allowed to propagate
-                    Err(e)
-                }
-            },
-            |addr| Ok(Address::from(addr)),
-        )?,
-        transparent_address,
-    ))
-}
-
 /// Generates addresses to fill the specified non-hardened child index range.
 ///
 /// The provided [`UnifiedAddressRequest`] is used to pre-generate unified addresses that correspond
@@ -635,7 +604,6 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
-
     generate_address_range_internal(
         conn,
         params,
@@ -646,7 +614,8 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
         request,
         range_to_store,
         require_key,
-    )
+    )?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -661,39 +630,26 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    if !account_uivk.has_transparent() {
-        if require_key {
-            return Err(SqliteClientError::AddressGeneration(
-                AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
-            ));
-        } else {
-            return Ok(());
-        }
-    }
+    let address_list = gap_limits::wallet::generate_address_list(
+        account_uivk,
+        account_ufvk,
+        key_scope,
+        request,
+        range_to_store,
+        require_key,
+    )?;
+    store_address_range(conn, params, account_id, key_scope, address_list)?;
+    Ok(())
+}
 
-    let gen_addrs = |key_scope: TransparentKeyScope, index: NonHardenedChildIndex| match key_scope {
-        TransparentKeyScope::EXTERNAL => generate_external_address(account_uivk, request, index),
-        TransparentKeyScope::INTERNAL => {
-            let internal_address = account_ufvk
-                .and_then(|k| k.transparent())
-                .expect("presence of transparent key was checked above.")
-                .derive_internal_ivk()?
-                .derive_address(index)?;
-            Ok((Address::from(internal_address), internal_address))
-        }
-        TransparentKeyScope::EPHEMERAL => {
-            let ephemeral_address = account_ufvk
-                .and_then(|k| k.transparent())
-                .expect("presence of transparent key was checked above.")
-                .derive_ephemeral_ivk()?
-                .derive_ephemeral_address(index)?;
-            Ok((Address::from(ephemeral_address), ephemeral_address))
-        }
-        _ => Err(AddressGenerationError::UnsupportedTransparentKeyScope(
-            key_scope,
-        )),
-    };
-
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn store_address_range<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountRef,
+    key_scope: TransparentKeyScope,
+    address_list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
+) -> Result<(), SqliteClientError> {
     // exposed_at_height is initially NULL
     let mut stmt_insert_address = conn.prepare_cached(
         "INSERT INTO addresses (
@@ -709,8 +665,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
          ON CONFLICT (account_id, diversifier_index_be, key_scope) DO NOTHING",
     )?;
 
-    for transparent_child_index in NonHardenedChildRange::from(range_to_store) {
-        let (address, transparent_address) = gen_addrs(key_scope, transparent_child_index)?;
+    for (address, transparent_address, transparent_child_index) in address_list {
         let zcash_address = address.to_zcash_address(params);
         let receiver_flags: ReceiverFlags = zcash_address
             .clone()

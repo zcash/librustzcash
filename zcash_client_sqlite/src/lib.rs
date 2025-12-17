@@ -122,10 +122,7 @@ use {
     },
     zcash_keys::{
         encoding::AddressCodec,
-        keys::{
-            UnifiedIncomingViewingKey,
-            transparent::{gap_limits::GapLimits, wallet::GapLimitsWalletAccess},
-        },
+        keys::transparent::{gap_limits::GapLimits, wallet::GapLimitsWalletAccess},
     },
 };
 
@@ -2194,26 +2191,33 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::transparent::find_gap_start(self.conn.borrow(), account_ref, key_scope, gap_limit)
     }
 
-    fn generate_address_range(
+    fn store_address_range(
         &self,
         account_id: Self::AccountRef,
-        account_uivk: &UnifiedIncomingViewingKey,
-        account_ufvk: Option<&UnifiedFullViewingKey>,
         key_scope: TransparentKeyScope,
-        request: UnifiedAddressRequest,
-        range_to_store: Range<NonHardenedChildIndex>,
-        require_key: bool,
+        list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
     ) -> Result<(), Self::Error> {
-        wallet::transparent::generate_address_range_internal(
+        wallet::transparent::store_address_range(
             self.conn.borrow(),
             &self.params,
             account_id,
-            account_uivk,
-            account_ufvk,
             key_scope,
-            request,
-            range_to_store,
-            require_key,
+            list,
+        )
+    }
+
+    fn update_gap_limits(
+        &self,
+        gap_limits: &GapLimits,
+        txid: TxId,
+        observation_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::update_gap_limits(
+            self.conn.borrow(),
+            &self.params,
+            gap_limits,
+            txid,
+            observation_height,
         )
     }
 }

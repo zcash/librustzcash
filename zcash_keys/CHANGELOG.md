@@ -13,6 +13,7 @@ workspace.
 - `zcash_keys::keys::OutgoingViewingKey`
 - `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses`
+- `zcash_keys::keys::transparent::gap_limits::generate_address_list`
 - `zcash_keys::keys::transparent::GapLimitWalletAccess`
 - `zcash_keys::keys::transparent::GapLimits`
 
