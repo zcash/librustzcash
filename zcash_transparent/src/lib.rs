@@ -19,7 +19,7 @@ pub mod sighash;
 #[cfg(feature = "transparent-inputs")]
 pub mod zip48;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "transparent-inputs"))]
 mod test_vectors;
 
 #[macro_use]

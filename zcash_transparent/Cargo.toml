@@ -72,6 +72,9 @@ zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 default = ["std"]
 std = [
     "dep:document-features",
+    "secp256k1?/std",
+    "zcash_address/std",
+    "zcash_script/std",
 ]
 
 ## Enables spending transparent notes with the transaction builder.
