@@ -1242,7 +1242,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     }
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(all(any(test, feature = "test-dependencies"), feature = "circuits"))]
 mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
@@ -1300,22 +1300,22 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use core::convert::Infallible;
-
-    use assert_matches::assert_matches;
-    use ff::Field;
-    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
-    use rand_core::OsRng;
-
-    use super::{Builder, Error};
-    use crate::transaction::builder::BuildConfig;
-
-    use ::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
-    use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
-    use zcash_protocol::{
-        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
-        memo::MemoBytes,
-        value::{BalanceError, ZatBalance, Zatoshis},
+    #[cfg(feature = "circuits")]
+    use {
+        super::{Builder, Error},
+        crate::transaction::builder::BuildConfig,
+        ::sapling::{zip32::ExtendedSpendingKey, Node, Rseed},
+        ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
+        assert_matches::assert_matches,
+        core::convert::Infallible,
+        ff::Field,
+        incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
+        rand_core::OsRng,
+        zcash_protocol::{
+            consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+            memo::MemoBytes,
+            value::{BalanceError, ZatBalance, Zatoshis},
+        },
     };
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1403,6 +1403,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "circuits")]
     fn binding_sig_present_if_shielded_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
@@ -1449,6 +1450,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "circuits")]
     fn fails_on_negative_change() {
         use crate::transaction::fees::zip317::MINIMUM_FEE;
 
