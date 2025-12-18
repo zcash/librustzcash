@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.6.3] - PLANNED
+## [0.6.3] - 2025-12-17
 
 ### Added
 - `zcash_transparent::zip48`:
