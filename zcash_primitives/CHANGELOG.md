@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.27.0] - PENDING
 
 ### Added
 - `zcash_primitives::transaction::builder`:
