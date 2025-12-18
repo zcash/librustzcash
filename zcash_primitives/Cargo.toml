@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.26.3"
+version = "0.26.4"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -114,7 +114,13 @@ pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 
 [features]
 default = ["multicore", "std", "circuits"]
-std = ["document-features", "redjubjub/std"]
+std = [
+    "document-features",
+    "redjubjub/std",
+    "sapling/std",
+    "orchard/std",
+    "transparent/std",
+]
 zip-233 = []
 
 ## Enables creating proofs
