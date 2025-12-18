@@ -320,7 +320,7 @@ pub struct PcztParts<P: Parameters> {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
+pub struct Builder<'a, P, U> {
     params: P,
     build_config: BuildConfig,
     target_height: BlockHeight,
@@ -340,7 +340,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     _progress_notifier: U,
 }
 
-impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
+impl<P, U> Builder<'_, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -474,7 +474,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 }
 
-impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
+impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -726,7 +726,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
+}
 
+impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a [`BuildResult`] containing:
@@ -1107,7 +1109,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             orchard_meta,
         })
     }
+}
 
+impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     /// Builds a PCZT from the configured spends and outputs.
     ///
     /// Upon success, returns a struct containing the PCZT components, and the
@@ -1238,7 +1242,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     }
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(all(any(test, feature = "test-dependencies"), feature = "circuits"))]
 mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
@@ -1296,22 +1300,22 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use core::convert::Infallible;
-
-    use assert_matches::assert_matches;
-    use ff::Field;
-    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
-    use rand_core::OsRng;
-
-    use super::{Builder, Error};
-    use crate::transaction::builder::BuildConfig;
-
-    use ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
-    use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
-    use zcash_protocol::{
-        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
-        memo::MemoBytes,
-        value::{BalanceError, ZatBalance, Zatoshis},
+    #[cfg(feature = "circuits")]
+    use {
+        super::{Builder, Error},
+        crate::transaction::builder::BuildConfig,
+        ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
+        ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
+        assert_matches::assert_matches,
+        core::convert::Infallible,
+        ff::Field,
+        incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
+        rand_core::OsRng,
+        zcash_protocol::{
+            consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+            memo::MemoBytes,
+            value::{BalanceError, ZatBalance, Zatoshis},
+        },
     };
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1398,6 +1402,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "circuits")]
     fn binding_sig_present_if_shielded_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
@@ -1444,6 +1449,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "circuits")]
     fn fails_on_negative_change() {
         use crate::transaction::fees::zip317::MINIMUM_FEE;
 

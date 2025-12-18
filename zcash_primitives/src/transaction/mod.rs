@@ -286,6 +286,7 @@ impl Authorization for Unauthorized {
 }
 
 /// [`Authorization`] marker type for coinbase transactions without authorization data.
+#[cfg(feature = "circuits")]
 struct Coinbase;
 
 #[cfg(feature = "circuits")]
