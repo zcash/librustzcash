@@ -797,7 +797,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::{Error, OutPoint, SignableInput, TransparentBuilder, TxOut};
     use crate::address::TransparentAddress;

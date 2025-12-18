@@ -8,7 +8,17 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.6.3] - 2025-12-17
+
+### Added
+- `zcash_transparent::zip48`:
+  - `FullViewingKey::derive_matching_account_priv_key`
+
+### Changed
+- Enabling the `std` feature now enables `zcash_address/std`, `zcash_script/std`,
+  and `secp256k1?/std`. This change is intended to improve the ergonomics for
+  downstream users of this crate, to eliminate the need for users to manually
+  enable the `std` feature of those dependencies.
 
 ## [0.6.2] - 2025-12-12
 

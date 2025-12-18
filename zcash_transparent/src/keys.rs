@@ -612,19 +612,21 @@ impl ExternalOvk {
 mod tests {
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
-    use zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK};
 
-    use super::AccountPubKey;
-    use super::NonHardenedChildIndex;
-    #[allow(deprecated)]
-    use crate::{
-        address::TransparentAddress,
-        keys::{AccountPrivKey, IncomingViewingKey, TransparentKeyScope},
-        test_vectors,
+    use crate::keys::NonHardenedChildIndex;
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::{
+            address::TransparentAddress,
+            keys::{AccountPrivKey, AccountPubKey, IncomingViewingKey, TransparentKeyScope},
+            test_vectors,
+        },
+        zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK},
     };
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
     fn address_derivation() {
         let seed = [
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
@@ -643,7 +645,6 @@ mod tests {
             let address_pubkey = account_pubkey
                 .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
                 .unwrap();
-            #[cfg(feature = "transparent-inputs")]
             assert_eq!(TransparentAddress::from_pubkey(&address_pubkey), address);
 
             let expected_path = [
@@ -689,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
     fn bip_32_test_vectors() {
         let seed = [
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
@@ -727,6 +728,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn check_ovk_test_vectors() {
         for tv in test_vectors::transparent_ovk() {
             let mut key_bytes = [0u8; 65];
