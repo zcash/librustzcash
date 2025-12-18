@@ -15,6 +15,11 @@ fn main() -> io::Result<()> {
     // - We check for the existence of protoc in the same way as prost_build, so that
     //   people building from source do not need to have protoc installed. If they make
     //   changes to the proto files, the discrepancy will be caught by CI.
+    // - We don't build on Windows because the protobufs are symlinks to the actual files,
+    //   which don't resolve by default in Windows clones of the git repository. This can
+    //   be worked around with `git config core.symlinks true` but that's additional
+    //   hassle, and it's easier to just make any protobuf updates on *nix dev machines.
+    #[cfg(not(windows))]
     if Path::new(COMPACT_FORMATS_PROTO).exists()
         && env::var_os("PROTOC")
             .map(PathBuf::from)
