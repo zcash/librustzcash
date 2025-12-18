@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.26.4] - 2025-12-17
+
+### Changed
+- Enabling the `std` feature now enables `orchard/std`, `sapling/std`, and
+  `transparent/std`. This change is intended to improve the ergonomics for
+  downstream users of this crate, to eliminate the need for users to manually
+  enable the `std` feature of those dependencies.
+- The bound of the progress notifier type in `zcash_primitives::transaction::builder::Builder`
+  on `sapling_crypto::builder::ProverProgress` has been relaxed; it is now retained
+  only for the `build` and `build_zfuture` methods.
+
 ## [0.26.3] - 2025-12-15
 
 ### Added
