@@ -551,6 +551,12 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
             .map_err(Error::SaplingBuild)
     }
 
+    /// Adds a transparent coin to be spent in this transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn add_transparent_input(&mut self, input: TransparentInputInfo) {
+        self.transparent_builder.add_input(input)
+    }
+
     /// Adds a transparent P2PKH coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_p2pkh_input(

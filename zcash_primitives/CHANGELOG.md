@@ -13,6 +13,7 @@ workspace.
 ### Added
 - `zcash_primitives::transaction::builder`:
   - `impl<FE> From<coinbase::Error> for Error<FE>`
+  - `Builder::add_transparent_p2pkh_input`
 
 ### Changed
 - MSRV is now 1.85.1.
@@ -21,7 +22,9 @@ workspace.
   - `Error` has a new `Coinbase` variant.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
     instead of `u64`.
-  - `Builder::add_transparent_input` has been renamed to `add_transparent_p2pkh_input`.
+  - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`
+    instead of its constituent parts. Use `Builder::add_transparent_p2pkh_input` if you need the
+    previous API.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.
