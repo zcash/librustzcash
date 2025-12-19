@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (f794a0873 2025-12-17)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions for querying information in the wallet database.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (fcf67da03 2025-12-18)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions for querying information in the wallet database.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! These functions should generally not be used directly; instead,
 <a href=#4 id=4 data-nosnippet>4</a>//! their functionality is available via the [`WalletRead`] and
@@ -118,11 +118,11 @@
 <a href=#118 id=118 data-nosnippet>118</a>};
 <a href=#119 id=119 data-nosnippet>119</a><span class="kw">use </span>zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 <a href=#120 id=120 data-nosnippet>120</a>
-<a href=#121 id=121 data-nosnippet>121</a><span class="kw">use </span><span class="self">self</span>::{
+<a href=#121 id=121 data-nosnippet>121</a><span class="kw">use </span>self::{
 <a href=#122 id=122 data-nosnippet>122</a>    common::{TableConstants, table_constants},
 <a href=#123 id=123 data-nosnippet>123</a>    scanning::{parse_priority_code, priority_code, replace_queue_entries},
 <a href=#124 id=124 data-nosnippet>124</a>};
-<a href=#125 id=125 data-nosnippet>125</a><span class="kw">use crate</span>::{
+<a href=#125 id=125 data-nosnippet>125</a><span class="kw">use </span>crate::{
 <a href=#126 id=126 data-nosnippet>126</a>    AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
 <a href=#127 id=127 data-nosnippet>127</a>    WalletCommitmentTrees, WalletDb,
 <a href=#128 id=128 data-nosnippet>128</a>    error::SqliteClientError,
@@ -998,13 +998,13 @@
 <a href=#998 id=998 data-nosnippet>998</a>            .flatten();
 <a href=#999 id=999 data-nosnippet>999</a>
 <a href=#1000 id=1000 data-nosnippet>1000</a>        <span class="kw">let </span>addr_source = <span class="kw">match </span>decode_diversifier_index_be(di_vec)<span class="question-mark">? </span>{
-<a href=#1001 id=1001 data-nosnippet>1001</a>            <span class="prelude-val">Some</span>(di) =&gt; <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(AddressSource::Derived {
+<a href=#1001 id=1001 data-nosnippet>1001</a>            <span class="prelude-val">Some</span>(di) =&gt; Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(AddressSource::Derived {
 <a href=#1002 id=1002 data-nosnippet>1002</a>                diversifier_index: di,
 <a href=#1003 id=1003 data-nosnippet>1003</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#1004 id=1004 data-nosnippet>1004</a>                </span>transparent_key_scope,
 <a href=#1005 id=1005 data-nosnippet>1005</a>            }),
 <a href=#1006 id=1006 data-nosnippet>1006</a>            <span class="attr">#[cfg(feature = <span class="string">"transparent-key-import"</span>)]
-<a href=#1007 id=1007 data-nosnippet>1007</a>            </span><span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(AddressSource::Standalone),
+<a href=#1007 id=1007 data-nosnippet>1007</a>            </span><span class="prelude-val">None </span>=&gt; Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(AddressSource::Standalone),
 <a href=#1008 id=1008 data-nosnippet>1008</a>            <span class="attr">#[cfg(not(feature = <span class="string">"transparent-key-import"</span>))]
 <a href=#1009 id=1009 data-nosnippet>1009</a>            </span><span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
 <a href=#1010 id=1010 data-nosnippet>1010</a>                <span class="string">"diversifier index may not be null"</span>.to_string(),
@@ -1247,7 +1247,7 @@
 <a href=#1247 id=1247 data-nosnippet>1247</a>                <span class="string">":tx_refs_ptr"</span>: <span class="kw-2">&amp;</span>tx_refs_ptr
 <a href=#1248 id=1248 data-nosnippet>1248</a>            },
 <a href=#1249 id=1249 data-nosnippet>1249</a>            |row| {
-<a href=#1250 id=1250 data-nosnippet>1250</a>                <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;((
+<a href=#1250 id=1250 data-nosnippet>1250</a>                Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;((
 <a href=#1251 id=1251 data-nosnippet>1251</a>                    row.get(<span class="number">0</span>).map(AccountRef)<span class="question-mark">?</span>,
 <a href=#1252 id=1252 data-nosnippet>1252</a>                    KeyScope::decode(row.get(<span class="number">1</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
 <a href=#1253 id=1253 data-nosnippet>1253</a>                ))
@@ -1883,7 +1883,7 @@
 <a href=#1883 id=1883 data-nosnippet>1883</a>
 <a href=#1884 id=1884 data-nosnippet>1884</a>                    <span class="kw">match </span>size_from_blocks {
 <a href=#1885 id=1885 data-nosnippet>1885</a>                        <span class="comment">// We know the tree size as of the start of the recover-until height.
-<a href=#1886 id=1886 data-nosnippet>1886</a>                        </span><span class="prelude-val">Some</span>(size) =&gt; <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(<span class="prelude-val">Some</span>(size)),
+<a href=#1886 id=1886 data-nosnippet>1886</a>                        </span><span class="prelude-val">Some</span>(size) =&gt; Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(<span class="prelude-val">Some</span>(size)),
 <a href=#1887 id=1887 data-nosnippet>1887</a>
 <a href=#1888 id=1888 data-nosnippet>1888</a>                        <span class="comment">// If the recover-until height is equal to the chain tip height,
 <a href=#1889 id=1889 data-nosnippet>1889</a>                        // then this is almost certainly a newly-recovered wallet, and all
@@ -2094,7 +2094,7 @@
 <a href=#2094 id=2094 data-nosnippet>2094</a>    <span class="kw">let </span><span class="kw-2">mut </span>account_balances = stmt_accounts
 <a href=#2095 id=2095 data-nosnippet>2095</a>        .query([])<span class="question-mark">?
 <a href=#2096 id=2096 data-nosnippet>2096</a>        </span>.and_then(|row| {
-<a href=#2097 id=2097 data-nosnippet>2097</a>            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;((AccountUuid(row.get::&lt;<span class="kw">_</span>, Uuid&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), AccountBalance::ZERO))
+<a href=#2097 id=2097 data-nosnippet>2097</a>            Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;((AccountUuid(row.get::&lt;<span class="kw">_</span>, Uuid&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), AccountBalance::ZERO))
 <a href=#2098 id=2098 data-nosnippet>2098</a>        })
 <a href=#2099 id=2099 data-nosnippet>2099</a>        .collect::&lt;<span class="prelude-ty">Result</span>&lt;HashMap&lt;AccountUuid, AccountBalance&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
 <a href=#2100 id=2100 data-nosnippet>2100</a>
@@ -3330,12 +3330,12 @@
 <a href=#3330 id=3330 data-nosnippet>3330</a>        };
 <a href=#3331 id=3331 data-nosnippet>3331</a>        wdb.with_sapling_tree_mut(|tree| {
 <a href=#3332 id=3332 data-nosnippet>3332</a>            tree.truncate_to_checkpoint(<span class="kw-2">&amp;</span>truncation_height)<span class="question-mark">?</span>;
-<a href=#3333 id=3333 data-nosnippet>3333</a>            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(())
+<a href=#3333 id=3333 data-nosnippet>3333</a>            Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(())
 <a href=#3334 id=3334 data-nosnippet>3334</a>        })<span class="question-mark">?</span>;
 <a href=#3335 id=3335 data-nosnippet>3335</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#3336 id=3336 data-nosnippet>3336</a>        </span>wdb.with_orchard_tree_mut(|tree| {
 <a href=#3337 id=3337 data-nosnippet>3337</a>            tree.truncate_to_checkpoint(<span class="kw-2">&amp;</span>truncation_height)<span class="question-mark">?</span>;
-<a href=#3338 id=3338 data-nosnippet>3338</a>            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(())
+<a href=#3338 id=3338 data-nosnippet>3338</a>            Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(())
 <a href=#3339 id=3339 data-nosnippet>3339</a>        })<span class="question-mark">?</span>;
 <a href=#3340 id=3340 data-nosnippet>3340</a>
 <a href=#3341 id=3341 data-nosnippet>3341</a>        <span class="comment">// Do not delete sent notes; this can contain data that is not recoverable
@@ -3631,7 +3631,7 @@
 <a href=#3631 id=3631 data-nosnippet>3631</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(out.txout().value()))
 <a href=#3632 id=3632 data-nosnippet>3632</a>        } <span class="kw">else </span>{
 <a href=#3633 id=3633 data-nosnippet>3633</a>            <span class="comment">// If we can’t find it, fee computation can't complete accurately
-<a href=#3634 id=3634 data-nosnippet>3634</a>            </span><span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(<span class="prelude-val">None</span>)
+<a href=#3634 id=3634 data-nosnippet>3634</a>            </span>Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(<span class="prelude-val">None</span>)
 <a href=#3635 id=3635 data-nosnippet>3635</a>        }
 <a href=#3636 id=3636 data-nosnippet>3636</a>    })
 <a href=#3637 id=3637 data-nosnippet>3637</a>}
@@ -4354,7 +4354,7 @@
 <a href=#4354 id=4354 data-nosnippet>4354</a>                    )
 <a href=#4355 id=4355 data-nosnippet>4355</a>                })<span class="question-mark">?</span>;
 <a href=#4356 id=4356 data-nosnippet>4356</a>
-<a href=#4357 id=4357 data-nosnippet>4357</a>                <span class="prelude-val">Ok</span>::&lt;TransactionDataRequest, SqliteClientError&gt;(<span class="kw">match </span>query_type {
+<a href=#4357 id=4357 data-nosnippet>4357</a>                Ok::&lt;TransactionDataRequest, SqliteClientError&gt;(<span class="kw">match </span>query_type {
 <a href=#4358 id=4358 data-nosnippet>4358</a>                    TxQueryType::Status =&gt; TransactionDataRequest::GetStatus(txid),
 <a href=#4359 id=4359 data-nosnippet>4359</a>                    TxQueryType::Enhancement =&gt; TransactionDataRequest::Enhancement(txid),
 <a href=#4360 id=4360 data-nosnippet>4360</a>                })
@@ -4849,7 +4849,7 @@
 <a href=#4849 id=4849 data-nosnippet>4849</a>    };
 <a href=#4850 id=4850 data-nosnippet>4850</a>
 <a href=#4851 id=4851 data-nosnippet>4851</a>    <span class="kw">use </span><span class="kw">super</span>::common::{TableConstants, table_constants};
-<a href=#4852 id=4852 data-nosnippet>4852</a>    <span class="kw">use crate</span>::{AccountUuid, error::SqliteClientError};
+<a href=#4852 id=4852 data-nosnippet>4852</a>    <span class="kw">use </span>crate::{AccountUuid, error::SqliteClientError};
 <a href=#4853 id=4853 data-nosnippet>4853</a>
 <a href=#4854 id=4854 data-nosnippet>4854</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_tx_history(
 <a href=#4855 id=4855 data-nosnippet>4855</a>        conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
@@ -4932,7 +4932,7 @@
 <a href=#4932 id=4932 data-nosnippet>4932</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
 <a href=#4933 id=4933 data-nosnippet>4933</a>    <span class="kw">use </span>zcash_protocol::value::Zatoshis;
 <a href=#4934 id=4934 data-nosnippet>4934</a>
-<a href=#4935 id=4935 data-nosnippet>4935</a>    <span class="kw">use crate</span>::{
+<a href=#4935 id=4935 data-nosnippet>4935</a>    <span class="kw">use </span>crate::{
 <a href=#4936 id=4936 data-nosnippet>4936</a>        AccountUuid,
 <a href=#4937 id=4937 data-nosnippet>4937</a>        error::SqliteClientError,
 <a href=#4938 id=4938 data-nosnippet>4938</a>        testing::{BlockCache, db::TestDbFactory},

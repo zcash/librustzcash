@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (f794a0873 2025-12-17)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Helper functions for managing light client key material.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (fcf67da03 2025-12-18)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Helper functions for managing light client key material.
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>::transparent::keys::TransparentKeyScope;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>alloc::string::{String, ToString};
@@ -385,7 +385,7 @@
 <a href=#385 id=385 data-nosnippet>385</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#386 id=386 data-nosnippet>386</a>                    </span>{
 <a href=#387 id=387 data-nosnippet>387</a>                        orchard = <span class="prelude-val">Some</span>(
-<a href=#388 id=388 data-nosnippet>388</a>                            <span class="prelude-ty">Option</span>::&lt;orchard::keys::SpendingKey&gt;::from(
+<a href=#388 id=388 data-nosnippet>388</a>                            Option::&lt;orchard::keys::SpendingKey&gt;::from(
 <a href=#389 id=389 data-nosnippet>389</a>                                orchard::keys::SpendingKey::from_bytes(key),
 <a href=#390 id=390 data-nosnippet>390</a>                            )
 <a href=#391 id=391 data-nosnippet>391</a>                            .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))<span class="question-mark">?</span>,
@@ -948,7 +948,7 @@
 <a href=#948 id=948 data-nosnippet>948</a>                    </span>})
 <a href=#949 id=949 data-nosnippet>949</a>                    .transpose(),
 <a href=#950 id=950 data-nosnippet>950</a>                <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#951 id=951 data-nosnippet>951</a>                </span>unified::Fvk::Orchard(data) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, DecodingError&gt;((
+<a href=#951 id=951 data-nosnippet>951</a>                </span>unified::Fvk::Orchard(data) =&gt; <span class="prelude-val">Some</span>(Ok::&lt;<span class="kw">_</span>, DecodingError&gt;((
 <a href=#952 id=952 data-nosnippet>952</a>                    u32::from(unified::Typecode::Orchard),
 <a href=#953 id=953 data-nosnippet>953</a>                    data.to_vec(),
 <a href=#954 id=954 data-nosnippet>954</a>                ))),
@@ -963,7 +963,7 @@
 <a href=#963 id=963 data-nosnippet>963</a>                        .transpose()
 <a href=#964 id=964 data-nosnippet>964</a>                }
 <a href=#965 id=965 data-nosnippet>965</a>                <span class="attr">#[cfg(not(feature = <span class="string">"sapling"</span>))]
-<a href=#966 id=966 data-nosnippet>966</a>                </span>unified::Fvk::Sapling(data) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, DecodingError&gt;((
+<a href=#966 id=966 data-nosnippet>966</a>                </span>unified::Fvk::Sapling(data) =&gt; <span class="prelude-val">Some</span>(Ok::&lt;<span class="kw">_</span>, DecodingError&gt;((
 <a href=#967 id=967 data-nosnippet>967</a>                    u32::from(unified::Typecode::Sapling),
 <a href=#968 id=968 data-nosnippet>968</a>                    data.to_vec(),
 <a href=#969 id=969 data-nosnippet>969</a>                ))),
@@ -976,7 +976,7 @@
 <a href=#976 id=976 data-nosnippet>976</a>                    </span>})
 <a href=#977 id=977 data-nosnippet>977</a>                    .transpose(),
 <a href=#978 id=978 data-nosnippet>978</a>                <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#979 id=979 data-nosnippet>979</a>                </span>unified::Fvk::P2pkh(data) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, DecodingError&gt;((
+<a href=#979 id=979 data-nosnippet>979</a>                </span>unified::Fvk::P2pkh(data) =&gt; <span class="prelude-val">Some</span>(Ok::&lt;<span class="kw">_</span>, DecodingError&gt;((
 <a href=#980 id=980 data-nosnippet>980</a>                    u32::from(unified::Typecode::P2pkh),
 <a href=#981 id=981 data-nosnippet>981</a>                    data.to_vec(),
 <a href=#982 id=982 data-nosnippet>982</a>                ))),
@@ -1674,7 +1674,7 @@
 <a href=#1674 id=1674 data-nosnippet>1674</a>
 <a href=#1675 id=1675 data-nosnippet>1675</a>    <span class="attr">#[cfg(any(feature = <span class="string">"sapling"</span>, feature = <span class="string">"orchard"</span>))]
 <a href=#1676 id=1676 data-nosnippet>1676</a>    </span><span class="kw">use </span>{
-<a href=#1677 id=1677 data-nosnippet>1677</a>        <span class="kw">super</span>::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
+<a href=#1677 id=1677 data-nosnippet>1677</a>        super::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
 <a href=#1678 id=1678 data-nosnippet>1678</a>        zcash_address::unified::{Encoding, Uivk},
 <a href=#1679 id=1679 data-nosnippet>1679</a>    };
 <a href=#1680 id=1680 data-nosnippet>1680</a>
@@ -1686,7 +1686,7 @@
 <a href=#1686 id=1686 data-nosnippet>1686</a>
 <a href=#1687 id=1687 data-nosnippet>1687</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 <a href=#1688 id=1688 data-nosnippet>1688</a>    </span><span class="kw">use </span>{
-<a href=#1689 id=1689 data-nosnippet>1689</a>        <span class="kw">crate</span>::{address::Address, encoding::AddressCodec},
+<a href=#1689 id=1689 data-nosnippet>1689</a>        crate::{address::Address, encoding::AddressCodec},
 <a href=#1690 id=1690 data-nosnippet>1690</a>        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
 <a href=#1691 id=1691 data-nosnippet>1691</a>        alloc::string::ToString,
 <a href=#1692 id=1692 data-nosnippet>1692</a>        alloc::vec::Vec,
@@ -1695,7 +1695,7 @@
 <a href=#1695 id=1695 data-nosnippet>1695</a>    };
 <a href=#1696 id=1696 data-nosnippet>1696</a>
 <a href=#1697 id=1697 data-nosnippet>1697</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
-<a href=#1698 id=1698 data-nosnippet>1698</a>    </span><span class="kw">use super</span>::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
+<a href=#1698 id=1698 data-nosnippet>1698</a>    </span><span class="kw">use </span>super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
 <a href=#1699 id=1699 data-nosnippet>1699</a>
 <a href=#1700 id=1700 data-nosnippet>1700</a>    <span class="attr">#[cfg(all(feature = <span class="string">"orchard"</span>, feature = <span class="string">"unstable"</span>))]
 <a href=#1701 id=1701 data-nosnippet>1701</a>    </span><span class="kw">use </span>subtle::ConstantTimeEq;
@@ -1855,7 +1855,7 @@
 <a href=#1855 id=1855 data-nosnippet>1855</a>    </span><span class="kw">fn </span>ufvk_derivation() {
 <a href=#1856 id=1856 data-nosnippet>1856</a>        <span class="kw">use </span><span class="kw">crate</span>::keys::UnifiedAddressRequest;
 <a href=#1857 id=1857 data-nosnippet>1857</a>
-<a href=#1858 id=1858 data-nosnippet>1858</a>        <span class="kw">use super</span>::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
+<a href=#1858 id=1858 data-nosnippet>1858</a>        <span class="kw">use </span>super::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
 <a href=#1859 id=1859 data-nosnippet>1859</a>
 <a href=#1860 id=1860 data-nosnippet>1860</a>        <span class="kw">for </span>tv <span class="kw">in </span>test_vectors::UNIFIED {
 <a href=#1861 id=1861 data-nosnippet>1861</a>            <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(
@@ -2037,7 +2037,7 @@
 <a href=#2037 id=2037 data-nosnippet>2037</a>    </span><span class="kw">fn </span>uivk_derivation() {
 <a href=#2038 id=2038 data-nosnippet>2038</a>        <span class="kw">use </span><span class="kw">crate</span>::keys::UnifiedAddressRequest;
 <a href=#2039 id=2039 data-nosnippet>2039</a>
-<a href=#2040 id=2040 data-nosnippet>2040</a>        <span class="kw">use super</span>::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
+<a href=#2040 id=2040 data-nosnippet>2040</a>        <span class="kw">use </span>super::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
 <a href=#2041 id=2041 data-nosnippet>2041</a>
 <a href=#2042 id=2042 data-nosnippet>2042</a>        <span class="kw">for </span>tv <span class="kw">in </span>test_vectors::UNIFIED {
 <a href=#2043 id=2043 data-nosnippet>2043</a>            <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(

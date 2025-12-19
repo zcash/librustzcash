@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (f794a0873 2025-12-17)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-80aa586b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.0-nightly (fcf67da03 2025-12-18)" data-channel="nightly" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-3e30299d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 <a href=#4 id=4 data-nosnippet>4</a>//! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -83,7 +83,7 @@
 <a href=#83 id=83 data-nosnippet>83</a>};
 <a href=#84 id=84 data-nosnippet>84</a><span class="kw">use </span>zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 <a href=#85 id=85 data-nosnippet>85</a>
-<a href=#86 id=86 data-nosnippet>86</a><span class="kw">use crate</span>::{
+<a href=#86 id=86 data-nosnippet>86</a><span class="kw">use </span>crate::{
 <a href=#87 id=87 data-nosnippet>87</a>    error::SqliteClientError,
 <a href=#88 id=88 data-nosnippet>88</a>    wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 <a href=#89 id=89 data-nosnippet>89</a>};
@@ -1149,7 +1149,7 @@
 <a href=#1149 id=1149 data-nosnippet>1149</a>            )<span class="question-mark">?
 <a href=#1150 id=1150 data-nosnippet>1150</a>            </span>.map(|res| {
 <a href=#1151 id=1151 data-nosnippet>1151</a>                <span class="kw">let </span>(amount, external_recipient, _ephemeral_address) = res<span class="question-mark">?</span>;
-<a href=#1152 id=1152 data-nosnippet>1152</a>                <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(OutputOfSentTx::from_parts(
+<a href=#1152 id=1152 data-nosnippet>1152</a>                Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;(OutputOfSentTx::from_parts(
 <a href=#1153 id=1153 data-nosnippet>1153</a>                    Zatoshis::from_u64(amount)<span class="question-mark">?</span>,
 <a href=#1154 id=1154 data-nosnippet>1154</a>                    external_recipient
 <a href=#1155 id=1155 data-nosnippet>1155</a>                        .map(|s| {
@@ -1175,7 +1175,7 @@
 <a href=#1175 id=1175 data-nosnippet>1175</a>                                </span>))
 <a href=#1176 id=1176 data-nosnippet>1176</a>                            })<span class="question-mark">?</span>;
 <a href=#1177 id=1177 data-nosnippet>1177</a>
-<a href=#1178 id=1178 data-nosnippet>1178</a>                            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;((addr, i))
+<a href=#1178 id=1178 data-nosnippet>1178</a>                            Ok::&lt;<span class="kw">_</span>, SqliteClientError&gt;((addr, i))
 <a href=#1179 id=1179 data-nosnippet>1179</a>                        })
 <a href=#1180 id=1180 data-nosnippet>1180</a>                        .transpose()<span class="question-mark">?</span>,
 <a href=#1181 id=1181 data-nosnippet>1181</a>                ))
@@ -2600,7 +2600,7 @@
 <a href=#2600 id=2600 data-nosnippet>2600</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
 <a href=#2601 id=2601 data-nosnippet>2601</a>    <span class="kw">use </span>zcash_protocol::consensus;
 <a href=#2602 id=2602 data-nosnippet>2602</a>
-<a href=#2603 id=2603 data-nosnippet>2603</a>    <span class="kw">use crate</span>::{
+<a href=#2603 id=2603 data-nosnippet>2603</a>    <span class="kw">use </span>crate::{
 <a href=#2604 id=2604 data-nosnippet>2604</a>        AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock <span class="kw">as _</span>,
 <a href=#2605 id=2605 data-nosnippet>2605</a>        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
 <a href=#2606 id=2606 data-nosnippet>2606</a>    };
@@ -2971,7 +2971,7 @@
 <a href=#2971 id=2971 data-nosnippet>2971</a>    </span><span class="kw">fn </span>transparent_receivers() {
 <a href=#2972 id=2972 data-nosnippet>2972</a>        <span class="kw">use </span>std::collections::BTreeSet;
 <a href=#2973 id=2973 data-nosnippet>2973</a>
-<a href=#2974 id=2974 data-nosnippet>2974</a>        <span class="kw">use crate</span>::{
+<a href=#2974 id=2974 data-nosnippet>2974</a>        <span class="kw">use </span>crate::{
 <a href=#2975 id=2975 data-nosnippet>2975</a>            GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests,
 <a href=#2976 id=2976 data-nosnippet>2976</a>        };
 <a href=#2977 id=2977 data-nosnippet>2977</a>        <span class="kw">use </span>zcash_client_backend::data_api::TransactionDataRequest;
