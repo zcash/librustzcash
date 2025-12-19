@@ -155,8 +155,8 @@ fn construct_script_sig(
     ])
 }
 
-/// Information required to spend a transparent coin; the secp256k public key when spending a p2pkh
-/// output, or the redeem script when spending a p2sh output.
+/// Information required to spend a transparent coin; the secp256k1 public key when spending a P2PKH
+/// output, or the redeem script when spending a P2SH output.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
 pub enum SpendInfo {
