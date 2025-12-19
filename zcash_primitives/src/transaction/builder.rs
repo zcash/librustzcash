@@ -553,13 +553,13 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
 
     /// Adds a transparent P2PKH coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
-    pub fn add_transparent_input(
+    pub fn add_transparent_p2pkh_input(
         &mut self,
         pubkey: secp256k1::PublicKey,
         utxo: transparent::bundle::OutPoint,
         coin: TxOut,
     ) -> Result<(), transparent::builder::Error> {
-        self.transparent_builder.add_input(pubkey, utxo, coin)
+        self.transparent_builder.add_p2pkh_input(pubkey, utxo, coin)
     }
 
     /// Adds a transparent P2SH coin to be spent in this transaction.
@@ -1383,7 +1383,7 @@ mod tests {
                 .into(),
         );
         builder
-            .add_transparent_input(pubkey, OutPoint::fake(), prev_coin)
+            .add_transparent_p2pkh_input(pubkey, OutPoint::fake(), prev_coin)
             .unwrap();
 
         // Create a tx with only t output. No binding_sig should be present

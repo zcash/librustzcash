@@ -21,6 +21,7 @@ workspace.
   - `Error` has a new `Coinbase` variant.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
     instead of `u64`.
+  - `Builder::add_transparent_input` has been renamed to `add_transparent_p2pkh_input`.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.

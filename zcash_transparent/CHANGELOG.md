@@ -17,6 +17,9 @@ workspace.
 - `impl core::error::Error` for:
   -` zcash_transparent::builder::Error`
   - `zcash_transparent::coinbase::Error`
+- `zcash_transparent::builder::SpendInfo`
+- `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
+- `zcash_transparent::builder::Builder::add_p2pkh_input`
 
 ### Changed
 - MSRV is now 1.85.1.
@@ -25,6 +28,9 @@ workspace.
     - `InvalidExternalSignature`
     - `MissingPreimage`
     - `UnsupportedPubkey`
+- `zcash_transparent::builder::Builder::add_input` now takes a `TransparentInputInfo`
+  instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
+  previous API.
 
 ## [0.6.3] - 2025-12-17
 
