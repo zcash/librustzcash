@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     fmt::{self, Debug, Display},
     num::{NonZeroU64, NonZeroUsize},
 };
@@ -483,6 +484,32 @@ impl EphemeralBalance {
     }
 }
 
+/// A trait that defines a set of types used in wallet metadata retrieval. Ordinarily, this will
+/// correspond to a type that implements [`InputSource`], and a blanket implementation of this
+/// trait is provided for all types that implement [`InputSource`].
+///
+/// If more capabilities are required of the backend than are exposed in the [`InputSource`] trait,
+/// the implementer of this trait should define their own trait that descends from [`InputSource`]
+/// and adds the required capabilities there, and then implement that trait for their desired
+/// database backend.
+pub trait MetaSource {
+    type Error;
+    type AccountId;
+    type NoteRef;
+}
+
+impl MetaSource for Infallible {
+    type Error = Infallible;
+    type AccountId = Infallible;
+    type NoteRef = Infallible;
+}
+
+impl<I: InputSource> MetaSource for I {
+    type Error = I::Error;
+    type AccountId = I::AccountId;
+    type NoteRef = I::NoteRef;
+}
+
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
@@ -490,11 +517,8 @@ pub trait ChangeStrategy {
     type Error: From<<Self::FeeRule as FeeRule>::Error>;
 
     /// The type of metadata source that this change strategy requires in order to be able to
-    /// retrieve required wallet metadata. If more capabilities are required of the backend than
-    /// are exposed in the [`InputSource`] trait, the implementer of this trait should define their
-    /// own trait that descends from [`InputSource`] and adds the required capabilities there, and
-    /// then implement that trait for their desired database backend.
-    type MetaSource: InputSource;
+    /// retrieve required wallet metadata.
+    type MetaSource: MetaSource;
 
     /// Tye type of wallet metadata that this change strategy relies upon in order to compute
     /// change.
@@ -509,10 +533,10 @@ pub trait ChangeStrategy {
     fn fetch_wallet_meta(
         &self,
         meta_source: &Self::MetaSource,
-        account: <Self::MetaSource as InputSource>::AccountId,
+        account: <Self::MetaSource as MetaSource>::AccountId,
         target_height: TargetHeight,
-        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error>;
+        exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error>;
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
