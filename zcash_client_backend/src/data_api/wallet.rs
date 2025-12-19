@@ -1299,7 +1299,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_input =
+        let mut add_transparent_p2pkh_input =
             |builder: &mut Builder<_, _>,
              utxos_spent: &mut Vec<_>,
              recipient_address: &TransparentAddress,
@@ -1320,13 +1320,13 @@ where
                 };
 
                 utxos_spent.push(outpoint.clone());
-                builder.add_transparent_input(pubkey, outpoint, txout)?;
+                builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
 
                 Ok(())
             };
 
         for utxo in proposal_step.transparent_inputs() {
-            add_transparent_input(
+            add_transparent_p2pkh_input(
                 &mut builder,
                 &mut utxos_spent,
                 utxo.recipient_address(),
@@ -1349,7 +1349,7 @@ where
                 .ok_or(ProposalError::ReferenceError(*input_ref))?
                 .vout[outpoint.n() as usize];
 
-            add_transparent_input(
+            add_transparent_p2pkh_input(
                 &mut builder,
                 &mut utxos_spent,
                 &address,

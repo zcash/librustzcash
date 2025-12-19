@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::{
-    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, SplitPolicy,
+    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, MetaSource, SplitPolicy,
     TransactionBalance,
     common::{SinglePoolBalanceConfig, single_pool_output_balance},
     sapling as sapling_fees,
@@ -95,7 +95,7 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
 impl<R, I> ChangeStrategy for SingleOutputChangeStrategy<R, I>
 where
     R: Zip317FeeRule + Clone,
-    I: InputSource,
+    I: MetaSource,
     <R as FeeRule>::Error: From<BalanceError>,
 {
     type FeeRule = R;
@@ -110,10 +110,10 @@ where
     fn fetch_wallet_meta(
         &self,
         _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as InputSource>::AccountId,
+        _account: <Self::MetaSource as MetaSource>::AccountId,
         _target_height: TargetHeight,
-        _exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error> {
+        _exclude: &[<Self::MetaSource as MetaSource>::NoteRef],
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as MetaSource>::Error> {
         Ok(())
     }
 

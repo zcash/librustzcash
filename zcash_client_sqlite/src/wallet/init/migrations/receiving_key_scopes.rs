@@ -369,7 +369,7 @@ mod tests {
         );
         let mut transparent_signing_set = TransparentSigningSet::new();
         builder
-            .add_transparent_input(
+            .add_transparent_p2pkh_input(
                 transparent_signing_set.add_key(
                     usk0.transparent()
                         .derive_external_secret_key(NonHardenedChildIndex::ZERO)

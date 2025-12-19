@@ -88,7 +88,7 @@ fn transparent_to_orchard() {
         },
     );
     builder
-        .add_transparent_input(transparent_pubkey, utxo, coin.clone())
+        .add_transparent_p2pkh_input(transparent_pubkey, utxo, coin.clone())
         .unwrap();
     builder
         .add_orchard_output::<zip317::FeeRule>(

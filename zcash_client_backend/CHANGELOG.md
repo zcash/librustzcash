@@ -22,6 +22,7 @@ workspace.
   - `LightdInfo` has added fields `upgrade_name`, `upgrade_height`, and `lighwallet_protocol_version`
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
+- `zcash_client_backend::fees::MetaSource`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
@@ -51,6 +52,9 @@ workspace.
     IVK.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variant `PaymentAmountMissing`
+- The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
+  bounded on the newly added `MetaSource` type instead of
+  `zcash_client_backend::data_api::InputSource`.
 
 ## [0.21.0] - 2025-11-05
 
