@@ -89,17 +89,25 @@ zcash_script.workspace = true
 
 [features]
 default = ["std"]
-std = ["dep:document-features"]
+std = [
+    "dep:document-features",
+    "orchard?/std",
+    "sapling?/std",
+    "transparent/std",
+    "zcash_address/std",
+]
 
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
-  "dep:bip32",
-  "transparent/transparent-inputs",
+    "dep:bip32",
+    "transparent/transparent-inputs",
 ]
 
 ## Enables use of zcashd-derived secp256k1 secret key encodings.
 transparent-key-encoding = [
-  "transparent-inputs", "dep:secp256k1", "dep:zeroize"
+    "transparent-inputs",
+    "dep:secp256k1",
+    "dep:zeroize",
 ]
 
 ## Enables use of Orchard key parts and addresses

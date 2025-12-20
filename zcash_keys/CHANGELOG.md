@@ -16,6 +16,8 @@ workspace.
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- `zcash_keys/std` now implies `orchard?/std`, `sapling?/std`,
+  `transparent/std`, and `zcash_address/std`.
 
 ## [0.12.0] - 2025-10-13
 
