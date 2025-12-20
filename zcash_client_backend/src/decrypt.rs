@@ -114,13 +114,23 @@ impl<A> DecryptedOutput<orchard::note::Note, A> {
 /// - `tx`: The transaction to decrypt.
 /// - `ufvks`: The [`UnifiedFullViewingKey`]s to use in trial decryption, keyed
 ///   by the identifiers for the wallet accounts they correspond to.
+/// - `transfer_types`: The key types that should be used to attempt to trial-decrypt the
+///   transaction. If empty, all available key types should be used.
 pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     params: &P,
     mined_height: Option<BlockHeight>,
     chain_tip_height: Option<BlockHeight>,
     tx: &'a Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
+    transfer_types: &[TransferType],
 ) -> DecryptedTransaction<'a, AccountId> {
+    let decrypt_external =
+        transfer_types.is_empty() || transfer_types.contains(&TransferType::Incoming);
+    let decrypt_internal =
+        transfer_types.is_empty() || transfer_types.contains(&TransferType::WalletInternal);
+    let decrypt_outgoing =
+        transfer_types.is_empty() || transfer_types.contains(&TransferType::Outgoing);
+
     let zip212_enforcement = zip212_enforcement(
         params,
         // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
@@ -133,6 +143,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                 .expect("Sapling activation height must be known.")
         }),
     );
+
     let sapling_bundle = tx.sapling_bundle();
     let sapling_outputs = sapling_bundle
         .iter()
@@ -142,32 +153,41 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                 .flat_map(|(account, ufvk)| ufvk.sapling().into_iter().map(|dfvk| (*account, dfvk)))
                 .flat_map(|(account, dfvk)| {
                     let sapling_domain = SaplingDomain::new(zip212_enforcement);
-                    let ivk_external =
-                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External));
-                    let ivk_internal =
-                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
-                    let ovk = dfvk.fvk().ovk;
+                    let ivk_external = decrypt_external
+                        .then(|| PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External)));
+                    let ivk_internal = decrypt_internal
+                        .then(|| PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal)));
+                    let ovk = decrypt_outgoing.then_some(dfvk.fvk().ovk);
 
                     bundle
                         .shielded_outputs()
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {
-                            try_note_decryption(&sapling_domain, &ivk_external, output)
+                            ivk_external
+                                .as_ref()
+                                .and_then(|k| try_note_decryption(&sapling_domain, k, output))
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
-                                    try_note_decryption(&sapling_domain, &ivk_internal, output)
+                                    ivk_internal
+                                        .as_ref()
+                                        .and_then(|k| {
+                                            try_note_decryption(&sapling_domain, k, output)
+                                        })
                                         .map(|ret| (ret, TransferType::WalletInternal))
                                 })
                                 .or_else(|| {
-                                    try_output_recovery_with_ovk(
-                                        &sapling_domain,
-                                        &ovk,
-                                        output,
-                                        output.cv(),
-                                        output.out_ciphertext(),
-                                    )
-                                    .map(|ret| (ret, TransferType::Outgoing))
+                                    ovk.as_ref()
+                                        .and_then(|k| {
+                                            try_output_recovery_with_ovk(
+                                                &sapling_domain,
+                                                k,
+                                                output,
+                                                output.cv(),
+                                                output.out_ciphertext(),
+                                            )
+                                        })
+                                        .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()
                                 .map(move |((note, _, memo), transfer_type)| {
@@ -194,13 +214,13 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                 .iter()
                 .flat_map(|(account, ufvk)| ufvk.orchard().into_iter().map(|fvk| (*account, fvk)))
                 .flat_map(|(account, fvk)| {
-                    let ivk_external = orchard::keys::PreparedIncomingViewingKey::new(
-                        &fvk.to_ivk(Scope::External),
-                    );
-                    let ivk_internal = orchard::keys::PreparedIncomingViewingKey::new(
-                        &fvk.to_ivk(Scope::Internal),
-                    );
-                    let ovk = fvk.to_ovk(Scope::External);
+                    let ivk_external = decrypt_external.then(|| {
+                        orchard::keys::PreparedIncomingViewingKey::new(&fvk.to_ivk(Scope::External))
+                    });
+                    let ivk_internal = decrypt_internal.then(|| {
+                        orchard::keys::PreparedIncomingViewingKey::new(&fvk.to_ivk(Scope::Internal))
+                    });
+                    let ovk = decrypt_external.then(|| fvk.to_ovk(Scope::External));
 
                     bundle
                         .actions()
@@ -208,21 +228,28 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                         .enumerate()
                         .flat_map(move |(index, action)| {
                             let domain = OrchardDomain::for_action(action);
-                            try_note_decryption(&domain, &ivk_external, action)
+                            ivk_external
+                                .as_ref()
+                                .and_then(|k| try_note_decryption(&domain, k, action))
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
-                                    try_note_decryption(&domain, &ivk_internal, action)
+                                    ivk_internal
+                                        .as_ref()
+                                        .and_then(|k| try_note_decryption(&domain, k, action))
                                         .map(|ret| (ret, TransferType::WalletInternal))
                                 })
                                 .or_else(|| {
-                                    try_output_recovery_with_ovk(
-                                        &domain,
-                                        &ovk,
-                                        action,
-                                        action.cv_net(),
-                                        &action.encrypted_note().out_ciphertext,
-                                    )
-                                    .map(|ret| (ret, TransferType::Outgoing))
+                                    ovk.as_ref()
+                                        .and_then(|k| {
+                                            try_output_recovery_with_ovk(
+                                                &domain,
+                                                k,
+                                                action,
+                                                action.cv_net(),
+                                                &action.encrypted_note().out_ciphertext,
+                                            )
+                                        })
+                                        .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()
                                 .map(move |((note, _, memo), transfer_type)| {

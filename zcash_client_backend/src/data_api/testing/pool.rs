@@ -257,7 +257,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
 
     let mut found_tx_change_memo = false;
@@ -528,7 +528,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 1);
 
     let mut found_send_max_memo = false;
@@ -666,7 +666,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 1);
 
     let mut found_send_max_memo = false;
@@ -928,7 +928,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 1);
 
     let mut found_send_max_memo = false;
@@ -1533,7 +1533,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 3);
 
     let mut found_tx_change_memo = false;
@@ -2050,7 +2050,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks, &[]);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
 
     let mut found_tx_change_memo = false;
