@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::TxIndex`
+
 ## [0.7.2] - 2025-12-10
 
 ### Added

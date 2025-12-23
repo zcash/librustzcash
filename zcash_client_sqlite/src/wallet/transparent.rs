@@ -22,6 +22,7 @@ use transparent::{
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::data_api::WalletUtxo;
+use zcash_client_backend::wallet::transparent::GapLimits;
 use zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressSource};
 use zcash_client_backend::{
     data_api::{
@@ -39,8 +40,7 @@ use zcash_keys::{
         UnifiedIncomingViewingKey,
     },
 };
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_primitives::transaction::fees::zip317;
+use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight},
@@ -61,7 +61,7 @@ use super::{
     get_account_ids, get_account_internal,
 };
 use crate::{
-    AccountRef, AccountUuid, AddressRef, GapLimits, TxRef, UtxoId,
+    AccountRef, AccountUuid, AddressRef, TxRef, UtxoId,
     error::SqliteClientError,
     util::Clock,
     wallet::{common::tx_unexpired_condition, get_account, mempool_height},
@@ -143,16 +143,15 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let gap_limit_starts = scopes
         .iter()
         .filter_map(|key_scope| {
-            gap_limits
-                .limit_for(*key_scope)
-                .zip(key_scope.as_transparent())
-                .and_then(|(limit, t_key_scope)| {
+            key_scope.as_transparent().and_then(|t_key_scope| {
+                gap_limits.limit_for(t_key_scope).and_then(|limit| {
                     find_gap_start(conn, account_id, t_key_scope, limit)
                         .transpose()
-                        .map(|res| res.map(|child_idx| (*key_scope, (limit, child_idx))))
+                        .map(|res| res.map(|child_idx| (t_key_scope, (limit, child_idx))))
                 })
+            })
         })
-        .collect::<Result<HashMap<KeyScope, (u32, NonHardenedChildIndex)>, SqliteClientError>>()?;
+        .collect::<Result<HashMap<TransparentKeyScope, (u32, NonHardenedChildIndex)>, SqliteClientError>>()?;
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
@@ -217,9 +216,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             row.get::<_, Option<u32>>("exposed_at_height")?
                 .map_or(Exposure::Unknown, |h| Exposure::Exposed {
                     at_height: BlockHeight::from(h),
-                    gap_metadata: gap_limit_starts
-                        .get(&key_scope)
-                        .zip(address_index_opt)
+                    gap_metadata: key_scope
+                        .as_transparent()
+                        .and_then(|t_key_scope| {
+                            gap_limit_starts.get(&t_key_scope).zip(address_index_opt)
+                        })
                         .map_or(
                             GapMetadata::DerivationUnknown,
                             |((gap_limit, start), idx)| {
@@ -268,9 +269,10 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time)
                 }
                 derived => {
-                    let scope_opt = <Option<TransparentKeyScope>>::from(derived);
-                    let (scope, address_index) =
-                        scope_opt.zip(address_index_opt).ok_or_else(|| {
+                    let (scope, address_index) = derived
+                        .as_transparent()
+                        .zip(address_index_opt)
+                        .ok_or_else(|| {
                             SqliteClientError::CorruptedData(
                                 "Derived addresses must have derivation metadata present."
                                     .to_owned(),
@@ -745,9 +747,9 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
 pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_id: AccountRef,
     key_scope: TransparentKeyScope,
-    gap_limits: &GapLimits,
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
@@ -825,9 +827,9 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
             generate_gap_addresses(
                 conn,
                 params,
+                gap_limits,
                 account_id,
                 t_key_scope,
-                gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 false,
             )?;
@@ -1049,12 +1051,12 @@ pub(crate) fn excluding_wallet_internal_ephemeral_outputs(
 ///
 /// # Parameters
 /// - `outpoint`: The identifier for the output to be retrieved.
-/// - `spendable_as_of`: The target height of a transaction under construction that will spend the
+/// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
-    spendable_as_of: Option<TargetHeight>,
+    target_height: Option<TargetHeight>,
 ) -> Result<Option<WalletUtxo>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
@@ -1090,8 +1092,8 @@ pub(crate) fn get_wallet_transparent_output(
             named_params![
                 ":txid": outpoint.hash(),
                 ":output_index": outpoint.n(),
-                ":target_height": spendable_as_of.map(u32::from),
-                ":allow_unspendable": spendable_as_of.is_none(),
+                ":target_height": target_height.map(u32::from),
+                ":allow_unspendable": target_height.is_none(),
             ],
             |row| {
                 let output = to_unspent_transparent_output(row)?;
@@ -1519,7 +1521,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     gap_limits: &GapLimits,
     output: &WalletTransparentOutput,
-) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
+) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
     put_transparent_output(conn, params, gap_limits, output, observed_height, true)
 }
@@ -1797,15 +1799,15 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                     let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
                     let exposed_at_height = row.get::<_, Option<u32>>("exposed_at_height")?.map(BlockHeight::from);
 
-                    match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
-                        Some((scope, address_index)) => {
+                    match key_scope.as_transparent().zip(address_index) {
+                        Some((t_key_scope, address_index)) => {
                             let exposure = exposed_at_height.map_or(
                                 Ok::<_, SqliteClientError>(Exposure::Unknown),
                                 |at_height| {
-                                    let gap_metadata = match gap_limits.limit_for(key_scope) {
+                                    let gap_metadata = match gap_limits.limit_for(t_key_scope) {
                                         None => GapMetadata::DerivationUnknown,
                                         Some(gap_limit) => {
-                                            find_gap_start(conn, account_id, scope, gap_limit)?.map_or(
+                                            find_gap_start(conn, account_id, t_key_scope, gap_limit)?.map_or(
                                                 GapMetadata::GapRecoverable { gap_limit },
                                                 |gap_start| {
                                                     if let Some(gap_position) = address_index.index().checked_sub(gap_start.index()) {
@@ -1829,7 +1831,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             )?;
 
                             Ok(TransparentAddressMetadata::derived(
-                                scope,
+                                t_key_scope,
                                 address_index,
                                 exposure,
                                 next_check_time
@@ -1961,21 +1963,23 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     output: &WalletTransparentOutput,
     observation_height: BlockHeight,
     known_unspent: bool,
-) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
+) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let addr_str = output.recipient_address().encode(params);
 
     // Unlike the shielded pools, we only can receive transparent outputs on addresses for which we
     // have an `addresses` table entry, so we can just query for that here.
-    let (address_id, account_id, key_scope_code) = conn
+    let (address_id, account_id, account_uuid, key_scope_code) = conn
         .query_row(
-            "SELECT id, account_id, key_scope
+            "SELECT addresses.id, account_id, accounts.uuid, key_scope
              FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
              WHERE cached_transparent_receiver_address = :transparent_address",
             named_params! {":transparent_address": addr_str},
             |row| {
                 Ok((
                     row.get("id").map(AddressRef)?,
                     row.get("account_id").map(AccountRef)?,
+                    row.get("uuid").map(AccountUuid)?,
                     row.get("key_scope")?,
                 ))
             },
@@ -2128,7 +2132,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         output_height.map_or(observation_height, BlockHeight::from),
     )?;
 
-    Ok((account_id, key_scope, utxo_id))
+    Ok((account_id, account_uuid, key_scope, utxo_id))
 }
 
 /// Adds a request to retrieve transactions involving the specified address to the transparent
@@ -2212,7 +2216,7 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::gap_limits(
             TestDbFactory::default(),
             BlockCache::new(),
-            GapLimits::default().into(),
+            GapLimits::default(),
         );
     }
 

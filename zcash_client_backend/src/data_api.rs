@@ -84,7 +84,7 @@ use zcash_keys::{
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
-    consensus::BlockHeight,
+    consensus::{BlockHeight, TxIndex},
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
@@ -125,6 +125,7 @@ use zcash_protocol::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
+pub mod ll;
 pub mod scanning;
 pub mod wallet;
 
@@ -2195,14 +2196,14 @@ impl BlockMetadata {
 pub struct ScannedBundles<NoteCommitment, NF> {
     final_tree_size: u32,
     commitments: Vec<(NoteCommitment, Retention<BlockHeight>)>,
-    nullifier_map: Vec<(TxId, u16, Vec<NF>)>,
+    nullifier_map: Vec<(TxIndex, TxId, Vec<NF>)>,
 }
 
 impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
     pub(crate) fn new(
         final_tree_size: u32,
         commitments: Vec<(NoteCommitment, Retention<BlockHeight>)>,
-        nullifier_map: Vec<(TxId, u16, Vec<NF>)>,
+        nullifier_map: Vec<(TxIndex, TxId, Vec<NF>)>,
     ) -> Self {
         Self {
             final_tree_size,
@@ -2222,7 +2223,7 @@ impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
     /// the block, so that either the txid or the combination of the block hash available from
     /// [`ScannedBlock::block_hash`] and returned transaction index may be used to uniquely
     /// identify the transaction, depending upon the needs of the caller.
-    pub fn nullifier_map(&self) -> &[(TxId, u16, Vec<NF>)] {
+    pub fn nullifier_map(&self) -> &[(TxIndex, TxId, Vec<NF>)] {
         &self.nullifier_map
     }
 
@@ -2342,19 +2343,19 @@ impl<A> ScannedBlock<A> {
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct DecryptedTransaction<'a, AccountId> {
+pub struct DecryptedTransaction<'a, Tx, AccountId> {
     mined_height: Option<BlockHeight>,
-    tx: &'a Transaction,
+    tx: &'a Tx,
     sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<DecryptedOutput<orchard::note::Note, AccountId>>,
 }
 
-impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
+impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
         mined_height: Option<BlockHeight>,
-        tx: &'a Transaction,
+        tx: &'a Tx,
         sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<
             DecryptedOutput<orchard::note::Note, AccountId>,
@@ -2374,7 +2375,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         self.mined_height
     }
     /// Returns the raw transaction data.
-    pub fn tx(&self) -> &Transaction {
+    pub fn tx(&self) -> &Tx {
         self.tx
     }
     /// Returns the Sapling outputs that were decrypted from the transaction.
@@ -3052,7 +3053,7 @@ pub trait WalletWrite: WalletRead {
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
         &mut self,
-        received_tx: DecryptedTransaction<Self::AccountId>,
+        received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
     /// Sets the trust status of the given transaction to either trusted or untrusted.

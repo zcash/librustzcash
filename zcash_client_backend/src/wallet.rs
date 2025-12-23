@@ -14,7 +14,7 @@ use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
     PoolType, ShieldedProtocol,
-    consensus::BlockHeight,
+    consensus::{BlockHeight, TxIndex},
     value::{BalanceError, Zatoshis},
 };
 use zip32::Scope;
@@ -29,6 +29,9 @@ use {
     ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
     std::time::SystemTime,
 };
+
+#[cfg(feature = "transparent-inputs")]
+pub mod transparent;
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -97,7 +100,7 @@ pub enum Recipient<AccountId> {
 #[derive(Clone)]
 pub struct WalletTx<AccountId> {
     txid: TxId,
-    block_index: usize,
+    block_index: TxIndex,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
     #[cfg(feature = "orchard")]
@@ -110,7 +113,7 @@ impl<AccountId> WalletTx<AccountId> {
     /// Constructs a new [`WalletTx`] from its constituent parts.
     pub fn new(
         txid: TxId,
-        block_index: usize,
+        block_index: TxIndex,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
         #[cfg(feature = "orchard")] orchard_spends: Vec<
@@ -138,7 +141,7 @@ impl<AccountId> WalletTx<AccountId> {
     }
 
     /// Returns the index of the transaction in the containing block.
-    pub fn block_index(&self) -> usize {
+    pub fn block_index(&self) -> TxIndex {
         self.block_index
     }
 
@@ -643,6 +646,7 @@ impl OvkPolicy {
 
 /// Metadata describing the gap limit position of a transparent address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
 pub enum GapMetadata {
     /// The address, or an address at a greater child index, has received transparent funds and
     /// will be discovered by wallet recovery by exploration over the space of

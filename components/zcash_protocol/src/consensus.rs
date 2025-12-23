@@ -3,6 +3,7 @@
 use core::cmp::{Ord, Ordering};
 use core::convert::TryFrom;
 use core::fmt;
+use core::num::TryFromIntError;
 use core::ops::{Add, Bound, RangeBounds, Sub};
 
 #[cfg(feature = "std")]
@@ -12,8 +13,8 @@ use crate::constants::{mainnet, regtest, testnet};
 
 /// A wrapper type representing blockchain heights.
 ///
-/// Safe conversion from various integer types, as well as addition and subtraction, are
-/// provided.
+/// Safe conversion from various integer types, as well as addition and subtraction, are provided.
+/// Subtraction of block heights, and of deltas to block heights, are always saturating.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
@@ -125,6 +126,64 @@ impl Sub<BlockHeight> for BlockHeight {
         self.0.saturating_sub(other.0)
     }
 }
+
+/// A wrapper type the index of a transaction within a block.
+///
+/// Safe conversion from various integer types are provided.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TxIndex(u16);
+
+impl From<TxIndex> for u16 {
+    fn from(value: TxIndex) -> Self {
+        value.0
+    }
+}
+
+impl From<TxIndex> for u32 {
+    fn from(value: TxIndex) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<TxIndex> for u64 {
+    fn from(value: TxIndex) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<u16> for TxIndex {
+    fn from(value: u16) -> Self {
+        TxIndex(value)
+    }
+}
+
+impl TryFrom<u32> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+impl TryFrom<u64> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+impl TryFrom<usize> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+#[cfg(feature = "std")]
+memuse::impl_no_dynamic_usage!(TxIndex);
 
 /// The enumeration of known Zcash network types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -32,7 +32,7 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     ShieldedProtocol, TxId,
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 use zip32::{Scope, fingerprint::SeedFingerprint};
 
@@ -557,14 +557,14 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     pub(crate) fn insert_sapling_nullifier_map(
         &mut self,
         block_height: BlockHeight,
-        new_entries: &[(TxId, u16, Vec<sapling::Nullifier>)],
+        new_entries: &[(TxIndex, TxId, Vec<sapling::Nullifier>)],
     ) -> Result<(), Error> {
-        for (txid, tx_index, nullifiers) in new_entries {
+        for (tx_index, txid, nullifiers) in new_entries {
             for nf in nullifiers.iter() {
                 self.nullifiers
-                    .insert(block_height, *tx_index as u32, Nullifier::Sapling(*nf));
+                    .insert(block_height, u32::from(*tx_index), Nullifier::Sapling(*nf));
             }
-            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+            match self.tx_locator.entry((block_height, u32::from(*tx_index))) {
                 Entry::Occupied(x) => {
                     if txid == x.get() {
                         // This is a duplicate entry
@@ -585,14 +585,14 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     pub(crate) fn insert_orchard_nullifier_map(
         &mut self,
         block_height: BlockHeight,
-        new_entries: &[(TxId, u16, Vec<orchard::note::Nullifier>)],
+        new_entries: &[(TxIndex, TxId, Vec<orchard::note::Nullifier>)],
     ) -> Result<(), Error> {
-        for (txid, tx_index, nullifiers) in new_entries {
+        for (tx_index, txid, nullifiers) in new_entries {
             for nf in nullifiers.iter() {
                 self.nullifiers
-                    .insert(block_height, *tx_index as u32, Nullifier::Orchard(*nf));
+                    .insert(block_height, u32::from(*tx_index), Nullifier::Orchard(*nf));
             }
-            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+            match self.tx_locator.entry((block_height, u32::from(*tx_index))) {
                 Entry::Occupied(x) => {
                     if txid == x.get() {
                         // This is a duplicate entry

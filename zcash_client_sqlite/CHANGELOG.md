@@ -16,9 +16,20 @@ workspace.
   - `tx_mined_height`
   - `tx_trust_status`
   - `recipient_key_scope`
+- `zcash_client_sqlite::TxRef`
+- `impl<'a> Borrow<rusqlite::Transaction<'a>> for zcash_client_sqlite::SqlTransaction<'a>`
+- `impl zcash_client_backend::data_api::ll::LowLevelWalletRead for WalletDb`
+- `impl zcash_client_backend::data_api::ll::LowLevelWalletWrite for WalletDb`
+- `impl Hash for zcash_client_sqlite::{ReceivedNoteId, UtxoId, TxRef}`
+- `impl {PartialOrd, Ord} for zcash_client_sqlite::{UtxoId, PartialOrd, Ord}`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+
+### Removed
+- `zcash_client_sqlite::GapLimits` use
+  `zcash_client_backend::wallet::transparent::GapLimits` instead.
+- `zcash_client_sqlite::UtxoId` contents are now private.
 
 ## [0.18.10, 0.19.1] - 2025-11-25
 
@@ -46,7 +57,7 @@ workspace.
 
 ### Fixed
 - A bug was fixed in `WalletDb::get_transaction` that could cause transaction
-  retrieval to return an error instead of `None` for transactions for which the 
+  retrieval to return an error instead of `None` for transactions for which the
   raw transaction data was not available.
 
 ## [0.18.9] - 2025-10-22
