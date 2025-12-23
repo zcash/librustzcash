@@ -4958,6 +4958,7 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
     }
 }
 
+#[cfg(feature = "pczt")]
 fn build_coinbase_tx(
     network: &LocalNetwork,
     target_height: BlockHeight,
@@ -4989,6 +4990,7 @@ fn build_coinbase_tx(
         .unwrap()
 }
 
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
 /// Tests that immature coinbase outputs are excluded from note selection.
 pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
