@@ -417,6 +417,8 @@ mod tests {
                 &prover,
                 #[allow(deprecated)]
                 &fixed::FeeRule::non_standard(Zatoshis::ZERO),
+                #[cfg(zcash_unstable = "nu7")]
+                |_| false,
             )
             .unwrap();
 
