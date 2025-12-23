@@ -84,7 +84,7 @@ use zcash_keys::{
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
-    consensus::BlockHeight,
+    consensus::{BlockHeight, TxIndex},
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
@@ -2196,14 +2196,14 @@ impl BlockMetadata {
 pub struct ScannedBundles<NoteCommitment, NF> {
     final_tree_size: u32,
     commitments: Vec<(NoteCommitment, Retention<BlockHeight>)>,
-    nullifier_map: Vec<(TxId, u16, Vec<NF>)>,
+    nullifier_map: Vec<(TxIndex, TxId, Vec<NF>)>,
 }
 
 impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
     pub(crate) fn new(
         final_tree_size: u32,
         commitments: Vec<(NoteCommitment, Retention<BlockHeight>)>,
-        nullifier_map: Vec<(TxId, u16, Vec<NF>)>,
+        nullifier_map: Vec<(TxIndex, TxId, Vec<NF>)>,
     ) -> Self {
         Self {
             final_tree_size,
@@ -2223,7 +2223,7 @@ impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
     /// the block, so that either the txid or the combination of the block hash available from
     /// [`ScannedBlock::block_hash`] and returned transaction index may be used to uniquely
     /// identify the transaction, depending upon the needs of the caller.
-    pub fn nullifier_map(&self) -> &[(TxId, u16, Vec<NF>)] {
+    pub fn nullifier_map(&self) -> &[(TxIndex, TxId, Vec<NF>)] {
         &self.nullifier_map
     }
 

@@ -60,6 +60,13 @@ workspace.
 - `zcash_client_backend::wallet::GapMetadata` has been moved behind the
   `transparent-inputs` feature flag, as it is only useful in the context
   of the wallet receiving transparent funds.
+- The return type of `zcash_client_backend::ScannedBundles::nullifier_map`
+  has been altered to use the `zcash_protocol::consensus::TxIndex` type
+  instead of `u16`. Also, the order of elements in the record has been
+  changed.
+- `zcash_client_backend::wallet::WalletTx::block_index` now has type
+  `zcash_protocol::consensus::TxIndex` and the `new` function has
+  been modified accordingly.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

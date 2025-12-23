@@ -16,6 +16,7 @@ use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, COMPACT_NOTE_SIZE, Domain, ShieldedOutput, batch};
 use zcash_primitives::transaction::{TxId, components::sapling::zip212_enforcement};
+use zcash_protocol::consensus::TxIndex;
 use zcash_protocol::{
     ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -846,7 +847,7 @@ where
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let tx_index =
-            u16::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
+            TxIndex::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
 
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
             &tx.spends,
@@ -859,7 +860,7 @@ where
             WalletSpend::from_parts,
         );
 
-        sapling_nullifier_map.push((txid, tx_index, sapling_unlinked_nullifiers));
+        sapling_nullifier_map.push((tx_index, txid, sapling_unlinked_nullifiers));
 
         #[cfg(feature = "orchard")]
         let orchard_spends = {
@@ -873,7 +874,7 @@ where
                 },
                 WalletSpend::from_parts,
             );
-            orchard_nullifier_map.push((txid, tx_index, orchard_unlinked_nullifiers));
+            orchard_nullifier_map.push((tx_index, txid, orchard_unlinked_nullifiers));
             orchard_spends
         };
 
@@ -957,7 +958,7 @@ where
         if has_sapling || has_orchard {
             wtxs.push(WalletTx::new(
                 txid,
-                tx_index as usize,
+                tx_index,
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
@@ -1402,7 +1403,7 @@ mod tests {
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
-            assert_eq!(tx.block_index(), 1);
+            assert_eq!(tx.block_index(), 1.into());
             assert_eq!(tx.sapling_spends().len(), 0);
             assert_eq!(tx.sapling_outputs().len(), 1);
             assert_eq!(tx.sapling_outputs()[0].index(), 0);
@@ -1482,7 +1483,7 @@ mod tests {
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
-            assert_eq!(tx.block_index(), 1);
+            assert_eq!(tx.block_index(), 1.into());
             assert_eq!(tx.sapling_spends().len(), 0);
             assert_eq!(tx.sapling_outputs().len(), 1);
             assert_eq!(tx.sapling_outputs()[0].index(), 0);
@@ -1542,7 +1543,7 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
-        assert_eq!(tx.block_index(), 1);
+        assert_eq!(tx.block_index(), 1.into());
         assert_eq!(tx.sapling_spends().len(), 1);
         assert_eq!(tx.sapling_outputs().len(), 0);
         assert_eq!(tx.sapling_spends()[0].index(), 0);

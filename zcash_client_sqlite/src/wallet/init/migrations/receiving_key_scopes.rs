@@ -911,7 +911,7 @@ mod tests {
         let tx_params = named_params![
             ":txid": &txid_bytes.as_ref()[..],
             ":block": u32::from(height),
-            ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
+            ":tx_index": u16::from(tx.block_index()),
         ];
 
         stmt_upsert_tx_meta

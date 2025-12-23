@@ -112,7 +112,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters, TxIndex},
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
@@ -3544,7 +3544,7 @@ pub(crate) fn put_tx_meta(
     let tx_params = named_params![
         ":txid": &txid_bytes.as_ref()[..],
         ":block": u32::from(height),
-        ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
+        ":tx_index": u16::from(tx.block_index()),
     ];
 
     stmt_upsert_tx_meta
@@ -3996,7 +3996,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
     spend_pool: ShieldedProtocol,
-    new_entries: &[(TxId, u16, Vec<N>)],
+    new_entries: &[(TxIndex, TxId, Vec<N>)],
 ) -> Result<(), SqliteClientError> {
     let mut stmt_select_tx_locators = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
@@ -4017,10 +4017,10 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
             tx_index = :tx_index",
     )?;
 
-    for (txid, tx_index, nullifiers) in new_entries {
+    for (tx_index, txid, nullifiers) in new_entries {
         let tx_args = named_params![
             ":block_height": u32::from(block_height),
-            ":tx_index": tx_index,
+            ":tx_index": u16::from(*tx_index),
             ":txid": txid.as_ref(),
         ];
 
@@ -4038,7 +4038,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
             .query_map(tx_args, |row| {
                 Ok((
                     BlockHeight::from_u32(row.get(0)?),
-                    row.get::<_, u16>(1)?,
+                    TxIndex::from(row.get::<_, u16>(1)?),
                     TxId::from_bytes(row.get(2)?),
                 ))
             })?
@@ -4071,7 +4071,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
                 ":spend_pool": pool_code(PoolType::Shielded(spend_pool)),
                 ":nf": nf.as_ref(),
                 ":block_height": u32::from(block_height),
-                ":tx_index": tx_index,
+                ":tx_index": u16::from(*tx_index),
             ];
             stmt_insert_nullifier_mapping.execute(nf_args)?;
         }
@@ -4104,7 +4104,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
         .query_row(sql_args, |row| {
             Ok((
                 BlockHeight::from_u32(row.get(0)?),
-                row.get(1)?,
+                TxIndex::from(row.get::<_, u16>(1)?),
                 TxId::from_bytes(row.get(2)?),
             ))
         })
