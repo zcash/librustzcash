@@ -143,7 +143,7 @@ pub trait LowLevelWalletRead {
     /// note or UTXO.
     ///
     /// If the wallet database has stored a wallet address that contains the given receiver, then
-    /// that address is returned; otherwise, a the most likely address containing that receiver
+    /// that address is returned; otherwise, the most likely address containing that receiver
     /// will be returned. The "most likely" address should be produced by generating the "standard"
     /// address (a transparent address if the receiver is transparent, or the default Unified
     /// address for the account) derived at the receiver's diviersifier index if the receiver is
@@ -401,7 +401,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// # Parameters
     /// - `output`: The output data.
     /// - `observation_height`: The chain tip height at the time that the update is made. Note that
-    ///   this is likely to differ from the height at which the output was mined (if any.)
+    ///   this is likely to differ from the height at which the output was mined (if any).
     /// - `known_unspent`: Set to `true` if the output is known to be a member of the UTXO set as
     ///   of the given observation height.
     #[cfg(feature = "transparent-inputs")]
@@ -457,7 +457,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     ) -> Result<(), Self::Error>;
 
     /// Adds a [`TransactionDataRequest::TransactionsInvolvingAddress`] request to the transaction
-    /// data request queue. When the transparetn output of `tx_ref` at output index `output_index`
+    /// data request queue. When the transparent output of `tx_ref` at output index `output_index`
     /// (which must have been received at `receiving_address`) is detected as having been spent,
     /// this request will be considered fulfilled.
     ///
@@ -475,7 +475,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         output_index: u32,
     ) -> Result<(), Self::Error>;
 
-    /// Adds [`TransactionDataRequest::Enhancement`] requests  for transactions that generated the
+    /// Adds [`TransactionDataRequest::Enhancement`] requests for transactions that generated the
     /// transparent inputs to the provided [`DecryptedTransaction`] to the transaction data request
     /// queue.
     ///
@@ -496,7 +496,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
     /// Updates the state of the wallet backend to indicate that the given range of blocks has been
     /// fully scanned, identifying the position in the note commitment tree of any notes belonging
-    /// to the wallet that were discoveredd in the process of scanning.
+    /// to the wallet that were discovered in the process of scanning.
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
