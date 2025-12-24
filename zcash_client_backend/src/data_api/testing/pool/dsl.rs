@@ -255,7 +255,7 @@ where
             .unwrap_or_else(|| BlockHeight::from_u32(0))
     }
 
-    /// Generates `N` empty blocks.
+    /// Generates `N` empty blocks and scans them.
     ///
     /// Returns the current block height.
     pub fn add_empty_blocks(&mut self, n: usize) -> BlockHeight {
@@ -263,6 +263,7 @@ where
         for _ in 0..n {
             let (h, _) = self.generate_empty_block();
             out_height = h;
+            self.scan_cached_blocks(h, 1);
         }
         out_height
     }

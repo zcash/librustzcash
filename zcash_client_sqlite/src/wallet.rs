@@ -4175,12 +4175,13 @@ pub(crate) fn put_tx_data(
     observed_height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
-        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height, min_observed_height)
-        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height, :observed_height)
+        "INSERT INTO transactions (txid, tx_index, created, expiry_height, raw, fee, target_height, min_observed_height)
+        VALUES (:txid, :tx_index, :created_at, :expiry_height, :raw, :fee, :target_height, :observed_height)
         ON CONFLICT (txid) DO UPDATE
         SET expiry_height = :expiry_height,
             raw = :raw,
             fee = IFNULL(:fee, fee),
+            tx_index = IFNULL(tx_index, :tx_index),
             min_observed_height = MIN(
                 min_observed_height,
                 :observed_height
@@ -4192,8 +4193,13 @@ pub(crate) fn put_tx_data(
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
+    let tx_index = tx
+        .transparent_bundle()
+        .and_then(|bundle| bundle.is_coinbase().then_some(0i64));
+
     let tx_params = named_params![
         ":txid": &txid.as_ref()[..],
+        ":tx_index": tx_index,
         ":created_at": created_at,
         ":expiry_height": u32::from(tx.expiry_height()),
         ":raw": raw_tx,

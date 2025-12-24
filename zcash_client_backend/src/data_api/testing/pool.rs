@@ -8,15 +8,17 @@ use std::{
 use assert_matches::assert_matches;
 use incrementalmerkletree::{Level, Position, frontier::Frontier};
 use rand::{Rng, RngCore};
+use rand_core::OsRng;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 
-use transparent::address::TransparentAddress;
+use transparent::{address::TransparentAddress, builder::TransparentSigningSet};
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
+        builder::{BuildConfig, Builder},
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -27,6 +29,7 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };
+use zcash_script::opcode::PushValue;
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
 
@@ -4953,4 +4956,114 @@ pub fn receive_two_notes_with_same_value<T: ShieldedPoolTester>(
     for note in spendable_notes {
         assert_eq!(T::note_value(note.note()), value);
     }
+}
+
+#[cfg(feature = "pczt")]
+fn build_coinbase_tx(
+    network: &LocalNetwork,
+    target_height: BlockHeight,
+    value: Zatoshis,
+    recipient: TransparentAddress,
+    miner_data: Option<PushValue>,
+) -> zcash_primitives::transaction::builder::BuildResult {
+    let build_config = BuildConfig::Coinbase { miner_data };
+    let mut builder = Builder::new(*network, target_height, build_config);
+
+    // Add transparent output to recipient
+    builder.add_transparent_output(&recipient, value).unwrap();
+
+    // Build the transaction (coinbase transactions don't need provers)
+    builder
+        .build(
+            // unused internally
+            &TransparentSigningSet::new(),
+            // unused internally
+            &[],
+            // unused internally
+            &[],
+            OsRng,
+            &LocalTxProver::bundled(),
+            &LocalTxProver::bundled(),
+            // unused internally
+            &StandardFeeRule::Zip317,
+        )
+        .unwrap()
+}
+
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+/// Tests that immature coinbase outputs are excluded from note selection.
+pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Get the default transparent address
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+
+    // Get the height where the coinbase tx will be mined
+    let coinbase_height = st.sapling_activation_height();
+
+    // Construct the coinbase transaction and mine the block
+    let coinbase_build_result =
+        build_coinbase_tx(st.network(), coinbase_height, coinbase_value, t_addr, None);
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+
+    for i in 1..=99 {
+        let latest_block_height = st.add_empty_blocks(1);
+
+        // Verify the coinbase UTXO is **not** spendable
+        let spendable_utxos = st
+            .wallet()
+            .get_spendable_transparent_outputs(
+                &t_addr,
+                TargetHeight::from(h + i),
+                ConfirmationsPolicy::default(),
+            )
+            .unwrap();
+        let confirmations = latest_block_height - h;
+        assert!(
+            spendable_utxos.is_empty(),
+            "{i}: Immature coinbase output is spendable at blockheight {latest_block_height} \
+            with {confirmations} confirmations \
+            (should only be spendable at 100):\n \
+            {spendable_utxos:#?}"
+        );
+    }
+
+    // Add the last block and ensure that the coinbase transaction is spendable
+    let latest_height = st.add_empty_blocks(1);
+    let confirmations = latest_height - h;
+    let target_height = TargetHeight::from(latest_height + 1);
+    let spendable_utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(&t_addr, target_height, ConfirmationsPolicy::default())
+        .unwrap();
+    assert!(
+        !spendable_utxos.is_empty(),
+        "Coinbase output should be spendable at blockheight {latest_height} \
+        with {confirmations} confirmations since the coinbase tx was mined (at {h})\n \
+        target_height {target_height:?} - coinbase_tx.mined_height {h} = {}",
+        u32::from(target_height) - u32::from(h)
+    );
+
+    // Verify we can propose shielding the coinbase utxo
+    let account = st.get_account().id();
+    let _proposal = st
+        .propose_shielding(
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            Zatoshis::from_u64(10000).unwrap(),
+            &[t_addr],
+            account,
+            ConfirmationsPolicy::default(),
+        )
+        .unwrap();
 }
