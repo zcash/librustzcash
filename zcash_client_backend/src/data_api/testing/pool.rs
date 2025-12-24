@@ -5014,7 +5014,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     st.scan_cached_blocks(h, 1);
 
     let params = *st.network();
-    decrypt_and_store_transaction(&params, st.wallet_mut(), &coinbase_tx, Some(h)).unwrap();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
 
     for i in 1..=99 {
         let latest_block_height = st.add_empty_blocks(1);
