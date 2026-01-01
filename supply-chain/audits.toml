@@ -19,10 +19,19 @@ criteria = "safe-to-deploy"
 delta = "1.0.82 -> 1.0.83"
 
 [[audits.anyhow]]
-who = "Schell Carl Scivally <efsubenovex@gmail.com>"
+who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "1.0.97 -> 1.0.100"
-notes = "Contains mostly configuration for no_std support and conditionally generating backtraces."
+notes = """
+Changes to the build script are to enable reusing the probe file within the crate, enable
+more features on newer Rust versions, and catch more errors.
+
+Most of the changes to `unsafe` code are refactors to surrounding safe code, and not
+actually altering the `unsafe` blocks. The new instances of `unsafe` are to allow errors
+to be converted to `Box<dyn std::error:Error>` in a way that supports downcasting (at the
+cost of backtraces), via a new vtable method. The `unsafe` blocks in the new code appear
+to match how boxing and downcasting logic is done in other existing vtable methods.
+"""
 
 [[audits.arti-client]]
 who = "Jack Grigg <jack@electriccoin.co>"
