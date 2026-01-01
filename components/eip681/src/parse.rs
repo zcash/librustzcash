@@ -290,13 +290,13 @@ impl Number {
         );
         let multiplied_integer = (integer as i128)
             .checked_mul(multiplier)
-            .with_context(|| SaturationSnafu { seen: self.clone() })?;
+            .with_context(|| OverflowSnafu)?;
         let decimal_multiplier = multiplier
             .checked_div(decimal_denominator as i128)
             .context(OverflowSnafu)?;
         let multiplied_decimal = (decimal_numerator as i128)
             .checked_mul(decimal_multiplier)
-            .with_context(|| SaturationSnafu { seen: self.clone() })?;
+            .with_context(|| OverflowSnafu)?;
         let value = multiplied_integer
             .checked_add(multiplied_decimal)
             .context(OverflowSnafu)?;

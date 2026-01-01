@@ -2,7 +2,7 @@
 
 use snafu::prelude::*;
 
-use crate::{Number, Value};
+use crate::Value;
 
 /// Errors discovered during parsing.
 #[derive(Debug, Snafu)]
@@ -99,9 +99,6 @@ pub enum ValidationError {
 
     #[snafu(display("Exponent is too large, expected at most {expected}, saw {seen}"))]
     LargeExponent { expected: usize, seen: u64 },
-
-    #[snafu(display("Number {seen} is too big and has saturated"))]
-    Saturation { seen: Number },
 
     #[snafu(display(
         "Arithmetic operation resulted in an overflow, exceeding the allowable range"
