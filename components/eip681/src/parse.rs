@@ -12,7 +12,7 @@ use crate::error::*;
 /// ```abnf
 /// *DIGIT
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Digits {
     places: Vec<u8>,
 }
@@ -148,7 +148,7 @@ impl HexDigits {
 ///
 /// Other implementations use regular expressions instead of parsing, and only
 /// support very specific values.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Number {
     /// true for "+", false for "-"
     signum: Option<bool>,
@@ -731,15 +731,16 @@ impl Parameters {
     /// Returns the number value of the parameter with the "value" key, if any.
     ///
     /// ## Errors
-    /// Errors if there are more than one parameter with the key "value".
+    /// Errors if there are more than one parameter with the key "value", and the
+    /// values of those parameters are not equal.
     pub fn value(&self) -> Result<Option<Number>, ValidationError> {
-        let mut values = self
+        let values = self
             .iter()
             .filter_map(|p| match p {
                 Parameter::Value(n) => Some(n.clone()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<std::collections::HashSet<_>>();
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
@@ -747,22 +748,22 @@ impl Parameters {
                 values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
             }
         );
-        Ok(values.pop())
+        Ok(values.into_iter().next())
     }
 
     /// Returns the number value of the parameter with the "gas" or "gasLimit" key, if any.
     ///
     /// ## Errors
-    /// Errors if there are more than one parameter with the key "gas" or "gas_limit".
+    /// Errors if there are more than one parameter with the key "gas_limit", and those
+    /// values are not equal.
     pub fn gas_limit(&self) -> Result<Option<Number>, ValidationError> {
-        let mut values = self
+        let values = self
             .iter()
             .filter_map(|p| match p {
-                Parameter::Gas(n) => Some(n.clone()),
                 Parameter::GasLimit(n) => Some(n.clone()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<std::collections::HashSet<_>>();
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
@@ -770,21 +771,24 @@ impl Parameters {
                 values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
             }
         );
-        Ok(values.pop())
+        Ok(values.into_iter().next())
     }
 
-    /// Returns the number value of the parameter with the "gasPrice" key, if any.
+    /// Returns the number value of the parameter with the "gasPrice" or "gas" key,
+    /// if any.
     ///
     /// ## Errors
-    /// Errors if there are more than one parameter with the key "gasPrice".
+    /// Errors if there are more than one parameter with the key "gasPrice"
+    /// or "gas", and the values of those parameters are not equal.
     pub fn gas_price(&self) -> Result<Option<Number>, ValidationError> {
-        let mut values = self
+        let values = self
             .iter()
             .filter_map(|p| match p {
+                Parameter::Gas(n) => Some(n.clone()),
                 Parameter::GasPrice(n) => Some(n.clone()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<std::collections::HashSet<_>>();
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
@@ -792,7 +796,7 @@ impl Parameters {
                 values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
             }
         );
-        Ok(values.pop())
+        Ok(values.into_iter().next())
     }
 
     /// Returns an iterator over all ABI type parameters.
