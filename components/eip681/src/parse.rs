@@ -606,7 +606,7 @@ pub enum Parameter {
     Gas(Number),
     /// Suggested user-editable value for the gas limit of the transaction.
     GasLimit(Number),
-    /// Synonym for "gas".
+    /// Suggested user-editable value for the gas price of the transaction.
     GasPrice(Number),
     /// A "type" parameter denotes a positional parameter provided to the function
     /// named by `function_name`. For information about `function_name` see the ABNF
