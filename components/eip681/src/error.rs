@@ -84,17 +84,7 @@ impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {
 
 impl<'a> From<ParseError<'a>> for nom::Err<ParseError<'a>> {
     fn from(value: ParseError<'a>) -> Self {
-        if value.is_recoverable() {
-            nom::Err::Error(value)
-        } else {
-            nom::Err::Failure(value)
-        }
-    }
-}
-
-impl ParseError<'_> {
-    pub fn is_recoverable(&self) -> bool {
-        true
+        nom::Err::Error(value)
     }
 }
 
