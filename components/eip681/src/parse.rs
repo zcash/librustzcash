@@ -36,15 +36,12 @@ impl Digits {
     /// Errors if internal arithmetic operations overflow.
     pub fn as_u64(&self) -> Result<u64, ValidationError> {
         let mut total = 0u64;
-        for (mag, digit) in self.places.iter().rev().enumerate() {
-            let increment = (*digit as u64)
-                .checked_mul(
-                    10u64
-                        .checked_pow(u32::try_from(mag).context(IntegerSnafu)?)
-                        .context(OverflowSnafu)?,
-                )
+        for digit in &self.places {
+            total = total
+                .checked_mul(10)
+                .context(OverflowSnafu)?
+                .checked_add(*digit as u64)
                 .context(OverflowSnafu)?;
-            total = total.checked_add(increment).context(OverflowSnafu)?;
         }
         Ok(total)
     }
