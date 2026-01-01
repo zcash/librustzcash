@@ -91,6 +91,7 @@ impl<'a> From<ParseError<'a>> for nom::Err<ParseError<'a>> {
 /// Errors discovered after parsing, usually when attempting to convert parsed
 /// types into numeric types.
 #[derive(Debug, Snafu, PartialEq)]
+#[non_exhaustive]
 #[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
     #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]

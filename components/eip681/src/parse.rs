@@ -52,17 +52,7 @@ impl Digits {
         let denominator = 10u64
             .checked_pow(u32::try_from(self.places.len()).context(IntegerSnafu)?)
             .context(OverflowSnafu)?;
-        let mut numerator = 0u64;
-
-        for digit in self.places.iter() {
-            numerator = numerator
-                .checked_mul(10)
-                .context(OverflowSnafu)?
-                .checked_add(*digit as u64)
-                .context(OverflowSnafu)?;
-        }
-
-        Ok((numerator, denominator))
+        Ok((self.as_u64()?, denominator))
     }
 
     pub fn from_u64(mut v: u64) -> Self {
@@ -1558,5 +1548,14 @@ mod test {
         let number = seen.parameters.value().unwrap().unwrap();
         assert_eq!(2, number.integer().unwrap());
         assert_eq!(2.014e18 as i128, number.as_i128().unwrap());
+    }
+
+    #[test]
+    fn digits_as_decimal_ratio_sanity() {
+        let input = "0001234";
+        let (_, digits) = Digits::parse_min(input, 1).unwrap();
+        let ratio = digits.as_decimal_ratio().unwrap();
+        assert_eq!((1234, 10_000_000), ratio);
+        assert_eq!(0.0001234, ratio.0 as f32 / ratio.1 as f32);
     }
 }
