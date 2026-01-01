@@ -822,12 +822,21 @@ delta = "0.4.8 -> 0.6.0"
 who = "Schell Carl Scivally <efsubenovex@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.12 -> 0.9.0"
+notes = """
+The changes are primarily API refactoring and simplification, dependency updates, new type implementations, and feature flag reorganization.
+The crate changed from #![forbid(unsafe_code)] (line 9347) to #![deny(unsafe_code)] (line 9348), to accommodate the ref-cast crate integration which requires #[allow(unsafe_code)] on specific functions.
+The only notable change is the ref-cast usage which is a sound pattern for creating transparent newtype wrappers.
+"""
 
 [[audits.schemars]]
 who = "Schell Carl Scivally <efsubenovex@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.9.0 -> 1.1.0"
-notes = "These changes improve security by forbidding unsafe code."
+notes = """
+This update contains no unsafe code, no ambient capability usage, and no changes that could be exploited by untrusted input.
+The changes are purely schema generation logic improvements, API refinements, and dependency updates.
+This reverts a previous change that lowered #[forbid(unsafe_code)] to #[deny(unsafe_code)].
+"""
 
 [[audits.secp256k1]]
 who = "Jack Grigg <jack@electriccoin.co>"
