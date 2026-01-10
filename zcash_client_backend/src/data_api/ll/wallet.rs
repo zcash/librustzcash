@@ -894,7 +894,9 @@ where
 
     // For each transaction that spends a transparent output of this transaction and does not
     // already have a known fee value, set the fee if possible.
-    for (spending_tx_ref, spending_tx) in wallet_db.get_spending_transactions(tx_ref)? {
+    for (spending_tx_ref, spending_tx) in
+        wallet_db.get_txs_spending_transparent_outputs_of(tx_ref)?
+    {
         if let Some(fee) = determine_fee(wallet_db, &spending_tx)? {
             wallet_db.update_tx_fee(spending_tx_ref, fee)?;
         }
