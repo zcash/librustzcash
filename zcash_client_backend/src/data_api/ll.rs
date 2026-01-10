@@ -374,14 +374,12 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// Records information about a transaction output that your wallet created, from the constituent
     /// properties of that output.
     ///
-    /// - If `recipient` is a Unified address, `output_index` is an index into the outputs of the
-    ///   transaction within the bundle associated with the recipient's output pool.
-    /// - If `recipient` is a Sapling address, `output_index` is an index into the Sapling outputs of
-    ///   the transaction.
-    /// - If `recipient` is a transparent address, `output_index` is an index into the transparent
-    ///   outputs of the transaction.
-    /// - If `recipient` is an internal account, `output_index` is an index into the outputs of
-    ///   the bundle indicated by the recipient pool.
+    /// - `tx_ref`: The identifier for the transaction that produced the output.
+    /// - `output_index`: The index of the output in the bundle corresponding to the pool where the
+    ///   output was created.
+    /// - `recipient`: Information about the address or account that the output is being sent to.
+    /// - `value`: The value of the output.
+    /// - `memo`: The memo attached to the output, if any.
     fn put_sent_output(
         &mut self,
         from_account_uuid: Self::AccountId,
