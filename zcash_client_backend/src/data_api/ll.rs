@@ -400,8 +400,10 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     ///
     /// # Parameters
     /// - `output`: The output data.
-    /// - `observation_height`: The chain tip height at the time that the update is made. Note that
-    ///   this is likely to differ from the height at which the output was mined (if any).
+    /// - `observation_height`: This should be set to the mined height, if known. If the TXO is
+    ///   known to be mined but the height at which it was mined is unknown, this should be set to
+    ///   the chain tip height at the time of the observation; if the utxo is known to be unmined,
+    ///   this should be set to the mempool height.
     /// - `known_unspent`: Set to `true` if the output is known to be a member of the UTXO set as
     ///   of the given observation height.
     #[cfg(feature = "transparent-inputs")]
