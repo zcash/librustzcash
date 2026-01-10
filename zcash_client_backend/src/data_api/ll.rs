@@ -224,8 +224,9 @@ pub trait LowLevelWalletRead {
     ) -> Result<Option<WalletUtxo>, Self::Error>;
 
     /// Returns the vector of transactions in the wallet that spend the transparent outputs of the
-    /// referenced transaction. This should include conflicted transactions and transactions that
-    /// have expired without having been mined.
+    /// referenced transaction, but for which the amount of fee paid is unknown. This should
+    /// include conflicted transactions and transactions that have expired without having been
+    /// mined.
     ///
     /// This is used as part of [`wallet::store_decrypted_tx`] to allow downstream transactions'
     /// fee amounts to be updated once the value of all their inputs are known.

@@ -3453,7 +3453,7 @@ pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
     tx_ref: TxRef,
 ) -> Result<Vec<(TxRef, Transaction)>, SqliteClientError> {
     // For each transaction that spends a transparent output of this transaction and does not
-    // already have a known fee value, set the fee if possible.
+    // already have a known fee value.
     let mut spending_txs_stmt = conn.prepare(
         "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
