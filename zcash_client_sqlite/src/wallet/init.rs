@@ -212,6 +212,10 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::AccountUnknown => {
             unreachable!("all accounts are known in migration context")
         }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::GapAddresses => {
+            unreachable!("we don't deal with gap addresses in migrations")
+        }
         SqliteClientError::UnknownZip32Derivation => {
             unreachable!("we don't call methods that require operating on imported accounts")
         }

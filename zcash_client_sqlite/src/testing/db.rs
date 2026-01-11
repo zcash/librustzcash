@@ -51,7 +51,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     core::ops::Range,
-    zcash_client_backend::wallet::transparent::GapLimits,
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).

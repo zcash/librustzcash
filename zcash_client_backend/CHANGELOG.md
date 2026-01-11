@@ -25,6 +25,9 @@ workspace.
 - `zcash_client_backend::fees::MetaSource`
 - `zcash_client_backend::wallet::transparent` module, behind the `transparent-inputs` feature flag.
 - `zcash_client_backend::data_api::ll`
+- `LowLevelWalletRead::get_account_ref`
+- `LowLevelWalletRead::get_account_internal`
+- `GapLimitsWalletAccess::generate_transparent_gap_addresses`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
@@ -74,6 +77,8 @@ workspace.
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use
   `zcash_client_backend::wallet::transparent::GapLimits` instead.
+- `zcash_client_backend::wallet::transparent::GapLimits` has been moved to
+  `zcash_keys::keys::transparent::GapLimits`, use that instead.
 
 ## [0.21.0] - 2025-11-05
 

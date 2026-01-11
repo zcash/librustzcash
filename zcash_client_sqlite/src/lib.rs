@@ -40,7 +40,7 @@ use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
     borrow::{Borrow, BorrowMut},
     cmp::{max, min},
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     convert::AsRef,
     fmt,
     num::NonZeroU32,
@@ -112,12 +112,18 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::time::SystemTime,
+    std::{collections::HashSet, time::SystemTime},
     zcash_client_backend::{
-        data_api::{Balance, TransactionsInvolvingAddress, WalletUtxo},
-        wallet::{TransparentAddressMetadata, transparent::GapLimits},
+        data_api::{
+            Balance, TransactionsInvolvingAddress, WalletUtxo,
+            ll::wallet::generate_transparent_gap_addresses,
+        },
+        wallet::TransparentAddressMetadata,
     },
-    zcash_keys::encoding::AddressCodec,
+    zcash_keys::{
+        encoding::AddressCodec,
+        keys::transparent::{gap_limits::GapLimits, wallet::GapLimitsWalletAccess},
+    },
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -220,7 +226,7 @@ impl AccountUuid {
 /// This is an ephemeral value for efficiently and generically working with accounts in a
 /// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
-pub(crate) struct AccountRef(i64);
+pub struct AccountRef(i64);
 
 /// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
 #[cfg(test)]
@@ -1377,7 +1383,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
-                wdb, from_state, blocks,
+                wdb,
+                #[cfg(feature = "transparent-inputs")]
+                wdb.gap_limits,
+                from_state,
+                blocks,
             )
             .map_err(SqliteClientError::from)
         })
@@ -1426,7 +1436,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| {
             let chain_tip = wallet::chain_tip_height(wdb.conn.borrow())?
                 .ok_or(SqliteClientError::ChainHeightUnknown)?;
-            store_decrypted_tx(wdb, wdb.params, chain_tip, d_tx)
+            store_decrypted_tx(
+                wdb,
+                wdb.params,
+                #[cfg(feature = "transparent-inputs")]
+                wdb.gap_limits,
+                chain_tip,
+                d_tx,
+            )
         })
     }
 
@@ -1551,6 +1568,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     LowLevelWalletRead for WalletDb<C, P, CL, R>
 {
     type AccountId = AccountUuid;
+    type AccountRef = AccountRef;
+    type Account = wallet::Account;
     type Error = SqliteClientError;
     type TxRef = TxRef;
 
@@ -1649,6 +1668,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             ShieldedProtocol::Orchard,
             &nf.to_bytes(),
         )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_account_ref(
+        &mut self,
+        account_uuid: Self::AccountId,
+    ) -> Result<Self::AccountRef, Self::Error> {
+        wallet::get_account_ref(self.conn.borrow(), account_uuid)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_account_internal(
+        &mut self,
+        account_id: Self::AccountRef,
+    ) -> Result<Option<wallet::Account>, SqliteClientError> {
+        wallet::get_account_internal(self.conn.borrow(), &self.params, account_id)
     }
 }
 
@@ -1880,16 +1915,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         key_scope: TransparentKeyScope,
         request: UnifiedAddressRequest,
     ) -> Result<(), Self::Error> {
-        let account_ref = wallet::get_account_ref(self.conn.borrow(), account_id)?;
-        wallet::transparent::generate_gap_addresses(
-            self.conn.borrow(),
-            &self.params,
-            &self.gap_limits,
-            account_ref,
-            key_scope,
-            request,
-            false,
-        )
+        generate_transparent_gap_addresses(self, self.gap_limits, account_id, key_scope, request)?;
+        Ok(())
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2144,6 +2171,53 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
             ORCHARD_TABLES_PREFIX,
             start_index,
             roots,
+        )
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    GapLimitsWalletAccess for WalletDb<C, P, CL, R>
+{
+    type Error = SqliteClientError;
+    type AccountRef = AccountRef;
+
+    fn find_gap_start(
+        &self,
+        account_ref: Self::AccountRef,
+        key_scope: TransparentKeyScope,
+        gap_limit: u32,
+    ) -> Result<Option<NonHardenedChildIndex>, Self::Error> {
+        wallet::transparent::find_gap_start(self.conn.borrow(), account_ref, key_scope, gap_limit)
+    }
+
+    fn store_address_range(
+        &self,
+        account_id: Self::AccountRef,
+        key_scope: TransparentKeyScope,
+        list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::store_address_range(
+            self.conn.borrow(),
+            &self.params,
+            account_id,
+            key_scope,
+            list,
+        )
+    }
+
+    fn update_gap_limits(
+        &self,
+        gap_limits: &GapLimits,
+        txid: TxId,
+        observation_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::update_gap_limits(
+            self.conn.borrow(),
+            &self.params,
+            gap_limits,
+            txid,
+            observation_height,
         )
     }
 }

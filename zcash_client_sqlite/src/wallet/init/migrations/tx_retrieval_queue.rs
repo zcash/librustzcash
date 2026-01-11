@@ -5,7 +5,7 @@ use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use zcash_primitives::transaction::{Transaction, builder::DEFAULT_TX_EXPIRY_DELTA};
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zcash_protocol::consensus;
 
 use crate::wallet::init::WalletMigrationError;
@@ -29,6 +29,7 @@ use {
     transparent::address::TransparentAddress,
     zcash_client_backend::data_api::DecryptedTransaction,
     zcash_keys::encoding::AddressCodec,
+    zcash_primitives::transaction::Transaction,
     zcash_protocol::{
         TxId,
         consensus::{BlockHeight, BranchId},

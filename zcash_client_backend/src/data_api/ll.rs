@@ -27,7 +27,7 @@ use zcash_protocol::{
 };
 use zip32::Scope;
 
-use super::{TransactionStatus, wallet::TargetHeight};
+use super::{Account, TransactionStatus, wallet::TargetHeight};
 use crate::{
     DecryptedOutput, TransferType,
     wallet::{Recipient, WalletSaplingOutput, WalletTx},
@@ -116,6 +116,12 @@ pub trait LowLevelWalletRead {
     /// authority, such that both received notes and change spendable by that spending authority
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Eq + Hash;
+
+    /// A wallet-internal account identifier
+    type AccountRef: Copy + Eq + Hash;
+
+    /// Type of the account with associated capabilities
+    type Account: Account;
 
     /// A wallet-internal transaction identifier.
     type TxRef: Copy + Eq + Hash;
@@ -249,6 +255,20 @@ pub trait LowLevelWalletRead {
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error>;
+
+    /// Get the ephemeral value for working with accounts in the wallet data store
+    #[cfg(feature = "transparent-inputs")]
+    fn get_account_ref(
+        &mut self,
+        account_uuid: Self::AccountId,
+    ) -> Result<Self::AccountRef, Self::Error>;
+
+    /// Get the account for an internal account reference
+    #[cfg(feature = "transparent-inputs")]
+    fn get_account_internal(
+        &mut self,
+        account_id: Self::AccountRef,
+    ) -> Result<Option<Self::Account>, Self::Error>;
 }
 
 /// A capability trait that provides low-level wallet write operations. These operations are used
