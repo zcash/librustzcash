@@ -7247,9 +7247,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.4.2"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bed6cf5b2b4361105d4ea06b2752f0c8af4641756c7fbc9858a80af186c234f"
+checksum = "c44ce400e8238f5359d54134b5bac5d278202698ebf40c0473d7022e56dfbc3a"
 dependencies = [
  "bip32",
  "bitflags 2.9.0",
