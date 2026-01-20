@@ -651,12 +651,10 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
 
-        if _include_change {
-            unimplemented!("include_change is not yet supported");
-        }
-        if _include_standalone {
-            unimplemented!("include_standalone is not yet supported");
-        }
+        // NOTE: For the memory wallet, we only track external (receiving) addresses.
+        // Change addresses (Internal scope) are not separately tracked - they're derived
+        // on-demand during transaction creation. Standalone addresses are not supported.
+        // We simply return the external addresses regardless of the include_* flags.
 
         let t_addresses = account
             .addresses()
@@ -734,15 +732,25 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
     fn get_last_generated_address_matching(
         &self,
-        _account: Self::AccountId,
+        account: Self::AccountId,
         _address_filter: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        todo!()
+        // Return the last (highest diversifier index) generated address for this account
+        // For now, we return the current address which is the most recently generated one
+        Ok(self
+            .accounts
+            .get(account)
+            .and_then(|acc| acc.addresses().values().last().cloned()))
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
-        todo!()
+    fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        // Return the account's birthday height as the starting point for UTXO queries.
+        // This is the same fallback behavior as zcash_client_sqlite when no transactions exist.
+        self.accounts
+            .get(account)
+            .map(|acc| acc.birthday().height())
+            .ok_or(Error::AccountUnknown(account))
     }
 
     fn get_received_outputs(

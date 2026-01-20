@@ -708,7 +708,12 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     );
                 }
                 TransferType::Incoming => {
-                    todo!("store decrypted tx sapling incoming")
+                    // Store incoming Sapling note
+                    let received_note = ReceivedNote::from_decrypted_sapling_output(
+                        d_tx.tx().txid(),
+                        output,
+                    )?;
+                    self.received_notes.insert_received_note(received_note);
                 }
             }
         }
@@ -779,7 +784,12 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     );
                 }
                 TransferType::Incoming => {
-                    todo!("store decrypted tx orchard incoming")
+                    // Store incoming Orchard note
+                    let received_note = ReceivedNote::from_decrypted_orchard_output(
+                        d_tx.tx().txid(),
+                        output,
+                    )?;
+                    self.received_notes.insert_received_note(received_note);
                 }
             }
         }
@@ -1248,7 +1258,10 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         _request: TransactionsInvolvingAddress,
         _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        todo!()
+        // No-op for now - this notifies that an address range was checked for transactions.
+        // In the sqlite implementation, this updates address metadata tracking.
+        // For the memory wallet, we don't need to track this state.
+        Ok(())
     }
 
     #[cfg(feature = "transparent-key-import")]

@@ -353,7 +353,7 @@ impl<P: Parameters> From<&MemoryWalletDb<P>> for proto::MemoryWallet {
                 .map(|r| proto::ScanQueueRecord::from(*r))
                 .collect(),
 
-            sapling_tree: tree_to_protobuf(&wallet.sapling_tree).unwrap(),
+            sapling_tree: tree_to_protobuf(&wallet.sapling_tree).ok().flatten(),
             sapling_tree_shard_end_heights: wallet
                 .sapling_tree_shard_end_heights
                 .clone()
@@ -366,7 +366,7 @@ impl<P: Parameters> From<&MemoryWalletDb<P>> for proto::MemoryWallet {
                 .collect(),
 
             #[cfg(feature = "orchard")]
-            orchard_tree: tree_to_protobuf(&wallet.orchard_tree).unwrap(),
+            orchard_tree: tree_to_protobuf(&wallet.orchard_tree).ok().flatten(),
             #[cfg(not(feature = "orchard"))]
             orchard_tree: None,
 

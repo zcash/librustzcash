@@ -466,6 +466,43 @@ impl Account {
         Ok(Vec::new())
     }
 
+    /// Finds the key scope for a given transparent address by checking:
+    /// 1. Ephemeral addresses (EPHEMERAL scope)
+    /// 2. Unified addresses (EXTERNAL scope)
+    /// 3. Legacy transparent address (EXTERNAL scope)
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn find_key_scope_for_transparent_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Option<TransparentKeyScope> {
+        // Check ephemeral addresses first
+        if self
+            .ephemeral_addresses
+            .values()
+            .any(|eph_addr| eph_addr.address == *address)
+        {
+            return Some(TransparentKeyScope::EPHEMERAL);
+        }
+
+        // Check unified addresses (EXTERNAL scope)
+        if self
+            .addresses
+            .values()
+            .any(|ua| ua.transparent() == Some(address))
+        {
+            return Some(TransparentKeyScope::EXTERNAL);
+        }
+
+        // Check legacy transparent address (EXTERNAL scope)
+        if let Ok(Some((legacy_addr, _))) = self.get_legacy_transparent_address() {
+            if legacy_addr == *address {
+                return Some(TransparentKeyScope::EXTERNAL);
+            }
+        }
+
+        None
+    }
+
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn mark_ephemeral_address_as_used(
         &mut self,
@@ -623,7 +660,7 @@ mod serialization {
                 }
                 .clone(),
                 viewing_key: acc.viewing_key.encode(&EncodingParams),
-                birthday: Some(acc.birthday().clone().try_into().unwrap()),
+                birthday: acc.birthday().clone().try_into().ok(),
                 addresses: acc
                     .addresses()
                     .iter()

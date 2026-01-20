@@ -13,6 +13,7 @@ use zcash_protocol::{PoolType, ShieldedProtocol::Sapling, memo::Memo};
 use zcash_client_backend::{
     data_api::{ReceivedNotes, SentTransactionOutput},
     wallet::{Note, NoteId, Recipient, WalletSaplingOutput},
+    DecryptedOutput,
 };
 
 use crate::AccountId;
@@ -172,6 +173,57 @@ impl ReceivedNote {
             commitment_tree_position: Some(output.note_commitment_tree_position()),
             recipient_key_scope: output.recipient_key_scope(),
         }
+    }
+
+    /// Creates a ReceivedNote from a decrypted Sapling output (for incoming transactions).
+    ///
+    /// This is used when syncing discovers a new incoming Sapling note that was
+    /// received to one of the wallet's external addresses.
+    pub fn from_decrypted_sapling_output(
+        txid: TxId,
+        output: &DecryptedOutput<sapling::Note, AccountId>,
+    ) -> Result<Self, Error> {
+        let note_id = NoteId::new(txid, Sapling, output.index() as u16);
+        let memo = Memo::try_from(output.memo().clone())?;
+
+        Ok(ReceivedNote {
+            note_id,
+            txid,
+            output_index: output.index() as u32,
+            account_id: *output.account(),
+            note: Note::Sapling(output.note().clone()),
+            nf: None, // Nullifier not yet known for incoming unspent notes
+            is_change: false, // Incoming notes are not change
+            memo,
+            commitment_tree_position: None, // Position not yet known
+            recipient_key_scope: Some(Scope::External), // Incoming uses external scope
+        })
+    }
+
+    /// Creates a ReceivedNote from a decrypted Orchard output (for incoming transactions).
+    ///
+    /// This is used when syncing discovers a new incoming Orchard note that was
+    /// received to one of the wallet's external addresses.
+    #[cfg(feature = "orchard")]
+    pub fn from_decrypted_orchard_output(
+        txid: TxId,
+        output: &DecryptedOutput<orchard::note::Note, AccountId>,
+    ) -> Result<Self, Error> {
+        let note_id = NoteId::new(txid, Orchard, output.index() as u16);
+        let memo = Memo::try_from(output.memo().clone())?;
+
+        Ok(ReceivedNote {
+            note_id,
+            txid,
+            output_index: output.index() as u32,
+            account_id: *output.account(),
+            note: Note::Orchard(*output.note()),
+            nf: None, // Nullifier not yet known for incoming unspent notes
+            is_change: false, // Incoming notes are not change
+            memo,
+            commitment_tree_position: None, // Position not yet known
+            recipient_key_scope: Some(Scope::External), // Incoming uses external scope
+        })
     }
 }
 

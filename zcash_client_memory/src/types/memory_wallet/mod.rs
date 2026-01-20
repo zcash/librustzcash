@@ -1101,11 +1101,19 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 entry.get_mut().txout = output.txout().clone();
             }
             Entry::Vacant(entry) => {
+                // Look up the key scope for this address by checking ephemeral,
+                // unified, and legacy transparent addresses in the account
+                let key_scope = self
+                    .accounts
+                    .get(*receiving_account)
+                    .and_then(|account| account.find_key_scope_for_transparent_address(address))
+                    .unwrap_or(::transparent::keys::TransparentKeyScope::EXTERNAL);
+
                 entry.insert(ReceivedTransparentOutput::new(
                     txid,
                     *receiving_account,
                     *address,
-                    todo!("look up the key scope for the address"),
+                    key_scope,
                     output.txout().clone(),
                     max_observed_unspent.unwrap_or(BlockHeight::from(0)),
                 ));
