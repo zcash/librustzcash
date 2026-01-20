@@ -1,0 +1,23 @@
+version = 1
+revision = 2
+requires-python = ">=3.8"
+
+[[package]]
+name = "librustzcash-release-tools"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "marko" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "marko", specifier = ">=2.0.0" }]
+
+[[package]]
+name = "marko"
+version = "2.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/dc/c8cadbd83de1b38d95a48568b445a5553005ebdd32e00a333ca940113db4/marko-2.1.4.tar.gz", hash = "sha256:dd7d66f3706732bf8f994790e674649a4fd0a6c67f16b80246f30de8e16a1eac", size = 142795, upload-time = "2025-06-13T03:25:50.857Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/66/49e3691d14898fb6e34ccb337c7677dfb7e18269ed170f12e4b85315eae6/marko-2.1.4-py3-none-any.whl", hash = "sha256:81c2b9f570ca485bc356678d9ba1a1b3eb78b4a315d01f3ded25442fdc796990", size = 42186, upload-time = "2025-06-13T03:25:49.858Z" },
+]
