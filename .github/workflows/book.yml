@@ -14,6 +14,8 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
+        with:
+          all-features: true
       - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
       - run: rustup override set "${TOOLCHAIN}"
