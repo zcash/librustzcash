@@ -28,7 +28,7 @@ inputs:
 outputs:
   feature-flags:
     description: 'Feature flags'
-    value: ${{ steps.prepare.outputs.flags }}
+    value: ${{ steps.prepare.outputs.flags || steps.prepare-all.outputs.flags }}
 runs:
   using: 'composite'
   steps:
