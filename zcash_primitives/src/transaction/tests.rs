@@ -407,7 +407,7 @@ fn zip_0233() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .map(|s| Script(s.clone()))
+            .map(|s| Script(script::Code(s.clone())))
             .collect();
 
         let test_bundle = txdata
