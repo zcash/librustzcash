@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["OrchardError"],"struct":["Verifier"]};
+window.SIDEBAR_ITEMS = {"enum":["OrchardError","SaplingError","TransparentError"],"struct":["Verifier"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["is_valid_solution"],"struct":["Error"]};
+window.SIDEBAR_ITEMS = {"fn":["is_valid_solution"],"mod":["tromp"],"struct":["Error"]};

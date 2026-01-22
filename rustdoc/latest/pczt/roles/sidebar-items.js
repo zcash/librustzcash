@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["combiner","creator","low_level_signer","redactor","updater","verifier"]};
+window.SIDEBAR_ITEMS = {"mod":["combiner","creator","io_finalizer","low_level_signer","prover","redactor","signer","spend_finalizer","tx_extractor","updater","verifier"]};

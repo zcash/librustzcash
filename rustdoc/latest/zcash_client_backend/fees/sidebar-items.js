@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ChangeError","DustAction","EphemeralBalance","StandardFeeRule"],"mod":["common","orchard","sapling","standard","zip317"],"struct":["ChangeValue","DustOutputPolicy","SplitPolicy","TransactionBalance"],"trait":["ChangeStrategy","MetaSource"]};
+window.SIDEBAR_ITEMS = {"enum":["ChangeError","DustAction","EphemeralBalance","StandardFeeRule"],"mod":["common","fixed","orchard","sapling","standard","zip317"],"struct":["ChangeValue","DustOutputPolicy","SplitPolicy","TransactionBalance"],"trait":["ChangeStrategy","MetaSource"]};

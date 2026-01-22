@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PathParseError","ZcashdHdDerivation"],"fn":["derive_mnemonic"],"struct":["LegacyAddressIndex"]};
