@@ -82,7 +82,7 @@ where
     Ok(())
 }
 
-async fn running<P, ChT, CaT, DbT, TrErr>(
+pub async fn running<P, ChT, CaT, DbT, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
     db_cache: &CaT,
@@ -220,7 +220,7 @@ where
     Ok(false)
 }
 
-async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
+pub async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, DbErr, <DbT as WalletCommitmentTrees>::Error>>
@@ -282,7 +282,7 @@ where
     Ok(())
 }
 
-async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
+pub async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
@@ -310,7 +310,7 @@ where
     Ok(())
 }
 
-async fn download_blocks<ChT, CaT, DbErr, TrErr>(
+pub async fn download_blocks<ChT, CaT, DbErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_cache: &CaT,
     scan_range: &ScanRange,
@@ -348,7 +348,7 @@ where
     Ok(())
 }
 
-async fn download_chain_state<ChT, CaErr, DbErr, TrErr>(
+pub async fn download_chain_state<ChT, CaErr, DbErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     block_height: BlockHeight,
 ) -> Result<ChainState, Error<CaErr, DbErr, TrErr>>
@@ -375,7 +375,7 @@ where
 /// chain tip is out of sync with blockchain history.
 ///
 /// Returns `true` if scanning these blocks materially changed the suggested scan ranges.
-async fn scan_blocks<P, CaT, DbT, TrErr>(
+pub async fn scan_blocks<P, CaT, DbT, TrErr>(
     params: &P,
     db_cache: &CaT,
     db_data: &mut DbT,
@@ -472,7 +472,7 @@ where
 ///
 /// [a comment in the Android SDK]: https://github.com/Electric-Coin-Company/zcash-android-wallet-sdk/blob/855204fc8ae4057fdac939f98df4aa38c8e662f1/sdk-lib/src/main/java/cash/z/ecc/android/sdk/block/processor/CompactBlockProcessor.kt#L979-L991
 #[cfg(feature = "transparent-inputs")]
-async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
+pub async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
     params: &P,
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
