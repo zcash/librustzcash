@@ -1059,6 +1059,8 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
     // unless decrypt_and_store_transaction has been called on the transaction that produced it.
     //
     // To fix this we'll need to add the `tx_index` field to the GetAddressUtxosReply proto type.
+    //
+    // See the tracking ticket https://github.com/zcash/lightwallet-protocol/issues/17.
     format!(
         r#"
         NOT (
