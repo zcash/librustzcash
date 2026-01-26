@@ -241,7 +241,7 @@ impl Number {
     ///
     /// ## Errors
     /// Errors if internal arithmetic operations overflow.
-    pub fn integer(&self) -> Result<u64, ValidationError> {
+    fn integer(&self) -> Result<u64, ValidationError> {
         self.integer.as_u64()
     }
 
