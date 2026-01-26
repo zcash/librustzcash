@@ -61,6 +61,7 @@ impl Digits {
         Ok(total)
     }
 
+    #[cfg(test)]
     /// Returns the ratio corresponding to the decimal number `0.<digits>`,
     /// i.e. the denominator will be `10^len(digits)`.
     fn as_decimal_ratio(&self) -> Result<(u64, u64), ValidationError> {
@@ -246,17 +247,6 @@ impl Number {
         self.integer.as_u64()
     }
 
-    /// Returns the value of the decimal portion of the number as a ratio
-    /// of `u64`s.
-    fn decimal(&self) -> Result<(u64, u64), ValidationError> {
-        Ok(self
-            .decimal
-            .as_ref()
-            .map(|d| d.as_decimal_ratio())
-            .transpose()?
-            .unwrap_or((0, 1)))
-    }
-
     /// Convert this [`Number`] into an i128, if possible.
     ///
     /// ## Errors
@@ -266,8 +256,20 @@ impl Number {
             .signum
             .map_or(1i128, |is_positive| if is_positive { 1 } else { -1 });
         let integer = self.integer()?;
-        let (decimal_numerator, decimal_denominator) = self.decimal()?;
-        let exp = self
+        let decimal_numerator = self
+            .decimal
+            .as_ref()
+            .map(|d| d.as_u64())
+            .transpose()?
+            .unwrap_or(0);
+        let decimal_places: u32 = self
+            .decimal
+            .as_ref()
+            .map(|d| d.places.len())
+            .unwrap_or(0)
+            .try_into()
+            .context(IntegerSnafu)?;
+        let exp: u32 = self
             .exponent
             .as_ref()
             .and_then(|(_, maybe_exp)| maybe_exp.as_ref().map(|digits| digits.as_u64()))
@@ -279,29 +281,29 @@ impl Number {
             expected: u128::MAX.ilog10() as usize,
             seen: exp as u64,
         })?;
-        let modulo = multiplier
-            .checked_rem(decimal_denominator as i128)
-            .context(OverflowSnafu)?;
-        snafu::ensure!(
-            modulo == 0 || decimal_numerator == 0,
-            SmallExponentSnafu {
-                expected: decimal_denominator.ilog10() as usize,
-                seen: exp
-            }
-        );
-        // Since it may be hard to see what's going on here:
+        // The exponent must be >= the number of decimal places to yield an integer result.
+        let decimal_exp = exp
+            .checked_sub(decimal_places)
+            .with_context(|| SmallExponentSnafu {
+                expected: decimal_places as usize,
+                seen: exp,
+            });
+        // Since it's hard to see through all the function chaining, this is
+        // what's going on here:
         // ```
         // signum * (
-        //     (integer * multiplier) +
-        //     (decimal_numerator * (multiplier / decimal_denominator))
+        //     (integer * 10^exp) +
+        //     (decimal_numerator * 10^(exp - decimal_places))
         // )
         // ```
         let multiplied_integer = (integer as i128)
             .checked_mul(multiplier)
             .with_context(|| OverflowSnafu)?;
-        let decimal_multiplier = multiplier
-            .checked_div(decimal_denominator as i128)
-            .context(OverflowSnafu)?;
+        let decimal_multiplier = match decimal_exp {
+            Ok(d) => 10i128.checked_pow(d).context(OverflowSnafu)?,
+            Err(_) if decimal_numerator == 0 => 0,
+            Err(e) => return Err(e),
+        };
         let multiplied_decimal = (decimal_numerator as i128)
             .checked_mul(decimal_multiplier)
             .with_context(|| OverflowSnafu)?;
