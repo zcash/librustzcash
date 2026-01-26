@@ -46,8 +46,8 @@ impl Digits {
         Ok(total)
     }
 
-    /// Returns the digits as a ratio, where prefixed zeros
-    /// are treated as a denominator.
+    /// Returns the ratio corresponding to the decimal number `0.<digits>`,
+    /// i.e. the denominator will be `10^len(digits)`.
     fn as_decimal_ratio(&self) -> Result<(u64, u64), ValidationError> {
         let denominator = 10u64
             .checked_pow(u32::try_from(self.places.len()).context(IntegerSnafu)?)
