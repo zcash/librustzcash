@@ -114,9 +114,12 @@ pub enum ValidationError {
 
     /// More than one value exists in a parameter list with a key
     /// that denotes a single value.
-    #[snafu(display("More than one parameter by the key '{key}', saw: [{}]", values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")))]
+    #[snafu(display(
+        "More than one parameter by the key '{key}', saw: [{}]",
+        values.iter().map(|(k, v)| format!("{k}={}", v.to_string())).collect::<Vec<_>>().join(", ")
+    ))]
     MultipleParameterValues {
         key: &'static str,
-        values: Vec<Value>,
+        values: Vec<(&'static str, Value)>,
     },
 }

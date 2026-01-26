@@ -1,6 +1,6 @@
 //! Types and functions used for parsing.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use nom::{AsChar, Parser};
 use snafu::{OptionExt, ResultExt};
@@ -732,46 +732,56 @@ impl Parameters {
     ///
     /// ## Errors
     /// Errors if there are more than one parameter with the key "value", and the
-    /// values of those parameters are not equal.
+    /// values of those parameters are not semantically equal.
     pub fn value(&self) -> Result<Option<Number>, ValidationError> {
-        let values = self
-            .iter()
-            .filter_map(|p| match p {
-                Parameter::Value(n) => Some(n.clone()),
-                _ => None,
-            })
-            .collect::<std::collections::HashSet<_>>();
+        let mut values = BTreeMap::default();
+        for p in self.iter() {
+            let (number, n) = match p {
+                Parameter::Value(n) => (n.as_i128()?, n),
+                _ => continue,
+            };
+            values.insert(("value", number), n.clone());
+        }
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
                 key: "value",
-                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
+                values: values
+                    .into_iter()
+                    .map(|((k, _), n)| (k, Value::Number(n)))
+                    .collect::<Vec<_>>(),
             }
         );
-        Ok(values.into_iter().next())
+        Ok(values.into_iter().next().map(|(_, n)| n))
     }
 
     /// Returns the number value of the parameter with the "gas" or "gasLimit" key, if any.
     ///
     /// ## Errors
-    /// Errors if there are more than one parameter with the key "gas_limit", and those
-    /// values are not equal.
+    /// Errors if there are more than one parameter with the key "gas" or "gasLimit", and those
+    /// values are not semantically equal.
     pub fn gas_limit(&self) -> Result<Option<Number>, ValidationError> {
-        let values = self
-            .iter()
-            .filter_map(|p| match p {
-                Parameter::GasLimit(n) => Some(n.clone()),
-                _ => None,
-            })
-            .collect::<std::collections::HashSet<_>>();
+        let mut values = BTreeMap::default();
+        for p in self.iter() {
+            let (k, number, n) = match p {
+                Parameter::Gas(n) => ("gas", n.as_i128()?, n),
+                Parameter::GasLimit(n) => ("gasLimit", n.as_i128()?, n),
+                _ => continue,
+            };
+            // Also return the actual key for error reporting
+            values.insert(("gasLimit", number), (k, n.clone()));
+        }
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
                 key: "gasLimit",
-                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
+                values: values
+                    .into_iter()
+                    .map(|(_, (k, n))| (k, Value::Number(n)))
+                    .collect::<Vec<_>>(),
             }
         );
-        Ok(values.into_iter().next())
+        Ok(values.into_iter().next().map(|(_, (_, n))| n))
     }
 
     /// Returns the number value of the parameter with the "gasPrice",
@@ -779,23 +789,27 @@ impl Parameters {
     ///
     /// ## Errors
     /// Errors if there are more than one parameter with the key "gasPrice"
-    /// or "gas", and the values of those parameters are not equal.
+    /// and the values of those parameters are not semantically equal.
     pub fn gas_price(&self) -> Result<Option<Number>, ValidationError> {
-        let values = self
-            .iter()
-            .filter_map(|p| match p {
-                Parameter::GasPrice(n) => Some(n.clone()),
-                _ => None,
-            })
-            .collect::<std::collections::HashSet<_>>();
+        let mut values = BTreeMap::default();
+        for p in self.iter() {
+            let (number, n) = match p {
+                Parameter::GasPrice(n) => (n.as_i128()?, n),
+                _ => continue,
+            };
+            values.insert(("gasPrice", number), n.clone());
+        }
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
                 key: "gasPrice",
-                values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
+                values: values
+                    .into_iter()
+                    .map(|((k, _), n)| (k, Value::Number(n)))
+                    .collect::<Vec<_>>(),
             }
         );
-        Ok(values.into_iter().next())
+        Ok(values.into_iter().next().map(|(_, n)| n))
     }
 
     /// Returns an iterator over all ABI type parameters.
