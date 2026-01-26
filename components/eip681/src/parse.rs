@@ -30,6 +30,21 @@ impl Digits {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const MAX_PLACES: usize = u64::MAX.ilog10() as usize;
 
+    /// Construct a new `Digits` from a `u64`.
+    pub fn from_u64(mut v: u64) -> Self {
+        if v == 0 {
+            return Digits { places: vec![0] };
+        }
+
+        let mut places: Vec<u8> = vec![];
+        while v > 0 {
+            places.push((v % 10) as u8);
+            v /= 10;
+        }
+        places.reverse();
+        Digits { places }
+    }
+
     /// Returns the `u64` representation.
     ///
     /// ## Errors
@@ -53,20 +68,6 @@ impl Digits {
             .checked_pow(u32::try_from(self.places.len()).context(IntegerSnafu)?)
             .context(OverflowSnafu)?;
         Ok((self.as_u64()?, denominator))
-    }
-
-    pub fn from_u64(mut v: u64) -> Self {
-        if v == 0 {
-            return Digits { places: vec![0] };
-        }
-
-        let mut places: Vec<u8> = vec![];
-        while v > 0 {
-            places.push((v % 10) as u8);
-            v /= 10;
-        }
-        places.reverse();
-        Digits { places }
     }
 
     /// Parse at least `min` digits.
@@ -288,6 +289,13 @@ impl Number {
                 seen: exp
             }
         );
+        // Since it may be hard to see what's going on here:
+        // ```
+        // signum * (
+        //     (integer * multiplier) +
+        //     (decimal_numerator * (multiplier / decimal_denominator))
+        // )
+        // ```
         let multiplied_integer = (integer as i128)
             .checked_mul(multiplier)
             .with_context(|| OverflowSnafu)?;
