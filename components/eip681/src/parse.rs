@@ -774,7 +774,7 @@ impl Parameters {
         Ok(values.into_iter().next())
     }
 
-    /// Returns the number value of the parameter with the "gasPrice" or "gas" key,
+    /// Returns the number value of the parameter with the "gasPrice",
     /// if any.
     ///
     /// ## Errors
@@ -784,7 +784,6 @@ impl Parameters {
         let values = self
             .iter()
             .filter_map(|p| match p {
-                Parameter::Gas(n) => Some(n.clone()),
                 Parameter::GasPrice(n) => Some(n.clone()),
                 _ => None,
             })
@@ -792,7 +791,7 @@ impl Parameters {
         snafu::ensure!(
             values.len() <= 1,
             MultipleParameterValuesSnafu {
-                key: "gasLimit",
+                key: "gasPrice",
                 values: values.into_iter().map(Value::Number).collect::<Vec<_>>(),
             }
         );
