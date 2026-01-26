@@ -116,7 +116,7 @@ pub enum ValidationError {
     /// that denotes a single value.
     #[snafu(display(
         "More than one parameter by the key '{key}', saw: [{}]",
-        values.iter().map(|(k, v)| format!("{k}={}", v.to_string())).collect::<Vec<_>>().join(", ")
+        values.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ")
     ))]
     MultipleParameterValues {
         key: &'static str,
