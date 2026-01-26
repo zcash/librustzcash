@@ -48,11 +48,11 @@ transactions.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.confirmations_until_spendable" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/wallet.rs.html#536-598">Source</a><h4 class="code-header">pub fn <a href="#method.confirmations_until_spendable" class="fn">confirmations_until_spendable</a>(
     &amp;self,
     target_height: <a class="struct" href="struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>,
-    pool_type: <a class="enum" href="../../../zcash_protocol/enum.PoolType.html" title="enum zcash_protocol::PoolType">PoolType</a>,
+    pool_type: PoolType,
     receiving_key_scope: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Scope&gt;,
-    mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../../../zcash_protocol/consensus/struct.BlockHeight.html" title="struct zcash_protocol::consensus::BlockHeight">BlockHeight</a>&gt;,
+    mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
     tx_trusted: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
-    max_shielding_input_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../../../zcash_protocol/consensus/struct.BlockHeight.html" title="struct zcash_protocol::consensus::BlockHeight">BlockHeight</a>&gt;,
+    max_shielding_input_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
     tx_shielding_inputs_trusted: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
 ) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a></h4></section></summary><div class="docblock"><p>Returns the number of confirmations until a transaction output is considered spendable,
 given information about the output and the inputs to the transaction that produced it.</p>

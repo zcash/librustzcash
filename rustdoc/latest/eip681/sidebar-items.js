@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EthereumAddress","Parameter","Value"],"mod":["error"],"struct":["Digits","EnsName","EthereumAbiTypeName","EthereumTransactionRequest","HexDigits","Number","Parameters","SchemaPrefix","UrlEncodedUnicodeString"]};

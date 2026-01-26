@@ -4,8 +4,8 @@
     Bip32DerivationError(Error),
     InvalidSaplingDiversifierIndex(DiversifierIndex),
     DiversifierSpaceExhausted,
-    ReceiverTypeNotSupported(<a class="enum" href="../../zcash_address/kind/unified/enum.Typecode.html" title="enum zcash_address::kind::unified::Typecode">Typecode</a>),
-    KeyNotAvailable(<a class="enum" href="../../zcash_address/kind/unified/enum.Typecode.html" title="enum zcash_address::kind::unified::Typecode">Typecode</a>),
+    ReceiverTypeNotSupported(Typecode),
+    KeyNotAvailable(Typecode),
     ShieldedReceiverRequired,
 }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Errors that can occur in the generation of unified addresses.</p>
 </div></details><h2 id="variants" class="variants section-header">Variants<a href="#variants" class="anchor">§</a></h2><div class="variants"><section id="variant.InvalidTransparentChildIndex" class="variant"><a href="#variant.InvalidTransparentChildIndex" class="anchor">§</a><h3 class="code-header">InvalidTransparentChildIndex(DiversifierIndex)</h3></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span><div class="docblock"><p>The requested diversifier index was outside the range of valid transparent
@@ -14,9 +14,9 @@ child address indices.</p>
 </div><section id="variant.Bip32DerivationError" class="variant"><a href="#variant.Bip32DerivationError" class="anchor">§</a><h3 class="code-header">Bip32DerivationError(Error)</h3></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span><div class="docblock"><p>An error occurred in [<code>bip32</code>] derivation of a transparent address.</p>
 </div><section id="variant.InvalidSaplingDiversifierIndex" class="variant"><a href="#variant.InvalidSaplingDiversifierIndex" class="anchor">§</a><h3 class="code-header">InvalidSaplingDiversifierIndex(DiversifierIndex)</h3></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>sapling</code></strong> only.</div></span><div class="docblock"><p>The diversifier index could not be mapped to a valid Sapling diversifier.</p>
 </div><section id="variant.DiversifierSpaceExhausted" class="variant"><a href="#variant.DiversifierSpaceExhausted" class="anchor">§</a><h3 class="code-header">DiversifierSpaceExhausted</h3></section><div class="docblock"><p>The space of available diversifier indices has been exhausted.</p>
-</div><section id="variant.ReceiverTypeNotSupported" class="variant"><a href="#variant.ReceiverTypeNotSupported" class="anchor">§</a><h3 class="code-header">ReceiverTypeNotSupported(<a class="enum" href="../../zcash_address/kind/unified/enum.Typecode.html" title="enum zcash_address::kind::unified::Typecode">Typecode</a>)</h3></section><div class="docblock"><p>A requested address typecode was not recognized, so we are unable to generate the address
+</div><section id="variant.ReceiverTypeNotSupported" class="variant"><a href="#variant.ReceiverTypeNotSupported" class="anchor">§</a><h3 class="code-header">ReceiverTypeNotSupported(Typecode)</h3></section><div class="docblock"><p>A requested address typecode was not recognized, so we are unable to generate the address
 as requested.</p>
-</div><section id="variant.KeyNotAvailable" class="variant"><a href="#variant.KeyNotAvailable" class="anchor">§</a><h3 class="code-header">KeyNotAvailable(<a class="enum" href="../../zcash_address/kind/unified/enum.Typecode.html" title="enum zcash_address::kind::unified::Typecode">Typecode</a>)</h3></section><div class="docblock"><p>A requested address typecode was recognized, but the unified key being used to generate the
+</div><section id="variant.KeyNotAvailable" class="variant"><a href="#variant.KeyNotAvailable" class="anchor">§</a><h3 class="code-header">KeyNotAvailable(Typecode)</h3></section><div class="docblock"><p>A requested address typecode was recognized, but the unified key being used to generate the
 address lacks an item of the requested type.</p>
 </div><section id="variant.ShieldedReceiverRequired" class="variant"><a href="#variant.ShieldedReceiverRequired" class="anchor">§</a><h3 class="code-header">ShieldedReceiverRequired</h3></section><div class="docblock"><p>A Unified address cannot be generated without at least one shielded receiver being
 included.</p>

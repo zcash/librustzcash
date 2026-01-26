@@ -2,9 +2,9 @@
     params: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;ParamsT</a>,
     data: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;mut DbT</a>,
     tx: &amp;<a class="struct" href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction">Transaction</a>,
-    mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../../../zcash_protocol/consensus/struct.BlockHeight.html" title="struct zcash_protocol::consensus::BlockHeight">BlockHeight</a>&gt;,
+    mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, DbT::<a class="associatedtype" href="../trait.WalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::WalletRead::Error">Error</a>&gt;<div class="where">where
-    ParamsT: <a class="trait" href="../../../zcash_protocol/consensus/trait.Parameters.html" title="trait zcash_protocol::consensus::Parameters">Parameters</a>,
+    ParamsT: Parameters,
     DbT: <a class="trait" href="../trait.WalletWrite.html" title="trait zcash_client_backend::data_api::WalletWrite">WalletWrite</a>,</div></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Scans a <a href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction"><code>Transaction</code></a> for any information that can be decrypted by the accounts in
 the wallet, and saves it to the wallet.</p>
 </div></details></section></div></main></body></html>
