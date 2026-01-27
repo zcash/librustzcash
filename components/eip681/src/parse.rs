@@ -2,7 +2,14 @@
 
 use std::{borrow::Cow, collections::BTreeMap};
 
-use nom::{AsChar, Parser};
+use nom::{
+    AsChar, Parser,
+    bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
+    character::complete::char,
+    combinator::opt,
+    multi::separated_list0,
+    sequence::preceded,
+};
 use primitive_types::U256;
 use sha3::{Digest, Keccak256};
 use snafu::{OptionExt, ResultExt};
@@ -99,7 +106,7 @@ impl Digits {
 /// Parse at least `min` digits.
 pub fn parse_min(i: &str, min: usize, is_hex: bool) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
     let radix = if is_hex { 16 } else { 10 };
-    let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(radix))(i)?;
+    let (i, chars) = take_while(|c: char| c.is_digit(radix))(i)?;
     let data = chars
         .chars()
         .map(|c| {
@@ -246,7 +253,7 @@ impl core::fmt::Display for HexDigits {
 impl HexDigits {
     /// Parse at least `min` digits.
     pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, data) = nom::bytes::complete::take_while(|c: char| c.is_ascii_hexdigit())(i)?;
+        let (i, data) = take_while(|c: char| c.is_ascii_hexdigit())(i)?;
         snafu::ensure!(
             data.len() >= min,
             DigitsMinimumSnafu {
@@ -410,36 +417,36 @@ impl Number {
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse [ "-" / "+" ]
-        let parse_signum_pos = nom::character::complete::char('+').map(|_| true);
-        let parse_signum_neg = nom::character::complete::char('-').map(|_| false);
+        let parse_signum_pos = char('+').map(|_| true);
+        let parse_signum_neg = char('-').map(|_| false);
         let parse_signum = parse_signum_pos.or(parse_signum_neg);
-        let (i, signum) = nom::combinator::opt(parse_signum)(i)?;
+        let (i, signum) = opt(parse_signum)(i)?;
 
         // Parse *DIGIT
         let (i, integer) = Digits::parse_min(i, 0)?;
 
         // Parse [ "." 1*DIGIT ]
         fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
-            let (i, _dot) = nom::character::complete::char('.')(i)?;
+            let (i, _dot) = char('.')(i)?;
             let (i, digits) = Digits::parse_min(i, 1)?;
             Ok((i, digits))
         }
-        let (i, decimal) = nom::combinator::opt(parse_decimal)(i)?;
+        let (i, decimal) = opt(parse_decimal)(i)?;
 
         // Parse [ ( "e" / "E" ) [ 1*DIGIT ] ]
         fn parse_exponent(i: &str) -> nom::IResult<&str, (bool, Option<Digits>), ParseError<'_>> {
             // Parse ( "e" / "E" )
-            let parse_little_e = nom::character::complete::char('e').map(|_| true);
-            let parse_big_e = nom::character::complete::char('E').map(|_| false);
+            let parse_little_e = char('e').map(|_| true);
+            let parse_big_e = char('E').map(|_| false);
             let mut parse_e = parse_little_e.or(parse_big_e);
             let (i, little_e) = parse_e.parse(i)?;
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1))(i)?;
+            let (i, maybe_exp) = opt(|i| Digits::parse_min(i, 1))(i)?;
 
             Ok((i, (little_e, maybe_exp)))
         }
-        let (i, exponent) = nom::combinator::opt(parse_exponent)(i)?;
+        let (i, exponent) = opt(parse_exponent)(i)?;
 
         Ok((
             i,
@@ -652,7 +659,7 @@ impl EnsName {
             !c.is_whitespace() && !EnsName::DELIMITERS.contains(&c)
         }
 
-        let (i, name) = nom::bytes::complete::take_till(|c| !continue_parsing(c))(i)?;
+        let (i, name) = take_till(|c| !continue_parsing(c))(i)?;
         snafu::ensure!(!name.is_empty(), EnsMissingSnafu);
         snafu::ensure!(name.contains('.'), EnsDomainSnafu);
 
@@ -699,7 +706,7 @@ impl AddressOrEnsName {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse "0x" and then 40+ hex digits
         fn parse_40plus_hex(i: &str) -> nom::IResult<&str, AddressOrEnsName, ParseError<'_>> {
-            let (i, _) = nom::bytes::complete::tag("0x")(i)?;
+            let (i, _) = tag("0x")(i)?;
             let (i, digits) = HexDigits::parse_min(i, 40)?;
             Ok((i, AddressOrEnsName::Address(digits)))
         }
@@ -748,7 +755,7 @@ impl UrlEncodedUnicodeString {
         fn should_continue_parsing(c: char) -> bool {
             c.is_alphanumeric() || c == '%'
         }
-        let (i, s) = nom::bytes::complete::take_while(should_continue_parsing)(i)?;
+        let (i, s) = take_while(should_continue_parsing)(i)?;
         Ok((i, UrlEncodedUnicodeString(s.to_string())))
     }
 
@@ -875,7 +882,7 @@ impl EthereumAbiTypeName {
             ];
             c.is_alphanum() || chars.contains(&c)
         }
-        let (i, s) = nom::bytes::complete::take_while1(is_type_char)(i)?;
+        let (i, s) = take_while1(is_type_char)(i)?;
         Ok((i, EthereumAbiTypeName { name: s.to_owned() }))
     }
 }
@@ -943,8 +950,8 @@ impl Parameter {
 
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse the key blob
-        let (i, key_blob) = nom::bytes::complete::take_till1(|c| c == '=')(i)?;
-        let (i, _) = nom::bytes::complete::tag("=")(i)?;
+        let (i, key_blob) = take_till1(|c| c == '=')(i)?;
+        let (i, _) = tag("=")(i)?;
 
         fn parse_number(
             i: &str,
@@ -1019,10 +1026,7 @@ impl Parameters {
     /// This parser never fails.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // First parse into parameter "blobs", separated by '&'
-        let (i, blobs) = nom::multi::separated_list0(
-            nom::bytes::complete::tag("&"),
-            nom::bytes::complete::take_till1(|c| c == '&'),
-        )(i)?;
+        let (i, blobs) = separated_list0(tag("&"), take_till1(|c| c == '&'))(i)?;
         let mut params = vec![];
         for blob in blobs.into_iter() {
             let (j, param) = Parameter::parse(blob)?;
@@ -1159,9 +1163,9 @@ impl core::fmt::Display for SchemaPrefix {
 
 impl SchemaPrefix {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, prefix) = nom::bytes::complete::take_till1(|c| c == ':')(i)?;
-        let (i, _) = nom::character::complete::char(':')(i)?;
-        let (i, maybe_pay) = nom::combinator::opt(nom::bytes::complete::tag("pay-"))(i)?;
+        let (i, prefix) = take_till1(|c| c == ':')(i)?;
+        let (i, _) = char(':')(i)?;
+        let (i, maybe_pay) = opt(tag("pay-"))(i)?;
         let has_pay = maybe_pay.is_some();
         Ok((
             i,
@@ -1233,7 +1237,7 @@ impl RawTransactionRequest {
     /// Parse a transaction request.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         let (i, schema_prefix) = SchemaPrefix::parse(i)?;
-        let (i, address_blob) = nom::bytes::complete::is_not("@/?")(i)?;
+        let (i, address_blob) = is_not("@/?")(i)?;
         let (remaining_address_input, target_address) = AddressOrEnsName::parse(address_blob)?;
         snafu::ensure!(
             remaining_address_input.is_empty(),
@@ -1242,17 +1246,13 @@ impl RawTransactionRequest {
             }
         );
 
-        let parse_chain_id =
-            nom::sequence::preceded(nom::bytes::complete::tag("@"), |i| Digits::parse_min(i, 1));
-        let (i, chain_id) = nom::combinator::opt(parse_chain_id)(i)?;
+        let parse_chain_id = preceded(tag("@"), |i| Digits::parse_min(i, 1));
+        let (i, chain_id) = opt(parse_chain_id)(i)?;
 
-        let parse_function_name = nom::sequence::preceded(
-            nom::bytes::complete::tag("/"),
-            UrlEncodedUnicodeString::parse,
-        );
-        let (i, function_name) = nom::combinator::opt(parse_function_name)(i)?;
+        let parse_function_name = preceded(tag("/"), UrlEncodedUnicodeString::parse);
+        let (i, function_name) = opt(parse_function_name)(i)?;
 
-        let (i, _) = nom::combinator::opt(nom::bytes::complete::tag("?"))(i)?;
+        let (i, _) = opt(tag("?"))(i)?;
         let (i, parameters) = Parameters::parse(i)?;
         Ok((
             i,
