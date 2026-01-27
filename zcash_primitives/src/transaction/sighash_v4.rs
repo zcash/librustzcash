@@ -98,13 +98,13 @@ fn joinsplits_hash(
         .hash(&data)
 }
 
-fn shielded_spends_hash<
+fn sapling_spends_hash<
     A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
 >(
-    shielded_spends: &[SpendDescription<A>],
+    spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
-    let mut data = Vec::with_capacity(shielded_spends.len() * 384);
-    for s_spend in shielded_spends {
+    let mut data = Vec::with_capacity(spends.len() * 384);
+    for s_spend in spends {
         data.extend_from_slice(&s_spend.cv().to_bytes());
         data.extend_from_slice(s_spend.anchor().to_repr().as_ref());
         data.extend_from_slice(s_spend.nullifier().as_ref());
@@ -117,9 +117,9 @@ fn shielded_spends_hash<
         .hash(&data)
 }
 
-fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
-    let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
-    for s_out in shielded_outputs {
+fn sapling_outputs_hash(outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
+    let mut data = Vec::with_capacity(outputs.len() * 948);
+    for s_out in outputs {
         sapling_serialization::write_output_v4(&mut data, s_out).unwrap();
     }
     Blake2bParams::new()
@@ -212,14 +212,14 @@ pub fn v4_signature_hash<
                 !tx.sapling_bundle
                     .as_ref()
                     .is_none_or(|b| b.shielded_spends().is_empty()),
-                shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
+                sapling_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
             );
             update_hash!(
                 h,
                 !tx.sapling_bundle
                     .as_ref()
                     .is_none_or(|b| b.shielded_outputs().is_empty()),
-                shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
+                sapling_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
             );
         }
         h.update(&tx.lock_time.to_le_bytes());
