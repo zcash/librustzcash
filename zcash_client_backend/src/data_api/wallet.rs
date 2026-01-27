@@ -1267,14 +1267,15 @@ where
     }
 
     #[cfg(feature = "transparent-inputs")]
-    let mut cache = HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
+    let mut transparent_input_addresses =
+        HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
 
     #[cfg(feature = "transparent-inputs")]
     let mut metadata_from_address = |addr: &TransparentAddress| -> Result<
         TransparentAddressMetadata,
         CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
     > {
-        match cache.get(addr) {
+        match transparent_input_addresses.get(addr) {
             Some(result) => Ok(result.clone()),
             None => {
                 // `wallet_db.get_transparent_address_metadata` includes reserved ephemeral
@@ -1290,7 +1291,7 @@ where
                     .map_err(InputSelectorError::DataSource)?
                     .ok_or(Error::AddressNotRecognized(*addr))?;
 
-                cache.insert(*addr, result.clone());
+                transparent_input_addresses.insert(*addr, result.clone());
                 Ok(result)
             }
         }
@@ -1610,7 +1611,7 @@ where
         step_index,
         builder,
         #[cfg(feature = "transparent-inputs")]
-        transparent_input_addresses: cache,
+        transparent_input_addresses,
         #[cfg(feature = "orchard")]
         orchard_output_meta,
         sapling_output_meta,
