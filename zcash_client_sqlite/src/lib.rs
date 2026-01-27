@@ -1596,7 +1596,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn detect_accounts_transparent<'t>(
         &self,
         spends: impl Iterator<Item = &'t transparent::bundle::OutPoint>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+    ) -> Result<HashSet<Self::AccountId>, Self::Error> {
         wallet::transparent::detect_spending_accounts(self.conn.borrow(), spends)
             .map_err(SqliteClientError::from)
     }
@@ -1604,7 +1604,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn detect_accounts_sapling<'t>(
         &self,
         spends: impl Iterator<Item = &'t sapling::Nullifier>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+    ) -> Result<HashSet<Self::AccountId>, Self::Error> {
         wallet::sapling::detect_spending_accounts(self.conn.borrow(), spends)
             .map_err(SqliteClientError::from)
     }
@@ -1613,7 +1613,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn detect_accounts_orchard<'t>(
         &self,
         spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
-    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+    ) -> Result<HashSet<Self::AccountId>, Self::Error> {
         wallet::orchard::detect_spending_accounts(self.conn.borrow(), spends)
             .map_err(SqliteClientError::from)
     }

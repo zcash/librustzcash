@@ -37,11 +37,14 @@ use {
 
 #[cfg(feature = "orchard")]
 use {
-    crate::data_api::{ORCHARD_SHARD_HEIGHT, ll::ReceivedOrchardOutput as _},
+    crate::data_api::ORCHARD_SHARD_HEIGHT,
     incrementalmerkletree::frontier::Frontier,
     shardtree::store::{Checkpoint, ShardStore as _},
     std::collections::BTreeMap,
 };
+
+#[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+use crate::data_api::ll::ReceivedOrchardOutput as _;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
