@@ -549,6 +549,7 @@ mod tests {
             None,
             tx,
             &[(account_id, ufvk0)].into_iter().collect(),
+            &[],
         );
 
         db_data
