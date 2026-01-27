@@ -146,12 +146,12 @@ impl ShieldedPoolTester for OrchardPoolTester {
             .map(|n| n.take_orchard())
     }
 
-    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize {
+    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<Transaction, A>) -> usize {
         d_tx.orchard_outputs().len()
     }
 
     fn with_decrypted_pool_memos<A>(
-        d_tx: &DecryptedTransaction<'_, A>,
+        d_tx: &DecryptedTransaction<Transaction, A>,
         mut f: impl FnMut(&MemoBytes),
     ) {
         for output in d_tx.orchard_outputs() {

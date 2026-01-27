@@ -20,6 +20,7 @@ workspace.
 - `zcash_transparent::builder::SpendInfo`
 - `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
 - `zcash_transparent::builder::Builder::add_p2pkh_input`
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
 
 ### Changed
 - MSRV is now 1.85.1.

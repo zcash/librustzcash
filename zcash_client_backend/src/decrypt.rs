@@ -120,7 +120,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     chain_tip_height: Option<BlockHeight>,
     tx: &'a Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
-) -> DecryptedTransaction<'a, AccountId> {
+) -> DecryptedTransaction<'a, Transaction, AccountId> {
     let zip212_enforcement = zip212_enforcement(
         params,
         // Height is block height for mined transactions, and the "mempool height" (chain height + 1)

@@ -276,10 +276,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 mod tests {
     use std::convert::Infallible;
 
-    use crate::ParallelSliceMut;
-    #[cfg(feature = "multicore")]
-    use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
-
     use incrementalmerkletree::Position;
     use rand_core::OsRng;
     use rusqlite::{Connection, OptionalExtension, named_params, params};
@@ -292,7 +288,9 @@ mod tests {
     };
     use zcash_client_backend::{
         TransferType,
-        data_api::{BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees},
+        data_api::{
+            BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, ll::ReceivedSaplingOutput,
+        },
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
         scanning::{Nullifiers, ScanningKeys, scan_block},
@@ -326,7 +324,6 @@ mod tests {
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
             },
             memo_repr,
-            sapling::ReceivedSaplingOutput,
         },
     };
 
@@ -740,7 +737,7 @@ mod tests {
                     // Create subtrees from the note commitments in parallel.
                     const CHUNK_SIZE: usize = 1024;
                     let subtrees = sapling_commitments
-                        .par_chunks_mut(CHUNK_SIZE)
+                        .chunks_mut(CHUNK_SIZE)
                         .enumerate()
                         .filter_map(|(i, chunk)| {
                             let start = start_position + (i * CHUNK_SIZE) as u64;

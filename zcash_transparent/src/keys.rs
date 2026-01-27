@@ -22,7 +22,7 @@ use {
 ///
 /// This type can represent [`zip32`] internal and external scopes, as well as custom scopes that
 /// may be used in non-hardened derivation at the `change` level of the BIP 44 key path.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {

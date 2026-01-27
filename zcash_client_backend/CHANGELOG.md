@@ -23,6 +23,8 @@ workspace.
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
 - `zcash_client_backend::fees::MetaSource`
+- `zcash_client_backend::wallet::transparent` module, behind the `transparent-inputs` feature flag.
+- `zcash_client_backend::data_api::ll`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
@@ -55,6 +57,16 @@ workspace.
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
   `zcash_client_backend::data_api::InputSource`.
+- `zcash_client_backend::wallet::GapMetadata` has been moved behind the
+  `transparent-inputs` feature flag, as it is only useful in the context
+  of the wallet receiving transparent funds.
+- Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
+  have been modified. It now abstracts over the transaction type, to permit
+  use with partial or compact transaction data instead of full transactions.
+
+### Removed
+- `zcash_client_backend::data_api::testing::transparent::GapLimits` use
+  `zcash_client_backend::wallet::transparent::GapLimits` instead.
 
 ## [0.21.0] - 2025-11-05
 
