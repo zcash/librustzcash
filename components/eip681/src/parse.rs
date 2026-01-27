@@ -2089,4 +2089,16 @@ mod test {
         let (_, n) = Number::parse(input).unwrap();
         assert_eq!(n.as_i128().unwrap(), 0);
     }
+
+    #[test]
+    fn round_trip_empty_params() {
+        let input = "ethereum:0x4040404040404040404040404040404040404040?";
+        let (i, seen) = RawTransactionRequest::parse(input)
+            .unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
+        pretty_assertions::assert_str_eq!(
+            input,
+            seen.to_string().as_str(),
+            "input: {input}\ni: {i}"
+        );
+    }
 }
