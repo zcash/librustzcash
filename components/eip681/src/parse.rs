@@ -1581,4 +1581,16 @@ mod test {
         assert_eq!((1234, 10_000_000), ratio);
         assert_eq!(0.0001234, ratio.0 as f32 / ratio.1 as f32);
     }
+
+    #[test]
+    fn round_trip_empty_params() {
+        let input = "ethereum:0x4040404040404040404040404040404040404040?";
+        let (i, seen) = EthereumTransactionRequest::parse(&input)
+            .unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
+        pretty_assertions::assert_str_eq!(
+            input,
+            seen.to_string().as_str(),
+            "input: {input}\ni: {i}"
+        );
+    }
 }
