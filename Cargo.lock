@@ -1476,10 +1476,12 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "ens-normalize-rs",
+ "hex",
  "nom",
  "percent-encoding",
  "pretty_assertions",
  "proptest",
+ "sha3",
  "snafu",
 ]
 

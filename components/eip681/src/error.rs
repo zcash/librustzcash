@@ -21,15 +21,18 @@ pub enum ParseError<'a> {
 
     /// The number of digits did not match or exceed the expected minimum.
     #[snafu(display(
-        "Expected at least {min} digits, saw {} before {}",
-        digits.len(),
+        "Expected at least {min} digits, saw {digits_len} before {}",
         input.split_at(10).0
     ))]
     DigitsMinimum {
         min: usize,
-        digits: Vec<u8>,
+        digits_len: usize,
         input: &'a str,
     },
+
+    /// The character is not a hexadecimal digit.
+    #[snafu(display("The character '{character}' was expected to be hexadecimal, but isn't."))]
+    NotAHexDigit { character: char },
 
     /// The ENS name was expected and missing.
     #[snafu(display("Missing ENS name"))]
@@ -94,6 +97,11 @@ impl<'a> From<ParseError<'a>> for nom::Err<ParseError<'a>> {
 #[non_exhaustive]
 #[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
+    #[snafu(display(
+        "Incorrect number of digits for an ethereum address. Expected 40, saw {len}."
+    ))]
+    IncorrectEthAddressLen { len: usize },
+
     #[snafu(display("Exponent is too small, expected at least {expected}, saw {seen}"))]
     SmallExponent { expected: usize, seen: u64 },
 
@@ -122,4 +130,8 @@ pub enum ValidationError {
         key: &'static str,
         values: Vec<(&'static str, Value)>,
     },
+
+    /// An Ethereum address failed ERC-55 checksum validation.
+    #[snafu(display("ERC-55 checksum validation failure."))]
+    Erc55Validation,
 }

@@ -33,6 +33,6 @@
 pub mod error;
 mod parse;
 pub use parse::{
-    Digits, EnsName, EthereumAbiTypeName, EthereumAddress, EthereumTransactionRequest, HexDigits,
-    Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
+    Digits, EnsName, EthereumAbiTypeName, EthereumAddressOrEnsName, EthereumTransactionRequest,
+    HexDigits, Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
 };
