@@ -6,13 +6,30 @@ use nom::{
     AsChar, Parser,
     bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
     character::complete::char,
-    combinator::opt,
+    combinator::{map_parser, opt},
     multi::separated_list0,
-    sequence::preceded,
+    sequence::{preceded, terminated, tuple},
 };
 use snafu::{OptionExt, ResultExt};
 
 use crate::error::*;
+
+/// Succeeds if all the input has been consumed by its child parser.
+///
+/// Identical to [`nom::combinator::all_consuming`] except it only accepts `&str` inputs
+/// and returns a different error.
+fn all_consuming<'i, O, F>(
+    mut f: F,
+) -> impl FnMut(&'i str) -> nom::IResult<&'i str, O, ParseError<'i>>
+where
+    F: Parser<&'i str, O, ParseError<'i>>,
+{
+    move |input| {
+        let (input, res) = f.parse(input)?;
+        snafu::ensure!(input.is_empty(), UnexpectedLeftoverInputSnafu { input });
+        Ok((input, res))
+    }
+}
 
 /// Zero or more consecutive digits.
 ///
@@ -214,47 +231,36 @@ impl Number {
     /// number = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        // Parse [ "-" / "+" ]
-        let parse_signum_pos = char('+').map(|_| true);
-        let parse_signum_neg = char('-').map(|_| false);
-        let parse_signum = parse_signum_pos.or(parse_signum_neg);
-        let (i, signum) = opt(parse_signum)(i)?;
+        // Parse [ "-" / "+" ], returning `true` if "+"
+        let parse_signum = opt(char('+').map(|_| true).or(char('-').map(|_| false)));
 
         // Parse *DIGIT
-        let (i, integer) = Digits::parse_min(0)(i)?;
+        let parse_integer = Digits::parse_min(0);
 
         // Parse [ "." 1*DIGIT ]
-        fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
-            let (i, _dot) = char('.')(i)?;
-            let (i, digits) = Digits::parse_min(1)(i)?;
-            Ok((i, digits))
-        }
-        let (i, decimal) = opt(parse_decimal)(i)?;
+        let parse_decimal = opt(preceded(char('.'), Digits::parse_min(1)));
 
         // Parse [ ( "e" / "E" ) [ 1*DIGIT ] ]
-        fn parse_exponent(i: &str) -> nom::IResult<&str, (bool, Option<Digits>), ParseError<'_>> {
-            // Parse ( "e" / "E" )
-            let parse_little_e = char('e').map(|_| true);
-            let parse_big_e = char('E').map(|_| false);
-            let mut parse_e = parse_little_e.or(parse_big_e);
-            let (i, little_e) = parse_e.parse(i)?;
+        fn parse_exponent(
+            i: &str,
+        ) -> nom::IResult<&str, Option<(bool, Option<Digits>)>, ParseError<'_>> {
+            // Parse ( "e" / "E" ), returning `true` if "e"
+            let parse_e = char('e').map(|_| true).or(char('E').map(|_| false));
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = opt(Digits::parse_min(1))(i)?;
+            let maybe_exp = opt(Digits::parse_min(1));
 
-            Ok((i, (little_e, maybe_exp)))
+            opt(tuple((parse_e, maybe_exp))).parse(i)
         }
-        let (i, exponent) = opt(parse_exponent)(i)?;
 
-        Ok((
-            i,
-            Self {
+        tuple((parse_signum, parse_integer, parse_decimal, parse_exponent))
+            .map(|(signum, integer, decimal, exponent)| Self {
                 signum,
                 integer,
                 decimal,
                 exponent,
-            },
-        ))
+            })
+            .parse(i)
     }
 
     /// Returns the value of the integer portion of the number.
@@ -433,15 +439,12 @@ impl EthereumAddress {
     /// Parse an `EthereumAddress`.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse "0x" and then 40+ hex digits
-        fn parse_40plus_hex(i: &str) -> nom::IResult<&str, EthereumAddress, ParseError<'_>> {
-            let (i, _) = tag("0x")(i)?;
-            let (i, digits) = HexDigits::parse_min(40)(i)?;
-            Ok((i, EthereumAddress::Hex(digits)))
-        }
-        let parse_ens = EnsName::parse.map(EthereumAddress::Name);
-        let mut parse_address = parse_40plus_hex.or(parse_ens);
-        let (i, address) = parse_address.parse(i)?;
-        Ok((i, address))
+        let parse_40plus_hex = preceded(tag("0x"), HexDigits::parse_min(40));
+
+        parse_40plus_hex
+            .map(EthereumAddress::Hex)
+            .or(EnsName::parse.map(EthereumAddress::Name))
+            .parse(i)
     }
 }
 
@@ -458,11 +461,9 @@ impl core::fmt::Display for UrlEncodedUnicodeString {
 
 impl UrlEncodedUnicodeString {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        fn should_continue_parsing(c: char) -> bool {
-            c.is_alphanumeric() || c == '%'
-        }
-        let (i, s) = take_while(should_continue_parsing)(i)?;
-        Ok((i, UrlEncodedUnicodeString(s.to_string())))
+        take_while(|c: char| c.is_alphanumeric() || c == '%')
+            .map(|s: &str| UrlEncodedUnicodeString(s.to_string()))
+            .parse(i)
     }
 
     pub fn encode(input: impl AsRef<str>) -> Self {
@@ -580,8 +581,9 @@ impl EthereumAbiTypeName {
             ];
             c.is_alphanum() || chars.contains(&c)
         }
-        let (i, s) = take_while1(is_type_char)(i)?;
-        Ok((i, EthereumAbiTypeName { name: s.to_owned() }))
+        take_while1(is_type_char)
+            .map(|s: &str| EthereumAbiTypeName { name: s.to_owned() })
+            .parse(i)
     }
 }
 
@@ -647,8 +649,7 @@ impl Parameter {
 
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse the key blob
-        let (i, key_blob) = take_till1(|c| c == '=')(i)?;
-        let (i, _) = tag("=")(i)?;
+        let (i, key_blob) = terminated(take_till1(|c| c == '='), tag("="))(i)?;
 
         fn parse_number(
             i: &str,
@@ -723,14 +724,12 @@ impl Parameters {
     /// This parser never fails.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // First parse into parameter "blobs", separated by '&'
-        let (i, blobs) = separated_list0(tag("&"), take_till1(|c| c == '&'))(i)?;
-        let mut params = vec![];
-        for blob in blobs.into_iter() {
-            let (j, param) = Parameter::parse(blob)?;
-            snafu::ensure!(j.is_empty(), UnexpectedLeftoverInputSnafu { input: j });
-            params.push(param);
-        }
-        Ok((i, Parameters(params)))
+        separated_list0(
+            tag("&"),
+            map_parser(take_till1(|c| c == '&'), all_consuming(Parameter::parse)),
+        )
+        .map(Parameters)
+        .parse(i)
     }
 
     /// Return an iterator over all parameters.
@@ -905,33 +904,26 @@ impl core::fmt::Display for EthereumTransactionRequest {
 impl EthereumTransactionRequest {
     /// Parse a transaction request.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, schema_prefix) = SchemaPrefix::parse(i)?;
-        let (i, address_blob) = is_not("@/?")(i)?;
-        let (remaining_address_input, target_address) = EthereumAddress::parse(address_blob)?;
-        snafu::ensure!(
-            remaining_address_input.is_empty(),
-            UnexpectedLeftoverInputSnafu {
-                input: remaining_address_input
-            }
-        );
+        let chain_id = Digits::parse_min(1);
+        let function_name = UrlEncodedUnicodeString::parse;
 
-        let parse_chain_id = preceded(tag("@"), Digits::parse_min(1));
-        let (i, chain_id) = opt(parse_chain_id)(i)?;
-
-        let parse_function_name = preceded(tag("/"), UrlEncodedUnicodeString::parse);
-        let (i, function_name) = opt(parse_function_name)(i)?;
-
-        let (i, parameters) = opt(preceded(tag("?"), Parameters::parse))(i)?;
-        Ok((
-            i,
-            Self {
+        tuple((
+            SchemaPrefix::parse,
+            map_parser(is_not("@/?"), all_consuming(EthereumAddress::parse)),
+            opt(preceded(tag("@"), chain_id)),
+            opt(preceded(tag("/"), function_name)),
+            opt(preceded(tag("?"), Parameters::parse)),
+        ))
+        .map(
+            |(schema_prefix, target_address, chain_id, function_name, parameters)| Self {
                 schema_prefix,
                 target_address,
                 chain_id,
                 function_name,
                 parameters,
             },
-        ))
+        )
+        .parse(i)
     }
 }
 
