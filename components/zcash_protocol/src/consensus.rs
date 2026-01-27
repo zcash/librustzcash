@@ -617,6 +617,15 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
 /// [ZIP 212]: https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes
 pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 
+/// The number of blocks after which a coinbase output is considered mature and spendable.
+///
+/// From [§ 7.1.2 of the Zcash Protocol Specification][txnconsensus]:
+/// > A transaction MUST NOT spend a transparent output of a coinbase transaction from a
+/// > block less than 100 blocks prior to the spend.
+///
+/// [txnconsensus]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub const COINBASE_MATURITY_BLOCKS: u32 = 100;
+
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
 /// Each branch ID in this enum corresponds to one of the epochs between a pair of Zcash

@@ -155,6 +155,8 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
+        // TODO: take into consideration coinbase maturity
+        // See <https://github.com/zcash/librustzcash/issues/821>
         let txos = self
             .transparent_received_outputs
             .iter()

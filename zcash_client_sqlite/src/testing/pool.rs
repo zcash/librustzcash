@@ -397,3 +397,11 @@ pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
         BlockCache::new(),
     )
 }
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::immature_coinbase_outputs_are_excluded_from_note_selection::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}

@@ -688,4 +688,12 @@ pub(crate) mod tests {
     fn receive_two_notes_with_same_value() {
         testing::pool::receive_two_notes_with_same_value::<SaplingPoolTester>();
     }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn immature_coinbase_outputs_are_excluded_from_note_selection() {
+        testing::pool::immature_coinbase_outputs_are_excluded_from_note_selection::<
+            SaplingPoolTester,
+        >();
+    }
 }

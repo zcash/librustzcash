@@ -1539,7 +1539,7 @@ pub trait InputSource {
     /// * the transaction that produced the output had or will have at least the required number of
     ///   confirmations according to the provided [`ConfirmationsPolicy`]; and
     /// * the output can potentially be spent in a transaction mined in a block at the given
-    ///   `target_height`.
+    ///   `target_height` (also taking into consideration the coinbase maturity rule).
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
