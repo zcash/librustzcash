@@ -567,21 +567,6 @@ impl EthereumAbiTypeName {
     }
 }
 
-// pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-//     let parse_value = nom::bytes::complete::tag("value").map(|_| Key::Value);
-//     let parse_gas = nom::bytes::complete::tag("gas").map(|_| Key::Gas);
-//     let parse_gas_limit = nom::bytes::complete::tag("gasLimit").map(|_| Key::GasLimit);
-//     let parse_gas_price = nom::bytes::complete::tag("gasPrice").map(|_| Key::GasPrice);
-
-//     nom::branch::alt((
-//         parse_value,
-//         parse_gas_limit,
-//         parse_gas_price,
-//         parse_gas,
-//         EthereumAbiTypeName::parse.map(Key::Type),
-//     ))(i)
-// }
-
 /// A key-value pair, where the the type of the value depends upon the key.
 ///
 /// ```abnf
