@@ -157,20 +157,23 @@ impl TryFrom<&RawTransactionRequest> for NativeRequest {
     fn try_from(raw: &RawTransactionRequest) -> Result<Self, Self::Error> {
         // A notive request cannot have a function name
         ensure!(raw.function_name.is_none(), HasFunctionNameSnafu);
-        // A native request cannot have ABI parameters
-        ensure!(
-            raw.parameters.abi_parameters().next().is_none(),
-            HasAbiParametersSnafu
-        );
 
-        for p in raw.parameters.iter() {
-            let v = p.value();
-            let n = v
-                .as_number()
-                .context(ParameterNotNumberSnafu { key: p.key() })?;
-            let _uint256 = n
-                .as_uint256()
-                .context(ParameterInvalidSnafu { key: p.key() })?;
+        if let Some(parameters) = &raw.parameters {
+            // A native request cannot have ABI parameters
+            ensure!(
+                parameters.abi_parameters().next().is_none(),
+                HasAbiParametersSnafu
+            );
+
+            for p in parameters.iter() {
+                let v = p.value();
+                let n = v
+                    .as_number()
+                    .context(ParameterNotNumberSnafu { key: p.key() })?;
+                let _uint256 = n
+                    .as_uint256()
+                    .context(ParameterInvalidSnafu { key: p.key() })?;
+            }
         }
 
         Ok(NativeRequest {
@@ -211,7 +214,7 @@ impl NativeRequest {
     pub fn value_atomic(&self) -> Option<U256> {
         // Swallowing errors with `??` is ok here as we already validated these parameters
         // to construct the request.
-        let value = self.inner.parameters.value().ok()??;
+        let value = self.inner.parameters.as_ref()?.value().ok()??;
         value.as_uint256().ok()
     }
 
@@ -219,7 +222,7 @@ impl NativeRequest {
     pub fn gas_limit(&self) -> Option<U256> {
         // Swallowing errors with `??` is ok here as we already validated these parameters
         // to construct the request.
-        let limit = self.inner.parameters.gas_limit().ok()??;
+        let limit = self.inner.parameters.as_ref()?.gas_limit().ok()??;
         limit.as_uint256().ok()
     }
 
@@ -227,7 +230,7 @@ impl NativeRequest {
     pub fn gas_price(&self) -> Option<U256> {
         // Swallowing errors with `??` is ok here as we already validated these parameters
         // to construct the request.
-        let price = self.inner.parameters.gas_price().ok()??;
+        let price = self.inner.parameters.as_ref()?.gas_price().ok()??;
         price.as_uint256().ok()
     }
 }
@@ -307,7 +310,11 @@ impl TryFrom<&RawTransactionRequest> for Erc20Request {
         );
 
         // Check ABI parameters - must have exactly address and uint256
-        let abi_params: Vec<_> = raw.parameters.abi_parameters().collect();
+        let abi_params: Vec<_> = raw
+            .parameters
+            .iter()
+            .flat_map(|p| p.abi_parameters())
+            .collect();
         ensure!(
             abi_params.len() == 2,
             AbiParameterLenSnafu {

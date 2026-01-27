@@ -1213,7 +1213,7 @@ pub struct RawTransactionRequest {
     pub target_address: AddressOrEnsName,
     pub chain_id: Option<Digits>,
     pub function_name: Option<UrlEncodedUnicodeString>,
-    pub parameters: Parameters,
+    pub parameters: Option<Parameters>,
 }
 
 impl core::fmt::Display for RawTransactionRequest {
@@ -1235,7 +1235,7 @@ impl core::fmt::Display for RawTransactionRequest {
             f.write_str("/")?;
             fn_name.fmt(f)?;
         }
-        if !parameters.0.is_empty() {
+        if let Some(parameters) = parameters {
             f.write_str("?")?;
             parameters.fmt(f)?;
         }
@@ -1263,8 +1263,7 @@ impl RawTransactionRequest {
         let parse_function_name = preceded(tag("/"), UrlEncodedUnicodeString::parse);
         let (i, function_name) = opt(parse_function_name)(i)?;
 
-        let (i, _) = opt(tag("?"))(i)?;
-        let (i, parameters) = Parameters::parse(i)?;
+        let (i, parameters) = opt(preceded(tag("?"), Parameters::parse))(i)?;
         Ok((
             i,
             Self {
@@ -1976,13 +1975,13 @@ mod test {
             prop::option::of(arb_parameters()),
         )
             .prop_map(
-                |(schema_prefix, target_address, chain_id, function_name, paramaters)| {
+                |(schema_prefix, target_address, chain_id, function_name, parameters)| {
                     RawTransactionRequest {
                         schema_prefix,
                         target_address,
                         chain_id,
                         function_name,
-                        parameters: paramaters.unwrap_or(Parameters(vec![])),
+                        parameters,
                     }
                 },
             )
@@ -2016,7 +2015,7 @@ mod test {
             "0xfb6916095ca1df60bb79Ce92ce3ea74c37c5d359",
             seen.target_address.to_string()
         );
-        let number = seen.parameters.value().unwrap().unwrap();
+        let number = seen.parameters.unwrap().value().unwrap().unwrap();
         assert_eq!(2, number.integer().unwrap());
         assert_eq!(2.014e18 as i128, number.as_i128().unwrap());
     }
