@@ -79,32 +79,40 @@ impl Digits {
     }
 
     /// Parse at least `min` digits.
-    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, places) = parse_min(i, min, false)?;
-        Ok((i, Digits { places }))
+    pub fn parse_min(min: usize) -> impl Fn(&str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        move |i| {
+            parse_min(min, false)
+                .map(|places| Digits { places })
+                .parse(i)
+        }
     }
 }
 
 /// Parse at least `min` digits.
-pub fn parse_min(i: &str, min: usize, is_hex: bool) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
-    let radix = if is_hex { 16 } else { 10 };
-    let (i, chars) = take_while(|c: char| c.is_digit(radix))(i)?;
-    let data = chars
-        .chars()
-        .map(|c| {
-            c.to_digit(radix)
-                .expect("we already checked that this char was a digit") as u8
-        })
-        .collect::<Vec<_>>();
-    snafu::ensure!(
-        data.len() >= min,
-        DigitsMinimumSnafu {
-            min,
-            digits: data,
-            input: i
-        }
-    );
-    Ok((i, data))
+pub fn parse_min(
+    min: usize,
+    is_hex: bool,
+) -> impl Fn(&str) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
+    move |i| {
+        let radix = if is_hex { 16 } else { 10 };
+        let (i, chars) = take_while(|c: char| c.is_digit(radix))(i)?;
+        let data = chars
+            .chars()
+            .map(|c| {
+                c.to_digit(radix)
+                    .expect("we already checked that this char was a digit") as u8
+            })
+            .collect::<Vec<_>>();
+        snafu::ensure!(
+            data.len() >= min,
+            DigitsMinimumSnafu {
+                min,
+                digits: data,
+                input: i
+            }
+        );
+        Ok((i, data))
+    }
 }
 
 /// Zero or more consecutive hexadecimal digits.
@@ -128,9 +136,12 @@ impl core::fmt::Display for HexDigits {
 
 impl HexDigits {
     /// Parse at least `min` digits.
-    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, places) = parse_min(i, min, true)?;
-        Ok((i, HexDigits { places }))
+    pub fn parse_min(min: usize) -> impl Fn(&str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        move |i| {
+            parse_min(min, true)
+                .map(|places| HexDigits { places })
+                .parse(i)
+        }
     }
 }
 
@@ -210,12 +221,12 @@ impl Number {
         let (i, signum) = opt(parse_signum)(i)?;
 
         // Parse *DIGIT
-        let (i, integer) = Digits::parse_min(i, 0)?;
+        let (i, integer) = Digits::parse_min(0)(i)?;
 
         // Parse [ "." 1*DIGIT ]
         fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
             let (i, _dot) = char('.')(i)?;
-            let (i, digits) = Digits::parse_min(i, 1)?;
+            let (i, digits) = Digits::parse_min(1)(i)?;
             Ok((i, digits))
         }
         let (i, decimal) = opt(parse_decimal)(i)?;
@@ -229,7 +240,7 @@ impl Number {
             let (i, little_e) = parse_e.parse(i)?;
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = opt(|i| Digits::parse_min(i, 1))(i)?;
+            let (i, maybe_exp) = opt(Digits::parse_min(1))(i)?;
 
             Ok((i, (little_e, maybe_exp)))
         }
@@ -424,7 +435,7 @@ impl EthereumAddress {
         // Parse "0x" and then 40+ hex digits
         fn parse_40plus_hex(i: &str) -> nom::IResult<&str, EthereumAddress, ParseError<'_>> {
             let (i, _) = tag("0x")(i)?;
-            let (i, digits) = HexDigits::parse_min(i, 40)?;
+            let (i, digits) = HexDigits::parse_min(40)(i)?;
             Ok((i, EthereumAddress::Hex(digits)))
         }
         let parse_ens = EnsName::parse.map(EthereumAddress::Name);
@@ -904,7 +915,7 @@ impl EthereumTransactionRequest {
             }
         );
 
-        let parse_chain_id = preceded(tag("@"), |i| Digits::parse_min(i, 1));
+        let parse_chain_id = preceded(tag("@"), Digits::parse_min(1));
         let (i, chain_id) = opt(parse_chain_id)(i)?;
 
         let parse_function_name = preceded(tag("/"), UrlEncodedUnicodeString::parse);
@@ -996,7 +1007,7 @@ mod test {
 
     #[test]
     fn parse_digits_sanity() {
-        let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
+        let (i, seen_digits) = Digits::parse_min(0)("256").unwrap();
         assert!(i.is_empty());
         assert_eq!(256, seen_digits.as_u64().unwrap())
     }
@@ -1005,7 +1016,7 @@ mod test {
         #[test]
         fn parse_digits(digits in arb_digits(1)) {
             let s = digits.to_string();
-            let (i, seen_digits) = Digits::parse_min(&s, 1).unwrap();
+            let (i, seen_digits) = Digits::parse_min(1)(&s).unwrap();
             assert_eq!("", i);
             assert_eq!(digits, seen_digits);
         }
@@ -1565,7 +1576,7 @@ mod test {
     #[test]
     fn digits_as_decimal_ratio_sanity() {
         let input = "0001234";
-        let (_, digits) = Digits::parse_min(input, 1).unwrap();
+        let (_, digits) = Digits::parse_min(1)(input).unwrap();
         let ratio = digits.as_decimal_ratio().unwrap();
         assert_eq!((1234, 10_000_000), ratio);
         assert_eq!(0.0001234, ratio.0 as f32 / ratio.1 as f32);
