@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash_v4.rs`."><title>sighash_v4.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-0bd2dfd4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (873d4682c 2026-01-25)" data-channel="nightly" data-search-js="search-86d08462.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash_v4.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::vec::Vec;
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash_v4.rs`."><title>sighash_v4.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-0bd2dfd4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (de6d33c03 2026-01-28)" data-channel="nightly" data-search-js="search-86d08462.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash_v4.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::vec::Vec;
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params <span class="kw">as </span>Blake2bParams};
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>ff::PrimeField;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -98,13 +98,13 @@
 <a href=#98 id=98 data-nosnippet>98</a>        .hash(<span class="kw-2">&amp;</span>data)
 <a href=#99 id=99 data-nosnippet>99</a>}
 <a href=#100 id=100 data-nosnippet>100</a>
-<a href=#101 id=101 data-nosnippet>101</a><span class="kw">fn </span>shielded_spends_hash&lt;
+<a href=#101 id=101 data-nosnippet>101</a><span class="kw">fn </span>sapling_spends_hash&lt;
 <a href=#102 id=102 data-nosnippet>102</a>    A: sapling::bundle::Authorization&lt;SpendProof = GrothProofBytes, OutputProof = GrothProofBytes&gt;,
 <a href=#103 id=103 data-nosnippet>103</a>&gt;(
-<a href=#104 id=104 data-nosnippet>104</a>    shielded_spends: <span class="kw-2">&amp;</span>[SpendDescription&lt;A&gt;],
+<a href=#104 id=104 data-nosnippet>104</a>    spends: <span class="kw-2">&amp;</span>[SpendDescription&lt;A&gt;],
 <a href=#105 id=105 data-nosnippet>105</a>) -&gt; Blake2bHash {
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(shielded_spends.len() * <span class="number">384</span>);
-<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">for </span>s_spend <span class="kw">in </span>shielded_spends {
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(spends.len() * <span class="number">384</span>);
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">for </span>s_spend <span class="kw">in </span>spends {
 <a href=#108 id=108 data-nosnippet>108</a>        data.extend_from_slice(<span class="kw-2">&amp;</span>s_spend.cv().to_bytes());
 <a href=#109 id=109 data-nosnippet>109</a>        data.extend_from_slice(s_spend.anchor().to_repr().as_ref());
 <a href=#110 id=110 data-nosnippet>110</a>        data.extend_from_slice(s_spend.nullifier().as_ref());
@@ -117,9 +117,9 @@
 <a href=#117 id=117 data-nosnippet>117</a>        .hash(<span class="kw-2">&amp;</span>data)
 <a href=#118 id=118 data-nosnippet>118</a>}
 <a href=#119 id=119 data-nosnippet>119</a>
-<a href=#120 id=120 data-nosnippet>120</a><span class="kw">fn </span>shielded_outputs_hash(shielded_outputs: <span class="kw-2">&amp;</span>[OutputDescription&lt;GrothProofBytes&gt;]) -&gt; Blake2bHash {
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(shielded_outputs.len() * <span class="number">948</span>);
-<a href=#122 id=122 data-nosnippet>122</a>    <span class="kw">for </span>s_out <span class="kw">in </span>shielded_outputs {
+<a href=#120 id=120 data-nosnippet>120</a><span class="kw">fn </span>sapling_outputs_hash(outputs: <span class="kw-2">&amp;</span>[OutputDescription&lt;GrothProofBytes&gt;]) -&gt; Blake2bHash {
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(outputs.len() * <span class="number">948</span>);
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="kw">for </span>s_out <span class="kw">in </span>outputs {
 <a href=#123 id=123 data-nosnippet>123</a>        sapling_serialization::write_output_v4(<span class="kw-2">&amp;mut </span>data, s_out).unwrap();
 <a href=#124 id=124 data-nosnippet>124</a>    }
 <a href=#125 id=125 data-nosnippet>125</a>    Blake2bParams::new()
@@ -212,14 +212,14 @@
 <a href=#212 id=212 data-nosnippet>212</a>                !tx.sapling_bundle
 <a href=#213 id=213 data-nosnippet>213</a>                    .as_ref()
 <a href=#214 id=214 data-nosnippet>214</a>                    .is_none_or(|b| b.shielded_spends().is_empty()),
-<a href=#215 id=215 data-nosnippet>215</a>                shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
+<a href=#215 id=215 data-nosnippet>215</a>                sapling_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
 <a href=#216 id=216 data-nosnippet>216</a>            );
 <a href=#217 id=217 data-nosnippet>217</a>            <span class="macro">update_hash!</span>(
 <a href=#218 id=218 data-nosnippet>218</a>                h,
 <a href=#219 id=219 data-nosnippet>219</a>                !tx.sapling_bundle
 <a href=#220 id=220 data-nosnippet>220</a>                    .as_ref()
 <a href=#221 id=221 data-nosnippet>221</a>                    .is_none_or(|b| b.shielded_outputs().is_empty()),
-<a href=#222 id=222 data-nosnippet>222</a>                shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
+<a href=#222 id=222 data-nosnippet>222</a>                sapling_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
 <a href=#223 id=223 data-nosnippet>223</a>            );
 <a href=#224 id=224 data-nosnippet>224</a>        }
 <a href=#225 id=225 data-nosnippet>225</a>        h.update(<span class="kw-2">&amp;</span>tx.lock_time.to_le_bytes());
