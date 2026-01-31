@@ -5,6 +5,7 @@
 //! encoding for protocol bundles and a value pool delta map for describing
 //! balance changes.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::convert::TryInto;
 use core2::io::{self, Read, Write};
@@ -107,7 +108,7 @@ impl BundleType {
 }
 
 /// Asset class identifiers for value pool deltas.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum AssetClass {
     /// ZEC (native asset), no UUID required.
@@ -128,7 +129,7 @@ impl AssetClass {
 }
 
 /// A universally unique identifier for an asset (64 bytes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetUuid(pub [u8; 64]);
 
 impl AssetUuid {
@@ -145,44 +146,40 @@ impl AssetUuid {
     }
 }
 
-/// Represents a single entry in the mValuePoolDeltas map.
+/// Key for the mValuePoolDeltas map.
 ///
-/// Each entry describes the change to the transparent transaction value pool
-/// produced by a specific bundle for a specific asset.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ValuePoolDelta {
+/// Entries are keyed by (bundleType, assetClass, assetUuid) and must be
+/// stored in increasing order of this tuple.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ValuePoolDeltaKey {
     /// The bundle type identifier.
     pub bundle_type: u64,
     /// The asset class (ZEC or other).
     pub asset_class: AssetClass,
     /// The asset UUID (present only for non-ZEC assets).
     pub asset_uuid: Option<AssetUuid>,
-    /// The net change to the value pool (must be non-zero).
-    pub value: i64,
 }
 
-impl ValuePoolDelta {
-    /// Creates a new ValuePoolDelta for ZEC.
-    pub fn zec(bundle_type: u64, value: i64) -> Self {
-        ValuePoolDelta {
+impl ValuePoolDeltaKey {
+    /// Creates a key for a ZEC value pool delta.
+    pub fn zec(bundle_type: u64) -> Self {
+        ValuePoolDeltaKey {
             bundle_type,
             asset_class: AssetClass::Zec,
             asset_uuid: None,
-            value,
         }
     }
 
-    /// Creates a new ValuePoolDelta for a non-ZEC asset.
-    pub fn other(bundle_type: u64, asset_uuid: AssetUuid, value: i64) -> Self {
-        ValuePoolDelta {
+    /// Creates a key for a non-ZEC asset value pool delta.
+    pub fn other(bundle_type: u64, asset_uuid: AssetUuid) -> Self {
+        ValuePoolDeltaKey {
             bundle_type,
             asset_class: AssetClass::Other,
             asset_uuid: Some(asset_uuid),
-            value,
         }
     }
 
-    /// Reads a ValuePoolDelta from a reader.
+    /// Reads a ValuePoolDeltaKey from a reader.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let bundle_type = CompactSize::read(&mut reader)?;
         let asset_class_byte = reader.read_u8()?;
@@ -198,6 +195,71 @@ impl ValuePoolDelta {
             AssetClass::Other => Some(AssetUuid::read(&mut reader)?),
         };
 
+        Ok(ValuePoolDeltaKey {
+            bundle_type,
+            asset_class,
+            asset_uuid,
+        })
+    }
+
+    /// Writes the ValuePoolDeltaKey to a writer.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        CompactSize::write(&mut writer, self.bundle_type as usize)?;
+        writer.write_u8(self.asset_class as u8)?;
+        if let Some(ref uuid) = self.asset_uuid {
+            uuid.write(&mut writer)?;
+        }
+        Ok(())
+    }
+}
+
+/// Represents a single entry in the mValuePoolDeltas map.
+///
+/// Each entry describes the change to the transparent transaction value pool
+/// produced by a specific bundle for a specific asset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValuePoolDelta {
+    /// The key (bundle_type, asset_class, asset_uuid).
+    pub key: ValuePoolDeltaKey,
+    /// The net change to the value pool (must be non-zero).
+    pub value: i64,
+}
+
+impl ValuePoolDelta {
+    /// Creates a new ValuePoolDelta for ZEC.
+    pub fn zec(bundle_type: u64, value: i64) -> Self {
+        ValuePoolDelta {
+            key: ValuePoolDeltaKey::zec(bundle_type),
+            value,
+        }
+    }
+
+    /// Creates a new ValuePoolDelta for a non-ZEC asset.
+    pub fn other(bundle_type: u64, asset_uuid: AssetUuid, value: i64) -> Self {
+        ValuePoolDelta {
+            key: ValuePoolDeltaKey::other(bundle_type, asset_uuid),
+            value,
+        }
+    }
+
+    /// Returns the bundle type.
+    pub fn bundle_type(&self) -> u64 {
+        self.key.bundle_type
+    }
+
+    /// Returns the asset class.
+    pub fn asset_class(&self) -> AssetClass {
+        self.key.asset_class
+    }
+
+    /// Returns the asset UUID, if present.
+    pub fn asset_uuid(&self) -> Option<&AssetUuid> {
+        self.key.asset_uuid.as_ref()
+    }
+
+    /// Reads a ValuePoolDelta from a reader.
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let key = ValuePoolDeltaKey::read(&mut reader)?;
         let value = reader.read_i64_le()?;
 
         // Consensus rule: value must be non-zero
@@ -208,66 +270,49 @@ impl ValuePoolDelta {
             ));
         }
 
-        Ok(ValuePoolDelta {
-            bundle_type,
-            asset_class,
-            asset_uuid,
-            value,
-        })
+        Ok(ValuePoolDelta { key, value })
     }
 
     /// Writes the ValuePoolDelta to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        CompactSize::write(&mut writer, self.bundle_type as usize)?;
-        writer.write_u8(self.asset_class as u8)?;
-        if let Some(ref uuid) = self.asset_uuid {
-            uuid.write(&mut writer)?;
-        }
+        self.key.write(&mut writer)?;
         writer.write_i64_le(self.value)?;
         Ok(())
     }
 }
 
-/// Raw bundle data for an unknown or partially-parsed bundle.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawBundleData {
-    /// The bundle type identifier.
-    pub bundle_type: u64,
-    /// The raw bundle data bytes.
-    pub data: Vec<u8>,
+/// Reads a bundle entry (bundle_type, length, data) and returns (bundle_type, data).
+fn read_bundle_entry<R: Read>(mut reader: R) -> io::Result<(u64, Vec<u8>)> {
+    let bundle_type = CompactSize::read(&mut reader)?;
+    let data_len = CompactSize::read(&mut reader)?;
+    let mut data = vec![0u8; u64_to_usize(data_len)?];
+    reader.read_exact(&mut data)?;
+    Ok((bundle_type, data))
 }
 
-impl RawBundleData {
-    /// Reads a RawBundleData entry from a reader.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let bundle_type = CompactSize::read(&mut reader)?;
-        let data_len = CompactSize::read(&mut reader)?;
-        let mut data = vec![0u8; u64_to_usize(data_len)?];
-        reader.read_exact(&mut data)?;
-        Ok(RawBundleData { bundle_type, data })
-    }
-
-    /// Writes the RawBundleData to a writer.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        CompactSize::write(&mut writer, self.bundle_type as usize)?;
-        CompactSize::write(&mut writer, self.data.len())?;
-        writer.write_all(&self.data)?;
-        Ok(())
-    }
+/// Writes a bundle entry (bundle_type, length, data).
+fn write_bundle_entry<W: Write>(mut writer: W, bundle_type: u64, data: &[u8]) -> io::Result<()> {
+    CompactSize::write(&mut writer, bundle_type as usize)?;
+    CompactSize::write(&mut writer, data.len())?;
+    writer.write_all(data)?;
+    Ok(())
 }
 
 /// Container for the V6Ext transaction maps.
 ///
 /// This holds the raw data from the three main components of the extensible
 /// transaction format: value pool deltas, effect bundles, and auth bundles.
+///
+/// All maps are stored as BTreeMaps which maintain entries in sorted order
+/// by key, as required by the specification.
 #[derive(Clone, Debug, Default)]
 pub struct V6ExtMaps {
-    /// The value pool deltas map.
-    pub value_pool_deltas: Vec<ValuePoolDelta>,
-    /// The effect bundles map (raw data for each bundle type).
-    pub effect_bundles: Vec<RawBundleData>,
-    /// The auth bundles map (raw data for each bundle type).
-    pub auth_bundles: Vec<RawBundleData>,
+    /// The value pool deltas map, keyed by (bundleType, assetClass, assetUuid).
+    pub value_pool_deltas: BTreeMap<ValuePoolDeltaKey, i64>,
+    /// The effect bundles map, keyed by bundle type.
+    pub effect_bundles: BTreeMap<u64, Vec<u8>>,
+    /// The auth bundles map, keyed by bundle type.
+    pub auth_bundles: BTreeMap<u64, Vec<u8>>,
 }
 
 impl V6ExtMaps {
@@ -280,23 +325,26 @@ impl V6ExtMaps {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         // Read value pool deltas
         let n_value_pool_deltas = CompactSize::read(&mut reader)?;
-        let mut value_pool_deltas = Vec::with_capacity(u64_to_usize(n_value_pool_deltas)?);
+        let mut value_pool_deltas = BTreeMap::new();
         for _ in 0..n_value_pool_deltas {
-            value_pool_deltas.push(ValuePoolDelta::read(&mut reader)?);
+            let delta = ValuePoolDelta::read(&mut reader)?;
+            value_pool_deltas.insert(delta.key, delta.value);
         }
 
         // Read effect bundles
         let n_effect_bundles = CompactSize::read(&mut reader)?;
-        let mut effect_bundles = Vec::with_capacity(u64_to_usize(n_effect_bundles)?);
+        let mut effect_bundles = BTreeMap::new();
         for _ in 0..n_effect_bundles {
-            effect_bundles.push(RawBundleData::read(&mut reader)?);
+            let (bundle_type, data) = read_bundle_entry(&mut reader)?;
+            effect_bundles.insert(bundle_type, data);
         }
 
         // Read auth bundles
         let n_auth_bundles = CompactSize::read(&mut reader)?;
-        let mut auth_bundles = Vec::with_capacity(u64_to_usize(n_auth_bundles)?);
+        let mut auth_bundles = BTreeMap::new();
         for _ in 0..n_auth_bundles {
-            auth_bundles.push(RawBundleData::read(&mut reader)?);
+            let (bundle_type, data) = read_bundle_entry(&mut reader)?;
+            auth_bundles.insert(bundle_type, data);
         }
 
         Ok(V6ExtMaps {
@@ -307,23 +355,26 @@ impl V6ExtMaps {
     }
 
     /// Writes the V6ExtMaps to a writer.
+    ///
+    /// Entries are written in sorted order by key (guaranteed by BTreeMap iteration).
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        // Write value pool deltas
+        // Write value pool deltas (already sorted by BTreeMap)
         CompactSize::write(&mut writer, self.value_pool_deltas.len())?;
-        for delta in &self.value_pool_deltas {
-            delta.write(&mut writer)?;
+        for (key, value) in &self.value_pool_deltas {
+            key.write(&mut writer)?;
+            writer.write_i64_le(*value)?;
         }
 
-        // Write effect bundles
+        // Write effect bundles (already sorted by BTreeMap)
         CompactSize::write(&mut writer, self.effect_bundles.len())?;
-        for bundle in &self.effect_bundles {
-            bundle.write(&mut writer)?;
+        for (bundle_type, data) in &self.effect_bundles {
+            write_bundle_entry(&mut writer, *bundle_type, data)?;
         }
 
-        // Write auth bundles
+        // Write auth bundles (already sorted by BTreeMap)
         CompactSize::write(&mut writer, self.auth_bundles.len())?;
-        for bundle in &self.auth_bundles {
-            bundle.write(&mut writer)?;
+        for (bundle_type, data) in &self.auth_bundles {
+            write_bundle_entry(&mut writer, *bundle_type, data)?;
         }
 
         Ok(())
@@ -332,25 +383,40 @@ impl V6ExtMaps {
     /// Gets the value pool delta for a specific bundle type and asset (ZEC).
     pub fn get_zec_delta(&self, bundle_type: u64) -> Option<i64> {
         self.value_pool_deltas
-            .iter()
-            .find(|d| d.bundle_type == bundle_type && d.asset_class == AssetClass::Zec)
-            .map(|d| d.value)
+            .get(&ValuePoolDeltaKey::zec(bundle_type))
+            .copied()
     }
 
     /// Gets the effect bundle data for a specific bundle type.
     pub fn get_effect_bundle(&self, bundle_type: u64) -> Option<&[u8]> {
-        self.effect_bundles
-            .iter()
-            .find(|b| b.bundle_type == bundle_type)
-            .map(|b| b.data.as_slice())
+        self.effect_bundles.get(&bundle_type).map(|v| v.as_slice())
     }
 
     /// Gets the auth bundle data for a specific bundle type.
     pub fn get_auth_bundle(&self, bundle_type: u64) -> Option<&[u8]> {
-        self.auth_bundles
-            .iter()
-            .find(|b| b.bundle_type == bundle_type)
-            .map(|b| b.data.as_slice())
+        self.auth_bundles.get(&bundle_type).map(|v| v.as_slice())
+    }
+
+    /// Inserts a ZEC value pool delta.
+    ///
+    /// Returns the previous value if one existed for this key.
+    pub fn insert_zec_delta(&mut self, bundle_type: u64, value: i64) -> Option<i64> {
+        self.value_pool_deltas
+            .insert(ValuePoolDeltaKey::zec(bundle_type), value)
+    }
+
+    /// Inserts an effect bundle.
+    ///
+    /// Returns the previous data if one existed for this bundle type.
+    pub fn insert_effect_bundle(&mut self, bundle_type: u64, data: Vec<u8>) -> Option<Vec<u8>> {
+        self.effect_bundles.insert(bundle_type, data)
+    }
+
+    /// Inserts an auth bundle.
+    ///
+    /// Returns the previous data if one existed for this bundle type.
+    pub fn insert_auth_bundle(&mut self, bundle_type: u64, data: Vec<u8>) -> Option<Vec<u8>> {
+        self.auth_bundles.insert(bundle_type, data)
     }
 
     /// Converts a ZatBalance to a value pool delta value.
@@ -401,50 +467,57 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_bundle_data_roundtrip() {
-        let bundle = RawBundleData {
-            bundle_type: BundleType::Sapling as u64,
-            data: vec![1, 2, 3, 4, 5],
-        };
+    fn test_bundle_entry_roundtrip() {
+        let bundle_type = BundleType::Sapling as u64;
+        let data = vec![1, 2, 3, 4, 5];
 
         let mut buf = Vec::new();
-        bundle.write(&mut buf).unwrap();
+        write_bundle_entry(&mut buf, bundle_type, &data).unwrap();
 
-        let parsed = RawBundleData::read(&buf[..]).unwrap();
-        assert_eq!(bundle, parsed);
+        let (parsed_type, parsed_data) = read_bundle_entry(&buf[..]).unwrap();
+        assert_eq!(bundle_type, parsed_type);
+        assert_eq!(data, parsed_data);
     }
 
     #[test]
     fn test_v6ext_maps_roundtrip() {
-        let maps = V6ExtMaps {
-            value_pool_deltas: vec![
-                ValuePoolDelta::zec(BundleType::Transparent as u64, 1000),
-                ValuePoolDelta::zec(BundleType::Sapling as u64, -500),
-                ValuePoolDelta::zec(BundleType::Fee as u64, -500),
-            ],
-            effect_bundles: vec![
-                RawBundleData {
-                    bundle_type: BundleType::Transparent as u64,
-                    data: vec![1, 2, 3],
-                },
-                RawBundleData {
-                    bundle_type: BundleType::Sapling as u64,
-                    data: vec![4, 5, 6, 7],
-                },
-            ],
-            auth_bundles: vec![RawBundleData {
-                bundle_type: BundleType::Transparent as u64,
-                data: vec![8, 9],
-            }],
-        };
+        let mut maps = V6ExtMaps::new();
+
+        // Insert value pool deltas
+        maps.insert_zec_delta(BundleType::Transparent as u64, 1000);
+        maps.insert_zec_delta(BundleType::Sapling as u64, -500);
+        maps.insert_zec_delta(BundleType::Fee as u64, -500);
+
+        // Insert effect bundles
+        maps.insert_effect_bundle(BundleType::Transparent as u64, vec![1, 2, 3]);
+        maps.insert_effect_bundle(BundleType::Sapling as u64, vec![4, 5, 6, 7]);
+
+        // Insert auth bundles
+        maps.insert_auth_bundle(BundleType::Transparent as u64, vec![8, 9]);
 
         let mut buf = Vec::new();
         maps.write(&mut buf).unwrap();
 
         let parsed = V6ExtMaps::read(&buf[..]).unwrap();
-        assert_eq!(maps.value_pool_deltas.len(), parsed.value_pool_deltas.len());
-        assert_eq!(maps.effect_bundles.len(), parsed.effect_bundles.len());
-        assert_eq!(maps.auth_bundles.len(), parsed.auth_bundles.len());
+        assert_eq!(maps.value_pool_deltas, parsed.value_pool_deltas);
+        assert_eq!(maps.effect_bundles, parsed.effect_bundles);
+        assert_eq!(maps.auth_bundles, parsed.auth_bundles);
+    }
+
+    #[test]
+    fn test_v6ext_maps_ordering() {
+        let mut maps = V6ExtMaps::new();
+
+        // Insert in non-sorted order
+        maps.insert_zec_delta(BundleType::Fee as u64, -500);
+        maps.insert_zec_delta(BundleType::Transparent as u64, 1000);
+        maps.insert_zec_delta(BundleType::Sapling as u64, -500);
+
+        // BTreeMap should maintain sorted order
+        let keys: Vec<_> = maps.value_pool_deltas.keys().collect();
+        assert_eq!(keys[0].bundle_type, BundleType::Transparent as u64);
+        assert_eq!(keys[1].bundle_type, BundleType::Sapling as u64);
+        assert_eq!(keys[2].bundle_type, BundleType::Fee as u64);
     }
 
     #[test]

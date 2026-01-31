@@ -1490,7 +1490,7 @@ impl Transaction {
     #[cfg(zcash_unstable = "nu7")]
     pub fn write_v6ext<W: Write>(&self, mut writer: W) -> io::Result<()> {
         use alloc::vec::Vec;
-        use v6ext::{BundleType, RawBundleData, V6ExtMaps, ValuePoolDelta};
+        use v6ext::{BundleType, V6ExtMaps};
 
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
@@ -1513,19 +1513,13 @@ impl Transaction {
 
         if let Some(bundle) = &self.sapling_bundle {
             if let Some(value) = V6ExtMaps::balance_to_delta(*bundle.value_balance()) {
-                maps.value_pool_deltas.push(ValuePoolDelta::zec(
-                    BundleType::Sapling as u64,
-                    value,
-                ));
+                maps.insert_zec_delta(BundleType::Sapling as u64, value);
             }
         }
 
         if let Some(bundle) = &self.orchard_bundle {
             if let Some(value) = V6ExtMaps::balance_to_delta(*bundle.value_balance()) {
-                maps.value_pool_deltas.push(ValuePoolDelta::zec(
-                    BundleType::Orchard as u64,
-                    value,
-                ));
+                maps.insert_zec_delta(BundleType::Orchard as u64, value);
             }
         }
 
@@ -1534,74 +1528,48 @@ impl Transaction {
         if self.zip233_amount != Zatoshis::ZERO {
             let nsm_value: i64 = -i64::try_from(u64::from(self.zip233_amount))
                 .expect("zatoshis should fit in i64");
-            maps.value_pool_deltas.push(ValuePoolDelta::zec(
-                BundleType::Zip233Nsm as u64,
-                nsm_value,
-            ));
+            maps.insert_zec_delta(BundleType::Zip233Nsm as u64, nsm_value);
         }
 
         // Build effect bundles
         if let Some(bundle) = &self.transparent_bundle {
             let mut effect_data: Vec<u8> = Vec::new();
             self.write_transparent_effect(&mut effect_data, bundle)?;
-            maps.effect_bundles.push(RawBundleData {
-                bundle_type: BundleType::Transparent as u64,
-                data: effect_data,
-            });
+            maps.insert_effect_bundle(BundleType::Transparent as u64, effect_data);
         }
 
         if let Some(bundle) = &self.sapling_bundle {
             let mut effect_data: Vec<u8> = Vec::new();
             Self::write_sapling_effect(&mut effect_data, bundle)?;
-            maps.effect_bundles.push(RawBundleData {
-                bundle_type: BundleType::Sapling as u64,
-                data: effect_data,
-            });
+            maps.insert_effect_bundle(BundleType::Sapling as u64, effect_data);
         }
 
         if let Some(bundle) = &self.orchard_bundle {
             let mut effect_data: Vec<u8> = Vec::new();
             Self::write_orchard_effect(&mut effect_data, bundle)?;
-            maps.effect_bundles.push(RawBundleData {
-                bundle_type: BundleType::Orchard as u64,
-                data: effect_data,
-            });
+            maps.insert_effect_bundle(BundleType::Orchard as u64, effect_data);
         }
 
         // Build auth bundles
         if let Some(bundle) = &self.transparent_bundle {
             let mut auth_data: Vec<u8> = Vec::new();
             Self::write_transparent_auth(&mut auth_data, bundle)?;
-            maps.auth_bundles.push(RawBundleData {
-                bundle_type: BundleType::Transparent as u64,
-                data: auth_data,
-            });
+            maps.insert_auth_bundle(BundleType::Transparent as u64, auth_data);
         }
 
         if let Some(bundle) = &self.sapling_bundle {
             let mut auth_data: Vec<u8> = Vec::new();
             Self::write_sapling_auth(&mut auth_data, bundle)?;
-            maps.auth_bundles.push(RawBundleData {
-                bundle_type: BundleType::Sapling as u64,
-                data: auth_data,
-            });
+            maps.insert_auth_bundle(BundleType::Sapling as u64, auth_data);
         }
 
         if let Some(bundle) = &self.orchard_bundle {
             let mut auth_data: Vec<u8> = Vec::new();
             Self::write_orchard_auth(&mut auth_data, bundle)?;
-            maps.auth_bundles.push(RawBundleData {
-                bundle_type: BundleType::Orchard as u64,
-                data: auth_data,
-            });
+            maps.insert_auth_bundle(BundleType::Orchard as u64, auth_data);
         }
 
-        // Sort maps by bundle type (required by spec)
-        maps.value_pool_deltas.sort_by_key(|d| d.bundle_type);
-        maps.effect_bundles.sort_by_key(|b| b.bundle_type);
-        maps.auth_bundles.sort_by_key(|b| b.bundle_type);
-
-        // Write the maps
+        // Write the maps (BTreeMap maintains sorted order automatically)
         maps.write(&mut writer)?;
 
         Ok(())

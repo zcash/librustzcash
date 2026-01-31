@@ -31,7 +31,10 @@ use super::{
 };
 
 #[cfg(zcash_unstable = "nu7")]
-use super::v6ext::{BundleType, ValuePoolDelta};
+use super::v6ext::{BundleType, ValuePoolDeltaKey};
+
+#[cfg(zcash_unstable = "nu7")]
+use alloc::collections::BTreeMap;
 
 /// TxId tree root personalization
 const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
@@ -280,21 +283,22 @@ fn hash_header_txid_data(
 ///
 /// This hashes the concatenated encodings of all entries in mValuePoolDeltas,
 /// in increasing order of (bundleType, assetClass, assetUuid).
+/// BTreeMap iteration order guarantees sorted order by key.
 #[cfg(zcash_unstable = "nu7")]
 fn hash_v6ext_value_pool_deltas(
-    deltas: &[super::v6ext::ValuePoolDelta],
+    deltas: &BTreeMap<ValuePoolDeltaKey, i64>,
 ) -> Blake2bHash {
     use zcash_encoding::CompactSize;
 
     let mut h = hasher(ZCASH_V6EXT_VALUE_POOL_DELTAS_HASH_PERSONALIZATION);
-    for delta in deltas {
+    for (key, value) in deltas {
         // Write each delta's encoding directly to the hash
-        CompactSize::write(&mut h, delta.bundle_type as usize).unwrap();
-        h.write_u8(delta.asset_class as u8).unwrap();
-        if let Some(ref uuid) = delta.asset_uuid {
+        CompactSize::write(&mut h, key.bundle_type as usize).unwrap();
+        h.write_u8(key.asset_class as u8).unwrap();
+        if let Some(ref uuid) = key.asset_uuid {
             h.write_all(&uuid.0).unwrap();
         }
-        h.write_i64_le(delta.value).unwrap();
+        h.write_i64_le(*value).unwrap();
     }
     h.finalize()
 }
@@ -645,16 +649,14 @@ pub fn to_v6ext_txid(
     #[cfg(feature = "zip-233")]
     zip233_amount: &zcash_protocol::value::Zatoshis,
 ) -> TxId {
-    use alloc::vec::Vec;
-
-    // Build value pool deltas from bundles
-    let mut deltas: Vec<ValuePoolDelta> = Vec::new();
+    // Build value pool deltas from bundles (BTreeMap maintains sorted order)
+    let mut deltas: BTreeMap<ValuePoolDeltaKey, i64> = BTreeMap::new();
 
     // Sapling value balance
     if let Some(bundle) = sapling_bundle {
         let value: i64 = (*bundle.value_balance()).into();
         if value != 0 {
-            deltas.push(ValuePoolDelta::zec(BundleType::Sapling as u64, value));
+            deltas.insert(ValuePoolDeltaKey::zec(BundleType::Sapling as u64), value);
         }
     }
 
@@ -662,7 +664,7 @@ pub fn to_v6ext_txid(
     if let Some(bundle) = orchard_bundle {
         let value: i64 = (*bundle.value_balance()).into();
         if value != 0 {
-            deltas.push(ValuePoolDelta::zec(BundleType::Orchard as u64, value));
+            deltas.insert(ValuePoolDeltaKey::zec(BundleType::Orchard as u64), value);
         }
     }
 
@@ -671,14 +673,8 @@ pub fn to_v6ext_txid(
     if *zip233_amount != zcash_protocol::value::Zatoshis::ZERO {
         let nsm_value: i64 = -i64::try_from(u64::from(*zip233_amount))
             .expect("zatoshis should fit in i64");
-        deltas.push(ValuePoolDelta::zec(BundleType::Zip233Nsm as u64, nsm_value));
+        deltas.insert(ValuePoolDeltaKey::zec(BundleType::Zip233Nsm as u64), nsm_value);
     }
-
-    // Sort by (bundle_type, asset_class, asset_uuid) - for ZEC, just bundle_type
-    deltas.sort_by(|a, b| {
-        a.bundle_type.cmp(&b.bundle_type)
-            .then_with(|| (a.asset_class as u8).cmp(&(b.asset_class as u8)))
-    });
 
     // Compute header digest (V6Ext header does NOT include ZIP 233 amount)
     let header_digest = hash_header_txid_data(
