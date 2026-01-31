@@ -43,6 +43,16 @@ pub const V6_TX_VERSION: u32 = 6;
 #[cfg(zcash_unstable = "nu7")]
 pub const V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
 
+/// Transaction version for the extensible transaction format (V6Ext).
+/// This uses the same version number as V6 but a different version group ID.
+/// Specified in the draft extensible transaction format ZIP.
+#[cfg(zcash_unstable = "nu7")]
+pub const V6EXT_TX_VERSION: u32 = 6;
+/// The version group ID for extensible V6 transactions.
+/// This is a temporary value for development purposes.
+#[cfg(zcash_unstable = "nu7")]
+pub const V6EXT_VERSION_GROUP_ID: u32 = 0x00EEF6EE;
+
 /// This version is used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
 /// When new consensus transaction versions are added, all call sites
