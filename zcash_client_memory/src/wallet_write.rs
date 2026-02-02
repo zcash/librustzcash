@@ -1061,6 +1061,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         Ok(truncation_height)
     }
 
+    fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     fn import_account_hd(
         &mut self,
         _account_name: &str,

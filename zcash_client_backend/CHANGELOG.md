@@ -65,6 +65,7 @@ workspace.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
+- `zcash_client_backend::data_api::WalletWrite` has added method `truncate_to_chain_state`.
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
   `zcash_client_backend::data_api::InputSource`.

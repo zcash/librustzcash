@@ -1481,6 +1481,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wallet::truncate_to_chain_state(wdb, chain_state))
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
@@ -1939,7 +1943,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn queue_transparent_input_retrieval(
         &mut self,
         tx_ref: Self::TxRef,
-        d_tx: &data_api::DecryptedTransaction<Transaction, Self::AccountId>,
+        d_tx: &DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         wallet::queue_transparent_input_retrieval(self.conn.borrow(), tx_ref, d_tx)
     }

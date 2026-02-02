@@ -92,6 +92,7 @@ use zcash_client_backend::{
         AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
         TransactionStatus, WalletSummary, Zip32Derivation,
+        chain::ChainState,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -3319,6 +3320,114 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     }
 
     Ok(truncation_height)
+}
+
+/// Truncates the wallet database to a precise block height using note commitment tree frontiers
+/// from the provided `ChainState`.
+///
+/// This function enables precise truncation even when the target height's checkpoint has been
+/// pruned from the note commitment tree. It works in two cases:
+///
+/// - If a checkpoint exists at or below the target height, it delegates to
+///   [`truncate_to_height`] directly.
+/// - If the target height is below the oldest available checkpoint, it first truncates to the
+///   oldest checkpoint (freeing space), then inserts the provided frontier as a new checkpoint
+///   at the target height, and finally truncates to that new checkpoint.
+pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
+    chain_state: ChainState,
+) -> Result<(), SqliteClientError> {
+    let target_height = chain_state.block_height();
+
+    // Try the simple case first: if a checkpoint exists at or below the target height,
+    // truncate_to_height will succeed directly.
+    match truncate_to_height(
+        wdb.conn.0,
+        &wdb.params,
+        #[cfg(feature = "transparent-inputs")]
+        &wdb.gap_limits,
+        target_height,
+    ) {
+        Ok(_) => return Ok(()),
+        Err(SqliteClientError::RequestedRewindInvalid { .. }) => {
+            // The target height is below the oldest checkpoint. We need to use the
+            // frontier-based approach.
+        }
+        Err(e) => return Err(e),
+    }
+
+    // Step 1: Truncate to the earliest available checkpoint. This removes all later
+    // checkpoints and tree data, making room for the frontier insertion.
+    //
+    // We find the minimum checkpoint height for each tree and take the maximum of those
+    // minimums, since that is the earliest height at which all trees have a checkpoint.
+    // The orchard table exists unconditionally but is empty when the feature is not active;
+    // MAX ignores NULLs, so this correctly returns only the sapling minimum in that case.
+    let min_checkpoint_height_query = "SELECT MAX(m) FROM (
+             SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+             UNION ALL
+             SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+         )";
+
+    let min_checkpoint_height: Option<BlockHeight> = wdb
+        .conn
+        .0
+        .query_row(min_checkpoint_height_query, [], |row| {
+            row.get::<_, Option<u32>>(0)
+        })
+        .optional()?
+        .flatten()
+        .map(BlockHeight::from);
+
+    // If there are checkpoints, truncate to the earliest common one first. If there are
+    // no checkpoints at all, we can skip this step and proceed directly to inserting the
+    // frontier.
+    if let Some(min_checkpoint_height) = min_checkpoint_height {
+        truncate_to_height(
+            wdb.conn.0,
+            &wdb.params,
+            #[cfg(feature = "transparent-inputs")]
+            &wdb.gap_limits,
+            min_checkpoint_height,
+        )?;
+    }
+
+    // Step 2: Insert the frontier from the chain state, creating a checkpoint at
+    // the target height. Because we just truncated down to a single checkpoint,
+    // there is room for this new one.
+    wdb.with_sapling_tree_mut(|tree| {
+        tree.insert_frontier(
+            chain_state.final_sapling_tree().clone(),
+            Retention::Checkpoint {
+                id: target_height,
+                marking: Marking::None,
+            },
+        )?;
+        Ok::<_, SqliteClientError>(())
+    })?;
+
+    #[cfg(feature = "orchard")]
+    wdb.with_orchard_tree_mut(|tree| {
+        tree.insert_frontier(
+            chain_state.final_orchard_tree().clone(),
+            Retention::Checkpoint {
+                id: target_height,
+                marking: Marking::None,
+            },
+        )?;
+        Ok::<_, SqliteClientError>(())
+    })?;
+
+    // Step 3: Now truncate to the target height checkpoint we just created.
+    truncate_to_height(
+        wdb.conn.0,
+        &wdb.params,
+        #[cfg(feature = "transparent-inputs")]
+        &wdb.gap_limits,
+        target_height,
+    )?;
+
+    Ok(())
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.

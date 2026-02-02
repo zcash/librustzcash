@@ -4256,6 +4256,118 @@ where
     );
 }
 
+pub fn truncate_to_chain_state<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Test plan:
+    // 1. Set up test environment with account
+    // 2. Generate and scan initial blocks to populate the note commitment tree
+    // 3. Capture the chain state at a specific height
+    // 4. Generate and scan blocks beyond PRUNING_DEPTH to ensure early checkpoints are pruned
+    // 5. Verify that normal truncate_to_height fails due to missing checkpoints
+    // 6. Test that truncate_to_chain_state succeeds using the captured chain state
+    // 7. Verify wallet state after truncation
+
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    // Step 2: Generate and scan initial blocks to populate the note commitment tree.
+    // We use an "other" fvk so that notes won't be tracked by the wallet (keeping the
+    // test focused on tree state rather than wallet balances).
+    let seed = [1u8; 32];
+    let other_sk = T::sk(&seed);
+    let other_fvk = T::sk_to_fvk(&other_sk);
+
+    let initial_block_count = 8u32;
+    for _ in 0..initial_block_count {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    let scan_start = sapling_activation;
+    st.scan_cached_blocks(scan_start, initial_block_count as usize);
+
+    // Step 3: Capture the chain state at the current tip. The CachedBlock tracks the
+    // exact frontier that corresponds to the end of each generated block.
+    let capture_height = sapling_activation + initial_block_count - 1;
+    let captured_chain_state = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(captured_chain_state.block_height(), capture_height);
+
+    // Step 4: Generate and scan blocks well beyond PRUNING_DEPTH so that the checkpoint
+    // at capture_height is pruned from the note commitment tree.
+    let extra_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5000),
+        );
+    }
+    st.scan_cached_blocks(capture_height + 1, extra_blocks as usize);
+
+    let tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set");
+    assert!(
+        tip >= capture_height + PRUNING_DEPTH,
+        "tip should be beyond pruning depth from capture height"
+    );
+
+    // Step 5: Verify that truncate_to_height fails at capture_height because the
+    // checkpoint has been pruned.
+    let truncation_result = st.wallet_mut().truncate_to_height(capture_height);
+    assert!(
+        truncation_result.is_err(),
+        "truncate_to_height should fail when checkpoint has been pruned"
+    );
+
+    // Step 6: truncate_to_chain_state should succeed because it inserts the frontier
+    // as a checkpoint before truncating.
+    st.wallet_mut()
+        .truncate_to_chain_state(captured_chain_state.clone())
+        .expect("truncate_to_chain_state should succeed");
+
+    // Step 7: Verify wallet state after truncation.
+    // The chain tip should now be at the capture height.
+    let new_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should still be set after truncation");
+    assert_eq!(new_tip, capture_height);
+
+    // The block hash at capture_height should match what was in the captured chain state.
+    let hash_at_capture = st
+        .wallet()
+        .get_block_hash(capture_height)
+        .unwrap()
+        .expect("block hash should exist at capture height");
+    assert_eq!(hash_at_capture, captured_chain_state.block_hash());
+
+    // Blocks above the capture height should have been removed.
+    assert_eq!(
+        st.wallet().get_block_hash(capture_height + 1).unwrap(),
+        None,
+        "blocks above capture height should be removed"
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,
