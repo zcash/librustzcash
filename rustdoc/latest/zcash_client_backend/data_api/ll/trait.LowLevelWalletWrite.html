@@ -1,0 +1,374 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="A capability trait that provides low-level wallet write operations. These operations are used to provide standard implementations for certain `WalletWrite` trait methods."><title>LowLevelWalletWrite in zcash_client_backend::data_api::ll - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (57d2fb136 2026-02-01)" data-channel="nightly" data-search-js="search-fb33671b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">LowLevelWalletWrite</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../zcash_client_backend/index.html">zcash_<wbr>client_<wbr>backend</a><span class="version">0.21.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">LowLevel<wbr>Wallet<wbr>Write</a></h2><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.delete_retrieval_queue_entries" title="delete_retrieval_queue_entries">delete_retrieval_queue_entries</a></li><li><a href="#tymethod.generate_transparent_gap_addresses" title="generate_transparent_gap_addresses">generate_transparent_gap_addresses</a></li><li><a href="#tymethod.mark_orchard_note_spent" title="mark_orchard_note_spent">mark_orchard_note_spent</a></li><li><a href="#tymethod.mark_sapling_note_spent" title="mark_sapling_note_spent">mark_sapling_note_spent</a></li><li><a href="#tymethod.mark_transparent_utxo_spent" title="mark_transparent_utxo_spent">mark_transparent_utxo_spent</a></li><li><a href="#tymethod.notify_scan_complete" title="notify_scan_complete">notify_scan_complete</a></li><li><a href="#tymethod.prune_tracked_nullifiers" title="prune_tracked_nullifiers">prune_tracked_nullifiers</a></li><li><a href="#tymethod.put_block_meta" title="put_block_meta">put_block_meta</a></li><li><a href="#tymethod.put_received_orchard_note" title="put_received_orchard_note">put_received_orchard_note</a></li><li><a href="#tymethod.put_received_sapling_note" title="put_received_sapling_note">put_received_sapling_note</a></li><li><a href="#tymethod.put_sent_output" title="put_sent_output">put_sent_output</a></li><li><a href="#tymethod.put_transparent_output" title="put_transparent_output">put_transparent_output</a></li><li><a href="#tymethod.put_tx_data" title="put_tx_data">put_tx_data</a></li><li><a href="#tymethod.put_tx_meta" title="put_tx_meta">put_tx_meta</a></li><li><a href="#tymethod.queue_transparent_input_retrieval" title="queue_transparent_input_retrieval">queue_transparent_input_retrieval</a></li><li><a href="#tymethod.queue_transparent_spend_detection" title="queue_transparent_spend_detection">queue_transparent_spend_detection</a></li><li><a href="#tymethod.queue_tx_retrieval" title="queue_tx_retrieval">queue_tx_retrieval</a></li><li><a href="#tymethod.set_transaction_status" title="set_transaction_status">set_transaction_status</a></li><li><a href="#tymethod.track_block_orchard_nullifiers" title="track_block_orchard_nullifiers">track_block_orchard_nullifiers</a></li><li><a href="#tymethod.track_block_sapling_nullifiers" title="track_block_sapling_nullifiers">track_block_sapling_nullifiers</a></li><li><a href="#tymethod.update_tx_fee" title="update_tx_fee">update_tx_fee</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In zcash_<wbr>client_<wbr>backend::<wbr>data_<wbr>api::<wbr>ll</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">zcash_client_backend</a>::<wbr><a href="../index.html">data_api</a>::<wbr><a href="index.html">ll</a></div><h1>Trait <span class="trait">LowLevel<wbr>Wallet<wbr>Write</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/zcash_client_backend/data_api/ll.rs.html#265-557">Source</a> </span></div><pre class="rust item-decl"><code>pub trait LowLevelWalletWrite: <a class="trait" href="trait.LowLevelWalletRead.html" title="trait zcash_client_backend::data_api::ll::LowLevelWalletRead">LowLevelWalletRead</a> {
+<details class="toggle type-contents-toggle"><summary class="hideme"><span>Show 21 methods</span></summary>    // Required methods
+    fn <a href="#tymethod.put_block_meta" class="fn">put_block_meta</a>(
+        &amp;mut self,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        sapling_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        sapling_output_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        orchard_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        orchard_action_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_tx_meta" class="fn">put_tx_meta</a>(
+        &amp;mut self,
+        tx: &amp;<a class="struct" href="../../wallet/struct.WalletTx.html" title="struct zcash_client_backend::wallet::WalletTx">WalletTx</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+        height: BlockHeight,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_tx_data" class="fn">put_tx_data</a>(
+        &amp;mut self,
+        tx: &amp;Transaction,
+        fee: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Zatoshis&gt;,
+        created_at: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;OffsetDateTime&gt;,
+        target_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>&gt;,
+        observed_height: BlockHeight,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.set_transaction_status" class="fn">set_transaction_status</a>(
+        &amp;mut self,
+        txid: TxId,
+        status: <a class="enum" href="../enum.TransactionStatus.html" title="enum zcash_client_backend::data_api::TransactionStatus">TransactionStatus</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_received_sapling_note" class="fn">put_received_sapling_note</a>&lt;T: <a class="trait" href="trait.ReceivedSaplingOutput.html" title="trait zcash_client_backend::data_api::ll::ReceivedSaplingOutput">ReceivedSaplingOutput</a>&lt;AccountId = Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;&gt;(
+        &amp;mut self,
+        output: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a>,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        target_or_mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
+        spent_in: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.mark_sapling_note_spent" class="fn">mark_sapling_note_spent</a>(
+        &amp;mut self,
+        nf: &amp;Nullifier,
+        spent_in_tx: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.track_block_sapling_nullifiers" class="fn">track_block_sapling_nullifiers</a>(
+        &amp;mut self,
+        block_height: BlockHeight,
+        nfs: &amp;[(TxIndex, TxId, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;Nullifier&gt;)],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_received_orchard_note" class="fn">put_received_orchard_note</a>&lt;T: <a class="trait" href="trait.ReceivedOrchardOutput.html" title="trait zcash_client_backend::data_api::ll::ReceivedOrchardOutput">ReceivedOrchardOutput</a>&lt;AccountId = Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;&gt;(
+        &amp;mut self,
+        output: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a>,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        target_or_mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
+        spent_in: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.mark_orchard_note_spent" class="fn">mark_orchard_note_spent</a>(
+        &amp;mut self,
+        nf: &amp;Nullifier,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.track_block_orchard_nullifiers" class="fn">track_block_orchard_nullifiers</a>(
+        &amp;mut self,
+        block_height: BlockHeight,
+        nfs: &amp;[(TxIndex, TxId, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;Nullifier&gt;)],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.prune_tracked_nullifiers" class="fn">prune_tracked_nullifiers</a>(
+        &amp;mut self,
+        pruning_depth: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_sent_output" class="fn">put_sent_output</a>(
+        &amp;mut self,
+        from_account_uuid: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        output_index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        recipient: &amp;<a class="enum" href="../../wallet/enum.Recipient.html" title="enum zcash_client_backend::wallet::Recipient">Recipient</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+        value: Zatoshis,
+        memo: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;MemoBytes&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.update_tx_fee" class="fn">update_tx_fee</a>(
+        &amp;mut self,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        fee: Zatoshis,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.put_transparent_output" class="fn">put_transparent_output</a>(
+        &amp;mut self,
+        output: &amp;<a class="struct" href="../../wallet/struct.WalletTransparentOutput.html" title="struct zcash_client_backend::wallet::WalletTransparentOutput">WalletTransparentOutput</a>,
+        observation_height: BlockHeight,
+        known_unspent: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;(Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>, <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;TransparentKeyScope&gt;), Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.mark_transparent_utxo_spent" class="fn">mark_transparent_utxo_spent</a>(
+        &amp;mut self,
+        outpoint: &amp;OutPoint,
+        spent_in_tx: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.generate_transparent_gap_addresses" class="fn">generate_transparent_gap_addresses</a>(
+        &amp;mut self,
+        account_id: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>,
+        key_scope: TransparentKeyScope,
+        request: <a class="enum" href="../../keys/enum.UnifiedAddressRequest.html" title="enum zcash_client_backend::keys::UnifiedAddressRequest">UnifiedAddressRequest</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.queue_tx_retrieval" class="fn">queue_tx_retrieval</a>(
+        &amp;mut self,
+        txids: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html" title="trait core::iter::traits::iterator::Iterator">Iterator</a>&lt;Item = TxId&gt;,
+        dependent_tx_ref: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.queue_transparent_spend_detection" class="fn">queue_transparent_spend_detection</a>(
+        &amp;mut self,
+        receiving_address: TransparentAddress,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        output_index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.queue_transparent_input_retrieval" class="fn">queue_transparent_input_retrieval</a>(
+        &amp;mut self,
+        tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+        d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, Transaction, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.delete_retrieval_queue_entries" class="fn">delete_retrieval_queue_entries</a>(
+        &amp;mut self,
+        txid: TxId,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.notify_scan_complete" class="fn">notify_scan_complete</a>(
+        &amp;mut self,
+        range: <a class="struct" href="https://doc.rust-lang.org/nightly/core/ops/range/struct.Range.html" title="struct core::ops::range::Range">Range</a>&lt;BlockHeight&gt;,
+        wallet_note_positions: &amp;[(ShieldedProtocol, Position)],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
+</details>}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A capability trait that provides low-level wallet write operations. These operations are used
+to provide standard implementations for certain <a href="../trait.WalletWrite.html" title="trait zcash_client_backend::data_api::WalletWrite"><code>WalletWrite</code></a> trait methods.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.put_block_meta" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#268-277">Source</a><h4 class="code-header">fn <a href="#tymethod.put_block_meta" class="fn">put_block_meta</a>(
+    &amp;mut self,
+    block_height: BlockHeight,
+    block_hash: BlockHash,
+    block_time: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    sapling_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    sapling_output_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    orchard_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    orchard_action_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Add metadata about a block to the wallet data store.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_tx_meta" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#280-284">Source</a><h4 class="code-header">fn <a href="#tymethod.put_tx_meta" class="fn">put_tx_meta</a>(
+    &amp;mut self,
+    tx: &amp;<a class="struct" href="../../wallet/struct.WalletTx.html" title="struct zcash_client_backend::wallet::WalletTx">WalletTx</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+    height: BlockHeight,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Add metadata about a transaction to the wallet data store.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_tx_data" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#298-305">Source</a><h4 class="code-header">fn <a href="#tymethod.put_tx_data" class="fn">put_tx_data</a>(
+    &amp;mut self,
+    tx: &amp;Transaction,
+    fee: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Zatoshis&gt;,
+    created_at: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;OffsetDateTime&gt;,
+    target_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>&gt;,
+    observed_height: BlockHeight,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Adds the given transaction to the wallet.</p>
+<h5 id="parameters"><a class="doc-anchor" href="#parameters">§</a>Parameters</h5>
+<ul>
+<li><code>tx</code>: The transaction to store.</li>
+<li><code>fee</code>: The fee paid by the transaction, if known. This may be <code>None</code> if the wallet
+does not have sufficient information to compute the fee (see <a href="trait.TxMeta.html#tymethod.fee_paid" title="method zcash_client_backend::data_api::ll::TxMeta::fee_paid"><code>TxMeta::fee_paid</code></a>).</li>
+<li><code>created_at</code>: The time the transaction was created, if known.</li>
+<li><code>target_height</code>: The target height for the transaction, if it was created by this
+wallet.</li>
+<li><code>observed_height</code>: The height at which the transaction was first observed. For mined
+transactions, this is the mined height; for unmined transactions, this is typically
+the chain tip height at the time of observation.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.set_transaction_status" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#309-313">Source</a><h4 class="code-header">fn <a href="#tymethod.set_transaction_status" class="fn">set_transaction_status</a>(
+    &amp;mut self,
+    txid: TxId,
+    status: <a class="enum" href="../enum.TransactionStatus.html" title="enum zcash_client_backend::data_api::TransactionStatus">TransactionStatus</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Updates transaction metadata to reflect that the given transaction status has been
+observed.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_received_sapling_note" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#317-323">Source</a><h4 class="code-header">fn <a href="#tymethod.put_received_sapling_note" class="fn">put_received_sapling_note</a>&lt;T: <a class="trait" href="trait.ReceivedSaplingOutput.html" title="trait zcash_client_backend::data_api::ll::ReceivedSaplingOutput">ReceivedSaplingOutput</a>&lt;AccountId = Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;&gt;(
+    &amp;mut self,
+    output: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a>,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    target_or_mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
+    spent_in: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Adds information about a received Sapling note to the wallet, or updates any existing
+record for that output.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.mark_sapling_note_spent" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#333-337">Source</a><h4 class="code-header">fn <a href="#tymethod.mark_sapling_note_spent" class="fn">mark_sapling_note_spent</a>(
+    &amp;mut self,
+    nf: &amp;Nullifier,
+    spent_in_tx: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Updates the backing store to indicate that the Sapling output having the given nullifier is
+spent in the transaction referenced by <code>spent_in_tx</code>. This may result in multiple distinct
+transactions being recorded as having spent the note; only one of these transactions will
+end up having been mined (by consensus). If an attempt is made to associate a nullifier
+with a mined transaction, and another mined transaction reveals the same nullifier,
+implementations of this method must return an error.</p>
+<p>Returns <code>Ok(true)</code> if a a new record was added to the data store.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.track_block_sapling_nullifiers" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#356-360">Source</a><h4 class="code-header">fn <a href="#tymethod.track_block_sapling_nullifiers" class="fn">track_block_sapling_nullifiers</a>(
+    &amp;mut self,
+    block_height: BlockHeight,
+    nfs: &amp;[(TxIndex, TxId, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;Nullifier&gt;)],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Causes the given Sapling output nullifiers to be tracked by the wallet.</p>
+<p>When scanning the chain out-of-order, it is necessary to store any nullifiers observed
+after a gap in the scanned blocks until the blocks in that gap have been fully scanned, in
+order to be able to immediately detect that a received output has already been spent. The
+data store should track a mapping from each nullifier to the block, the index of the
+transaction in the block, and the transaction ID, so when a note is received within that
+“gap” its spentness can be determined by checking in the store. For space efficiency, the
+backing store may use the combination of block height and index within the block instead of
+the txid for transaction identification.</p>
+<h5 id="parameters-1"><a class="doc-anchor" href="#parameters-1">§</a>Parameters</h5>
+<ul>
+<li><code>block_height</code>: The height of the block containing the nullifiers.</li>
+<li><code>nfs</code>: A slice of tuples, where each tuple contains:
+<ul>
+<li>The transaction ID of the transaction revealing the nullifiers.</li>
+<li>The index of the transaction within the block.</li>
+<li>The vector of nullifiers revealed by the spends in that transaction.</li>
+</ul>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_received_orchard_note" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#365-371">Source</a><h4 class="code-header">fn <a href="#tymethod.put_received_orchard_note" class="fn">put_received_orchard_note</a>&lt;T: <a class="trait" href="trait.ReceivedOrchardOutput.html" title="trait zcash_client_backend::data_api::ll::ReceivedOrchardOutput">ReceivedOrchardOutput</a>&lt;AccountId = Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;&gt;(
+    &amp;mut self,
+    output: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a>,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    target_or_mined_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
+    spent_in: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>orchard</code></strong> only.</div></span></summary><div class="docblock"><p>Adds information about a received Orchard note to the wallet, or updates any existing
+record for that output.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.mark_orchard_note_spent" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#382-386">Source</a><h4 class="code-header">fn <a href="#tymethod.mark_orchard_note_spent" class="fn">mark_orchard_note_spent</a>(
+    &amp;mut self,
+    nf: &amp;Nullifier,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>orchard</code></strong> only.</div></span></summary><div class="docblock"><p>Updates the backing store to indicate that the Orchard output having the given nullifier is
+spent in the transaction referenced by <code>spent_in_tx</code>. This may result in multiple distinct
+transactions being recorded as having spent the note; only one of these transactions will
+end up having been mined (by consensus). If an attempt is made to associate a nullifier
+with a mined transaction, and another mined transaction reveals the same nullifier,
+implementations of this method must return an error.</p>
+<p>Returns <code>Ok(true)</code> if a a new record was added to the data store.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.track_block_orchard_nullifiers" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#406-410">Source</a><h4 class="code-header">fn <a href="#tymethod.track_block_orchard_nullifiers" class="fn">track_block_orchard_nullifiers</a>(
+    &amp;mut self,
+    block_height: BlockHeight,
+    nfs: &amp;[(TxIndex, TxId, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;Nullifier&gt;)],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>orchard</code></strong> only.</div></span></summary><div class="docblock"><p>Causes the given Orchard output nullifiers to be tracked by the wallet.</p>
+<p>When scanning the chain out-of-order, it is necessary to store any nullifiers observed
+after a gap in the scanned blocks until the blocks in that gap have been fully scanned, in
+order to be able to immediately detect that a received output has already been spent. The
+data store should track a mapping from each nullifier to the block, the index of the
+transaction in the block, and the transaction ID, so when a note is received within that
+“gap” its spentness can be determined by checking in the store. For space efficiency, the
+backing store may use the combination of block height and index within the block instead of
+the txid for transaction identification.</p>
+<h5 id="parameters-2"><a class="doc-anchor" href="#parameters-2">§</a>Parameters</h5>
+<ul>
+<li><code>block_height</code>: The height of the block containing the nullifiers.</li>
+<li><code>nfs</code>: A slice of tuples, where each tuple contains:
+<ul>
+<li>The transaction ID of the transaction revealing the nullifiers.</li>
+<li>The index of the transaction within the block.</li>
+<li>The vector of nullifiers revealed by the actions in that transaction.</li>
+</ul>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.prune_tracked_nullifiers" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#422">Source</a><h4 class="code-header">fn <a href="#tymethod.prune_tracked_nullifiers" class="fn">prune_tracked_nullifiers</a>(
+    &amp;mut self,
+    pruning_depth: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Removes tracked nullifiers that are no longer needed for spend detection.</p>
+<p>This function prunes nullifiers that were recorded at block heights less than
+<code>(fully_scanned_height - pruning_depth)</code>, where <code>fully_scanned_height</code> is the height
+of the wallet’s fully scanned chain state. These nullifiers are no longer needed because
+any notes they could have spent would have already been discovered during scanning.</p>
+<h5 id="parameters-3"><a class="doc-anchor" href="#parameters-3">§</a>Parameters</h5>
+<ul>
+<li><code>pruning_depth</code>: The number of blocks below the fully scanned height at which to
+prune tracked nullifiers.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_sent_output" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#434-442">Source</a><h4 class="code-header">fn <a href="#tymethod.put_sent_output" class="fn">put_sent_output</a>(
+    &amp;mut self,
+    from_account_uuid: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    output_index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    recipient: &amp;<a class="enum" href="../../wallet/enum.Recipient.html" title="enum zcash_client_backend::wallet::Recipient">Recipient</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+    value: Zatoshis,
+    memo: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;MemoBytes&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Records information about a transaction output that your wallet created, from the constituent
+properties of that output.</p>
+<h5 id="parameters-4"><a class="doc-anchor" href="#parameters-4">§</a>Parameters</h5>
+<ul>
+<li><code>tx_ref</code>: The identifier for the transaction that produced the output.</li>
+<li><code>output_index</code>: The index of the output in the bundle corresponding to the pool where the
+output was created.</li>
+<li><code>recipient</code>: Information about the address or account that the output is being sent to.</li>
+<li><code>value</code>: The value of the output.</li>
+<li><code>memo</code>: The memo attached to the output, if any.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.update_tx_fee" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#446">Source</a><h4 class="code-header">fn <a href="#tymethod.update_tx_fee" class="fn">update_tx_fee</a>(
+    &amp;mut self,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    fee: Zatoshis,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Updates the wallet’s view of a transaction to indicate the miner’s fee paid by the
+transaction.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_transparent_output" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#460-465">Source</a><h4 class="code-header">fn <a href="#tymethod.put_transparent_output" class="fn">put_transparent_output</a>(
+    &amp;mut self,
+    output: &amp;<a class="struct" href="../../wallet/struct.WalletTransparentOutput.html" title="struct zcash_client_backend::wallet::WalletTransparentOutput">WalletTransparentOutput</a>,
+    observation_height: BlockHeight,
+    known_unspent: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;(Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>, <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;TransparentKeyScope&gt;), Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Adds a transparent output observed by the wallet to the data store, or updates any existing
+record for that output.</p>
+<h5 id="parameters-5"><a class="doc-anchor" href="#parameters-5">§</a>Parameters</h5>
+<ul>
+<li><code>output</code>: The output data.</li>
+<li><code>observation_height</code>: This should be set to the mined height, if known. If the TXO is
+known to be mined but the height at which it was mined is unknown, this should be set to
+the chain tip height at the time of the observation; if the utxo is known to be unmined,
+this should be set to the mempool height.</li>
+<li><code>known_unspent</code>: Set to <code>true</code> if the output is known to be a member of the UTXO set as
+of the given observation height.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.mark_transparent_utxo_spent" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#470-474">Source</a><h4 class="code-header">fn <a href="#tymethod.mark_transparent_utxo_spent" class="fn">mark_transparent_utxo_spent</a>(
+    &amp;mut self,
+    outpoint: &amp;OutPoint,
+    spent_in_tx: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Updates the backing store to indicate that the UTXO referred to by <code>outpoint</code> is spent
+in the transaction referenced by <code>spent_in_tx</code>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.generate_transparent_gap_addresses" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#491-496">Source</a><h4 class="code-header">fn <a href="#tymethod.generate_transparent_gap_addresses" class="fn">generate_transparent_gap_addresses</a>(
+    &amp;mut self,
+    account_id: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>,
+    key_scope: TransparentKeyScope,
+    request: <a class="enum" href="../../keys/enum.UnifiedAddressRequest.html" title="enum zcash_client_backend::keys::UnifiedAddressRequest">UnifiedAddressRequest</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Updates the wallet backend by generating and caching addresses for the given key scope such
+that at least the backend’s configured gap limit worth of addresses exist at indices
+successive from that of the last address that received a mined transaction.</p>
+<h5 id="parameters-6"><a class="doc-anchor" href="#parameters-6">§</a>Parameters</h5>
+<ul>
+<li><code>account_id</code>: The ID of the account holding the UFVK from which addresses should be
+generated.</li>
+<li><code>key_scope</code>: The transparent key scope for addresses to generate. Implementations may
+choose to only support the <code>external</code>, <code>internal</code>, and <code>ephemeral</code> key scopes and return
+an error if an unrecognized scope is used.</li>
+<li><code>request</code>: A request for the Unified Address that will be generated with a diversifier
+index equal to the <a href="https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki"><code>BIP 44</code></a> <code>address_index</code> of each generated address.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.queue_tx_retrieval" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#505-509">Source</a><h4 class="code-header">fn <a href="#tymethod.queue_tx_retrieval" class="fn">queue_tx_retrieval</a>(
+    &amp;mut self,
+    txids: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html" title="trait core::iter::traits::iterator::Iterator">Iterator</a>&lt;Item = TxId&gt;,
+    dependent_tx_ref: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Adds a <a href="../enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest"><code>TransactionDataRequest::Enhancement</code></a> request for the enhancement of the given
+transaction to the transaction data request queue. The <code>dependent_tx_ref</code> parameter
+specifies the transaction that caused this request to be generated, likely as part of the
+process of traversing the transparent transaction graph by inspecting the inputs of a
+transaction with outputs that were received by the wallet.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.queue_transparent_spend_detection" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#523-528">Source</a><h4 class="code-header">fn <a href="#tymethod.queue_transparent_spend_detection" class="fn">queue_transparent_spend_detection</a>(
+    &amp;mut self,
+    receiving_address: TransparentAddress,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    output_index: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Adds a <a href="../enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest"><code>TransactionDataRequest::TransactionsInvolvingAddress</code></a> request to the transaction
+data request queue. When the transparent output of <code>tx_ref</code> at output index <code>output_index</code>
+(which must have been received at <code>receiving_address</code>) is detected as having been spent,
+this request will be considered fulfilled.</p>
+<p>NOTE: The somewhat awkward API of this method is a historical artifact; if the light wallet
+protocol is in the future updated to expose a mechanism to find the transaction that spends
+a particular <code>OutPoint</code>, the <code>TransactionsInvolvingAddress</code> variant and this method will
+likely be removed.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.queue_transparent_input_retrieval" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#537-541">Source</a><h4 class="code-header">fn <a href="#tymethod.queue_transparent_input_retrieval" class="fn">queue_transparent_input_retrieval</a>(
+    &amp;mut self,
+    tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
+    d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, Transaction, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Adds <a href="../enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest"><code>TransactionDataRequest::Enhancement</code></a> requests for transactions that generated the
+transparent inputs to the provided <a href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction"><code>DecryptedTransaction</code></a> to the transaction data request
+queue.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.delete_retrieval_queue_entries" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#547">Source</a><h4 class="code-header">fn <a href="#tymethod.delete_retrieval_queue_entries" class="fn">delete_retrieval_queue_entries</a>(
+    &amp;mut self,
+    txid: TxId,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Deletes all <a href="../enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest"><code>TransactionDataRequest::Enhancement</code></a> requests for the given transaction ID
+from the transaction data request queue.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.notify_scan_complete" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#552-556">Source</a><h4 class="code-header">fn <a href="#tymethod.notify_scan_complete" class="fn">notify_scan_complete</a>(
+    &amp;mut self,
+    range: <a class="struct" href="https://doc.rust-lang.org/nightly/core/ops/range/struct.Range.html" title="struct core::ops::range::Range">Range</a>&lt;BlockHeight&gt;,
+    wallet_note_positions: &amp;[(ShieldedProtocol, Position)],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Updates the state of the wallet backend to indicate that the given range of blocks has been
+fully scanned, identifying the position in the note commitment tree of any notes belonging
+to the wallet that were discovered in the process of scanning.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety", so this trait is not object safe.</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../../trait.impl/zcash_client_backend/data_api/ll/trait.LowLevelWalletWrite.js" async></script></section></div></main></body></html>

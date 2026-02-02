@@ -120,7 +120,7 @@
 <a href=#120 id=120 data-nosnippet>120</a>    chain_tip_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
 <a href=#121 id=121 data-nosnippet>121</a>    tx: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Transaction,
 <a href=#122 id=122 data-nosnippet>122</a>    ufvks: <span class="kw-2">&amp;</span>HashMap&lt;AccountId, UnifiedFullViewingKey&gt;,
-<a href=#123 id=123 data-nosnippet>123</a>) -&gt; DecryptedTransaction&lt;<span class="lifetime">'a</span>, AccountId&gt; {
+<a href=#123 id=123 data-nosnippet>123</a>) -&gt; DecryptedTransaction&lt;<span class="lifetime">'a</span>, Transaction, AccountId&gt; {
 <a href=#124 id=124 data-nosnippet>124</a>    <span class="kw">let </span>zip212_enforcement = zip212_enforcement(
 <a href=#125 id=125 data-nosnippet>125</a>        params,
 <a href=#126 id=126 data-nosnippet>126</a>        <span class="comment">// Height is block height for mined transactions, and the "mempool height" (chain height + 1)

@@ -146,12 +146,12 @@
 <a href=#146 id=146 data-nosnippet>146</a>            .map(|n| n.take_orchard())
 <a href=#147 id=147 data-nosnippet>147</a>    }
 <a href=#148 id=148 data-nosnippet>148</a>
-<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">fn </span>decrypted_pool_outputs_count&lt;A&gt;(d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, A&gt;) -&gt; usize {
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">fn </span>decrypted_pool_outputs_count&lt;A&gt;(d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;Transaction, A&gt;) -&gt; usize {
 <a href=#150 id=150 data-nosnippet>150</a>        d_tx.orchard_outputs().len()
 <a href=#151 id=151 data-nosnippet>151</a>    }
 <a href=#152 id=152 data-nosnippet>152</a>
 <a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">fn </span>with_decrypted_pool_memos&lt;A&gt;(
-<a href=#154 id=154 data-nosnippet>154</a>        d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, A&gt;,
+<a href=#154 id=154 data-nosnippet>154</a>        d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;Transaction, A&gt;,
 <a href=#155 id=155 data-nosnippet>155</a>        <span class="kw-2">mut </span>f: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>MemoBytes),
 <a href=#156 id=156 data-nosnippet>156</a>    ) {
 <a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">for </span>output <span class="kw">in </span>d_tx.orchard_outputs() {

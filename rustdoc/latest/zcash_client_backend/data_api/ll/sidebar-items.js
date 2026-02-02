@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["wallet"],"trait":["LowLevelWalletRead","LowLevelWalletWrite","ReceivedOrchardOutput","ReceivedSaplingOutput","TxMeta"]};

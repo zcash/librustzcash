@@ -32,7 +32,7 @@
 <a href=#32 id=32 data-nosnippet>32</a><span class="kw">use </span>zcash_primitives::transaction::Transaction;
 <a href=#33 id=33 data-nosnippet>33</a><span class="kw">use </span>zcash_protocol::{
 <a href=#34 id=34 data-nosnippet>34</a>    ShieldedProtocol, TxId,
-<a href=#35 id=35 data-nosnippet>35</a>    consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade},
+<a href=#35 id=35 data-nosnippet>35</a>    consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade, TxIndex},
 <a href=#36 id=36 data-nosnippet>36</a>};
 <a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span>zip32::{Scope, fingerprint::SeedFingerprint};
 <a href=#38 id=38 data-nosnippet>38</a>
@@ -557,14 +557,14 @@
 <a href=#557 id=557 data-nosnippet>557</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_sapling_nullifier_map(
 <a href=#558 id=558 data-nosnippet>558</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
 <a href=#559 id=559 data-nosnippet>559</a>        block_height: BlockHeight,
-<a href=#560 id=560 data-nosnippet>560</a>        new_entries: <span class="kw-2">&amp;</span>[(TxId, u16, Vec&lt;sapling::Nullifier&gt;)],
+<a href=#560 id=560 data-nosnippet>560</a>        new_entries: <span class="kw-2">&amp;</span>[(TxIndex, TxId, Vec&lt;sapling::Nullifier&gt;)],
 <a href=#561 id=561 data-nosnippet>561</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
-<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">for </span>(txid, tx_index, nullifiers) <span class="kw">in </span>new_entries {
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">for </span>(tx_index, txid, nullifiers) <span class="kw">in </span>new_entries {
 <a href=#563 id=563 data-nosnippet>563</a>            <span class="kw">for </span>nf <span class="kw">in </span>nullifiers.iter() {
 <a href=#564 id=564 data-nosnippet>564</a>                <span class="self">self</span>.nullifiers
-<a href=#565 id=565 data-nosnippet>565</a>                    .insert(block_height, <span class="kw-2">*</span>tx_index <span class="kw">as </span>u32, Nullifier::Sapling(<span class="kw-2">*</span>nf));
+<a href=#565 id=565 data-nosnippet>565</a>                    .insert(block_height, u32::from(<span class="kw-2">*</span>tx_index), Nullifier::Sapling(<span class="kw-2">*</span>nf));
 <a href=#566 id=566 data-nosnippet>566</a>            }
-<a href=#567 id=567 data-nosnippet>567</a>            <span class="kw">match </span><span class="self">self</span>.tx_locator.entry((block_height, <span class="kw-2">*</span>tx_index <span class="kw">as </span>u32)) {
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="kw">match </span><span class="self">self</span>.tx_locator.entry((block_height, u32::from(<span class="kw-2">*</span>tx_index))) {
 <a href=#568 id=568 data-nosnippet>568</a>                Entry::Occupied(x) =&gt; {
 <a href=#569 id=569 data-nosnippet>569</a>                    <span class="kw">if </span>txid == x.get() {
 <a href=#570 id=570 data-nosnippet>570</a>                        <span class="comment">// This is a duplicate entry
@@ -585,14 +585,14 @@
 <a href=#585 id=585 data-nosnippet>585</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_orchard_nullifier_map(
 <a href=#586 id=586 data-nosnippet>586</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
 <a href=#587 id=587 data-nosnippet>587</a>        block_height: BlockHeight,
-<a href=#588 id=588 data-nosnippet>588</a>        new_entries: <span class="kw-2">&amp;</span>[(TxId, u16, Vec&lt;orchard::note::Nullifier&gt;)],
+<a href=#588 id=588 data-nosnippet>588</a>        new_entries: <span class="kw-2">&amp;</span>[(TxIndex, TxId, Vec&lt;orchard::note::Nullifier&gt;)],
 <a href=#589 id=589 data-nosnippet>589</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
-<a href=#590 id=590 data-nosnippet>590</a>        <span class="kw">for </span>(txid, tx_index, nullifiers) <span class="kw">in </span>new_entries {
+<a href=#590 id=590 data-nosnippet>590</a>        <span class="kw">for </span>(tx_index, txid, nullifiers) <span class="kw">in </span>new_entries {
 <a href=#591 id=591 data-nosnippet>591</a>            <span class="kw">for </span>nf <span class="kw">in </span>nullifiers.iter() {
 <a href=#592 id=592 data-nosnippet>592</a>                <span class="self">self</span>.nullifiers
-<a href=#593 id=593 data-nosnippet>593</a>                    .insert(block_height, <span class="kw-2">*</span>tx_index <span class="kw">as </span>u32, Nullifier::Orchard(<span class="kw-2">*</span>nf));
+<a href=#593 id=593 data-nosnippet>593</a>                    .insert(block_height, u32::from(<span class="kw-2">*</span>tx_index), Nullifier::Orchard(<span class="kw-2">*</span>nf));
 <a href=#594 id=594 data-nosnippet>594</a>            }
-<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">match </span><span class="self">self</span>.tx_locator.entry((block_height, <span class="kw-2">*</span>tx_index <span class="kw">as </span>u32)) {
+<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">match </span><span class="self">self</span>.tx_locator.entry((block_height, u32::from(<span class="kw-2">*</span>tx_index))) {
 <a href=#596 id=596 data-nosnippet>596</a>                Entry::Occupied(x) =&gt; {
 <a href=#597 id=597 data-nosnippet>597</a>                    <span class="kw">if </span>txid == x.get() {
 <a href=#598 id=598 data-nosnippet>598</a>                        <span class="comment">// This is a duplicate entry
