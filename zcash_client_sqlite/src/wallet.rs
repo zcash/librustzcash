@@ -3173,25 +3173,18 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
-    // Determine a checkpoint to which we can rewind, if any.
-    #[cfg(not(feature = "orchard"))]
-    let truncation_height_query = r#"
-        SELECT MAX(height) FROM blocks
-        JOIN sapling_tree_checkpoints ON checkpoint_id = blocks.height
-        WHERE blocks.height <= :block_height
-    "#;
-
-    #[cfg(feature = "orchard")]
-    let truncation_height_query = r#"
-        SELECT MAX(height) FROM blocks
-        JOIN sapling_tree_checkpoints sc ON sc.checkpoint_id = blocks.height
-        JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = blocks.height
-        WHERE blocks.height <= :block_height
-    "#;
-
+    // Determine a checkpoint to which we can rewind, if any. We need a height
+    // that has a checkpoint in every tree that contains data. The orchard table
+    // exists unconditionally but is empty when the orchard feature is not active.
     let truncation_height = conn
         .query_row(
-            truncation_height_query,
+            r#"
+            SELECT MAX(height) FROM blocks
+            WHERE blocks.height <= :block_height
+            AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+            AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            "#,
             named_params! {":block_height": u32::from(max_height)},
             |row| row.get::<_, Option<u32>>(0),
         )
@@ -3201,20 +3194,18 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             || {
                 // If we don't have a checkpoint at a height less than or equal to the requested
                 // truncation height, query for the minimum height to which it's possible for us to
-                // truncate so that we can report it to the caller.
-                #[cfg(not(feature = "orchard"))]
-                let min_checkpoint_height_query =
-                    "SELECT MIN(checkpoint_id) FROM sapling_tree_checkpoints";
-                #[cfg(feature = "orchard")]
-                let min_checkpoint_height_query = "SELECT MIN(sc.checkpoint_id)
-                     FROM sapling_tree_checkpoints sc
-                     JOIN orchard_tree_checkpoints oc
-                     ON oc.checkpoint_id = sc.checkpoint_id";
-
+                // truncate so that we can report it to the caller. We take the maximum of the per-tree
+                // minimums, since that is the earliest height at which all trees have a checkpoint.
                 let min_truncation_height = conn
-                    .query_row(min_checkpoint_height_query, [], |row| {
-                        row.get::<_, Option<u32>>(0)
-                    })
+                    .query_row(
+                        "SELECT MAX(m) FROM (
+                            SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+                            UNION ALL
+                            SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+                        )",
+                        [],
+                        |row| row.get::<_, Option<u32>>(0),
+                    )
                     .optional()?
                     .flatten()
                     .map(BlockHeight::from);
