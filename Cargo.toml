@@ -180,7 +180,7 @@ trait-variant = "0.1"
 
 # ZIP 32
 aes = "0.8"
-bip0039 = { version = "0.12" }
+bip0039 = "0.13.4"
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
 
