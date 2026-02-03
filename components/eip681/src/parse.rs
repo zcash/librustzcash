@@ -6,7 +6,7 @@ use nom::{
     AsChar, Parser,
     branch::alt,
     bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
-    character::complete::char,
+    character::complete::{char, digit0},
     combinator::{map_parser, opt, success, value},
     multi::separated_list0,
     sequence::{preceded, separated_pair, terminated, tuple},
@@ -117,37 +117,25 @@ impl Digits {
     /// Parse at least `min` digits.
     pub fn parse_min(min: usize) -> impl Fn(&str) -> nom::IResult<&str, Self, ParseError<'_>> {
         move |i| {
-            parse_min(min, false)
-                .map(|places| Digits { places })
-                .parse(i)
+            let (i, chars) = digit0(i)?;
+            let places = chars
+                .chars()
+                .map(|c| {
+                    c.to_digit(10)
+                        .expect("we already checked that this char was a digit")
+                        as u8
+                })
+                .collect::<Vec<_>>();
+            snafu::ensure!(
+                places.len() >= min,
+                DigitsMinimumSnafu {
+                    min,
+                    digits_len: places.len(),
+                    input: i
+                }
+            );
+            Ok((i, Digits { places }))
         }
-    }
-}
-
-/// Parse at least `min` digits.
-pub fn parse_min(
-    min: usize,
-    is_hex: bool,
-) -> impl Fn(&str) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
-    move |i| {
-        let radix = if is_hex { 16 } else { 10 };
-        let (i, chars) = take_while(|c: char| c.is_digit(radix))(i)?;
-        let data = chars
-            .chars()
-            .map(|c| {
-                c.to_digit(radix)
-                    .expect("we already checked that this char was a digit") as u8
-            })
-            .collect::<Vec<_>>();
-        snafu::ensure!(
-            data.len() >= min,
-            DigitsMinimumSnafu {
-                min,
-                digits_len: data.len(),
-                input: i
-            }
-        );
-        Ok((i, data))
     }
 }
 
