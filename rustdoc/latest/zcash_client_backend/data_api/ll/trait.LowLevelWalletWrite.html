@@ -3,7 +3,7 @@
     fn <a href="#tymethod.put_block_meta" class="fn">put_block_meta</a>(
         &amp;mut self,
         block_height: BlockHeight,
-        block_hash: BlockHash,
+        block_hash: <a class="struct" href="../../../zcash_primitives/block/struct.BlockHash.html" title="struct zcash_primitives::block::BlockHash">BlockHash</a>,
         block_time: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
         sapling_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
         sapling_output_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
@@ -17,7 +17,7 @@
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
 <span class="item-spacer"></span>    fn <a href="#tymethod.put_tx_data" class="fn">put_tx_data</a>(
         &amp;mut self,
-        tx: &amp;Transaction,
+        tx: &amp;<a class="struct" href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction">Transaction</a>,
         fee: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Zatoshis&gt;,
         created_at: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;OffsetDateTime&gt;,
         target_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>&gt;,
@@ -111,7 +111,7 @@
 <span class="item-spacer"></span>    fn <a href="#tymethod.queue_transparent_input_retrieval" class="fn">queue_transparent_input_retrieval</a>(
         &amp;mut self,
         tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
-        d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, Transaction, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+        d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, <a class="struct" href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction">Transaction</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
     ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;;
 <span class="item-spacer"></span>    fn <a href="#tymethod.delete_retrieval_queue_entries" class="fn">delete_retrieval_queue_entries</a>(
         &amp;mut self,
@@ -127,7 +127,7 @@ to provide standard implementations for certain <a href="../trait.WalletWrite.ht
 </div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.put_block_meta" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#268-277">Source</a><h4 class="code-header">fn <a href="#tymethod.put_block_meta" class="fn">put_block_meta</a>(
     &amp;mut self,
     block_height: BlockHeight,
-    block_hash: BlockHash,
+    block_hash: <a class="struct" href="../../../zcash_primitives/block/struct.BlockHash.html" title="struct zcash_primitives::block::BlockHash">BlockHash</a>,
     block_time: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
     sapling_commitment_tree_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
     sapling_output_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
@@ -141,7 +141,7 @@ to provide standard implementations for certain <a href="../trait.WalletWrite.ht
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Add metadata about a transaction to the wallet data store.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.put_tx_data" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#298-305">Source</a><h4 class="code-header">fn <a href="#tymethod.put_tx_data" class="fn">put_tx_data</a>(
     &amp;mut self,
-    tx: &amp;Transaction,
+    tx: &amp;<a class="struct" href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction">Transaction</a>,
     fee: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Zatoshis&gt;,
     created_at: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;OffsetDateTime&gt;,
     target_height: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../wallet/struct.TargetHeight.html" title="struct zcash_client_backend::data_api::wallet::TargetHeight">TargetHeight</a>&gt;,
@@ -355,7 +355,7 @@ likely be removed.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.queue_transparent_input_retrieval" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/ll.rs.html#537-541">Source</a><h4 class="code-header">fn <a href="#tymethod.queue_transparent_input_retrieval" class="fn">queue_transparent_input_retrieval</a>(
     &amp;mut self,
     tx_ref: Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.TxRef" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::TxRef">TxRef</a>,
-    d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, Transaction, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
+    d_tx: &amp;<a class="struct" href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction">DecryptedTransaction</a>&lt;'_, <a class="struct" href="../../../zcash_primitives/transaction/struct.Transaction.html" title="struct zcash_primitives::transaction::Transaction">Transaction</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::AccountId">AccountId</a>&gt;,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.LowLevelWalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::ll::LowLevelWalletRead::Error">Error</a>&gt;</h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span></summary><div class="docblock"><p>Adds <a href="../enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest"><code>TransactionDataRequest::Enhancement</code></a> requests for transactions that generated the
 transparent inputs to the provided <a href="../struct.DecryptedTransaction.html" title="struct zcash_client_backend::data_api::DecryptedTransaction"><code>DecryptedTransaction</code></a> to the transaction data request
 queue.</p>

@@ -9,7 +9,7 @@
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;NonEmpty&lt;TxId&gt;, <a class="type" href="type.CreateErrT.html" title="type zcash_client_backend::data_api::wallet::CreateErrT">CreateErrT</a>&lt;DbT, InputsErrT, FeeRuleT, ChangeErrT, N&gt;&gt;<div class="where">where
     DbT: <a class="trait" href="../trait.WalletWrite.html" title="trait zcash_client_backend::data_api::WalletWrite">WalletWrite</a> + <a class="trait" href="../trait.WalletCommitmentTrees.html" title="trait zcash_client_backend::data_api::WalletCommitmentTrees">WalletCommitmentTrees</a>,
     ParamsT: Parameters + <a class="trait" href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html" title="trait core::clone::Clone">Clone</a>,
-    FeeRuleT: FeeRule,</div></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
+    FeeRuleT: <a class="trait" href="../../../zcash_primitives/transaction/fees/trait.FeeRule.html" title="trait zcash_primitives::transaction::fees::FeeRule">FeeRule</a>,</div></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 the given proposal, and persist it to the wallet database.</p>
 <p>Returns the database identifier for each newly constructed transaction, or an error if
 an error occurs in transaction construction, proving, or signing.</p>

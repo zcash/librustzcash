@@ -41,14 +41,14 @@ exist no unscanned ranges between the wallet’s birthday height and the provide
 </div></details><details class="toggle method-toggle" open><summary><section id="method.from_activation" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#2699-2711">Source</a><h4 class="code-header">pub fn <a href="#method.from_activation" class="fn">from_activation</a>&lt;P: Parameters&gt;(
     params: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;P</a>,
     network_upgrade: NetworkUpgrade,
-    prior_block_hash: BlockHash,
+    prior_block_hash: <a class="struct" href="../../zcash_primitives/block/struct.BlockHash.html" title="struct zcash_primitives::block::BlockHash">BlockHash</a>,
 ) -&gt; <a class="struct" href="struct.AccountBirthday.html" title="struct zcash_client_backend::data_api::AccountBirthday">AccountBirthday</a></h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate features <code>test-dependencies</code></strong> only.</div></span></summary><div class="docblock"><p>Constructs a new <a href="struct.AccountBirthday.html" title="struct zcash_client_backend::data_api::AccountBirthday"><code>AccountBirthday</code></a> at the given network upgrade’s activation,
 with no “recover until” height.</p>
 <h5 id="panics"><a class="doc-anchor" href="#panics">§</a>Panics</h5>
 <p>Panics if the activation height for the given network upgrade is not set.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.from_sapling_activation" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#2720-2725">Source</a><h4 class="code-header">pub fn <a href="#method.from_sapling_activation" class="fn">from_sapling_activation</a>&lt;P: Parameters&gt;(
     params: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;P</a>,
-    prior_block_hash: BlockHash,
+    prior_block_hash: <a class="struct" href="../../zcash_primitives/block/struct.BlockHash.html" title="struct zcash_primitives::block::BlockHash">BlockHash</a>,
 ) -&gt; <a class="struct" href="struct.AccountBirthday.html" title="struct zcash_client_backend::data_api::AccountBirthday">AccountBirthday</a></h4></section><span class="item-info"><div class="stab portability">Available on <strong>crate features <code>test-dependencies</code></strong> only.</div></span></summary><div class="docblock"><p>Constructs a new <a href="struct.AccountBirthday.html" title="struct zcash_client_backend::data_api::AccountBirthday"><code>AccountBirthday</code></a> at Sapling activation, with no
 “recover until” height.</p>
 <h5 id="panics-1"><a class="doc-anchor" href="#panics-1">§</a>Panics</h5>
