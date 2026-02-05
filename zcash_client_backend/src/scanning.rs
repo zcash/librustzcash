@@ -29,6 +29,7 @@ use crate::{
 use orchard::note_encryption::OrchardDomain;
 
 pub(crate) mod compact;
+pub(crate) mod full;
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a [`CompactSaplingOutput`] or [`CompactOrchardAction`].
