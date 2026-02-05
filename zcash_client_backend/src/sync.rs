@@ -52,7 +52,11 @@ use {
     zcash_script::script,
 };
 
+#[cfg(feature = "sync-decryptor")]
+pub mod decryptor;
+
 /// Scans the chain until the wallet is up-to-date.
+#[cfg(feature = "sync")]
 pub async fn run<P, ChT, CaT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
@@ -545,6 +549,7 @@ where
 }
 
 /// Errors that can occur while syncing.
+#[cfg(feature = "sync")]
 #[derive(Debug)]
 pub enum Error<CaErr, DbErr, TrErr> {
     /// An error while interacting with a [`BlockCache`].
