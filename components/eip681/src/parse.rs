@@ -334,9 +334,9 @@ impl HexDigits {
 /// multiplier of a power of 10. Only integer numbers are allowed, so the
 /// exponent MUST be greater or equal to the number of decimals after the point.
 ///
-/// ## Note
-/// This ABNF notation doesn't seem correct, as it allows for quite a few
-/// cases that don't make sense - for example:
+/// ## Warning
+/// The ABNF notation is ambiguous, it allows for quite a few cases that don't
+/// make sense - for example:
 ///
 /// 1. `*DIGIT` is missing and `[ "." 1*DIGIT ]` is present while `[ ( "e" / "E" ) [ 1*DIGIT] ]`
 ///    is not
@@ -389,7 +389,7 @@ impl core::fmt::Display for Number {
 impl Number {
     /// Parse a `Number`.
     ///
-    /// /// ```abnf
+    /// ```abnf
     /// number = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
@@ -590,7 +590,7 @@ impl Number {
 /// * linea.eth
 ///
 /// Uses:
-/// * https://crates.io/crates/ens-normalize-rs
+/// * <https://crates.io/crates/ens-normalize-rs>
 ///
 /// ENS names must conform to the following syntax:
 ///
@@ -656,7 +656,7 @@ impl EnsName {
     }
 }
 
-/// An Ethereum address, or an ENS name.
+/// A 40 character hexadecimal address, or an ENS name.
 ///
 /// ```abnf
 /// ethereum_address = ( "0x" 40*HEXDIG ) / ENS_NAME
@@ -664,35 +664,55 @@ impl EnsName {
 ///
 /// Where `ENS_NAME` is [`EnsName`].
 #[derive(Clone, Debug, PartialEq)]
-pub enum EthereumAddressOrEnsName {
+pub enum AddressOrEnsName {
     Address(HexDigits),
     Name(EnsName),
 }
 
-impl core::fmt::Display for EthereumAddressOrEnsName {
+impl core::fmt::Display for AddressOrEnsName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EthereumAddressOrEnsName::Address(digits) => f.write_fmt(format_args!("0x{digits}")),
-            EthereumAddressOrEnsName::Name(name) => name.fmt(f),
+            AddressOrEnsName::Address(digits) => f.write_fmt(format_args!("0x{digits}")),
+            AddressOrEnsName::Name(name) => name.fmt(f),
         }
     }
 }
 
-impl EthereumAddressOrEnsName {
+impl AddressOrEnsName {
     /// Parse an `EthereumAddress`.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse "0x" and then 40+ hex digits
-        fn parse_40plus_hex(
-            i: &str,
-        ) -> nom::IResult<&str, EthereumAddressOrEnsName, ParseError<'_>> {
+        fn parse_40plus_hex(i: &str) -> nom::IResult<&str, AddressOrEnsName, ParseError<'_>> {
             let (i, _) = nom::bytes::complete::tag("0x")(i)?;
             let (i, digits) = HexDigits::parse_min(i, 40)?;
-            Ok((i, EthereumAddressOrEnsName::Address(digits)))
+            Ok((i, AddressOrEnsName::Address(digits)))
         }
-        let parse_ens = EnsName::parse.map(EthereumAddressOrEnsName::Name);
+        let parse_ens = EnsName::parse.map(AddressOrEnsName::Name);
         let mut parse_address = parse_40plus_hex.or(parse_ens);
         let (i, address) = parse_address.parse(i)?;
         Ok((i, address))
+    }
+
+    /// Returns the ERC-55 validated string representation of the address, or the ENS name, if possible.
+    pub fn to_erc55_validated_string(&self) -> Result<String, ValidationError> {
+        match self {
+            AddressOrEnsName::Address(hex_digits) => {
+                if let Err(ValidationError::Erc55Validation { reason }) =
+                    hex_digits.validate_erc55()
+                {
+                    match reason {
+                        Erc55ValidationFailureReason::AllLowercase
+                        | Erc55ValidationFailureReason::AllUppercase => {
+                            Ok(format!("0x{hex_digits}"))
+                        }
+                        e => Erc55ValidationSnafu { reason: e }.fail(),
+                    }
+                } else {
+                    Ok(format!("0x{hex_digits}"))
+                }
+            }
+            AddressOrEnsName::Name(ens_name) => Ok(ens_name.to_string()),
+        }
     }
 }
 
@@ -739,7 +759,7 @@ impl UrlEncodedUnicodeString {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Number(Number),
-    Address(EthereumAddressOrEnsName),
+    Address(AddressOrEnsName),
     String(UrlEncodedUnicodeString),
 }
 
@@ -761,7 +781,7 @@ impl Value {
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         let mut number = Number::parse.map(Value::Number);
-        let mut ethereum_address = EthereumAddressOrEnsName::parse.map(Value::Address);
+        let mut ethereum_address = AddressOrEnsName::parse.map(Value::Address);
         let mut string = UrlEncodedUnicodeString::parse.map(Value::String);
 
         // Here there are some interesting corner cases:
@@ -794,6 +814,14 @@ impl Value {
     pub fn as_number(&self) -> Option<&Number> {
         match self {
             Value::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// Return the value as an [`AddressOrEnsName`].
+    pub fn as_address_or_ens_name(&self) -> Option<&AddressOrEnsName> {
+        match self {
+            Value::Address(a) => Some(a),
             _ => None,
         }
     }
@@ -836,21 +864,6 @@ impl EthereumAbiTypeName {
     }
 }
 
-// pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-//     let parse_value = nom::bytes::complete::tag("value").map(|_| Key::Value);
-//     let parse_gas = nom::bytes::complete::tag("gas").map(|_| Key::Gas);
-//     let parse_gas_limit = nom::bytes::complete::tag("gasLimit").map(|_| Key::GasLimit);
-//     let parse_gas_price = nom::bytes::complete::tag("gasPrice").map(|_| Key::GasPrice);
-
-//     nom::branch::alt((
-//         parse_value,
-//         parse_gas_limit,
-//         parse_gas_price,
-//         parse_gas,
-//         EthereumAbiTypeName::parse.map(Key::Type),
-//     ))(i)
-// }
-
 /// A key-value pair, where the the type of the value depends upon the key.
 ///
 /// ```abnf
@@ -864,7 +877,7 @@ impl EthereumAbiTypeName {
 /// > ... gasLimit and gasPrice are suggested user-editable values for gas
 /// > limit and gas price, respectively, for the requested transaction. It is
 /// > acceptable to abbreviate gasLimit as gas, the two are treated synonymously.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Parameter {
     /// The amount to be paid, in the atomic unit of the native token of the blockchain.
     ///
@@ -890,7 +903,8 @@ impl core::fmt::Display for Parameter {
 }
 
 impl Parameter {
-    fn key(&self) -> String {
+    /// Returns the parameter name or type.
+    pub fn key(&self) -> String {
         match self {
             Parameter::Value(_) => "value".to_string(),
             Parameter::Gas(_) => "gas".to_string(),
@@ -955,7 +969,7 @@ impl Parameter {
 }
 
 /// A collection of [`Parameter`].
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Parameters(Vec<Parameter>);
 
 impl core::fmt::Display for Parameters {
@@ -1105,8 +1119,15 @@ impl Parameters {
 /// ```abnf
 /// schema_prefix = "ethereum" ":" [ "pay-" ]
 /// ```
-#[derive(Debug, PartialEq)]
+///
+/// ## Note
+/// The EIP-681 rules are used by multiple chains, so the prefix may be
+/// something other than `"ethereum"`. Unfortunately, this also means that
+/// the prefix _could_ contain garbage. Take care to ensure that the schema
+/// prefix is what you expect.
+#[derive(Clone, Debug, PartialEq)]
 pub struct SchemaPrefix {
+    prefix: String,
     has_pay: bool,
 }
 
@@ -1122,28 +1143,49 @@ impl core::fmt::Display for SchemaPrefix {
 
 impl SchemaPrefix {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, _) = nom::bytes::complete::tag("ethereum:")(i)?;
+        let (i, prefix) = nom::bytes::complete::take_till1(|c| c == ':')(i)?;
+        let (i, _) = nom::character::complete::char(':')(i)?;
         let (i, maybe_pay) = nom::combinator::opt(nom::bytes::complete::tag("pay-"))(i)?;
         let has_pay = maybe_pay.is_some();
-        Ok((i, SchemaPrefix { has_pay }))
+        Ok((
+            i,
+            SchemaPrefix {
+                prefix: prefix.to_string(),
+                has_pay,
+            },
+        ))
+    }
+
+    /// Returns the schema prefix.
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    /// Returns whether the request contains "pay-" in the prefix.
+    pub fn has_pay(&self) -> bool {
+        self.has_pay
     }
 }
 
-/// Ethereum transaction request.
+/// A raw, parsed EIP-681 transaction request.
 ///
 /// ```abnf
 /// request = schema_prefix target_address [ "@" chain_id ] [ "/" function_name ] [ "?" parameters ]
 /// ```
-#[derive(Debug, PartialEq)]
-pub struct EthereumTransactionRequest {
+///
+/// ## Note
+/// [`RawTransactionRequest::parse`] succeeds if any portion of the input can be parsed as a transaction.
+/// You must take care to handle any leftover input properly, or otherwise fail downstream parsers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawTransactionRequest {
     pub schema_prefix: SchemaPrefix,
-    pub target_address: EthereumAddressOrEnsName,
+    pub target_address: AddressOrEnsName,
     pub chain_id: Option<Digits>,
     pub function_name: Option<UrlEncodedUnicodeString>,
     pub parameters: Parameters,
 }
 
-impl core::fmt::Display for EthereumTransactionRequest {
+impl core::fmt::Display for RawTransactionRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             schema_prefix,
@@ -1171,13 +1213,12 @@ impl core::fmt::Display for EthereumTransactionRequest {
     }
 }
 
-impl EthereumTransactionRequest {
+impl RawTransactionRequest {
     /// Parse a transaction request.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         let (i, schema_prefix) = SchemaPrefix::parse(i)?;
         let (i, address_blob) = nom::bytes::complete::is_not("@/?")(i)?;
-        let (remaining_address_input, target_address) =
-            EthereumAddressOrEnsName::parse(address_blob)?;
+        let (remaining_address_input, target_address) = AddressOrEnsName::parse(address_blob)?;
         snafu::ensure!(
             remaining_address_input.is_empty(),
             UnexpectedLeftoverInputSnafu {
@@ -1587,10 +1628,10 @@ mod test {
     #[test]
     fn hex_address_zero_sanity() {
         let input = "0x0000000000000000000000000000000000000000";
-        let (output, addy) = EthereumAddressOrEnsName::parse(input).unwrap();
+        let (output, addy) = AddressOrEnsName::parse(input).unwrap();
         assert_eq!("", output, "output was not fully consumed");
         assert_eq!(
-            EthereumAddressOrEnsName::Address(HexDigits {
+            AddressOrEnsName::Address(HexDigits {
                 places: [CaseSensitiveHexDigit::from_char('0').expect("always valid"); 40].to_vec()
             }),
             addy
@@ -1598,12 +1639,12 @@ mod test {
         assert_eq!(input, &format!("{addy}"));
     }
 
-    fn arb_eth_addy() -> impl Strategy<Value = EthereumAddressOrEnsName> {
-        let hexes: BoxedStrategy<EthereumAddressOrEnsName> = arb_hex_digits(40, 40)
-            .prop_map(EthereumAddressOrEnsName::Address)
+    fn arb_eth_addy() -> impl Strategy<Value = AddressOrEnsName> {
+        let hexes: BoxedStrategy<AddressOrEnsName> = arb_hex_digits(40, 40)
+            .prop_map(AddressOrEnsName::Address)
             .boxed();
-        let names: BoxedStrategy<EthereumAddressOrEnsName> = arb_happy_ens_name()
-            .prop_map(EthereumAddressOrEnsName::Name)
+        let names: BoxedStrategy<AddressOrEnsName> = arb_happy_ens_name()
+            .prop_map(AddressOrEnsName::Name)
             .boxed();
         hexes.prop_union(names)
     }
@@ -1612,7 +1653,7 @@ mod test {
         #[test]
         fn parse_arb_eth_address(expected in arb_eth_addy()) {
             let input = expected.to_string();
-            let (rest, seen) = EthereumAddressOrEnsName::parse(&input).unwrap();
+            let (rest, seen) = AddressOrEnsName::parse(&input).unwrap();
             assert_eq!("", rest);
             assert_eq!(expected, seen);
         }
@@ -1795,7 +1836,7 @@ mod test {
     /// Parsing a value as an ENS name consumes more input than as a string, so ENS name should
     /// win.
     fn parse_value_ens_name_over_string() {
-        let expected = Value::Address(EthereumAddressOrEnsName::Name(EnsName("aa.a0".to_string())));
+        let expected = Value::Address(AddressOrEnsName::Name(EnsName("aa.a0".to_string())));
         let input = expected.to_string();
         let (_output, seen) = Value::parse(&input).unwrap();
         pretty_assertions::assert_eq!(expected, seen);
@@ -1883,7 +1924,10 @@ mod test {
     }
 
     fn arb_schema_prefix() -> impl Strategy<Value = SchemaPrefix> {
-        any::<bool>().prop_map(|has_pay| SchemaPrefix { has_pay })
+        any::<bool>().prop_map(|has_pay| SchemaPrefix {
+            prefix: "ethereum".to_string(),
+            has_pay,
+        })
     }
 
     proptest! {
@@ -1896,7 +1940,7 @@ mod test {
         }
     }
 
-    fn arb_request() -> impl Strategy<Value = EthereumTransactionRequest> {
+    fn arb_request() -> impl Strategy<Value = RawTransactionRequest> {
         (
             arb_schema_prefix(),
             arb_eth_addy(),
@@ -1906,7 +1950,7 @@ mod test {
         )
             .prop_map(
                 |(schema_prefix, target_address, chain_id, function_name, paramaters)| {
-                    EthereumTransactionRequest {
+                    RawTransactionRequest {
                         schema_prefix,
                         target_address,
                         chain_id,
@@ -1921,7 +1965,7 @@ mod test {
         #[test]
         fn parse_arb_request(expected in arb_request()) {
             let input = expected.to_string();
-            let (i, seen) = EthereumTransactionRequest::parse(&input).unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
+            let (i, seen) = RawTransactionRequest::parse(&input).unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
             pretty_assertions::assert_str_eq!(input, seen.to_string().as_str(), "input: {input}\ni: {i}");
             pretty_assertions::assert_eq!(expected, seen);
         }
@@ -1930,7 +1974,7 @@ mod test {
     #[test]
     fn test_vectors_eip_681() {
         let input = "ethereum:0xfb6916095ca1df60bb79Ce92ce3ea74c37c5d359?value=2.014e18";
-        let (_, seen) = EthereumTransactionRequest::parse(input).unwrap();
+        let (_, seen) = RawTransactionRequest::parse(input).unwrap();
         // Ensure the address is case-sensitive
         pretty_assertions::assert_eq!(
             "0xfb6916095ca1df60bb79Ce92ce3ea74c37c5d359",
