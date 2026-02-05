@@ -25,6 +25,24 @@ pub(crate) struct DecryptedOutput<IvkTag, D: Domain, M> {
     pub(crate) memo: M,
 }
 
+impl<IvkTag, D, M> Clone for DecryptedOutput<IvkTag, D, M>
+where
+    IvkTag: Clone,
+    D: Domain,
+    D::Recipient: Clone,
+    D::Note: Clone,
+    M: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            ivk_tag: self.ivk_tag.clone(),
+            recipient: self.recipient.clone(),
+            note: self.note.clone(),
+            memo: self.memo.clone(),
+        }
+    }
+}
+
 impl<IvkTag, D: Domain, M> fmt::Debug for DecryptedOutput<IvkTag, D, M>
 where
     IvkTag: fmt::Debug,
@@ -134,7 +152,7 @@ impl<IvkTag, D: Domain, M> DynamicUsage for OutputReplier<IvkTag, D, M> {
 }
 
 /// The receiver for the result of batch scanning a specific transaction.
-struct BatchReceiver<IvkTag, D: Domain, M>(channel::Receiver<OutputItem<IvkTag, D, M>>);
+pub(crate) struct BatchReceiver<IvkTag, D: Domain, M>(channel::Receiver<OutputItem<IvkTag, D, M>>);
 
 impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
     fn dynamic_usage(&self) -> usize {
@@ -163,6 +181,27 @@ impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
         let usage = self.dynamic_usage();
         (usage, Some(usage))
+    }
+}
+
+impl<IvkTag, D: Domain, M> BatchReceiver<IvkTag, D, M> {
+    /// Blocks until the results of the batch are ready.
+    pub(crate) fn into_results(self) -> HashMap<usize, DecryptedOutput<IvkTag, D, M>> {
+        // This iterator will end once the channel becomes empty and disconnected. We
+        // created one sender per output, and each sender is dropped after the batch it is
+        // in completes (and in the case of successful decryptions, after the decrypted
+        // note has been sent to the channel). Completion of the iterator therefore
+        // corresponds to complete knowledge of the outputs of this transaction that could
+        // be decrypted.
+        self.0
+            .into_iter()
+            .map(
+                |OutputIndex {
+                     output_index,
+                     value,
+                 }| { (output_index, value) },
+            )
+            .collect()
     }
 }
 
@@ -403,21 +442,16 @@ where
     fn add_outputs(
         &mut self,
         domain: impl Fn(&Output) -> D,
-        outputs: &[Output],
+        outputs: impl IntoIterator<Item = Output>,
         replier: channel::Sender<OutputItem<IvkTag, D, Dec::Memo>>,
     ) {
-        self.outputs.extend(
-            outputs
-                .iter()
-                .cloned()
-                .map(|output| (domain(&output), output)),
-        );
-        self.repliers.extend((0..outputs.len()).map(|output_index| {
-            OutputReplier(OutputIndex {
+        for (output_index, output) in outputs.into_iter().enumerate() {
+            self.outputs.push((domain(&output), output));
+            self.repliers.push(OutputReplier(OutputIndex {
                 output_index,
                 value: replier.clone(),
-            })
-        }));
+            }));
+        }
     }
 }
 
@@ -526,6 +560,9 @@ where
     /// batch, or the all-zeros hash to indicate that no block triggered it (i.e. it was a
     /// mempool change).
     ///
+    /// The decryption results can be obtained via [`Self::collect_results`]. To manage
+    /// result collection manually, use [`Self::process_outputs`] instead of this method.
+    ///
     /// If after adding the given outputs, the accumulated batch size is at least the size
     /// threshold that was set via `Self::new`, `Self::flush` is called. Subsequent calls
     /// to `Self::add_outputs` will be accumulated into a new batch.
@@ -534,16 +571,42 @@ where
         block_tag: BlockHash,
         txid: TxId,
         domain: impl Fn(&Output) -> D,
-        outputs: &[Output],
+        outputs: impl IntoIterator<Item = Output>,
     ) {
+        let batch_receiver = self.process_outputs(domain, outputs);
+        self.pending_results
+            .insert(ResultKey(block_tag, txid), batch_receiver);
+    }
+
+    /// Batches the given outputs for trial decryption.
+    ///
+    /// Returns a handle for receiving the results of the batch. To have the batch runner
+    /// manage this for you, use [`Self::add_outputs`] instead of this method.
+    ///
+    /// If after adding the given outputs, the accumulated batch size is at least the size
+    /// threshold that was set via `Self::new`, `Self::flush` is called. Subsequent calls
+    /// to either `Self::process_outputs` or `Self::add_outputs` will be accumulated into a
+    /// new batch.
+    pub(crate) fn process_outputs(
+        &mut self,
+        domain: impl Fn(&Output) -> D,
+        outputs: impl IntoIterator<Item = Output>,
+    ) -> BatchReceiver<IvkTag, D, Dec::Memo> {
+        // Each output is given its own clone of the sending half of the channel, and the
+        // returned `BatchReceiver` holds the only receiving half. Successful decryptions
+        // are sent to the channel, and every sender is dropped once the batch it belongs
+        // to has run; the receiver therefore yields exactly the decryptable outputs and
+        // then completes once all the senders are gone.
         let (tx, rx) = channel::unbounded();
         self.acc.add_outputs(domain, outputs, tx);
-        self.pending_results
-            .insert(ResultKey(block_tag, txid), BatchReceiver(rx));
 
+        // Run the batch eagerly once it reaches the configured size, rather than letting
+        // it grow unbounded; any remaining outputs accumulate into the next batch.
         if self.acc.outputs.len() >= self.batch_size_threshold {
             self.flush();
         }
+
+        BatchReceiver(rx)
     }
 
     /// Runs the currently accumulated batch on the global threadpool.

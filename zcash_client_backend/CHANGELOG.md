@@ -33,6 +33,13 @@ workspace.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
+- `zcash_client_backend::scanning`:
+  - `full` module, providing full-block scanning.
+  - `Nullifiers::unspent` and `Nullifiers::update_with` are now public, for use
+    when driving block scanning via the `full` module.
+- `zcash_client_backend::sync`:
+  - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
+    Tokio-based batch decryption engine for full blocks and transactions.
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -70,7 +77,7 @@ workspace.
   addition to `propose_shielding`.
 
 ### Removed
-- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput` 
+- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`
   instead).
 
 ## [0.23.0] - 2026-06-02
