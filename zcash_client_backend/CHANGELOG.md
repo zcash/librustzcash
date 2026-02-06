@@ -11,8 +11,11 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::ReceivedTransactionOutput`
-- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+- `zcash_client_backend::data_api`:
+  - `ll` module
+  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
+  - `DecryptableTransaction`
+  - `ReceivedTransactionOutput`
 - in `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
   - Added types `CompactTxIn`, `TxOut`
@@ -23,7 +26,7 @@ workspace.
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
 - `zcash_client_backend::fees::MetaSource`
-- `zcash_client_backend::data_api::ll`
+- `zcash_client_backend::wallet::transparent` module, behind the `transparent-inputs` feature flag.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
