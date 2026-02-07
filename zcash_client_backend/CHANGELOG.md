@@ -26,7 +26,11 @@ workspace.
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
 - `zcash_client_backend::fees::MetaSource`
-- `zcash_client_backend::wallet::transparent` module, behind the `transparent-inputs` feature flag.
+- `zcash_client_backend::wallet`:
+  - `transparent` module, behind the `transparent-inputs` feature flag.
+  - `Note::receiver`
+  - `impl From<sapling_crypto::Note> for Note`
+  - `impl From<orchard::Note> for Note`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes

@@ -20,7 +20,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
+    PoolType, ShieldedProtocol, TxId,
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -594,8 +594,9 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
 /// This trait provides a generalization over output representations.
 pub trait ReceivedShieldedOutput {
+    const POOL_TYPE: PoolType;
     type AccountId;
-    type Note;
+    type Note: Into<crate::wallet::Note>;
     type Nullifier;
 
     /// Returns the index of the output within its corresponding bundle.
@@ -606,6 +607,9 @@ pub trait ReceivedShieldedOutput {
     fn note(&self) -> &Self::Note;
     /// Returns any memo associated with the output.
     fn memo(&self) -> Option<&MemoBytes>;
+    /// Returns a [`TransferType`] value that is determined based upon what type of key was used to
+    /// decrypt the transaction.
+    fn transfer_type(&self) -> TransferType;
     /// Returns whether or not the received output is counted as wallet-internal change, for the
     /// purpose of display.
     fn is_change(&self) -> bool;
@@ -630,6 +634,7 @@ impl<T: ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nu
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> {
+    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -646,6 +651,13 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
     fn memo(&self) -> Option<&MemoBytes> {
         None
     }
+    fn transfer_type(&self) -> TransferType {
+        if self.is_change() {
+            TransferType::WalletInternal
+        } else {
+            TransferType::Incoming
+        }
+    }
     fn is_change(&self) -> bool {
         WalletSaplingOutput::is_change(self)
     }
@@ -661,6 +673,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note, AccountId> {
+    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -676,6 +689,9 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
+    }
+    fn transfer_type(&self) -> TransferType {
+        self.transfer_type()
     }
     fn is_change(&self) -> bool {
         self.transfer_type() == TransferType::WalletInternal
@@ -709,6 +725,7 @@ impl<T: ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::no
 
 #[cfg(feature = "orchard")]
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> {
+    const POOL_TYPE: PoolType = PoolType::ORCHARD;
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -724,6 +741,13 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
+    }
+    fn transfer_type(&self) -> TransferType {
+        if self.is_change() {
+            TransferType::WalletInternal
+        } else {
+            TransferType::Incoming
+        }
     }
     fn is_change(&self) -> bool {
         WalletOrchardOutput::is_change(self)
@@ -741,6 +765,7 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
 
 #[cfg(feature = "orchard")]
 impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note, AccountId> {
+    const POOL_TYPE: PoolType = PoolType::ORCHARD;
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -756,6 +781,9 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
+    }
+    fn transfer_type(&self) -> TransferType {
+        self.transfer_type()
     }
     fn is_change(&self) -> bool {
         self.transfer_type() == TransferType::WalletInternal
