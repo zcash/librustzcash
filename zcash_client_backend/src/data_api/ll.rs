@@ -592,16 +592,18 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     ) -> Result<(), Self::Error>;
 }
 
-/// This trait provides a generalization over shielded Sapling output representations.
-pub trait ReceivedSaplingOutput {
+/// This trait provides a generalization over output representations.
+pub trait ReceivedShieldedOutput {
     type AccountId;
+    type Note;
+    type Nullifier;
 
-    /// Returns the index of the Sapling output within the Sapling bundle.
+    /// Returns the index of the output within its corresponding bundle.
     fn index(&self) -> usize;
     /// Returns the account ID for the account that received this output.
     fn account_id(&self) -> Self::AccountId;
     /// Returns the received note.
-    fn note(&self) -> &::sapling::Note;
+    fn note(&self) -> &Self::Note;
     /// Returns any memo associated with the output.
     fn memo(&self) -> Option<&MemoBytes>;
     /// Returns whether or not the received output is counted as wallet-internal change, for the
@@ -609,7 +611,7 @@ pub trait ReceivedSaplingOutput {
     fn is_change(&self) -> bool;
     /// Returns the nullifier that will be revealed when the note is spent, if the output was
     /// observed using a key that provides the capability for nullifier computation.
-    fn nullifier(&self) -> Option<&::sapling::Nullifier>;
+    fn nullifier(&self) -> Option<&Self::Nullifier>;
     /// Returns the position of the note in the note commitment tree, if the transaction that
     /// produced the output has been mined.
     fn note_commitment_tree_position(&self) -> Option<Position>;
@@ -617,8 +619,20 @@ pub trait ReceivedSaplingOutput {
     fn recipient_key_scope(&self) -> Option<Scope>;
 }
 
-impl<AccountId: Copy> ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
+/// This trait provides a generalization over shielded Sapling output representations.
+pub trait ReceivedSaplingOutput:
+    ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nullifier>
+{
+}
+impl<T: ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nullifier>>
+    ReceivedSaplingOutput for T
+{
+}
+
+impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> {
     type AccountId = AccountId;
+    type Note = ::sapling::Note;
+    type Nullifier = ::sapling::Nullifier;
 
     fn index(&self) -> usize {
         self.index()
@@ -646,8 +660,10 @@ impl<AccountId: Copy> ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
     }
 }
 
-impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<::sapling::Note, AccountId> {
+impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note, AccountId> {
     type AccountId = AccountId;
+    type Note = ::sapling::Note;
+    type Nullifier = ::sapling::Nullifier;
 
     fn index(&self) -> usize {
         self.index()
@@ -681,33 +697,21 @@ impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<::sapling::Note,
 
 /// This trait provides a generalization over shielded Orchard output representations.
 #[cfg(feature = "orchard")]
-pub trait ReceivedOrchardOutput {
-    type AccountId;
-
-    /// Returns the index of the Orchard action that produced this output within the Orchard bundle.
-    fn index(&self) -> usize;
-    /// Returns the account ID for the account that received this output.
-    fn account_id(&self) -> Self::AccountId;
-    /// Returns the received note.
-    fn note(&self) -> &::orchard::note::Note;
-    /// Returns any memo associated with the output.
-    fn memo(&self) -> Option<&MemoBytes>;
-    /// Returns whether or not the received output is counted as wallet-internal change, for the
-    /// purpose of display.
-    fn is_change(&self) -> bool;
-    /// Returns the nullifier that will be revealed when the note is spent, if the output was
-    /// observed using a key that provides the capability for nullifier computation.
-    fn nullifier(&self) -> Option<&::orchard::note::Nullifier>;
-    /// Returns the position of the note in the note commitment tree, if the transaction that
-    /// produced the output has been mined.
-    fn note_commitment_tree_position(&self) -> Option<Position>;
-    /// Returns the HD derivation scope of the viewing key that decrypted the note, if known.
-    fn recipient_key_scope(&self) -> Option<Scope>;
+pub trait ReceivedOrchardOutput:
+    ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::note::Nullifier>
+{
+}
+#[cfg(feature = "orchard")]
+impl<T: ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::note::Nullifier>>
+    ReceivedOrchardOutput for T
+{
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId: Copy> ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
+impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> {
     type AccountId = AccountId;
+    type Note = ::orchard::Note;
+    type Nullifier = ::orchard::note::Nullifier;
 
     fn index(&self) -> usize {
         self.index()
@@ -736,8 +740,10 @@ impl<AccountId: Copy> ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId: Copy> ReceivedOrchardOutput for DecryptedOutput<::orchard::note::Note, AccountId> {
+impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note, AccountId> {
     type AccountId = AccountId;
+    type Note = ::orchard::Note;
+    type Nullifier = ::orchard::note::Nullifier;
 
     fn index(&self) -> usize {
         self.index()
