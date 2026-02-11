@@ -213,9 +213,25 @@ impl CaseSensitiveHexDigit {
 /// ```abnf
 /// *HEXDIG
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HexDigits {
     places: Vec<CaseSensitiveHexDigit>,
+}
+
+impl std::fmt::Debug for HexDigits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HexDigits")
+            .field(
+                "places",
+                &self
+                    .places
+                    .iter()
+                    .map(|digit| digit.to_string())
+                    .collect::<Vec<_>>()
+                    .concat(),
+            )
+            .finish()
+    }
 }
 
 impl core::fmt::Display for HexDigits {
@@ -1966,8 +1982,17 @@ mod test {
         fn parse_arb_request(expected in arb_request()) {
             let input = expected.to_string();
             let (i, seen) = RawTransactionRequest::parse(&input).unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
-            pretty_assertions::assert_str_eq!(input, seen.to_string().as_str(), "input: {input}\ni: {i}");
-            pretty_assertions::assert_eq!(expected, seen);
+            if input != seen.to_string().as_str() {
+                pretty_assertions::assert_eq!(
+                    expected,
+                    seen,
+                    "\n\
+                     expected {input}\n\
+                     saw:     {seen}\n\
+                     input: {input}\ni: {i}"
+                );
+                unreachable!("requests with differing serialization should not pass assert_eq");
+             }
         }
     }
 
@@ -2045,5 +2070,12 @@ mod test {
         let ratio = digits.as_decimal_ratio().unwrap();
         assert_eq!((1234, 10_000_000), ratio);
         assert_eq!(0.0001234, ratio.0 as f32 / ratio.1 as f32);
+    }
+
+    #[test]
+    fn zero_e_zero_number_sanity() {
+        let input = "0e0";
+        let (_, n) = Number::parse(input).unwrap();
+        assert_eq!(n.as_i128().unwrap(), 0);
     }
 }
