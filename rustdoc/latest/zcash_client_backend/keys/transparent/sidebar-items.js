@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ParseError"],"mod":["test_vectors"],"struct":["Key"]};
+window.SIDEBAR_ITEMS = {"enum":["ParseError"],"mod":["gap_limits","test_vectors"],"struct":["Key"]};

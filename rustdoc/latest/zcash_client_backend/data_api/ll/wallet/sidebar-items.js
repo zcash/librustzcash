@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PutBlocksError"],"fn":["put_blocks","store_decrypted_tx"]};
+window.SIDEBAR_ITEMS = {"enum":["PutBlocksError"],"fn":["generate_transparent_gap_addresses","put_blocks","store_decrypted_tx"],"trait":["PutBlocksDbT","StoreDecryptedTxDbT"]};
