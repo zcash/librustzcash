@@ -3197,20 +3197,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
                 // truncation height, query for the minimum height to which it's possible for us to
                 // truncate so that we can report it to the caller. We take the maximum of the per-tree
                 // minimums, since that is the earliest height at which all trees have a checkpoint.
-                let min_truncation_height = conn
-                    .query_row(
-                        "SELECT MAX(m) FROM (
-                            SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
-                            UNION ALL
-                            SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
-                        )",
-                        [],
-                        |row| row.get::<_, Option<u32>>(0),
-                    )
-                    .optional()?
-                    .flatten()
-                    .map(BlockHeight::from);
-
+                let min_truncation_height = min_shared_checkpoint_height(conn)?;
                 Err(SqliteClientError::RequestedRewindInvalid {
                     safe_rewind_height: min_truncation_height,
                     requested_height: max_height,
@@ -3322,6 +3309,29 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     Ok(truncation_height)
 }
 
+// Find the minimum checkpoint height for each tree and take the maximum of those minima.
+//
+// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
+// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
+// this correctly returns only the sapling minimum in that case.
+fn min_shared_checkpoint_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT MAX(m) FROM (
+                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+                 UNION ALL
+                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+             )",
+            [],
+            |row| row.get::<_, Option<u32>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(BlockHeight::from))
+}
+
 /// Truncates the wallet database to a precise block height using note commitment tree frontiers
 /// from the provided `ChainState`.
 ///
@@ -3353,31 +3363,14 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
             // The target height is below the oldest checkpoint. We need to use the
             // frontier-based approach.
         }
-        Err(e) => return Err(e),
+        Err(e) => {
+            return Err(e);
+        }
     }
 
     // Step 1: Truncate to the earliest available checkpoint. This removes all later
     // checkpoints and tree data, making room for the frontier insertion.
-    //
-    // We find the minimum checkpoint height for each tree and take the maximum of those
-    // minimums, since that is the earliest height at which all trees have a checkpoint.
-    // The orchard table exists unconditionally but is empty when the feature is not active;
-    // MAX ignores NULLs, so this correctly returns only the sapling minimum in that case.
-    let min_checkpoint_height_query = "SELECT MAX(m) FROM (
-             SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
-             UNION ALL
-             SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
-         )";
-
-    let min_checkpoint_height: Option<BlockHeight> = wdb
-        .conn
-        .0
-        .query_row(min_checkpoint_height_query, [], |row| {
-            row.get::<_, Option<u32>>(0)
-        })
-        .optional()?
-        .flatten()
-        .map(BlockHeight::from);
+    let min_checkpoint_height = min_shared_checkpoint_height(wdb.conn.0)?;
 
     // If there are checkpoints, truncate to the earliest common one first. If there are
     // no checkpoints at all, we can skip this step and proceed directly to inserting the
