@@ -1,8 +1,36 @@
 //! Parser for [EIP-681](https://eips.ethereum.org/EIPS/eip-681) transaction requests.
 //!
-//! The top level of the parsing tree is the type [`EthereumTransactionRequest`].
+//! This crate provides two levels of API:
+//!
+//! 1. **High-level API** (this module): [`TransactionRequest`], [`NativeRequest`], and
+//!    [`Erc20Request`] for common use cases.
+//! 2. **Low-level parsing API** ([`parse`] module): Direct access to the full EIP-681 grammar
+//!    via [`parse::RawTransactionRequest`].
+//!
+//! ## Quick Start
+//!
+//! ```rust
+//! use eip681::TransactionRequest;
+//!
+//! let uri = "ethereum:0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359?value=2.014e18";
+//! let request = TransactionRequest::parse(uri).unwrap();
+//!
+//! match request {
+//!     TransactionRequest::NativeRequest(native) => {
+//!         println!("Native transfer to {}", native.recipient_address());
+//!     }
+//!     TransactionRequest::Erc20Request(erc20) => {
+//!         println!("ERC-20 transfer to {}", erc20.recipient_address());
+//!     }
+//!     TransactionRequest::Unrecognised(raw) => {
+//!         println!("Other request: {}", raw);
+//!     }
+//! }
+//! ```
 //!
 //! ## ABNF Syntax
+//!
+//! The underlying parser implements the following grammar:
 //!
 //! ```abnf
 //! request          = schema_prefix target_address [ "@" chain_id ] [ "/" function_name ] [ "?" parameters ]
@@ -32,8 +60,7 @@
 pub use primitive_types::U256;
 
 pub mod error;
-mod parse;
-pub use parse::{
-    Digits, EnsName, EthereumAbiTypeName, EthereumAddressOrEnsName, EthereumTransactionRequest,
-    HexDigits, Number, Parameter, Parameters, SchemaPrefix, UrlEncodedUnicodeString, Value,
-};
+pub mod parse;
+
+mod request;
+pub use request::{Erc20Request, NativeRequest, TransactionRequest};
