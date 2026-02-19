@@ -3160,6 +3160,69 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     Ok(())
 }
 
+/// Find the minimum checkpoint height for each tree and take the maximum of those minima.
+///
+/// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
+/// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
+/// this correctly returns only the sapling minimum in that case.
+fn min_shared_checkpoint_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT MAX(m) FROM (
+                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+                 UNION ALL
+                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+             )",
+            [],
+            |row| row.get::<_, Option<u32>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(BlockHeight::from))
+}
+
+/// Determine an existing checkpoint height to which we can rewind, if any.
+///
+/// If no checkpoint exists at the requested height, this will return the maximum height at which a
+/// checkpoint exists for all active pools that is less than or equal to the requested height, where
+/// "active" is defined according to the features enabled on this crate.
+///
+/// This will return the height that has a checkpoint in every tree that contains data. The orchard
+/// table exists unconditionally but is empty when the orchard feature is not active.
+fn select_truncation_height(
+    conn: &rusqlite::Transaction,
+    requested_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    conn.query_row(
+        r#"
+            SELECT MAX(height) FROM blocks
+            WHERE height <= :requested_height
+            AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+            AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            "#,
+        named_params! {":requested_height": u32::from(requested_height)},
+        |row| row.get::<_, Option<u32>>(0),
+    )
+    .optional()?
+    .flatten()
+    .map_or_else(
+        || {
+            // If we don't have a checkpoint at a height less than or equal to the requested
+            // truncation height, query for the minimum height to which it's possible for us to
+            // truncate so that we can report it to the caller. We take the maximum of the per-tree
+            // minimums, since that is the earliest height at which all trees have a checkpoint.
+            Err(SqliteClientError::RequestedRewindInvalid {
+                safe_rewind_height: min_shared_checkpoint_height(conn)?,
+                requested_height,
+            })
+        },
+        |h| Ok(BlockHeight::from(h)),
+    )
+}
+
 /// Truncates the database to at most the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
@@ -3174,38 +3237,22 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
-    // Determine a checkpoint to which we can rewind, if any. We need a height
-    // that has a checkpoint in every tree that contains data. The orchard table
-    // exists unconditionally but is empty when the orchard feature is not active.
-    let truncation_height = conn
-        .query_row(
-            r#"
-            SELECT MAX(height) FROM blocks
-            WHERE blocks.height <= :block_height
-            AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
-            AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
-                 OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
-            "#,
-            named_params! {":block_height": u32::from(max_height)},
-            |row| row.get::<_, Option<u32>>(0),
-        )
-        .optional()?
-        .flatten()
-        .map_or_else(
-            || {
-                // If we don't have a checkpoint at a height less than or equal to the requested
-                // truncation height, query for the minimum height to which it's possible for us to
-                // truncate so that we can report it to the caller. We take the maximum of the per-tree
-                // minimums, since that is the earliest height at which all trees have a checkpoint.
-                let min_truncation_height = min_shared_checkpoint_height(conn)?;
-                Err(SqliteClientError::RequestedRewindInvalid {
-                    safe_rewind_height: min_truncation_height,
-                    requested_height: max_height,
-                })
-            },
-            |h| Ok(BlockHeight::from(h)),
-        )?;
+    let truncation_height = select_truncation_height(conn, max_height)?;
+    truncate_to_height_internal(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        truncation_height,
+    )
+}
 
+pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+    truncation_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
         let h = row.get::<_, Option<u32>>(0)?;
 
@@ -3309,29 +3356,6 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     Ok(truncation_height)
 }
 
-// Find the minimum checkpoint height for each tree and take the maximum of those minima.
-//
-// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
-// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
-// this correctly returns only the sapling minimum in that case.
-fn min_shared_checkpoint_height(
-    conn: &rusqlite::Connection,
-) -> Result<Option<BlockHeight>, SqliteClientError> {
-    Ok(conn
-        .query_row(
-            "SELECT MAX(m) FROM (
-                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
-                 UNION ALL
-                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
-             )",
-            [],
-            |row| row.get::<_, Option<u32>>(0),
-        )
-        .optional()?
-        .flatten()
-        .map(BlockHeight::from))
-}
-
 /// Truncates the wallet database to a precise block height using note commitment tree frontiers
 /// from the provided `ChainState`.
 ///
@@ -3341,8 +3365,9 @@ fn min_shared_checkpoint_height(
 /// - If a checkpoint exists at or below the target height, it delegates to
 ///   [`truncate_to_height`] directly.
 /// - If the target height is below the oldest available checkpoint, it first truncates to the
-///   oldest checkpoint (freeing space), then inserts the provided frontier as a new checkpoint
-///   at the target height, and finally truncates to that new checkpoint.
+///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
+///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
+///   target height, and finally truncates to that new checkpoint.
 pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
     chain_state: ChainState,
@@ -3351,43 +3376,53 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 
     // Try the simple case first: if a checkpoint exists at or below the target height,
     // truncate_to_height will succeed directly.
-    match truncate_to_height(
-        wdb.conn.0,
-        &wdb.params,
-        #[cfg(feature = "transparent-inputs")]
-        &wdb.gap_limits,
-        target_height,
-    ) {
-        Ok(_) => return Ok(()),
-        Err(SqliteClientError::RequestedRewindInvalid { .. }) => {
-            // The target height is below the oldest checkpoint. We need to use the
-            // frontier-based approach.
+    match select_truncation_height(wdb.conn.0, target_height) {
+        Ok(h) => {
+            if h == target_height {
+                // There is a checkpoint for the requested height, we can just truncate to it and
+                // return.
+                return truncate_to_height_internal(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    h,
+                )
+                .map(|_| ());
+            } else {
+                // The returned height corresponds to a checkpoint that is below the requested
+                // height. Inserting a checkpoint at a height *greater* than this returned height
+                // may cause an older checkpoint to be deleted, but that's fine, so we just fall
+                // through here.
+            }
+        }
+        Err(SqliteClientError::RequestedRewindInvalid {
+            safe_rewind_height, ..
+        }) => {
+            // The safe rewind height is at a position greater than the requested height, so we
+            // truncate to that height first to clear out checkpoints that would otherwise cause
+            // the checkpoint we're about to insert to be immediately pruned, then, we fall through
+            // to insertion of the frontier.
+            if let Some(min_checkpoint_height) = safe_rewind_height {
+                truncate_to_height(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    min_checkpoint_height,
+                )?;
+            }
         }
         Err(e) => {
             return Err(e);
         }
-    }
+    };
 
-    // Step 1: Truncate to the earliest available checkpoint. This removes all later
-    // checkpoints and tree data, making room for the frontier insertion.
-    let min_checkpoint_height = min_shared_checkpoint_height(wdb.conn.0)?;
+    // If there are checkpoints, truncate to the earliest common one first. If there are no
+    // checkpoints at all, we can skip this step and proceed directly to inserting the frontier.
 
-    // If there are checkpoints, truncate to the earliest common one first. If there are
-    // no checkpoints at all, we can skip this step and proceed directly to inserting the
-    // frontier.
-    if let Some(min_checkpoint_height) = min_checkpoint_height {
-        truncate_to_height(
-            wdb.conn.0,
-            &wdb.params,
-            #[cfg(feature = "transparent-inputs")]
-            &wdb.gap_limits,
-            min_checkpoint_height,
-        )?;
-    }
-
-    // Step 2: Insert the frontier from the chain state, creating a checkpoint at
-    // the target height. Because we just truncated down to a single checkpoint,
-    // there is room for this new one.
+    // Insert the frontier from the chain state, creating a checkpoint at the target height.
+    // Because we just truncated down to a single checkpoint, there is room for this new one.
     wdb.with_sapling_tree_mut(|tree| {
         tree.insert_frontier(
             chain_state.final_sapling_tree().clone(),
@@ -3411,14 +3446,16 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
         Ok::<_, SqliteClientError>(())
     })?;
 
-    // Step 3: Now truncate to the target height checkpoint we just created.
-    truncate_to_height(
+    // Now truncate to the target height checkpoint we just created.
+    let truncated_height = truncate_to_height(
         wdb.conn.0,
         &wdb.params,
         #[cfg(feature = "transparent-inputs")]
         &wdb.gap_limits,
         target_height,
     )?;
+
+    assert_eq!(truncated_height, target_height);
 
     Ok(())
 }
