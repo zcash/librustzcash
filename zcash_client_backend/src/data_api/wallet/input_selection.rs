@@ -50,6 +50,9 @@ use {
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
+#[cfg(feature = "unstable")]
+use zcash_primitives::transaction::TxVersion;
+
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
 pub enum InputSelectorError<DbErrT, SelectorErrT, ChangeErrT, N> {
@@ -198,6 +201,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -389,6 +393,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -398,6 +403,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         Self::InputSource: InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
+        // proposed_version is only used in orchard-gated code paths
+        #[cfg(all(feature = "unstable", not(feature = "orchard")))]
+        let _ = proposed_version;
+
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
         #[cfg(feature = "orchard")]
@@ -466,10 +475,17 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    if addr.has_orchard() {
-                        payment_pools.insert(*idx, PoolType::ORCHARD);
-                        orchard_outputs.push(OrchardPayment(payment_amount));
-                        continue;
+                    {
+                        #[cfg(feature = "unstable")]
+                        let version_has_orchard = proposed_version.is_none_or(|v| v.has_orchard());
+                        #[cfg(not(feature = "unstable"))]
+                        let version_has_orchard = true;
+
+                        if addr.has_orchard() && version_has_orchard {
+                            payment_pools.insert(*idx, PoolType::ORCHARD);
+                            orchard_outputs.push(OrchardPayment(payment_amount));
+                            continue;
+                        }
                     }
 
                     if addr.has_sapling() {
@@ -678,7 +694,18 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             #[cfg(not(feature = "orchard"))]
             let selectable_pools = &[ShieldedProtocol::Sapling];
             #[cfg(feature = "orchard")]
-            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+            let selectable_pools = {
+                #[cfg(feature = "unstable")]
+                let version_has_orchard = proposed_version.is_none_or(|v| v.has_orchard());
+                #[cfg(not(feature = "unstable"))]
+                let version_has_orchard = true;
+
+                if version_has_orchard {
+                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
+                } else {
+                    &[ShieldedProtocol::Sapling][..]
+                }
+            };
 
             shielded_inputs = wallet_db
                 .select_spendable_notes(

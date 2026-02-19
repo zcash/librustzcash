@@ -957,6 +957,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )?;
 
         create_proposed_transactions(
@@ -998,6 +1000,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -1066,6 +1070,8 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            #[cfg(feature = "unstable")]
+            None,
         );
 
         if let Ok(proposal) = &result {

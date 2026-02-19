@@ -616,6 +616,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -646,6 +647,8 @@ where
         spend_from_account,
         request,
         change_strategy,
+        #[cfg(feature = "unstable")]
+        proposed_version,
     )?;
     Ok(proposal)
 }
@@ -688,6 +691,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     ProposeTransferErrT<
@@ -734,6 +738,8 @@ where
         &change_strategy,
         request,
         confirmations_policy,
+        #[cfg(feature = "unstable")]
+        proposed_version,
     )
 }
 
