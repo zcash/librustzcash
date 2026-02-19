@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-02-19
+### Fixed
+- Migration no longer crashes in regtest mode.
+
 ## [0.18.11, 0.19.2] - 2026-01-30
 
 ### Fixed
