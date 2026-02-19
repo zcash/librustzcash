@@ -14,12 +14,13 @@ workspace.
 - `zcash_primitives::transaction::builder`:
   - `impl<FE> From<coinbase::Error> for Error<FE>`
   - `Builder::add_transparent_p2pkh_input`
+  - `Builder::propose_version`
 
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_primitives::transaction::builder`:
-  - `Error` has a new `Coinbase` variant.
+  - `Error` has new `Coinbase` and `ProposedVersionIncompatible` variants.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
     instead of `u64`.
   - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`

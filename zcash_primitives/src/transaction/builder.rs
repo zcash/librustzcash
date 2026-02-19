@@ -9,6 +9,7 @@ use ::transparent::{
     address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut, coinbase,
 };
 use zcash_protocol::{
+    PoolType,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
@@ -109,6 +110,9 @@ pub enum Error<FE> {
     OrchardBuilderNotAvailable,
     /// An error occurred in constructing a coinbase transaction.
     Coinbase(coinbase::Error),
+    /// The proposed transaction version does not support a feature required
+    /// by the transaction under construction.
+    ProposedVersionIncompatible(TxVersion, PoolType),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(zcash_unstable = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -143,6 +147,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::Coinbase(err) => write!(
                 f,
                 "An error occurred in constructing a coinbase transaction: {err}"
+            ),
+            Error::ProposedVersionIncompatible(version, pool_type) => write!(
+                f,
+                "Proposed transaction version {version:?} does not support {pool_type}"
             ),
             #[cfg(zcash_unstable = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
@@ -322,6 +330,8 @@ pub struct PcztParts<P: Parameters> {
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P, U> {
     params: P,
+    tx_version: TxVersion,
+    consensus_branch_id: BranchId,
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
@@ -379,6 +389,45 @@ impl<P, U> Builder<'_, P, U> {
             .as_ref()
             .map_or_else(|| &[][..], |b| b.outputs())
     }
+
+    /// Checks that the given version supports all features required by the inputs and
+    /// outputs already added to the builder.
+    fn check_version_compatibility<FE>(&self, version: TxVersion) -> Result<(), Error<FE>> {
+        if !version.has_sapling()
+            && (!self.sapling_inputs().is_empty() || !self.sapling_outputs().is_empty())
+        {
+            return Err(Error::ProposedVersionIncompatible(
+                version,
+                PoolType::SAPLING,
+            ));
+        }
+        if !version.has_orchard()
+            && self
+                .orchard_builder
+                .as_ref()
+                .is_some_and(|b| !b.spends().is_empty() || !b.outputs().is_empty())
+        {
+            return Err(Error::ProposedVersionIncompatible(
+                version,
+                PoolType::ORCHARD,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Proposes a specific transaction version.
+    ///
+    /// Validates that the proposed version supports all features required by
+    /// the inputs and outputs already added to the builder. Returns
+    /// [`Error::ProposedVersionIncompatible`] if validation fails.
+    ///
+    /// The same validation is performed at build time to catch inputs/outputs
+    /// added after this call.
+    pub fn propose_version<FE>(&mut self, version: TxVersion) -> Result<(), Error<FE>> {
+        self.check_version_compatibility(version)?;
+        self.tx_version = version;
+        Ok(())
+    }
 }
 
 impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
@@ -423,8 +472,14 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             target_height + DEFAULT_TX_EXPIRY_DELTA
         };
 
+        // Determine the default transaction version for the consensus branch
+        let consensus_branch_id = BranchId::for_height(&params, target_height);
+        let tx_version = TxVersion::suggested_for_branch(consensus_branch_id);
+
         Builder {
             params,
+            tx_version,
+            consensus_branch_id,
             build_config,
             target_height,
             expiry_height,
@@ -457,6 +512,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ) -> Builder<'a, P, Sender<Progress>> {
         Builder {
             params: self.params,
+            tx_version: self.tx_version,
+            consensus_branch_id: self.consensus_branch_id,
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
@@ -936,10 +993,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         SP: SpendProver,
         OP: OutputProver,
     {
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
-
-        // determine transaction version
-        let version = TxVersion::suggested_for_branch(consensus_branch_id);
+        self.check_version_compatibility::<FE>(self.tx_version)?;
 
         //
         // Consistency checks
@@ -1012,8 +1066,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         let (tze_bundle, tze_signers) = build_future(self.tze_builder);
 
         let unauthed_tx: TransactionData<A> = TransactionData {
-            version,
-            consensus_branch_id,
+            version: self.tx_version,
+            consensus_branch_id: self.consensus_branch_id,
             lock_time: 0,
             expiry_height: self.expiry_height,
             #[cfg(all(
@@ -1129,12 +1183,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
-
-        // determine transaction version
-        let version = TxVersion::suggested_for_branch(consensus_branch_id);
-
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+        self.check_version_compatibility::<FR::Error>(self.tx_version)?;
 
         //
         // Consistency checks
@@ -1184,8 +1233,8 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
         Ok(PcztResult {
             pczt_parts: PcztParts {
                 params: self.params,
-                version,
-                consensus_branch_id,
+                version: self.tx_version,
+                consensus_branch_id: self.consensus_branch_id,
                 lock_time: 0,
                 expiry_height: self.expiry_height,
                 transparent: transparent_bundle,
@@ -1330,8 +1379,9 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::transaction::{OutPoint, TxOut, builder::DEFAULT_TX_EXPIRY_DELTA},
+        crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
+        zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };
 
@@ -1349,8 +1399,11 @@ mod tests {
             .unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
+        let consensus_branch_id = BranchId::for_height(&TEST_NETWORK, sapling_activation_height);
         let mut builder = builder::Builder {
             params: TEST_NETWORK,
+            tx_version: TxVersion::suggested_for_branch(consensus_branch_id),
+            consensus_branch_id,
             build_config: BuildConfig::Standard {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
