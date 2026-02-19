@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["EthereumAddressOrEnsName","Parameter","Value"],"mod":["error"],"struct":["Digits","EnsName","EthereumAbiTypeName","EthereumTransactionRequest","HexDigits","Number","Parameters","SchemaPrefix","U256","UrlEncodedUnicodeString"]};
+window.SIDEBAR_ITEMS = {"enum":["TransactionRequest"],"mod":["error","parse"],"struct":["Erc20Request","NativeRequest","U256"]};

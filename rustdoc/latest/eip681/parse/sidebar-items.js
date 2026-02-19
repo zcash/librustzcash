@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AddressOrEnsName","CaseSensitiveHexDigit","Parameter","Value"],"fn":["parse_min"],"struct":["Digits","EnsName","EthereumAbiTypeName","HexDigits","Number","Parameters","RawTransactionRequest","SchemaPrefix","UrlEncodedUnicodeString"]};

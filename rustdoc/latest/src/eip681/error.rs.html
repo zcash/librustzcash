@@ -1,8 +1,8 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/eip681/src/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="eip681" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (873b4beb0 2026-02-15)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">eip681/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Any and all errors encountered during parsing and validation.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/eip681/src/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="eip681" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (838709580 2026-02-17)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">eip681/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Any and all errors encountered during parsing and validation.
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>snafu::prelude::<span class="kw-2">*</span>;
 <a href=#4 id=4 data-nosnippet>4</a>
-<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span><span class="kw">crate</span>::Value;
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span><span class="kw">crate</span>::parse::Value;
 <a href=#6 id=6 data-nosnippet>6</a>
 <a href=#7 id=7 data-nosnippet>7</a><span class="doccomment">/// Errors discovered during parsing.
 <a href=#8 id=8 data-nosnippet>8</a></span><span class="attr">#[derive(Debug, Snafu)]
@@ -60,8 +60,8 @@
 <a href=#60 id=60 data-nosnippet>60</a>    </span><span class="attr">#[snafu(display(<span class="string">"Invalid parameter key '{key}'."</span>))]
 <a href=#61 id=61 data-nosnippet>61</a>    </span>InvalidParameterKey { key: String },
 <a href=#62 id=62 data-nosnippet>62</a>
-<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// Unexpected leftover parsing input.
-<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="attr">#[snafu(display(<span class="string">"Unexpected leftover parsing input '{input}'"</span>))]
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// Unexpected leftover input after parsing.
+<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="attr">#[snafu(display(<span class="string">"Unexpected leftover input: {input}"</span>))]
 <a href=#65 id=65 data-nosnippet>65</a>    </span>UnexpectedLeftoverInput { input: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>str },
 <a href=#66 id=66 data-nosnippet>66</a>}
 <a href=#67 id=67 data-nosnippet>67</a>
@@ -152,4 +152,128 @@
 <a href=#152 id=152 data-nosnippet>152</a>        reason: Erc55ValidationFailureReason,
 <a href=#153 id=153 data-nosnippet>153</a>    },
 <a href=#154 id=154 data-nosnippet>154</a>}
+<a href=#155 id=155 data-nosnippet>155</a>
+<a href=#156 id=156 data-nosnippet>156</a><span class="doccomment">/// Errors encountered while converting [`RawTransactionRequest`] into
+<a href=#157 id=157 data-nosnippet>157</a>/// [`Erc20Request`].
+<a href=#158 id=158 data-nosnippet>158</a>///
+<a href=#159 id=159 data-nosnippet>159</a>/// [`RawTransactionRequest`]: crate::parse::RawTransactionRequest
+<a href=#160 id=160 data-nosnippet>160</a>/// [`Erc20Request`]: crate::Erc20Request
+<a href=#161 id=161 data-nosnippet>161</a></span><span class="attr">#[derive(Debug, Snafu)]
+<a href=#162 id=162 data-nosnippet>162</a>#[non_exhaustive]
+<a href=#163 id=163 data-nosnippet>163</a>#[snafu(visibility(<span class="kw">pub</span>(<span class="kw">crate</span>)))]
+<a href=#164 id=164 data-nosnippet>164</a></span><span class="kw">pub enum </span>Erc20Error {
+<a href=#165 id=165 data-nosnippet>165</a>    <span class="attr">#[snafu(display(<span class="string">"Transaction is missing the function name"</span>))]
+<a href=#166 id=166 data-nosnippet>166</a>    </span>MissingFn,
+<a href=#167 id=167 data-nosnippet>167</a>
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="attr">#[snafu(display(<span class="string">"Expected function name to be 'transfer', saw '{seen}'"</span>))]
+<a href=#169 id=169 data-nosnippet>169</a>    </span>FnName { seen: String },
+<a href=#170 id=170 data-nosnippet>170</a>
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="attr">#[snafu(display(<span class="string">"Incorrect number of ABI parameters, expected 2, saw '{seen}'"</span>))]
+<a href=#172 id=172 data-nosnippet>172</a>    </span>AbiParameterLen { seen: usize },
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="attr">#[snafu(display(
+<a href=#175 id=175 data-nosnippet>175</a>        <span class="string">r#"Incorrect ABI parameter names, \
+<a href=#176 id=176 data-nosnippet>176</a>        expected "address" and "uint256" - saw "{param1}" and "{param2}""#
+<a href=#177 id=177 data-nosnippet>177</a>    </span>))]
+<a href=#178 id=178 data-nosnippet>178</a>    </span>AbiParameterName { param1: String, param2: String },
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>    <span class="attr">#[snafu(display(<span class="string">"The 'address' parameter value is not an address"</span>))]
+<a href=#181 id=181 data-nosnippet>181</a>    </span>AbiParameterAddressIsNotAnAddress,
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a>    <span class="attr">#[snafu(display(<span class="string">"The 'uint256' parameter is not a number"</span>))]
+<a href=#184 id=184 data-nosnippet>184</a>    </span>AbiParameterUint256,
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="attr">#[snafu(display(<span class="string">"The 'uint256' parameter could not be converted: {source}"</span>))]
+<a href=#187 id=187 data-nosnippet>187</a>    </span>AbiParameterUint256Conversion { source: std::num::TryFromIntError },
+<a href=#188 id=188 data-nosnippet>188</a>}
+<a href=#189 id=189 data-nosnippet>189</a>
+<a href=#190 id=190 data-nosnippet>190</a><span class="doccomment">/// Errors encountered while converting [`RawTransactionRequest`] into [`NativeRequest`].
+<a href=#191 id=191 data-nosnippet>191</a>///
+<a href=#192 id=192 data-nosnippet>192</a>/// [`RawTransactionRequest`]: crate::parse::RawTransactionRequest
+<a href=#193 id=193 data-nosnippet>193</a>/// [`NativeRequest`]: crate::NativeRequest
+<a href=#194 id=194 data-nosnippet>194</a></span><span class="attr">#[derive(Debug, Snafu)]
+<a href=#195 id=195 data-nosnippet>195</a>#[non_exhaustive]
+<a href=#196 id=196 data-nosnippet>196</a>#[snafu(visibility(<span class="kw">pub</span>(<span class="kw">crate</span>)))]
+<a href=#197 id=197 data-nosnippet>197</a></span><span class="kw">pub enum </span>NativeTransferError {
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="attr">#[snafu(display(<span class="string">"Has a function name"</span>))]
+<a href=#199 id=199 data-nosnippet>199</a>    </span>HasFunctionName,
+<a href=#200 id=200 data-nosnippet>200</a>
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="attr">#[snafu(display(<span class="string">"Request has ABI parameters"</span>))]
+<a href=#202 id=202 data-nosnippet>202</a>    </span>HasAbiParameters,
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="attr">#[snafu(display(<span class="string">"Parameter '{key}' is not a number"</span>))]
+<a href=#205 id=205 data-nosnippet>205</a>    </span>ParameterNotNumber { key: String },
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="attr">#[snafu(display(<span class="string">"Parameter '{key}' value is invalid: {source}"</span>))]
+<a href=#208 id=208 data-nosnippet>208</a>    </span>ParameterInvalid {
+<a href=#209 id=209 data-nosnippet>209</a>        key: String,
+<a href=#210 id=210 data-nosnippet>210</a>        source: ValidationError,
+<a href=#211 id=211 data-nosnippet>211</a>    },
+<a href=#212 id=212 data-nosnippet>212</a>
+<a href=#213 id=213 data-nosnippet>213</a>    <span class="attr">#[snafu(display(<span class="string">"Invalid chain ID: {source}"</span>))]
+<a href=#214 id=214 data-nosnippet>214</a>    </span>ChainIdInvalid { source: ValidationError },
+<a href=#215 id=215 data-nosnippet>215</a>
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="attr">#[snafu(display(<span class="string">"Invalid recipient address: {source}"</span>))]
+<a href=#217 id=217 data-nosnippet>217</a>    </span>RecipientAddressInvalid { source: ValidationError },
+<a href=#218 id=218 data-nosnippet>218</a>}
+<a href=#219 id=219 data-nosnippet>219</a>
+<a href=#220 id=220 data-nosnippet>220</a><span class="doccomment">/// Top-level errors for the transaction request API.
+<a href=#221 id=221 data-nosnippet>221</a></span><span class="attr">#[derive(Debug, Snafu)]
+<a href=#222 id=222 data-nosnippet>222</a>#[snafu(visibility(<span class="kw">pub</span>(<span class="kw">crate</span>)))]
+<a href=#223 id=223 data-nosnippet>223</a>#[non_exhaustive]
+<a href=#224 id=224 data-nosnippet>224</a></span><span class="kw">pub enum </span>Error {
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="doccomment">/// An error occurred during parsing.
+<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="attr">#[snafu(display(<span class="string">"Parsing error: {message}"</span>))]
+<a href=#227 id=227 data-nosnippet>227</a>    </span>Parse { message: String },
+<a href=#228 id=228 data-nosnippet>228</a>
+<a href=#229 id=229 data-nosnippet>229</a>    <span class="doccomment">/// An error occurred during validation.
+<a href=#230 id=230 data-nosnippet>230</a>    </span><span class="attr">#[snafu(display(<span class="string">"Validation error: {source}"</span>))]
+<a href=#231 id=231 data-nosnippet>231</a>    </span>Validation { source: ValidationError },
+<a href=#232 id=232 data-nosnippet>232</a>
+<a href=#233 id=233 data-nosnippet>233</a>    <span class="doccomment">/// The provided address string is not a valid Ethereum address.
+<a href=#234 id=234 data-nosnippet>234</a>    </span><span class="attr">#[snafu(display(<span class="string">"Invalid Ethereum address: {address}"</span>))]
+<a href=#235 id=235 data-nosnippet>235</a>    </span>InvalidAddress { address: String },
+<a href=#236 id=236 data-nosnippet>236</a>
+<a href=#237 id=237 data-nosnippet>237</a>    <span class="doccomment">/// The request is not a valid ERC-20 transfer.
+<a href=#238 id=238 data-nosnippet>238</a>    </span><span class="attr">#[snafu(display(<span class="string">"Not an ERC-20 transfer request: {source}"</span>))]
+<a href=#239 id=239 data-nosnippet>239</a>    </span>NotErc20Transfer { source: Erc20Error },
+<a href=#240 id=240 data-nosnippet>240</a>
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="doccomment">/// The request is not a valid native transfer.
+<a href=#242 id=242 data-nosnippet>242</a>    </span><span class="attr">#[snafu(display(<span class="string">"Not a native transfer request: {source}"</span>))]
+<a href=#243 id=243 data-nosnippet>243</a>    </span>NotNativeTransfer { source: NativeTransferError },
+<a href=#244 id=244 data-nosnippet>244</a>}
+<a href=#245 id=245 data-nosnippet>245</a>
+<a href=#246 id=246 data-nosnippet>246</a><span class="kw">impl </span>From&lt;ValidationError&gt; <span class="kw">for </span>Error {
+<a href=#247 id=247 data-nosnippet>247</a>    <span class="kw">fn </span>from(source: ValidationError) -&gt; <span class="self">Self </span>{
+<a href=#248 id=248 data-nosnippet>248</a>        Error::Validation { source }
+<a href=#249 id=249 data-nosnippet>249</a>    }
+<a href=#250 id=250 data-nosnippet>250</a>}
+<a href=#251 id=251 data-nosnippet>251</a>
+<a href=#252 id=252 data-nosnippet>252</a><span class="kw">impl </span>From&lt;Erc20Error&gt; <span class="kw">for </span>Error {
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="kw">fn </span>from(source: Erc20Error) -&gt; <span class="self">Self </span>{
+<a href=#254 id=254 data-nosnippet>254</a>        Error::NotErc20Transfer { source }
+<a href=#255 id=255 data-nosnippet>255</a>    }
+<a href=#256 id=256 data-nosnippet>256</a>}
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a><span class="kw">impl </span>From&lt;NativeTransferError&gt; <span class="kw">for </span>Error {
+<a href=#259 id=259 data-nosnippet>259</a>    <span class="kw">fn </span>from(source: NativeTransferError) -&gt; <span class="self">Self </span>{
+<a href=#260 id=260 data-nosnippet>260</a>        Error::NotNativeTransfer { source }
+<a href=#261 id=261 data-nosnippet>261</a>    }
+<a href=#262 id=262 data-nosnippet>262</a>}
+<a href=#263 id=263 data-nosnippet>263</a>
+<a href=#264 id=264 data-nosnippet>264</a><span class="kw">impl </span>From&lt;ParseError&lt;<span class="lifetime">'_</span>&gt;&gt; <span class="kw">for </span>Error {
+<a href=#265 id=265 data-nosnippet>265</a>    <span class="kw">fn </span>from(value: ParseError&lt;<span class="lifetime">'_</span>&gt;) -&gt; <span class="self">Self </span>{
+<a href=#266 id=266 data-nosnippet>266</a>        Error::Parse {
+<a href=#267 id=267 data-nosnippet>267</a>            message: value.to_string(),
+<a href=#268 id=268 data-nosnippet>268</a>        }
+<a href=#269 id=269 data-nosnippet>269</a>    }
+<a href=#270 id=270 data-nosnippet>270</a>}
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a><span class="kw">impl</span>&lt;<span class="lifetime">'a</span>&gt; From&lt;nom::Err&lt;ParseError&lt;<span class="lifetime">'a</span>&gt;&gt;&gt; <span class="kw">for </span>Error {
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">fn </span>from(value: nom::Err&lt;ParseError&lt;<span class="lifetime">'a</span>&gt;&gt;) -&gt; <span class="self">Self </span>{
+<a href=#274 id=274 data-nosnippet>274</a>        Error::Parse {
+<a href=#275 id=275 data-nosnippet>275</a>            message: value.to_string(),
+<a href=#276 id=276 data-nosnippet>276</a>        }
+<a href=#277 id=277 data-nosnippet>277</a>    }
+<a href=#278 id=278 data-nosnippet>278</a>}
 </code></pre></div></section></main></body></html>
