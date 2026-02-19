@@ -26,6 +26,9 @@ workspace.
 - `zcash_client_backend::data_api::ll`
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
+  an additional `proposed_version: Option<TxVersion>` parameter under the `unstable`
+  feature flag, allowing callers to request a specific transaction version.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
 - Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
   changes:

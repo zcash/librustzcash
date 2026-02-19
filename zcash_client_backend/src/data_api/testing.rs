@@ -967,6 +967,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -1131,6 +1133,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
