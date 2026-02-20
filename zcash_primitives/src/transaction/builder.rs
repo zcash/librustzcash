@@ -110,9 +110,9 @@ pub enum Error<FE> {
     OrchardBuilderNotAvailable,
     /// An error occurred in constructing a coinbase transaction.
     Coinbase(coinbase::Error),
-    /// The proposed transaction version does not support a feature required
-    /// by the transaction under construction.
-    ProposedVersionIncompatible(TxVersion, PoolType),
+    /// The proposed transaction version or the consensus branch id for the target height does not
+    /// support a feature required by the transaction under construction.
+    TargetIncompatible(BranchId, TxVersion, PoolType),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(zcash_unstable = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -148,9 +148,9 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "An error occurred in constructing a coinbase transaction: {err}"
             ),
-            Error::ProposedVersionIncompatible(version, pool_type) => write!(
+            Error::TargetIncompatible(branch_id, version, pool_type) => write!(
                 f,
-                "Proposed transaction version {version:?} does not support {pool_type}"
+                "Proposed transaction version {version:?} or consensus branch {branch_id:?} does not support {pool_type}"
             ),
             #[cfg(zcash_unstable = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
@@ -393,21 +393,26 @@ impl<P, U> Builder<'_, P, U> {
     /// Checks that the given version supports all features required by the inputs and
     /// outputs already added to the builder.
     fn check_version_compatibility<FE>(&self, version: TxVersion) -> Result<(), Error<FE>> {
-        if !version.has_sapling()
+        let sapling_available = version.has_sapling() && self.consensus_branch_id.has_sapling();
+        if !sapling_available
             && (!self.sapling_inputs().is_empty() || !self.sapling_outputs().is_empty())
         {
-            return Err(Error::ProposedVersionIncompatible(
+            return Err(Error::TargetIncompatible(
+                self.consensus_branch_id,
                 version,
                 PoolType::SAPLING,
             ));
         }
-        if !version.has_orchard()
+
+        let orchard_available = version.has_orchard() && self.consensus_branch_id.has_orchard();
+        if !orchard_available
             && self
                 .orchard_builder
                 .as_ref()
                 .is_some_and(|b| !b.spends().is_empty() || !b.outputs().is_empty())
         {
-            return Err(Error::ProposedVersionIncompatible(
+            return Err(Error::TargetIncompatible(
+                self.consensus_branch_id,
                 version,
                 PoolType::ORCHARD,
             ));
@@ -419,7 +424,7 @@ impl<P, U> Builder<'_, P, U> {
     ///
     /// Validates that the proposed version supports all features required by
     /// the inputs and outputs already added to the builder. Returns
-    /// [`Error::ProposedVersionIncompatible`] if validation fails.
+    /// [`Error::TargetIncompatible`] if validation fails.
     ///
     /// The same validation is performed at build time to catch inputs/outputs
     /// added after this call.

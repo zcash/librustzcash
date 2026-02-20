@@ -403,9 +403,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         Self::InputSource: InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        // proposed_version is only used in orchard-gated code paths
-        #[cfg(all(feature = "unstable", not(feature = "orchard")))]
-        let _ = proposed_version;
+        #[cfg(feature = "unstable")]
+        let (sapling_supported, orchard_supported) = proposed_version.map_or((true, true), |v| {
+            (
+                v.has_sapling(),
+                cfg!(feature = "orchard") && v.has_orchard(),
+            )
+        });
+        #[cfg(not(feature = "unstable"))]
+        let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
 
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
@@ -475,20 +481,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    {
-                        #[cfg(feature = "unstable")]
-                        let version_has_orchard = proposed_version.is_none_or(|v| v.has_orchard());
-                        #[cfg(not(feature = "unstable"))]
-                        let version_has_orchard = true;
-
-                        if addr.has_orchard() && version_has_orchard {
-                            payment_pools.insert(*idx, PoolType::ORCHARD);
-                            orchard_outputs.push(OrchardPayment(payment_amount));
-                            continue;
-                        }
+                    if addr.has_orchard() && orchard_supported {
+                        payment_pools.insert(*idx, PoolType::ORCHARD);
+                        orchard_outputs.push(OrchardPayment(payment_amount));
+                        continue;
                     }
 
-                    if addr.has_sapling() {
+                    if addr.has_sapling() && sapling_supported {
                         payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment_amount));
                         continue;
@@ -691,19 +690,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
 
-            #[cfg(not(feature = "orchard"))]
-            let selectable_pools = &[ShieldedProtocol::Sapling];
-            #[cfg(feature = "orchard")]
             let selectable_pools = {
-                #[cfg(feature = "unstable")]
-                let version_has_orchard = proposed_version.is_none_or(|v| v.has_orchard());
-                #[cfg(not(feature = "unstable"))]
-                let version_has_orchard = true;
-
-                if version_has_orchard {
+                if orchard_supported && sapling_supported {
                     &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
-                } else {
+                } else if orchard_supported {
+                    &[ShieldedProtocol::Orchard][..]
+                } else if sapling_supported {
                     &[ShieldedProtocol::Sapling][..]
+                } else {
+                    &[]
                 }
             };
 
