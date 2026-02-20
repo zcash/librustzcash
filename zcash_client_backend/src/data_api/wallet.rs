@@ -112,6 +112,9 @@ use {
     zcash_protocol::consensus::NetworkConstants,
 };
 
+#[cfg(feature = "unstable")]
+use zcash_primitives::transaction::TxVersion;
+
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, InputSelector, InputSelectorError};
 
@@ -613,6 +616,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -643,6 +647,8 @@ where
         spend_from_account,
         request,
         change_strategy,
+        #[cfg(feature = "unstable")]
+        proposed_version,
     )?;
     Ok(proposal)
 }
@@ -685,6 +691,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     ProposeTransferErrT<
@@ -731,6 +738,8 @@ where
         &change_strategy,
         request,
         confirmations_policy,
+        #[cfg(feature = "unstable")]
+        proposed_version,
     )
 }
 
@@ -895,6 +904,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     spending_keys: &SpendingKeys,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -929,6 +939,8 @@ where
             step,
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
+            #[cfg(feature = "unstable")]
+            proposed_version,
         )?;
         step_results.push((step, step_result));
     }
@@ -1079,6 +1091,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     BuildState<'static, ParamsT, DbT::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -1217,6 +1230,11 @@ where
             orchard_anchor,
         },
     );
+
+    #[cfg(feature = "unstable")]
+    if let Some(version) = proposed_version {
+        builder.propose_version(version)?;
+    }
 
     #[cfg(all(feature = "transparent-inputs", not(feature = "orchard")))]
     let has_shielded_inputs = !sapling_inputs.is_empty();
@@ -1644,6 +1662,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     StepResult<<DbT as WalletRead>::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -1664,6 +1683,8 @@ where
         proposal_step,
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
+        #[cfg(feature = "unstable")]
+        proposed_version,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -1874,6 +1895,8 @@ where
         proposal_step,
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
+        #[cfg(feature = "unstable")]
+        None,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -2599,5 +2622,7 @@ where
         spending_keys,
         OvkPolicy::Sender,
         &proposal,
+        #[cfg(feature = "unstable")]
+        None,
     )
 }

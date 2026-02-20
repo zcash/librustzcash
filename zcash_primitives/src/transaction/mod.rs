@@ -242,6 +242,46 @@ impl TxVersion {
             BranchId::ZFuture => TxVersion::ZFuture,
         }
     }
+
+    /// Returns `true` if this transaction version is valid for us in the specified consensus
+    /// branch, `false` otherwise.
+    pub fn valid_in_branch(&self, consensus_branch_id: BranchId) -> bool {
+        use BranchId::*;
+        // Note: we intentionally use `match` expressions instead of the `matches!`
+        // macro below because we want exhaustivity.
+        match self {
+            TxVersion::Sprout(_) => consensus_branch_id == Sprout,
+            TxVersion::V3 => consensus_branch_id == Overwinter,
+            TxVersion::V4 => match consensus_branch_id {
+                Sprout | Overwinter => false,
+                Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => true,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => false, // ZIP 2003
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => false, // ZIP 2003
+            },
+            TxVersion::V5 => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
+                Nu5 | Nu6 | Nu6_1 => true,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => true,
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
+            },
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6 => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
+                | Nu6_1 => false,
+                Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
+            },
+            #[cfg(zcash_unstable = "zfuture")]
+            TxVersion::ZFuture => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
+                | Nu6_1 => false,
+                ZFuture => true,
+            },
+        }
+    }
 }
 
 /// Authorization state for a bundle of transaction data.

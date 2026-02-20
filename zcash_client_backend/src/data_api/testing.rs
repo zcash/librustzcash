@@ -957,6 +957,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )?;
 
         create_proposed_transactions(
@@ -967,6 +969,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -996,6 +1000,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -1064,6 +1070,8 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            #[cfg(feature = "unstable")]
+            None,
         );
 
         if let Ok(proposal) = &result {
@@ -1131,6 +1139,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 

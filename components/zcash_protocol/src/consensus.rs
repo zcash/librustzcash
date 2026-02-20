@@ -863,6 +863,46 @@ impl BranchId {
     pub fn sprout_uses_groth_proofs(&self) -> bool {
         !matches!(self, BranchId::Sprout | BranchId::Overwinter)
     }
+
+    // Returns `true` for consensus branches that support the Sprout protocol, `false` otherwise..
+    pub fn has_sprout(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => {
+                true
+            }
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => false,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => false,
+        }
+    }
+
+    // Returns `true` for consensus branches that support the Sapling protocol, `false` otherwise..
+    pub fn has_sapling(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter => false,
+            Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => true,
+        }
+    }
+
+    // Returns `true` for consensus branches that support the Orchard protocol, `false` otherwise.
+    pub fn has_orchard(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
+            Nu5 | Nu6 | Nu6_1 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => true,
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

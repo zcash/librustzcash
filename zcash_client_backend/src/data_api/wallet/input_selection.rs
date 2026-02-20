@@ -17,7 +17,7 @@ use zcash_primitives::transaction::fees::{
 };
 use zcash_protocol::{
     PoolType, ShieldedProtocol,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, BranchId},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -49,6 +49,9 @@ use {
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
+
+#[cfg(feature = "unstable")]
+use zcash_primitives::transaction::TxVersion;
 
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
@@ -198,6 +201,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -389,6 +393,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -398,6 +403,22 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         Self::InputSource: InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
+        #[cfg(feature = "unstable")]
+        let (sapling_supported, orchard_supported) =
+            proposed_version.map_or(Ok((true, true)), |v| {
+                let branch_id = BranchId::for_height(params, BlockHeight::from(target_height));
+                if v.valid_in_branch(branch_id) {
+                    Ok((
+                        v.has_sapling(),
+                        cfg!(feature = "orchard") && v.has_orchard(),
+                    ))
+                } else {
+                    Err(ProposalError::IncompatibleTxVersion(branch_id))
+                }
+            })?;
+        #[cfg(not(feature = "unstable"))]
+        let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
+
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
         #[cfg(feature = "orchard")]
@@ -466,13 +487,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    if addr.has_orchard() {
+                    if addr.has_orchard() && orchard_supported {
                         payment_pools.insert(*idx, PoolType::ORCHARD);
                         orchard_outputs.push(OrchardPayment(payment_amount));
                         continue;
                     }
 
-                    if addr.has_sapling() {
+                    if addr.has_sapling() && sapling_supported {
                         payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment_amount));
                         continue;
@@ -675,10 +696,17 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
 
-            #[cfg(not(feature = "orchard"))]
-            let selectable_pools = &[ShieldedProtocol::Sapling];
-            #[cfg(feature = "orchard")]
-            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+            let selectable_pools = {
+                if orchard_supported && sapling_supported {
+                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
+                } else if orchard_supported {
+                    &[ShieldedProtocol::Orchard][..]
+                } else if sapling_supported {
+                    &[ShieldedProtocol::Sapling][..]
+                } else {
+                    &[]
+                }
+            };
 
             shielded_inputs = wallet_db
                 .select_spendable_notes(
