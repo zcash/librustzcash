@@ -15,6 +15,7 @@ workspace.
   - `impl<FE> From<coinbase::Error> for Error<FE>`
   - `Builder::add_transparent_p2pkh_input`
   - `Builder::propose_version`
+- `zcash_primitives::transaction::TxVersion::valid_in_branch`
 
 ### Changed
 - MSRV is now 1.85.1.

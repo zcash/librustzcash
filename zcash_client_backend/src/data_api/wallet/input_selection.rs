@@ -17,7 +17,7 @@ use zcash_primitives::transaction::fees::{
 };
 use zcash_protocol::{
     PoolType, ShieldedProtocol,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, BranchId},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -404,12 +404,18 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         #[cfg(feature = "unstable")]
-        let (sapling_supported, orchard_supported) = proposed_version.map_or((true, true), |v| {
-            (
-                v.has_sapling(),
-                cfg!(feature = "orchard") && v.has_orchard(),
-            )
-        });
+        let (sapling_supported, orchard_supported) =
+            proposed_version.map_or(Ok((true, true)), |v| {
+                let branch_id = BranchId::for_height(params, BlockHeight::from(target_height));
+                if v.valid_in_branch(branch_id) {
+                    Ok((
+                        v.has_sapling(),
+                        cfg!(feature = "orchard") && v.has_orchard(),
+                    ))
+                } else {
+                    Err(ProposalError::IncompatibleTxVersion(branch_id))
+                }
+            })?;
         #[cfg(not(feature = "unstable"))]
         let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
 

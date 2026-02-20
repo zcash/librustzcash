@@ -111,8 +111,9 @@ pub enum Error<FE> {
     /// An error occurred in constructing a coinbase transaction.
     Coinbase(coinbase::Error),
     /// The proposed transaction version or the consensus branch id for the target height does not
-    /// support a feature required by the transaction under construction.
-    TargetIncompatible(BranchId, TxVersion, PoolType),
+    /// support a feature required by the transaction under construction, or the proposed
+    /// transaction version is not supported on the given consensus branch.
+    TargetIncompatible(BranchId, TxVersion, Option<PoolType>),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(zcash_unstable = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -148,10 +149,16 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "An error occurred in constructing a coinbase transaction: {err}"
             ),
-            Error::TargetIncompatible(branch_id, version, pool_type) => write!(
-                f,
-                "Proposed transaction version {version:?} or consensus branch {branch_id:?} does not support {pool_type}"
-            ),
+            Error::TargetIncompatible(branch_id, version, pool_type) => match pool_type {
+                None => write!(
+                    f,
+                    "Proposed transaction version {version:?} is not valid for consensus branch {branch_id:?}"
+                ),
+                Some(t) => write!(
+                    f,
+                    "{t} is not supported for proposed transaction version {version:?} or consensus branch {branch_id:?}"
+                ),
+            },
             #[cfg(zcash_unstable = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
         }
@@ -393,6 +400,14 @@ impl<P, U> Builder<'_, P, U> {
     /// Checks that the given version supports all features required by the inputs and
     /// outputs already added to the builder.
     fn check_version_compatibility<FE>(&self, version: TxVersion) -> Result<(), Error<FE>> {
+        if !version.valid_in_branch(self.consensus_branch_id) {
+            return Err(Error::TargetIncompatible(
+                self.consensus_branch_id,
+                version,
+                None,
+            ));
+        }
+
         let sapling_available = version.has_sapling() && self.consensus_branch_id.has_sapling();
         if !sapling_available
             && (!self.sapling_inputs().is_empty() || !self.sapling_outputs().is_empty())
@@ -400,7 +415,7 @@ impl<P, U> Builder<'_, P, U> {
             return Err(Error::TargetIncompatible(
                 self.consensus_branch_id,
                 version,
-                PoolType::SAPLING,
+                Some(PoolType::SAPLING),
             ));
         }
 
@@ -414,7 +429,7 @@ impl<P, U> Builder<'_, P, U> {
             return Err(Error::TargetIncompatible(
                 self.consensus_branch_id,
                 version,
-                PoolType::ORCHARD,
+                Some(PoolType::ORCHARD),
             ));
         }
         Ok(())
