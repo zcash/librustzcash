@@ -23,13 +23,13 @@ use zcash_client_backend::{
     data_api::{
         TargetValue,
         chain::{ChainState, CommitmentTreeRoot},
-        error::RewindError,
+        error::{LockError, RewindError},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
         wallet::{ConfirmationsPolicy, TargetHeight},
         *,
     },
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
     address::UnifiedAddress,
