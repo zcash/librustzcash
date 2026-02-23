@@ -6683,7 +6683,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     let test_meta = |st: &TestState<TC, Dsf::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
-            .get_account_metadata(account.id(), &query, target_height, &[])
+            .get_account_metadata(account.id(), &query, target_height, &[], false)
             .unwrap();
 
         assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
@@ -7224,6 +7224,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
                 CoinbaseFilter::AllTransparentOutputs,
+                false,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -7247,6 +7248,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert!(
@@ -7336,6 +7338,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert_eq!(
@@ -7361,6 +7364,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::CoinbaseOnly,
+            false,
         )
         .unwrap();
     assert_eq!(
@@ -7381,6 +7385,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::NonCoinbaseOnly,
+            false,
         )
         .unwrap();
     assert_eq!(

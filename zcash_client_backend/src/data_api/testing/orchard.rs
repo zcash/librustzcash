@@ -138,6 +138,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
+                false,
             )
             .map(|n| n.take_orchard())
     }
@@ -149,7 +150,13 @@ impl ShieldedPoolTester for OrchardPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
-            .select_unspent_notes(account, &[ShieldedPool::Orchard], target_height, exclude)
+            .select_unspent_notes(
+                account,
+                &[ShieldedPool::Orchard],
+                target_height,
+                exclude,
+                false,
+            )
             .map(|n| n.take_orchard())
     }
 
