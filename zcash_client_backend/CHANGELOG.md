@@ -31,6 +31,9 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- `zcash_client_backend::data_api::ll`
+- `zcash_client_backend::wallet::OutputRef`
+- `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -72,6 +75,8 @@ workspace.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
+- `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
+  `OutputRef` instead of `(PoolType, TxId, u32)`.
 - `zcash_client_backend::data_api::WalletWrite` has added method `truncate_to_chain_state`.
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
