@@ -161,7 +161,7 @@ where
         let target = self.selection_target()?;
         let received = self
             .wallet
-            .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
+            .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[], false)
             .map_err(Error::InputSource)?;
         let mut notes: Vec<SpendableNote> = received
             .orchard()
