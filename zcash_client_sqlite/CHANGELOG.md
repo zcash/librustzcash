@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A database migration adds `lock_expiry_height` columns to the
+  `sapling_received_notes`, `orchard_received_notes`, `ironwood_received_notes`,
+  and `transparent_received_outputs` tables to support explicit note locking
+  during concurrent proposal creation.
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
