@@ -29,6 +29,7 @@ mod ironwood_pool_code_views;
 mod ironwood_received_notes;
 mod ironwood_shardtree;
 mod ivk_item_cache;
+mod note_locking;
 mod nullifier_map;
 mod orchard_ironwood_migration_account_key;
 mod orchard_ironwood_migration_tables;
@@ -155,6 +156,11 @@ pub(super) fn all_migrations<
     //                                               /                    \     ironwood_pool_code_views
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
+    //    note_locking depends on all prior leaves: v_tx_outputs_key_scopes, ivk_item_cache,
+    //    add_transparent_receiver_address_index, add_transparent_value_index,
+    //    ironwood_pool_code_views, orchard_ironwood_migration_tables, and
+    //    tree_retained_checkpoints.
+    //
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -260,6 +266,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(orchard_ironwood_migration_account_key::Migration),
         Box::new(tree_retained_checkpoints::Migration),
+        Box::new(note_locking::Migration),
     ]
 }
 
@@ -401,13 +408,8 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
-    v_tx_outputs_key_scopes::MIGRATION_ID,
-    ivk_item_cache::MIGRATION_ID,
-    add_transparent_receiver_address_index::MIGRATION_ID,
-    add_transparent_value_index::MIGRATION_ID,
-    ironwood_pool_code_views::MIGRATION_ID,
+    note_locking::MIGRATION_ID,
     orchard_ironwood_migration_account_key::MIGRATION_ID,
-    tree_retained_checkpoints::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
