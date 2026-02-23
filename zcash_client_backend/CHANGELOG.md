@@ -23,6 +23,8 @@ workspace.
   API of this crate; it exists so code in this crate that constructs
   `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
   exactly when the underlying crate expects them.
+- `zcash_client_backend::wallet::OutputRef`
+- `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
@@ -48,6 +50,8 @@ workspace.
     reported in the `value_pending_spendability` field of the coinbase bucket
     rather than as spendable value; it becomes spendable only once the output
     reaches coinbase maturity.
+- `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
+  `OutputRef` instead of `(PoolType, TxId, u32)`.
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report
