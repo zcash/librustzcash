@@ -337,6 +337,11 @@ impl CachedBlock {
         }
     }
 
+    /// Returns the chain state as of the end of this block.
+    pub fn chain_state(&self) -> &ChainState {
+        &self.chain_state
+    }
+
     /// Returns the height of this block.
     pub fn height(&self) -> BlockHeight {
         self.chain_state.block_height()
@@ -2906,6 +2911,10 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _block_height: BlockHeight,
     ) -> Result<BlockHeight, Self::Error> {
+        Err(())
+    }
+
+    fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
         Err(())
     }
 

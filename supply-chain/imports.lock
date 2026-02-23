@@ -114,8 +114,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.shardtree]]
-version = "0.6.1"
-when = "2025-01-31"
+version = "0.6.2"
+when = "2026-02-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"

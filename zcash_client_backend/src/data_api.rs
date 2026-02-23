@@ -3096,6 +3096,15 @@ pub trait WalletWrite: WalletRead {
     /// given the current state of the wallet's note commitment tree.
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
 
+    /// Truncates the wallet database to the specified chain state.
+    ///
+    /// In contrast to [`truncate_to_height`], this method allows the caller to truncate the wallet
+    /// database to a precise height by providing additional chain state information needed for
+    /// note commitment tree maintenance after the truncation.
+    ///
+    /// [`truncate_to_height`]: WalletWrite::truncate_to_height
+    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error>;
+
     /// Reserves the next `n` available ephemeral addresses for the given account.
     /// This cannot be undone, so as far as possible, errors associated with transaction
     /// construction should have been reported before calling this method.
