@@ -78,7 +78,8 @@ fn check_balance<DSF>(
                 taddr,
                 target_height,
                 confirmations_policy,
-                CoinbaseFilter::AllTransparentOutputs
+                CoinbaseFilter::AllTransparentOutputs,
+                false,
             )
             .unwrap()
             .into_iter()
@@ -146,12 +147,13 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height),
+        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height, false),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -179,7 +181,8 @@ where
                 taddr,
                 target_height,
                 ConfirmationsPolicy::MIN,
-                CoinbaseFilter::AllTransparentOutputs
+                CoinbaseFilter::AllTransparentOutputs,
+                false
             )
             .as_deref(),
         Ok(&[])
@@ -187,7 +190,7 @@ where
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height),
+        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height, false),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
@@ -195,7 +198,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, false)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -518,6 +521,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -536,6 +540,7 @@ where
                     target_height,
                     ConfirmationsPolicy::MIN,
                     CoinbaseFilter::AllTransparentOutputs,
+                    false,
                 )
                 .unwrap(),
         );
@@ -553,6 +558,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -566,6 +572,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
+                false,
             )
             .unwrap()
             .is_empty()
@@ -1121,6 +1128,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1467,6 +1475,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            false,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2076,6 +2085,7 @@ where
             TargetValue::AtLeast(payment_amount),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            false,
         )
         .expect("initial gather should succeed");
     let initial_gather_value: Zatoshis = initial_gather
@@ -2389,6 +2399,7 @@ where
             TargetValue::AtLeast(target),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            false,
         )
         .expect("value-bounded gather should succeed");
 
@@ -2437,6 +2448,7 @@ where
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            false,
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);

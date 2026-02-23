@@ -1608,18 +1608,21 @@ pub trait InputSource {
     /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
-    /// is not spendable as of the given height.
+    /// is not spendable as of the given height. When `include_locked` is `false`, locked
+    /// notes are also excluded.
     fn get_spendable_note(
         &self,
         txid: &TxId,
         protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
+        include_locked: bool,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
-    /// be included.
+    /// be included. When `include_locked` is `false`, locked notes are excluded.
+    #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
@@ -1628,16 +1631,18 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
-    /// target height.
+    /// target height. When `include_locked` is `false`, locked notes are excluded.
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
         sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.
@@ -1646,6 +1651,7 @@ pub trait InputSource {
     /// - notes that are not considered spendable as of the given `target_height`
     /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
+    /// - when `include_locked` is `false`, locked notes.
     ///
     /// Implementations of this method may limit the complexity of supported queries. Such
     /// limitations should be clearly documented for the implementing type.
@@ -1655,6 +1661,7 @@ pub trait InputSource {
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<AccountMeta, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
@@ -1662,11 +1669,13 @@ pub trait InputSource {
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or would not be
     /// spendable in a transaction mined in the block at the target height.
+    /// When `include_locked` is `false`, locked outputs are also excluded.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1686,6 +1695,7 @@ pub trait InputSource {
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
+    /// When `include_locked` is `false`, locked outputs are also excluded.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
@@ -1693,6 +1703,7 @@ pub trait InputSource {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: CoinbaseFilter,
+        _include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1719,6 +1730,7 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
@@ -1727,6 +1739,7 @@ pub trait InputSource {
                 target_height,
                 confirmations_policy,
                 output_filter,
+                include_locked,
             )?);
         }
         Ok(outputs)
@@ -1786,6 +1799,7 @@ pub trait InputSource {
         target_value: TargetValue,
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
+        include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
@@ -1796,6 +1810,7 @@ pub trait InputSource {
             target_value,
             max_inputs,
             fee_rule,
+            include_locked,
         );
         unimplemented!(
             "InputSource::select_spendable_transparent_outputs must be overridden for \
