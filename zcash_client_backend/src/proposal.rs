@@ -17,7 +17,7 @@ use zip321::{TransactionRequest, Zip321Error};
 use crate::{
     data_api::wallet::{ConfirmationsPolicy, TargetHeight},
     fees::TransactionBalance,
-    wallet::{Note, ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 
 /// Errors that can occur in construction of a [`Step`].
@@ -51,7 +51,7 @@ pub enum ProposalError {
     /// An attempted double-spend of a prior step output was detected.
     StepDoubleSpend(StepOutput),
     /// An attempted double-spend of an output belonging to the wallet was detected.
-    ChainDoubleSpend(PoolType, TxId, u32),
+    ChainDoubleSpend(OutputRef),
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
@@ -141,9 +141,12 @@ impl Display for ProposalError {
                 f,
                 "The proposal uses the output of step {r:?} in more than one place."
             ),
-            ProposalError::ChainDoubleSpend(pool, txid, index) => write!(
+            ProposalError::ChainDoubleSpend(output_ref) => write!(
                 f,
-                "The proposal attempts to spend the same output twice: {pool}, {txid}, {index}"
+                "The proposal attempts to spend the same output twice: {}, {}, {}",
+                output_ref.pool(),
+                output_ref.txid(),
+                output_ref.output_index()
             ),
             ProposalError::PaymentPoolsMismatch => write!(
                 f,
@@ -266,7 +269,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         confirmations_policy: ConfirmationsPolicy,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
-        let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
+        let mut consumed_chain_inputs: BTreeSet<OutputRef> = BTreeSet::new();
         let mut consumed_prior_inputs: BTreeSet<StepOutput> = BTreeSet::new();
 
         for (i, step) in steps.iter().enumerate() {
@@ -296,24 +299,24 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             }
 
             for t_out in step.transparent_inputs() {
-                let key = (
-                    PoolType::TRANSPARENT,
+                let output_ref = OutputRef::new(
                     TxId::from_bytes(*t_out.outpoint().hash()),
+                    PoolType::TRANSPARENT,
                     t_out.outpoint().n(),
                 );
-                if !consumed_chain_inputs.insert(key) {
-                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                if !consumed_chain_inputs.insert(output_ref) {
+                    return Err(ProposalError::ChainDoubleSpend(output_ref));
                 }
             }
 
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
-                let key = (
-                    PoolType::Shielded(s_out.note().pool()),
+                let output_ref = OutputRef::new(
                     *s_out.txid(),
+                    PoolType::Shielded(s_out.note().pool()),
                     s_out.output_index().into(),
                 );
-                if !consumed_chain_inputs.insert(key) {
-                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                if !consumed_chain_inputs.insert(output_ref) {
+                    return Err(ProposalError::ChainDoubleSpend(output_ref));
                 }
             }
         }
