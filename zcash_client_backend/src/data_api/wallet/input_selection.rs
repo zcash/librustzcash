@@ -756,6 +756,7 @@ impl<DbT> GreedyInputSelector<DbT> {
                 target_value,
                 shielding_max_inputs(self.shielding_block_space_percent),
                 &StandardFeeRule::Zip317,
+                false,
             )
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -1331,6 +1332,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 TargetValue::AtLeast(required),
                                 shielding_max_inputs(self.shielding_block_space_percent),
                                 &StandardFeeRule::Zip317,
+                                false,
                             )
                             .map_err(InputSelectorError::DataSource)?
                             .into_iter()
@@ -1362,6 +1364,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     target_height,
                     confirmations_policy,
                     &exclude,
+                    false,
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
@@ -1493,6 +1496,7 @@ where
             target_height,
             confirmations_policy,
             &[],
+            false,
         )
         .map_err(InputSelectorError::DataSource)?;
 
@@ -2178,6 +2182,7 @@ where
             target_height,
             confirmations_policy,
             output_filter,
+            false,
         )
         .map_err(InputSelectorError::DataSource)?;
 

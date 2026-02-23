@@ -5460,7 +5460,7 @@ pub(crate) fn lock_outputs(
                 ],
             ),
         }
-        .map_err(|e| LockError::Storage(e))?;
+        .map_err(LockError::Storage)?;
 
         if updated == 0 {
             return Err(LockError::LockFailure(output));
