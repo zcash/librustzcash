@@ -96,7 +96,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{Note, NoteId, Recipient, WalletTx},
+    wallet::{Note, NoteId, OutputRef, Recipient, WalletTx},
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -126,7 +126,7 @@ use self::{
 use crate::{
     AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb,
-    error::SqliteClientError,
+    error::{LockError, SqliteClientError},
     util::Clock,
     wallet::{
         commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
@@ -4323,6 +4323,205 @@ pub(crate) fn get_block_range(
         },
     )
     .map_err(SqliteClientError::from)
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub(crate) fn get_locked_outputs(
+    conn: &rusqlite::Connection,
+    account: AccountUuid,
+) -> Result<Vec<OutputRef>, SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?
+        .map(u32::from)
+        .ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    let mut result = Vec::new();
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, sn.output_index
+         FROM sapling_received_notes sn
+         JOIN transactions t ON t.id_tx = sn.transaction_id
+         JOIN accounts a ON a.id = sn.account_id
+         WHERE sn.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::SAPLING,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, orn.action_index
+         FROM orchard_received_notes orn
+         JOIN transactions t ON t.id_tx = orn.transaction_id
+         JOIN accounts a ON a.id = orn.account_id
+         WHERE orn.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::ORCHARD,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, tro.output_index
+         FROM transparent_received_outputs tro
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         JOIN accounts a ON a.id = tro.account_id
+         WHERE tro.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::TRANSPARENT,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    Ok(result)
+}
+
+pub(crate) fn lock_outputs(
+    conn: &rusqlite::Transaction,
+    outputs: impl Iterator<Item = OutputRef>,
+    lock_expiry_height: BlockHeight,
+) -> Result<usize, LockError> {
+    let chain_tip = chain_tip_height(conn)?.map(u32::from);
+
+    let mut rows_updated = 0;
+    for output in outputs {
+        let updated = match output.pool() {
+            PoolType::Shielded(ShieldedProtocol::Sapling) => conn.execute(
+                "UPDATE sapling_received_notes SET lock_expiry_height = :expiry_height
+                WHERE output_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+            PoolType::Shielded(ShieldedProtocol::Orchard) => conn.execute(
+                "UPDATE orchard_received_notes SET lock_expiry_height = :expiry_height
+                WHERE action_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+            PoolType::Transparent => conn.execute(
+                "UPDATE transparent_received_outputs SET lock_expiry_height = :expiry_height
+                WHERE output_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+        }
+        .map_err(|e| LockError::Storage(e))?;
+
+        if updated == 0 {
+            return Err(LockError::LockFailure(output));
+        } else {
+            rows_updated += updated;
+        }
+    }
+
+    Ok(rows_updated)
+}
+
+pub(crate) fn unlock_output(
+    conn: &rusqlite::Transaction,
+    output: &OutputRef,
+) -> Result<bool, SqliteClientError> {
+    let rows_updated = match output.pool() {
+        PoolType::Shielded(ShieldedProtocol::Sapling) => conn.execute(
+            "UPDATE sapling_received_notes SET lock_expiry_height = NULL
+             WHERE output_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+        PoolType::Shielded(ShieldedProtocol::Orchard) => conn.execute(
+            "UPDATE orchard_received_notes SET lock_expiry_height = NULL
+             WHERE action_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+        PoolType::Transparent => conn.execute(
+            "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
+             WHERE output_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+    };
+    Ok(rows_updated > 0)
 }
 
 pub(crate) fn get_received_outputs(

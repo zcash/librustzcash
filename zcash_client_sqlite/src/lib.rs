@@ -61,6 +61,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        error::LockError,
         ll::{
             self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
             wallet::store_decrypted_tx,
@@ -69,7 +70,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -969,6 +970,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTest
     for WalletDb<C, P, CL, R>
 {
+    fn get_locked_outputs(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error> {
+        wallet::get_locked_outputs(self.conn.borrow(), account)
+    }
+
     fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<<Self as WalletRead>::AccountId>>, <Self as WalletRead>::Error>
@@ -1448,6 +1456,19 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::set_tx_trust(wdb.conn.0, txid, trusted))
+    }
+
+    fn lock_outputs(
+        &mut self,
+        outputs: impl Iterator<Item = OutputRef>,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(self
+            .transactionally(|wdb| wallet::lock_outputs(wdb.conn.0, outputs, lock_expiry_height))?)
+    }
+
+    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error> {
+        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output))
     }
 
     fn store_transactions_to_be_sent(

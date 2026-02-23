@@ -95,10 +95,13 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
-    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
+    data_api::{
+        error::LockError,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
-    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, OutputRef, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1918,6 +1921,15 @@ pub trait WalletRead {
 #[cfg(any(test, feature = "test-dependencies"))]
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletTest: InputSource + WalletRead {
+    /// Returns the set of currently locked outputs for the given account.
+    ///
+    /// Locked outputs are excluded from note selection, and are tallied separately in balance
+    /// computations.
+    fn get_locked_outputs(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error>;
+
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
@@ -3072,6 +3084,30 @@ pub trait WalletWrite: WalletRead {
     /// The outputs of a trusted transaction will be available for spending with
     /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
+
+    /// Locks the specified outputs, preventing it from being selected for spending at any height
+    /// less than or equal to the given height.
+    ///
+    /// Returns the number of outputs locked by the operation on success, or a [`LockError`] on
+    /// failure, wrapping either an error from the underlying storage backend or the first output
+    /// that could not be locked.
+    ///
+    /// Implementations of this method must either succeed completely, successfully locking each
+    /// provided output on success, or fail completely leaving all lock state unmodified if any of
+    /// the outputs were already locked. Existing locks that have expired as of the chain tip
+    /// should be replaced with new locks.
+    fn lock_outputs(
+        &mut self,
+        outputs: impl Iterator<Item = OutputRef>,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>>;
+
+    /// Unlocks the specified output, making it once again available for spending and balance
+    /// computations.
+    ///
+    /// Returns `true` if the output was found and unlocked, `false` if no matching
+    /// output exists.
+    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error>;
 
     /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.

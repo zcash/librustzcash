@@ -13,17 +13,15 @@ use zcash_client_backend::{
     TransferType,
     address::UnifiedAddress,
     data_api::{
-        AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction,
-        SentTransactionOutput, WalletRead, WalletWrite,
-    },
-    data_api::{
-        AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
-        WalletCommitmentTrees as _, Zip32Derivation,
+        AccountBirthday, AccountPurpose, AccountSource, DecryptedTransaction, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SentTransaction, SentTransactionOutput, TransactionStatus,
+        WalletCommitmentTrees as _, WalletRead, WalletWrite, Zip32Derivation,
         chain::ChainState,
+        error::LockError,
         scanning::{ScanPriority, ScanRange},
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, Recipient, WalletTransparentOutput},
+    wallet::{NoteId, OutputRef, Recipient, WalletTransparentOutput},
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
@@ -941,6 +939,18 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     }
 
     fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn lock_outputs(
+        &mut self,
+        _outputs: impl Iterator<Item = OutputRef>,
+        _lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        todo!()
+    }
+
+    fn unlock_output(&mut self, _output: &OutputRef) -> Result<bool, Self::Error> {
         todo!()
     }
 

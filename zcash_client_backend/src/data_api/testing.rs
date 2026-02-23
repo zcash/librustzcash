@@ -60,7 +60,7 @@ use super::{
     },
 };
 use crate::{
-    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
+    data_api::{MaxSpendMode, TargetValue, error::LockError, wallet::TargetHeight},
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
@@ -69,7 +69,7 @@ use crate::{
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2898,6 +2898,18 @@ impl WalletWrite for MockWalletDb {
 
     fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn lock_outputs(
+        &mut self,
+        _outputs: impl Iterator<Item = OutputRef>,
+        _lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(0)
+    }
+
+    fn unlock_output(&mut self, _output: &OutputRef) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     fn store_transactions_to_be_sent(

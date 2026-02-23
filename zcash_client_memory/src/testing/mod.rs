@@ -4,11 +4,11 @@ use std::fmt::Debug;
 use zcash_client_backend::data_api::testing::CacheInsertionResult;
 use zcash_client_backend::{
     data_api::{
-        OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletTest,
+        OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletRead, WalletTest,
         testing::{DataStoreFactory, Reset, TestCache, TestState},
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, Recipient},
+    wallet::{Note, NoteId, OutputRef, ReceivedNote, Recipient},
 };
 use zcash_keys::address::Address;
 use zcash_protocol::{
@@ -25,7 +25,7 @@ use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::{
-        data_api::{InputSource, WalletRead, wallet::TargetHeight},
+        data_api::{InputSource, wallet::TargetHeight},
         wallet::WalletTransparentOutput,
     },
     zcash_keys::keys::transparent::gap_limits::GapLimits,
@@ -110,6 +110,13 @@ impl<P> WalletTest for MemoryWalletDb<P>
 where
     P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
+    fn get_locked_outputs(
+        &self,
+        _account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, Error> {
+        Ok(vec![])
+    }
+
     #[allow(clippy::type_complexity)]
     fn get_sent_outputs(&self, txid: &TxId) -> Result<Vec<OutputOfSentTx>, Error> {
         self.sent_notes
