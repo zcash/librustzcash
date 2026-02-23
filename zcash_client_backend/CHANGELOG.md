@@ -78,6 +78,18 @@ workspace.
   and `IncompatibleTxVersion`
 - `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
   `OutputRef` instead of `(PoolType, TxId, u32)`.
+- The following `InputSource` trait methods now take an additional
+  `include_locked: bool` parameter that controls whether locked notes
+  are included in results:
+  - `get_spendable_note`
+  - `select_spendable_notes`
+  - `select_unspent_notes`
+  - `get_account_metadata`
+  - `get_unspent_transparent_output` (under `transparent-inputs`)
+  - `get_spendable_transparent_outputs` (under `transparent-inputs`)
+- `WalletWrite::store_transactions_to_be_sent` implementations are now
+  required to unlock any locked outputs that are recorded as spent by
+  the stored transactions.
 - `zcash_client_backend::data_api::WalletWrite` has added methods
   `truncate_to_chain_state`, `lock_outputs` and `unlock_output`.
 - `zcash_client_backend::data_api::WalletTest` has added method

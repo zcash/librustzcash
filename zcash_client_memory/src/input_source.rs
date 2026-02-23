@@ -39,6 +39,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         protocol: zcash_protocol::ShieldedProtocol,
         index: u32,
         target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<
         Option<
             zcash_client_backend::wallet::ReceivedNote<
@@ -103,6 +104,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<zcash_client_backend::data_api::ReceivedNotes<Self::NoteRef>, Self::Error> {
         let sapling_eligible_notes = if sources.contains(&Sapling) {
             self.select_spendable_notes_from_pool(
@@ -144,6 +146,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         _sources: &[ShieldedProtocol],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         unimplemented!()
     }
@@ -154,6 +157,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        _include_locked: bool,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         // TODO: take into consideration coinbase maturity
         // See <https://github.com/zcash/librustzcash/issues/821>
@@ -186,6 +190,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         &self,
         outpoint: &OutPoint,
         _target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<Option<WalletUtxo>, Self::Error> {
         // FIXME: make use of `target_height` to check spendability.
         Ok(self
@@ -211,6 +216,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<AccountMeta, Self::Error> {
         let confirmations_policy = ConfirmationsPolicy::new_symmetrical(
             NonZeroU32::MIN,

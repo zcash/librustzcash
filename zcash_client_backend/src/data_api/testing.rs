@@ -2583,6 +2583,7 @@ impl InputSource for MockWalletDb {
         _protocol: ShieldedProtocol,
         _index: u32,
         _target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -2595,6 +2596,7 @@ impl InputSource for MockWalletDb {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::empty())
     }
@@ -2605,6 +2607,7 @@ impl InputSource for MockWalletDb {
         _sources: &[ShieldedProtocol],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Err(())
     }
@@ -2615,6 +2618,7 @@ impl InputSource for MockWalletDb {
         _selector: &NoteFilter,
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<AccountMeta, Self::Error> {
         Err(())
     }

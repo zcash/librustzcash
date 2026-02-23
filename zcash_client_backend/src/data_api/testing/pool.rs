@@ -4705,7 +4705,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     let test_meta = |st: &TestState<TC, Dsf::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
-            .get_account_metadata(account.id(), &query, target_height, &[])
+            .get_account_metadata(account.id(), &query, target_height, &[], false)
             .unwrap();
 
         assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
@@ -5152,6 +5152,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 &t_addr,
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
+                false,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -5170,7 +5171,12 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     let target_height = TargetHeight::from(latest_height + 1);
     let spendable_utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&t_addr, target_height, ConfirmationsPolicy::default())
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            false,
+        )
         .unwrap();
     assert!(
         !spendable_utxos.is_empty(),
