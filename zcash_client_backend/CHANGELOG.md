@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::wallet::OutputRef`
+- `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
+
 ### Changed
+- `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
+  `OutputRef` instead of `(PoolType, TxId, u32)`.
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report
