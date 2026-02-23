@@ -29,6 +29,7 @@ mod ironwood_pool_code_views;
 mod ironwood_received_notes;
 mod ironwood_shardtree;
 mod ivk_item_cache;
+mod note_locking;
 mod nullifier_map;
 mod orchard_ironwood_migration_tables;
 mod orchard_note_version;
@@ -148,10 +149,11 @@ pub(super) fn all_migrations<
     //     add_transparent_value_index  v_tx_outputs_key_scopes  standalone_p2sh    witness_stabilized_notes
     //                                                    /          \         \
     //                                                   /            \      orchard_note_version
-    //                                                  /              \         \
-    //                                                 /                \      ironwood_received_notes
-    //                                                /                  \              |
-    //                                               /                    \     ironwood_pool_code_views
+    //                                                  /              \                      \
+    //                                                 /                \               ironwood_received_notes
+    //                                                /                  \                     /           \
+    //                                               /                    \    ironwood_pool_code_views   note_locking
+    //                                              /                      \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
     let rng = Rc::new(Mutex::new(rng));
@@ -258,6 +260,7 @@ pub(super) fn all_migrations<
         Box::new(ironwood_pool_code_views::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
+        Box::new(note_locking::Migration),
     ]
 }
 
@@ -406,6 +409,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     ironwood_pool_code_views::MIGRATION_ID,
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
+    note_locking::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

@@ -382,6 +382,7 @@ CREATE TABLE "sapling_received_notes" (
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -475,6 +476,7 @@ CREATE TABLE "orchard_received_notes" (
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL DEFAULT 2,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -549,6 +551,7 @@ CREATE TABLE ironwood_received_notes (
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, action_index)
 )";
 pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT: &str = "
@@ -744,6 +747,7 @@ CREATE TABLE "transparent_received_outputs" (
     max_observed_unspent_height INTEGER,
     address_id INTEGER NOT NULL
         REFERENCES addresses(id) ON DELETE CASCADE,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT: &str = r#"
