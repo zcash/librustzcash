@@ -72,7 +72,7 @@ use zcash_client_backend::{
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
-    address::UnifiedAddress,
+    address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::{
@@ -130,7 +130,6 @@ use {
 use {
     rusqlite::named_params,
     zcash_client_backend::data_api::{OutputOfSentTx, WalletTest, testing::TransactionSummary},
-    zcash_keys::address::Address,
 };
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
