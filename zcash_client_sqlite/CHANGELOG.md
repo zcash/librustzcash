@@ -33,6 +33,10 @@ workspace.
   `PoolMigrations::for_account`, scoped to the account whose migration it
   tracks; the underlying `orchard_ironwood_migrations` table enforces at most
   one migration per account.
+- A database migration adds `lock_expiry_height` columns to the
+  `sapling_received_notes`, `orchard_received_notes`, `ironwood_received_notes`,
+  and `transparent_received_outputs` tables to support explicit note locking
+  during concurrent proposal creation.
 
 ### Fixed
 - The `zewif` importer no longer marks transparent addresses that have no
