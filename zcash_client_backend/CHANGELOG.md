@@ -28,6 +28,7 @@ workspace.
 - `zcash_client_backend::data_api::error::LockError`
 - `zcash_client_backend::wallet::OutputRef`
 - `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
+- `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
@@ -76,6 +77,13 @@ workspace.
   `lock_outputs` and `unlock_output`.
 - `zcash_client_backend::data_api::WalletTest` has added method
   `get_locked_outputs`.
+- The following `zcash_client_backend::data_api::wallet::` proposal creation
+  functions now take a `lock_for_blocks: Option<u32>` parameter and require
+  `WalletWrite` instead of `WalletRead`:
+  - `propose_transfer`
+  - `propose_standard_transfer_to_address`
+  - `propose_send_max_transfer`
+  - `propose_shielding`
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report

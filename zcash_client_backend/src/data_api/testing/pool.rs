@@ -8108,6 +8108,7 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),
+        None,
         Some(TxVersion::V5),
     );
 
@@ -8570,6 +8571,7 @@ where
         request,
         ConfirmationsPolicy::MIN,
         &SpendPolicy::default(),
+        None,
         Some(TxVersion::V5),
     )
     .expect("proposal construction succeeds");
