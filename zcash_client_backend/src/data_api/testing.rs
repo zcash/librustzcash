@@ -962,6 +962,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            None,
             #[cfg(feature = "unstable")]
             None,
         )?;
@@ -1005,6 +1006,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            None,
             #[cfg(feature = "unstable")]
             None,
         )
@@ -1038,6 +1040,7 @@ where
             memo,
             mode,
             confirmations_policy,
+            None,
         )
     }
 
@@ -1075,6 +1078,7 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            None,
             #[cfg(feature = "unstable")]
             None,
         );
@@ -1120,6 +1124,7 @@ where
             from_addrs,
             to_account,
             confirmations_policy,
+            None,
         )
     }
 
