@@ -25,6 +25,7 @@ workspace.
 - `impl zcash_keys::keys::transparent::gap_limits::AddressStore for WalletDb`
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
+- Add `zip-48` feature gates to prevent build errors
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.

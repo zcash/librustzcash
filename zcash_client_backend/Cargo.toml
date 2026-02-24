@@ -187,11 +187,24 @@ transparent-inputs = [
     "zcash_primitives/transparent-inputs",
 ]
 
-# Enables operations that permit arbitrary transparent pubkeys to be associated
-# with an account in the wallet. Applications that rely on this feature must
-# maintain spending keys corresponding to all imported pubkeys for any account
-# from which it permits spending.
+## Enables operations that permit arbitrary transparent pubkeys to be associated
+## with an account in the wallet.
+##
+## Applications that enable this feature **MUST** also enable the
+## `transparent-inputs` feature of the crate they are using that implements the
+## `zcash_client_backend` traits.
+##
+## Applications that rely on this feature must maintain spending keys
+## corresponding to all imported pubkeys for any account from which it permits
+## spending.
 transparent-key-import = ["transparent-inputs"]
+
+## Enables tracking of ZIP 48 transparent multisig wallets.
+##
+## Applications that enable this feature **MUST** also enable the
+## `transparent-inputs` feature of the crate they are using that implements the
+## `zcash_client_backend` traits.
+zip-48 = ["transparent-inputs"]
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]

@@ -31,6 +31,11 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- Coin tracking for ZIP 48 multisig accounts (no spend ability)
+  - Create `zip-48` feature
+  - `zcash_client_backend::data_api::AccountSource::Zip48`
+  - `zcash_client_backend::data_api::WalletWrite::import_account_zip48_multisig()`
+  - ZIP 48 tests in `zcash_client_backend::data_api::testing::transparent`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes

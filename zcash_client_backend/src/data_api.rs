@@ -489,6 +489,10 @@ pub enum AccountSource {
         purpose: AccountPurpose,
         key_source: Option<String>,
     },
+
+    /// A ZIP 48 transparent multisig account.
+    #[cfg(feature = "zip-48")]
+    Zip48,
 }
 
 impl AccountSource {
@@ -500,6 +504,8 @@ impl AccountSource {
                 purpose: AccountPurpose::Spending { derivation },
                 ..
             } => derivation.as_ref(),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => None,
             _ => None,
         }
     }
@@ -509,6 +515,8 @@ impl AccountSource {
         match self {
             AccountSource::Derived { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
             AccountSource::Imported { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => None,
         }
     }
 }
@@ -549,6 +557,8 @@ pub trait Account {
                 derivation: Some(derivation.clone()),
             },
             AccountSource::Imported { purpose, .. } => purpose.clone(),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => AccountPurpose::ViewOnly,
         }
     }
 
@@ -2744,6 +2754,10 @@ impl AccountBirthday {
 /// - [`WalletWrite::create_account`]
 /// - [`WalletWrite::import_account_hd`]
 /// - [`WalletWrite::import_account_ufvk`]
+#[cfg_attr(
+    feature = "zip-48",
+    doc = "/// - [`WalletWrite::import_account_zip48_multisig`]"
+)]
 ///
 /// All of these methods take an [`AccountBirthday`]. The birthday height is defined as
 /// the minimum block height that will be scanned for funds belonging to the wallet. If
@@ -2949,6 +2963,29 @@ pub trait WalletWrite: WalletRead {
         purpose: AccountPurpose,
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
+
+    /// Imports a ZIP 48 transparent multisig wallet for tracking.
+    ///
+    /// This creates a new account of kind `account_kind = 2` (ZIP 48 multisig) with the
+    /// provided full viewing key. The account can track received funds and derive addresses.
+    ///
+    /// # Parameters
+    /// - `name`: A human-readable name for the account.
+    /// - `fvk`: The ZIP 48 full viewing key containing threshold and participant public keys.
+    /// - `birthday`: The account birthday, used for determining scan start height.
+    ///
+    /// Returns details about the imported account.
+    #[cfg(feature = "zip-48")]
+    fn import_account_zip48_multisig(
+        &mut self,
+        _name: &str,
+        _fvk: &transparent::zip48::FullViewingKey,
+        _birthday: &AccountBirthday,
+    ) -> Result<Self::Account, Self::Error> {
+        unimplemented!(
+            "WalletWrite::import_account_zip48_multisig must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
 
     /// Deletes the specified account, and all transactions that exclusively involve it, from the
     /// wallet database.

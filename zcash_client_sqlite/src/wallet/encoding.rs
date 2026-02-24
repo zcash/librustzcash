@@ -57,6 +57,8 @@ pub(crate) fn account_kind_code(value: &AccountSource) -> u32 {
     match value {
         AccountSource::Derived { .. } => 0,
         AccountSource::Imported { .. } => 1,
+        #[cfg(feature = "zip-48")]
+        AccountSource::Zip48 { .. } => 2,
     }
 }
 

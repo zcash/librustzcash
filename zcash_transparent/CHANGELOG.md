@@ -32,6 +32,7 @@ workspace.
 - `zcash_transparent::builder::Builder::add_input` now takes a `TransparentInputInfo`
   instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
   previous API.
+- Made `zcash_transparent::zip48::coin_type_and_account()` public
 
 ## [0.6.3] - 2025-12-17
 

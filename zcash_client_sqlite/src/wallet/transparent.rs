@@ -2172,6 +2172,7 @@ mod tests {
     fn put_received_transparent_utxo() {
         zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
             TestDbFactory::default(),
+            zcash_client_backend::data_api::testing::transparent::TransparentAccountType::Derived,
         );
     }
 
@@ -2188,12 +2189,13 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),
             BlockCache::new(),
+            zcash_client_backend::data_api::testing::transparent::TransparentAccountType::Derived,
         );
     }
 
     #[test]
     fn gap_limits() {
-        zcash_client_backend::data_api::testing::transparent::gap_limits(
+        zcash_client_backend::data_api::testing::transparent::zip32_gap_limits(
             TestDbFactory::default(),
             BlockCache::new(),
             GapLimits::default(),

@@ -258,7 +258,7 @@ impl FullViewingKey {
     }
 
     /// Returns the ZIP 48 coin type and account ID for this full viewing key.
-    fn coin_type_and_account(&self) -> (u32, AccountId) {
+    pub fn coin_type_and_account(&self) -> (u32, AccountId) {
         // By construction of `Self`, all keys in `key_info` have the same derivation
         // information, so we only need to look at the first.
         self.key_info.first().coin_type_and_account()

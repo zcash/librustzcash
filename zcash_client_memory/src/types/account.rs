@@ -587,6 +587,8 @@ mod serialization {
                 kind: match acc.kind {
                     AccountSource::Derived { .. } => 0,
                     AccountSource::Imported { .. } => 1,
+                    #[cfg(feature = "zip-48")]
+                    AccountSource::Zip48 => 2,
                 },
                 seed_fingerprint: match acc.kind {
                     AccountSource::Derived { ref derivation, .. } => {
@@ -598,6 +600,8 @@ mod serialization {
                             .map(|d| d.seed_fingerprint().to_bytes().to_vec()),
                         AccountPurpose::ViewOnly => None,
                     },
+                    #[cfg(feature = "zip-48")]
+                    AccountSource::Zip48 => None,
                 },
                 account_index: match acc.kind {
                     AccountSource::Derived { ref derivation, .. } => {
@@ -609,6 +613,8 @@ mod serialization {
                         }
                         AccountPurpose::ViewOnly => None,
                     },
+                    #[cfg(feature = "zip-48")]
+                    AccountSource::Zip48 => None,
                 },
                 purpose: match acc.kind {
                     AccountSource::Derived { .. } => None,
@@ -616,10 +622,14 @@ mod serialization {
                         AccountPurpose::Spending { .. } => Some(0),
                         AccountPurpose::ViewOnly => Some(1),
                     },
+                    #[cfg(feature = "zip-48")]
+                    AccountSource::Zip48 => Some(1),
                 },
                 key_source: match acc.kind {
                     AccountSource::Derived { ref key_source, .. } => key_source,
                     AccountSource::Imported { ref key_source, .. } => key_source,
+                    #[cfg(feature = "zip-48")]
+                    AccountSource::Zip48 => &None,
                 }
                 .clone(),
                 viewing_key: acc.viewing_key.encode(&EncodingParams),
