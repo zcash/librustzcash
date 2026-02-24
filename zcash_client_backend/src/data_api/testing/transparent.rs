@@ -32,7 +32,7 @@ use crate::{
 #[cfg(feature = "zip-48")]
 use {
     crate::data_api::{AccountBirthday, AccountSource, chain::ChainState},
-    ::transparent::keys::NonHardenedChildIndex,
+    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
     ::transparent::zip48::{AccountPrivKey, FullViewingKey},
     zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters},
     zip32::AccountId,
@@ -92,11 +92,17 @@ fn check_balance<DSF>(
     );
 }
 
-/// Creates a ZIP 48 test account and returns its ID, transparent address, and birthday height.
+/// Creates a ZIP 48 test account and returns its ID, transparent address, birthday height,
+/// and the full viewing key.
 #[cfg(feature = "zip-48")]
 fn create_zip48_test_account<Cache, DSF: DataStoreFactory>(
     st: &mut TestState<Cache, DSF::DataStore, LocalNetwork>,
-) -> (DSF::AccountId, TransparentAddress, BlockHeight)
+) -> (
+    DSF::AccountId,
+    TransparentAddress,
+    BlockHeight,
+    FullViewingKey,
+)
 where
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
@@ -134,7 +140,7 @@ where
     let (taddr, _redeem) = fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
     let birthday_height = birthday.height();
 
-    (account_id, taddr, birthday_height)
+    (account_id, taddr, birthday_height, fvk)
 }
 
 pub fn put_received_transparent_utxo<DSF>(dsf: DSF, account_type: TransparentAccountType)
@@ -168,7 +174,7 @@ where
         TransparentAccountType::Zip48 => {
             let mut st = TestBuilder::new().with_data_store_factory(dsf).build();
 
-            let (account_id, taddr, birthday) = create_zip48_test_account::<_, DSF>(&mut st);
+            let (account_id, taddr, birthday, _fvk) = create_zip48_test_account::<_, DSF>(&mut st);
             (st, account_id, taddr, birthday)
         }
     };
@@ -432,7 +438,7 @@ pub fn transparent_balance_spendability<DSF>(
                 .with_block_cache(cache)
                 .build();
 
-            let (account_id, taddr, _birthday) = create_zip48_test_account::<_, DSF>(&mut st);
+            let (account_id, taddr, _birthday, _fvk) = create_zip48_test_account::<_, DSF>(&mut st);
             (st, account_id, taddr)
         }
     };
@@ -706,4 +712,140 @@ where
         ),
         Ok(h) if h.get(&expected_taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
+}
+
+/// Tests that `get_next_zip48_multisig_address` sequentially derives addresses and that
+/// calling it with a non-ZIP-48 account returns `Ok(None)`.
+#[cfg(feature = "zip-48")]
+pub fn get_next_zip48_multisig_address<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    // --- ZIP 48 account ---
+    let (zip48_account_id, _taddr, _birthday, fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+
+    // First call should derive index 0 (External).
+    let (addr0, meta0) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::External)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr0, _) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    assert_eq!(addr0, expected_addr0);
+    assert_eq!(meta0.scope(), Some(TransparentKeyScope::EXTERNAL));
+    assert_eq!(meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // Second call should derive index 1 (External).
+    let (addr1, meta1) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::External)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let index_one = NonHardenedChildIndex::from_index(1).unwrap();
+    let (expected_addr1, _) = fvk.derive_address(zip32::Scope::External, index_one);
+    assert_eq!(addr1, expected_addr1);
+    assert_eq!(meta1.address_index(), Some(index_one));
+
+    // Internal scope should also work, starting at index 0.
+    let (int_addr0, int_meta0) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::Internal)
+        .unwrap()
+        .expect("ZIP 48 account should return an internal address");
+
+    let (expected_int_addr0, _) =
+        fvk.derive_address(zip32::Scope::Internal, NonHardenedChildIndex::ZERO);
+    assert_eq!(int_addr0, expected_int_addr0);
+    assert_eq!(int_meta0.scope(), Some(TransparentKeyScope::INTERNAL));
+    assert_eq!(int_meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // --- Non-ZIP-48 (Derived) account should return Ok(None) ---
+    let derived_account_id = st.test_account().unwrap().id();
+    let result = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(derived_account_id, zip32::Scope::External)
+        .unwrap();
+    assert!(result.is_none(), "Derived account should return None");
+}
+
+/// Tests that `get_zip48_multisig_address_for_index` derives the correct address at
+/// arbitrary indices and that calling it with a non-ZIP-48 account returns `Ok(None)`.
+#[cfg(feature = "zip-48")]
+pub fn get_zip48_multisig_address_for_index<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    // --- ZIP 48 account ---
+    let (zip48_account_id, _taddr, _birthday, fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+
+    // Derive at index 5.
+    let index_5 = NonHardenedChildIndex::from_index(5).unwrap();
+    let (addr5, meta5) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(zip48_account_id, zip32::Scope::External, index_5)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr5, _) = fvk.derive_address(zip32::Scope::External, index_5);
+    assert_eq!(addr5, expected_addr5);
+    assert_eq!(meta5.scope(), Some(TransparentKeyScope::EXTERNAL));
+    assert_eq!(meta5.address_index(), Some(index_5));
+
+    // Derive at index 0.
+    let (addr0, meta0) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(
+            zip48_account_id,
+            zip32::Scope::External,
+            NonHardenedChildIndex::ZERO,
+        )
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr0, _) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    assert_eq!(addr0, expected_addr0);
+    assert_eq!(meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // Internal scope at index 3.
+    let index_3 = NonHardenedChildIndex::from_index(3).unwrap();
+    let (int_addr3, int_meta3) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(zip48_account_id, zip32::Scope::Internal, index_3)
+        .unwrap()
+        .expect("ZIP 48 account should return an internal address");
+
+    let (expected_int_addr3, _) = fvk.derive_address(zip32::Scope::Internal, index_3);
+    assert_eq!(int_addr3, expected_int_addr3);
+    assert_eq!(int_meta3.scope(), Some(TransparentKeyScope::INTERNAL));
+    assert_eq!(int_meta3.address_index(), Some(index_3));
+
+    // --- Non-ZIP-48 (Derived) account should return Ok(None) ---
+    let derived_account_id = st.test_account().unwrap().id();
+    let result = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(
+            derived_account_id,
+            zip32::Scope::External,
+            NonHardenedChildIndex::ZERO,
+        )
+        .unwrap();
+    assert!(result.is_none(), "Derived account should return None");
 }

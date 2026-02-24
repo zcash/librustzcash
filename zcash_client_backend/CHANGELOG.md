@@ -35,6 +35,8 @@ workspace.
   - Create `zip-48` feature
   - `zcash_client_backend::data_api::AccountSource::Zip48`
   - `zcash_client_backend::data_api::WalletWrite::import_account_zip48_multisig()`
+  - `zcash_client_backend::data_api::WalletWrite::get_next_zip48_multisig_address()`
+  - `zcash_client_backend::data_api::WalletWrite::get_zip48_multisig_address_for_index()`
   - ZIP 48 tests in `zcash_client_backend::data_api::testing::transparent`
 
 ### Changed

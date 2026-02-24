@@ -3069,6 +3069,56 @@ pub trait WalletWrite: WalletRead {
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
+    /// Generates, persists, and marks as exposed the next available address for a ZIP 48
+    /// multisig account.
+    ///
+    /// The address and its redeem script are derived from the account's full viewing key
+    /// at the next available index for the specified scope. The redeem script is stored
+    /// alongside the address for later use in transaction construction.
+    ///
+    /// # Parameters
+    /// - `account`: The identifier for the ZIP 48 multisig account.
+    /// - `scope`: The derivation scope (`External` for receiving, `Internal` for change).
+    ///
+    /// Returns `Ok(None)` if the account identifier does not correspond to a known
+    /// ZIP 48 multisig account.
+    #[cfg(feature = "zip-48")]
+    fn get_next_zip48_multisig_address(
+        &mut self,
+        _account: Self::AccountId,
+        _scope: zip32::Scope,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::get_next_zip48_multisig_address must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
+
+    /// Generates, persists, and marks as exposed an address at a specific index for a ZIP 48
+    /// multisig account.
+    ///
+    /// This method allows generating addresses at specific indices, which may be useful for
+    /// wallet recovery or coordinating with external systems.
+    ///
+    /// # Parameters
+    /// - `account`: The identifier for the ZIP 48 multisig account.
+    /// - `scope`: The derivation scope (`External` for receiving, `Internal` for change).
+    /// - `address_index`: The specific index at which to derive the address.
+    ///
+    /// # Warning
+    /// If the chosen index is outside the wallet's gap limit, funds sent to this address
+    /// may not be discovered on recovery from the viewing key alone.
+    #[cfg(feature = "zip-48")]
+    fn get_zip48_multisig_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _scope: zip32::Scope,
+        _address_index: NonHardenedChildIndex,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::get_zip48_multisig_address_for_index must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
+
     /// Updates the wallet's view of the blockchain.
     ///
     /// This method is used to provide the wallet with information about the state of the
