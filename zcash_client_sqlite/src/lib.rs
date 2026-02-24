@@ -480,7 +480,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         match protocol {
             ShieldedPool::Sapling => wallet::sapling::get_spendable_sapling_note(
@@ -489,6 +489,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 txid,
                 index,
                 target_height,
+                include_locked,
             )
             .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedPool::Orchard => {
@@ -499,6 +500,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     txid,
                     index,
                     target_height,
+                    include_locked,
                 )
                 .map(|opt| {
                     opt.map(|n| {
@@ -520,6 +522,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     txid,
                     index,
                     target_height,
+                    include_locked,
                 )
                 .map(|opt| {
                     opt.map(|n| {
@@ -544,7 +547,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedPool::Sapling) {
@@ -556,6 +559,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -570,6 +574,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -584,6 +589,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -597,7 +603,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedPool::Sapling) {
@@ -611,6 +617,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Sapling,
                     wallet::sapling::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -627,6 +634,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Orchard,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -643,6 +651,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    include_locked,
                 )?
             } else {
                 vec![]
@@ -671,7 +680,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -680,6 +689,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+            include_locked,
         )
     }
 
@@ -690,7 +700,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs_for_addresses(
             self.conn.borrow(),
@@ -699,6 +709,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+            include_locked,
         )
     }
 
@@ -713,7 +724,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_value: TargetValue,
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -726,6 +737,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_value,
             max_inputs,
             fee_rule,
+            include_locked,
         )
     }
 
@@ -736,7 +748,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        include_locked: bool,
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
@@ -745,6 +757,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            include_locked,
         )?;
 
         #[cfg(feature = "orchard")]
@@ -755,6 +768,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            include_locked,
         )?;
         #[cfg(not(feature = "orchard"))]
         let orchard_pool_meta = None;
@@ -767,6 +781,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            include_locked,
         )?;
         #[cfg(not(feature = "orchard"))]
         let ironwood_pool_meta = None;
