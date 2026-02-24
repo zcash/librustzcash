@@ -211,6 +211,7 @@ impl AccountPubKey {
 /// P2SH multisig account.
 ///
 /// [ZIP 48]: https://zips.z.cash/zip-0048
+#[derive(Clone, Debug)]
 pub struct FullViewingKey {
     threshold: u8,
     key_info: NonEmpty<AccountPubKey>,
@@ -255,6 +256,46 @@ impl FullViewingKey {
                 key_info,
             })
         }
+    }
+
+    /// Parses a ZIP 48 full viewing key from its serialized BIP 389 multipath descriptor format.
+    pub fn parse_multipath_descriptor<P: zcash_protocol::consensus::Parameters>(
+        bytes: &[u8],
+        params: &P,
+    ) -> Result<Self, FullViewingKeyError> {
+        let s = std::str::from_utf8(bytes).map_err(|_| FullViewingKeyError::InvalidDescriptor)?;
+
+        // Expected format: sh(sortedmulti(<threshold>,<key_info>/<0;1>/*,...))
+        let inner = s
+            .strip_prefix("sh(sortedmulti(")
+            .ok_or(FullViewingKeyError::InvalidDescriptor)?
+            .strip_suffix("))")
+            .ok_or(FullViewingKeyError::InvalidDescriptor)?;
+
+        // Split by comma to get threshold and key expressions
+        // Key expressions contain '/' but not ',', so simple split is safe
+        let mut parts = inner.split(',');
+
+        // Parse threshold
+        let threshold: u8 = parts
+            .next()
+            .ok_or(FullViewingKeyError::InvalidDescriptor)?
+            .parse()
+            .map_err(|_| FullViewingKeyError::InvalidDescriptor)?;
+
+        // Parse key expressions, stripping the /<0;1>/* suffix
+        let key_info: Vec<AccountPubKey> = parts
+            .map(|key_expr| {
+                let key_info_expr = key_expr
+                    .strip_suffix("/<0;1>/*")
+                    .ok_or(FullViewingKeyError::InvalidDescriptor)?;
+                AccountPubKey::parse_key_info_expression(key_info_expr, params)
+                    .ok_or(FullViewingKeyError::InvalidDescriptor)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Use standard constructor to validate
+        FullViewingKey::standard(threshold, key_info)
     }
 
     /// Returns the ZIP 48 coin type and account ID for this full viewing key.
@@ -358,6 +399,8 @@ pub enum FullViewingKeyError {
     InvalidThreshold,
     /// The pubkeys were not all derived following ZIP 48.
     IncompatiblePubKeys,
+    /// The provided descriptor is invalid.
+    InvalidDescriptor,
 }
 
 #[cfg(test)]
@@ -415,6 +458,35 @@ mod tests {
                 addr,
             );
         }
+    }
+
+    #[test]
+    fn multipath_descriptor_round_trip() {
+        let params = MainNetwork;
+        let seeds = [[1; 32], [2; 32], [3; 32]];
+
+        let key_info = seeds
+            .iter()
+            .map(|seed| {
+                AccountPrivKey::from_seed(&params, seed, AccountId::ZERO)
+                    .unwrap()
+                    .to_account_pubkey()
+            })
+            .collect();
+
+        let fvk = FullViewingKey::standard(2, key_info).unwrap();
+        let descriptor = fvk.multipath_descriptor(&params);
+        let parsed =
+            FullViewingKey::parse_multipath_descriptor(descriptor.as_bytes(), &params).unwrap();
+        assert_eq!(parsed.multipath_descriptor(&params), descriptor);
+
+        // Verify derived addresses also match
+        let (addr1, redeem1) =
+            fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+        let (addr2, redeem2) =
+            parsed.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+        assert_eq!(addr1, addr2);
+        assert_eq!(redeem1, redeem2);
     }
 
     #[test]

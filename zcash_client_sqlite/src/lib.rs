@@ -1299,6 +1299,26 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    #[cfg(feature = "zip-48")]
+    fn import_account_zip48_multisig(
+        &mut self,
+        name: &str,
+        fvk: &transparent::zip48::FullViewingKey,
+        birthday: &AccountBirthday,
+    ) -> Result<Self::Account, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                name,
+                &AccountSource::Zip48,
+                wallet::ViewingKey::Zip48Full(Box::new(fvk.clone())),
+                birthday,
+                &wdb.gap_limits,
+            )
+        })
+    }
+
     fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::delete_account(wdb.conn.0, account_uuid))
     }
@@ -1340,6 +1360,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         if let Some(account) = self.get_account(account)? {
             use zcash_keys::keys::AddressGenerationError::*;
+
+            #[cfg(feature = "zip-48")]
+            if matches!(account.source(), AccountSource::Zip48) {
+                return Err(SqliteClientError::Zip48UnsupportedOperation);
+            }
 
             match account.uivk().address(diversifier_index, request) {
                 Ok(address) => {

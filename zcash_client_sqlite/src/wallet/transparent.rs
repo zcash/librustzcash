@@ -69,6 +69,13 @@ use crate::{
 
 pub(crate) mod ephemeral;
 
+#[cfg(feature = "zip-48")]
+pub(crate) mod zip48_multisig;
+
+// Re-export ZIP 48 multisig functions for use in other modules
+#[cfg(feature = "zip-48")]
+pub(crate) use zip48_multisig::generate_zip48_multisig_address_range;
+
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     spent: impl Iterator<Item = &'a OutPoint>,
@@ -161,7 +168,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             transparent_child_index,
             imported_transparent_receiver_pubkey,
             exposed_at_height,
-            transparent_receiver_next_check_time
+            transparent_receiver_next_check_time,
+            redeem_script
          FROM addresses
          WHERE account_id = :account_id
          AND cached_transparent_receiver_address IS NOT NULL
@@ -243,50 +251,97 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .map(decode_epoch_seconds)
             .transpose()?;
 
+        #[cfg(feature = "zip-48")]
+        let redeem_script_bytes: Option<Vec<u8>> = row.get("redeem_script")?;
+
         if let Some(taddr) = taddr {
-            let metadata = match key_scope {
-                #[cfg(feature = "transparent-key-import")]
-                KeyScope::Foreign => {
-                    let pubkey_bytes = row
-                        .get::<_, Option<Vec<u8>>>(3)?
-                        .ok_or_else(|| {
-                            SqliteClientError::CorruptedData(
-                            "Pubkey bytes must be present for all imported transparent addresses."
+            let non_multisig_metadata =
+                || -> Result<TransparentAddressMetadata, SqliteClientError> {
+                    match key_scope {
+                        #[cfg(feature = "transparent-key-import")]
+                        KeyScope::Foreign => {
+                            let pubkey_bytes = row
+                                .get::<_, Option<Vec<u8>>>(3)?
+                                .ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(
+                                    "Pubkey bytes must be present for all imported transparent addresses."
+                                        .to_owned(),
+                                )
+                                })
+                                .and_then(|b| {
+                                    <[u8; 33]>::try_from(&b[..]).map_err(|_| {
+                                        SqliteClientError::CorruptedData(format!(
+                                            "Invalid public key byte length; must be 33 bytes, got {}.",
+                                            b.len()
+                                        ))
+                                    })
+                                })?;
+                            let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Invalid public key: {}",
+                                    e
+                                ))
+                            })?;
+                            Ok(TransparentAddressMetadata::standalone(
+                                pubkey,
+                                exposure,
+                                next_check_time,
+                            ))
+                        }
+                        derived => {
+                            let (scope, address_index) = derived
+                                .as_transparent()
+                                .zip(address_index_opt)
+                                .ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(
+                                        "Derived addresses must have derivation metadata present."
+                                            .to_owned(),
+                                    )
+                                })?;
+
+                            Ok(TransparentAddressMetadata::derived(
+                                scope,
+                                address_index,
+                                exposure,
+                                next_check_time,
+                            ))
+                        }
+                    }
+                };
+
+            // Check for ZIP 48 multisig address first (has redeem_script)
+            #[cfg(feature = "zip-48")]
+            let metadata = if let Some(ref rs_bytes) = redeem_script_bytes {
+                use zcash_script::script::{self, Code};
+
+                let (scope, address_index) = key_scope
+                    .as_transparent()
+                    .zip(address_index_opt)
+                    .ok_or_else(|| {
+                        SqliteClientError::CorruptedData(
+                            "ZIP 48 multisig addresses must have derivation metadata present."
                                 .to_owned(),
                         )
-                        })
-                        .and_then(|b| {
-                            <[u8; 33]>::try_from(&b[..]).map_err(|_| {
-                                SqliteClientError::CorruptedData(format!(
-                                    "Invalid public key byte length; must be 33 bytes, got {}.",
-                                    b.len()
-                                ))
-                            })
-                        })?;
-                    let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
-                        SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
                     })?;
-                    TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time)
-                }
-                derived => {
-                    let (scope, address_index) = derived
-                        .as_transparent()
-                        .zip(address_index_opt)
-                        .ok_or_else(|| {
-                            SqliteClientError::CorruptedData(
-                                "Derived addresses must have derivation metadata present."
-                                    .to_owned(),
-                            )
-                        })?;
 
-                    TransparentAddressMetadata::derived(
-                        scope,
-                        address_index,
-                        exposure,
-                        next_check_time,
-                    )
-                }
+                let redeem_script =
+                    script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
+                        SqliteClientError::CorruptedData(format!("Invalid redeem script: {:?}", e))
+                    })?;
+
+                TransparentAddressMetadata::zip48_multisig(
+                    scope,
+                    address_index,
+                    redeem_script,
+                    exposure,
+                    next_check_time,
+                )
+            } else {
+                non_multisig_metadata()?
             };
+
+            #[cfg(not(feature = "zip-48"))]
+            let metadata = non_multisig_metadata()?;
 
             ret.insert(taddr, metadata);
         }
@@ -602,13 +657,30 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
+    #[cfg(feature = "zip-48")]
+    use super::ViewingKey;
+
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
+
+    // Check if this is a ZIP 48 multisig account and use ZIP 48-specific address generation
+    #[cfg(feature = "zip-48")]
+    if let ViewingKey::Zip48Full(fvk) = &account.viewing_key {
+        return generate_zip48_multisig_address_range(
+            conn,
+            params,
+            account_id,
+            fvk,
+            key_scope,
+            range_to_store,
+        );
+    }
+
     generate_address_range_internal(
         conn,
         params,
         account_id,
-        &account.uivk(),
+        &account.viewing_key.uivk(),
         account.ufvk(),
         key_scope,
         request,
@@ -2199,6 +2271,33 @@ mod tests {
             TestDbFactory::default(),
             BlockCache::new(),
             GapLimits::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zip-48")]
+    fn put_received_transparent_utxo_zip48() {
+        zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
+            TestDbFactory::default(),
+            zcash_client_backend::data_api::testing::transparent::TransparentAccountType::Zip48,
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zip-48")]
+    fn transparent_balance_spendability_zip48() {
+        zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            zcash_client_backend::data_api::testing::transparent::TransparentAccountType::Zip48,
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zip-48")]
+    fn import_account_zip48_multisig() {
+        zcash_client_backend::data_api::testing::transparent::import_account_zip48_multisig(
+            TestDbFactory::default(),
         );
     }
 

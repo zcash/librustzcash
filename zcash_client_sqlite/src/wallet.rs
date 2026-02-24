@@ -85,6 +85,9 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
+
+use ::transparent::zip48;
+
 use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
@@ -219,8 +222,14 @@ fn parse_account_source(
             },
             key_source,
         }),
+        #[cfg(feature = "zip-48")]
+        (2, None) => Ok(AccountSource::Zip48),
         (0, None) => Err(SqliteClientError::CorruptedData(
             "Wallet DB account_kind constraint violated".to_string(),
+        )),
+        #[cfg(feature = "zip-48")]
+        (2, Some(_)) => Err(SqliteClientError::CorruptedData(
+            "ZIP 48 multisig accounts should not have HD derivation info".to_string(),
         )),
         (_, _) => Err(SqliteClientError::CorruptedData(
             "Unrecognized account_kind".to_string(),
@@ -242,6 +251,13 @@ pub(crate) enum ViewingKey {
     /// Accounts that have this kind of viewing key cannot be used in wallet contexts,
     /// because they are unable to maintain an accurate balance.
     Incoming(Box<UnifiedIncomingViewingKey>),
+
+    /// A ZIP 48 transparent multisig full viewing key.
+    ///
+    /// These accounts only support transparent P2SH multisig addresses and do not have
+    /// unified viewing keys.
+    #[cfg(feature = "zip-48")]
+    Zip48Full(Box<zip48::FullViewingKey>),
 }
 
 /// An account stored in a `zcash_client_sqlite` database.
@@ -306,6 +322,8 @@ impl ViewingKey {
         match self {
             ViewingKey::Full(ufvk) => Some(ufvk),
             ViewingKey::Incoming(_) => None,
+            #[cfg(feature = "zip-48")]
+            ViewingKey::Zip48Full(_) => None,
         }
     }
 
@@ -313,6 +331,19 @@ impl ViewingKey {
         match self {
             ViewingKey::Full(ufvk) => ufvk.as_ref().to_unified_incoming_viewing_key(),
             ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
+            #[cfg(feature = "zip-48")]
+            ViewingKey::Zip48Full(_) => {
+                unreachable!("ZIP 48 multisig accounts do not have a unified incoming viewing key")
+            }
+        }
+    }
+
+    /// Returns the serialized ZIP 48 full viewing key bytes if this is a multisig account.
+    #[cfg(feature = "zip-48")]
+    fn zip48_fvk_bytes<P: consensus::Parameters>(&self, params: &P) -> Option<Vec<u8>> {
+        match self {
+            ViewingKey::Zip48Full(fvk) => Some(fvk.multipath_descriptor(params).into_bytes()),
+            _ => None,
         }
     }
 }
@@ -409,6 +440,23 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             return Err(SqliteClientError::AccountCollision(existing_account.id()));
         }
     }
+
+    // Check whether a ZIP 48 multisig account with the same FVK already exists.
+    #[cfg(feature = "zip-48")]
+    if let Some(fvk_bytes) = viewing_key.zip48_fvk_bytes(params) {
+        if let Some(existing_uuid) = conn
+            .query_row(
+                "SELECT uuid FROM accounts WHERE zip48_fvk = :zip48_fvk",
+                named_params![":zip48_fvk": fvk_bytes],
+                |row| Ok(AccountUuid(row.get(0)?)),
+            )
+            .optional()
+            .map_err(SqliteClientError::from)?
+        {
+            return Err(SqliteClientError::AccountCollision(existing_uuid));
+        }
+    }
+
     // TODO(#1490): check for IVK collisions.
 
     let account_uuid = AccountUuid(Uuid::new_v4());
@@ -461,6 +509,20 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     let zcashd_legacy_address_index: i64 = LEGACY_ADDRESS_INDEX_NULL;
 
     let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
+
+    // For ZIP 48 multisig accounts, uivk is NULL (they have no unified IVK).
+    #[cfg(feature = "zip-48")]
+    let (uivk_encoded, zip48_fvk_bytes): (Option<String>, Option<Vec<u8>>) =
+        if let Some(fvk_bytes) = viewing_key.zip48_fvk_bytes(params) {
+            (None, Some(fvk_bytes))
+        } else {
+            (Some(viewing_key.uivk().encode(params)), None)
+        };
+    #[cfg(not(feature = "zip-48"))]
+    let uivk_encoded: Option<String> = Some(viewing_key.uivk().encode(params));
+    #[cfg(not(feature = "zip-48"))]
+    let zip48_fvk_bytes: Option<Vec<u8>> = None;
+
     let account_id = conn
         .query_row(
             r#"
@@ -474,7 +536,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
                 recover_until_height,
-                has_spend_key
+                has_spend_key,
+                zip48_fvk
             )
             VALUES (
                 :account_name,
@@ -486,7 +549,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
                 :recover_until_height,
-                :has_spend_key
+                :has_spend_key,
+                :zip48_fvk
             )
             RETURNING id
             "#,
@@ -499,7 +563,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":zcashd_legacy_address_index": zcashd_legacy_address_index,
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
-                ":uivk": viewing_key.uivk().encode(params),
+                ":uivk": uivk_encoded,
                 ":orchard_fvk_item_cache": orchard_item,
                 ":sapling_fvk_item_cache": sapling_item,
                 ":p2pkh_fvk_item_cache": transparent_item,
@@ -508,6 +572,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                 ":recover_until_height": birthday.recover_until().map(u32::from),
                 ":has_spend_key": spending_key_available as i64,
+                ":zip48_fvk": zip48_fvk_bytes,
             ],
             |row| row.get(0).map(AccountRef),
         )
@@ -634,52 +699,76 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     }
 
-    // Always derive the default Unified Address for the account. If the account's viewing
-    // key has fewer components than the wallet supports (most likely due to this being an
-    // imported viewing key), derive an address containing the common subset of receivers.
-    let (address, d_idx) = account.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
-    upsert_address(
-        conn,
-        params,
-        account_id,
-        d_idx,
-        &address,
-        Some(birthday.height()),
-        false,
-    )?;
+    // ZIP 48 multisig accounts use their own address derivation mechanism and don't have
+    // unified addresses, so we skip the standard address generation for them.
+    #[cfg(feature = "zip-48")]
+    let is_zip48_multisig = matches!(account.viewing_key, ViewingKey::Zip48Full(_));
+    #[cfg(not(feature = "zip-48"))]
+    let is_zip48_multisig = false;
 
-    // Pre-generate external transparent addresses prior to the index of the default address.
-    #[cfg(feature = "transparent-inputs")]
-    if let Ok(default_addr_idx) = NonHardenedChildIndex::try_from(d_idx) {
-        transparent::generate_address_range(
+    if !is_zip48_multisig {
+        // Always derive the default Unified Address for the account. If the account's viewing
+        // key has fewer components than the wallet supports (most likely due to this being an
+        // imported viewing key), derive an address containing the common subset of receivers.
+        let (address, d_idx) = account.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
+        upsert_address(
             conn,
             params,
             account_id,
-            TransparentKeyScope::EXTERNAL,
-            UnifiedAddressRequest::ALLOW_ALL,
-            NonHardenedChildIndex::const_from_index(0)..default_addr_idx,
-            false,
-        )?
-    }
-
-    // Pre-generate transparent addresses up to the gap limits for the external, internal,
-    // and ephemeral key scopes.
-    #[cfg(feature = "transparent-inputs")]
-    for key_scope in [
-        TransparentKeyScope::EXTERNAL,
-        TransparentKeyScope::INTERNAL,
-        TransparentKeyScope::EPHEMERAL,
-    ] {
-        use ReceiverRequirement::*;
-        transparent::generate_gap_addresses(
-            conn,
-            params,
-            gap_limits,
-            account_id,
-            key_scope,
-            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            d_idx,
+            &address,
+            Some(birthday.height()),
             false,
         )?;
+
+        // Pre-generate external transparent addresses prior to the index of the default address.
+        #[cfg(feature = "transparent-inputs")]
+        if let Ok(default_addr_idx) = NonHardenedChildIndex::try_from(d_idx) {
+            transparent::generate_address_range(
+                conn,
+                params,
+                account_id,
+                TransparentKeyScope::EXTERNAL,
+                UnifiedAddressRequest::ALLOW_ALL,
+                NonHardenedChildIndex::const_from_index(0)..default_addr_idx,
+                false,
+            )?
+        }
+
+        // Pre-generate transparent addresses up to the gap limits for the external, internal,
+        // and ephemeral key scopes.
+        #[cfg(feature = "transparent-inputs")]
+        for key_scope in [
+            TransparentKeyScope::EXTERNAL,
+            TransparentKeyScope::INTERNAL,
+            TransparentKeyScope::EPHEMERAL,
+        ] {
+            use ReceiverRequirement::*;
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                gap_limits,
+                account_id,
+                key_scope,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                false,
+            )?;
+        }
+    } else {
+        // For ZIP 48 multisig accounts, pre-generate transparent addresses up to the gap limit
+        // for EXTERNAL and INTERNAL scopes (EPHEMERAL is not applicable to ZIP 48)
+        #[cfg(feature = "zip-48")]
+        for key_scope in [TransparentKeyScope::EXTERNAL, TransparentKeyScope::INTERNAL] {
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                gap_limits,
+                account_id,
+                key_scope,
+                UnifiedAddressRequest::ALLOW_ALL,
+                false,
+            )?;
+        }
     }
 
     Ok(account)
@@ -846,6 +935,11 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
             return Ok(None);
         }
     };
+
+    #[cfg(feature = "zip-48")]
+    if matches!(account.viewing_key, ViewingKey::Zip48Full(_)) {
+        return Err(SqliteClientError::Zip48UnsupportedOperation);
+    }
 
     // This will also ensure that the provided request can be satisfied by the account's UIVK
     let requirements = account.uivk().receiver_requirements(request)?;
@@ -1031,6 +1125,11 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
     let account: Account =
         get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+
+    #[cfg(feature = "zip-48")]
+    if matches!(account.viewing_key, ViewingKey::Zip48Full(_)) {
+        return Err(SqliteClientError::Zip48UnsupportedOperation);
+    }
 
     let requirements = account
         .uivk()
@@ -1298,6 +1397,18 @@ fn parse_account_row<P: consensus::Parameters>(
     let account_id = AccountRef(row.get("id")?);
     let account_name = row.get("name")?;
     let account_uuid = AccountUuid(row.get("uuid")?);
+
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    #[cfg(feature = "zip-48")]
+    let zip48_fvk_bytes: Option<Vec<u8>> = row.get("zip48_fvk")?;
+
+    // Parse the ZIP 48 FVK early so we can extract derivation info for parse_account_source.
+    #[cfg(feature = "zip-48")]
+    let zip48_fvk = zip48_fvk_bytes
+        .as_deref()
+        .map(|bytes| zip48::FullViewingKey::parse_multipath_descriptor(bytes, params))
+        .transpose()?;
+
     let kind = parse_account_source(
         row.get("account_kind")?,
         row.get("hd_seed_fingerprint")?,
@@ -1308,7 +1419,6 @@ fn parse_account_row<P: consensus::Parameters>(
         row.get("key_source")?,
     )?;
 
-    let ufvk_str: Option<String> = row.get("ufvk")?;
     let viewing_key = if let Some(ufvk_str) = ufvk_str {
         ViewingKey::Full(Box::new(
             UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
@@ -1319,15 +1429,30 @@ fn parse_account_row<P: consensus::Parameters>(
             })?,
         ))
     } else {
-        let uivk_str: String = row.get("uivk")?;
-        ViewingKey::Incoming(Box::new(
-            UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
-                SqliteClientError::CorruptedData(format!(
-                    "Could not decode unified incoming viewing key for account {}: {}",
-                    account_uuid.0, e
-                ))
-            })?,
-        ))
+        let decode_uivk = || -> Result<ViewingKey, SqliteClientError> {
+            let uivk_str: Option<String> = row.get("uivk")?;
+            let uivk_str = uivk_str.ok_or_else(|| {
+                SqliteClientError::CorruptedData("Missing uivk for non-ZIP48 account".into())
+            })?;
+            Ok(ViewingKey::Incoming(Box::new(
+                UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
+                    SqliteClientError::CorruptedData(format!(
+                        "Could not decode unified incoming viewing key for account {}: {}",
+                        account_uuid.0, e
+                    ))
+                })?,
+            )))
+        };
+
+        #[cfg(feature = "zip-48")]
+        if let Some(fvk) = zip48_fvk {
+            ViewingKey::Zip48Full(Box::new(fvk))
+        } else {
+            decode_uivk()?
+        }
+
+        #[cfg(not(feature = "zip-48"))]
+        decode_uivk()?
     };
 
     let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
@@ -1351,7 +1476,7 @@ pub(crate) fn get_account<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, has_spend_key, birthday_height, zip48_fvk
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -1375,7 +1500,7 @@ pub(crate) fn get_account_internal<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-               ufvk, uivk, has_spend_key, birthday_height
+               ufvk, uivk, has_spend_key, birthday_height, zip48_fvk
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1411,7 +1536,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
-                ufvk, uivk, has_spend_key, birthday_height
+                ufvk, uivk, has_spend_key, birthday_height, zip48_fvk
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
             OR sapling_fvk_item_cache = :sapling_fvk_item_cache
