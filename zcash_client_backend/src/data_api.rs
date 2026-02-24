@@ -2338,28 +2338,39 @@ impl<A> ScannedBlock<A> {
     }
 }
 
+/// A trait representing a decryptable transaction.
+pub trait DecryptableTransaction<AccountId> {
+    type DecryptedSaplingOutput;
+    #[cfg(feature = "orchard")]
+    type DecryptedOrchardOutput;
+}
+
+impl<AccountId> DecryptableTransaction<AccountId> for Transaction {
+    type DecryptedSaplingOutput = DecryptedOutput<sapling::Note, AccountId>;
+    #[cfg(feature = "orchard")]
+    type DecryptedOrchardOutput = DecryptedOutput<orchard::Note, AccountId>;
+}
+
 /// A transaction that was detected during scanning of the blockchain,
 /// including its decrypted Sapling and/or Orchard outputs.
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct DecryptedTransaction<'a, Tx, AccountId> {
+pub struct DecryptedTransaction<'a, Tx: DecryptableTransaction<AccountId>, AccountId> {
     mined_height: Option<BlockHeight>,
     tx: &'a Tx,
-    sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
+    sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
     #[cfg(feature = "orchard")]
-    orchard_outputs: Vec<DecryptedOutput<orchard::note::Note, AccountId>>,
+    orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
 }
 
-impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
+impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
         mined_height: Option<BlockHeight>,
         tx: &'a Tx,
-        sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
-        #[cfg(feature = "orchard")] orchard_outputs: Vec<
-            DecryptedOutput<orchard::note::Note, AccountId>,
-        >,
+        sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
+        #[cfg(feature = "orchard")] orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
     ) -> Self {
         Self {
             mined_height,
@@ -2379,12 +2390,12 @@ impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
         self.tx
     }
     /// Returns the Sapling outputs that were decrypted from the transaction.
-    pub fn sapling_outputs(&self) -> &[DecryptedOutput<sapling::Note, AccountId>] {
+    pub fn sapling_outputs(&self) -> &[Tx::DecryptedSaplingOutput] {
         &self.sapling_outputs
     }
     /// Returns the Orchard outputs that were decrypted from the transaction.
     #[cfg(feature = "orchard")]
-    pub fn orchard_outputs(&self) -> &[DecryptedOutput<orchard::note::Note, AccountId>] {
+    pub fn orchard_outputs(&self) -> &[Tx::DecryptedOrchardOutput] {
         &self.orchard_outputs
     }
 

@@ -17,12 +17,12 @@ use zcash_protocol::{
 };
 
 use crate::{
-    DecryptedOutput, TransferType,
+    TransferType,
     data_api::{
         DecryptedTransaction, SAPLING_SHARD_HEIGHT, ScannedBlock, TransactionStatus,
-        WalletCommitmentTrees, chain::ChainState,
+        WalletCommitmentTrees, chain::ChainState, ll::ReceivedShieldedOutput,
     },
-    wallet::{Note, Recipient},
+    wallet::Recipient,
 };
 
 use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
@@ -855,10 +855,6 @@ where
         tx_ref,
         funding_account,
         d_tx.sapling_outputs(),
-        PoolType::SAPLING,
-        Note::Sapling,
-        |note| Receiver::Sapling(note.recipient()),
-        |output| output.note_value(),
         |wallet_db, output, tx_ref| {
             wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), None)
         },
@@ -875,10 +871,6 @@ where
         tx_ref,
         funding_account,
         d_tx.orchard_outputs(),
-        PoolType::ORCHARD,
-        Note::Orchard,
-        |note| Receiver::Orchard(note.recipient()),
-        |output| output.note_value(),
         |wallet_db, output, tx_ref| {
             wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), None)
         },
@@ -1052,19 +1044,15 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn put_shielded_outputs<DbT, P, N>(
+fn put_shielded_outputs<DbT, P, Output>(
     wallet_db: &mut DbT,
     params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     funding_account: Option<DbT::AccountId>,
-    outputs: &[DecryptedOutput<N, <DbT as LowLevelWalletRead>::AccountId>],
-    output_pool: PoolType,
-    note: impl Fn(N) -> Note,
-    receiver: impl Fn(&N) -> Receiver,
-    value: impl Fn(&DecryptedOutput<N, <DbT as LowLevelWalletRead>::AccountId>) -> Zatoshis,
+    outputs: &[Output],
     put_received_note: impl Fn(
         &mut DbT,
-        &DecryptedOutput<N, <DbT as LowLevelWalletRead>::AccountId>,
+        &Output,
         <DbT as LowLevelWalletRead>::TxRef,
     ) -> Result<(), <DbT as LowLevelWalletRead>::Error>,
     mut on_external_account: impl FnMut(<DbT as LowLevelWalletRead>::AccountId),
@@ -1072,69 +1060,79 @@ fn put_shielded_outputs<DbT, P, N>(
 where
     DbT: LowLevelWalletWrite,
     P: consensus::Parameters,
-    N: Clone,
+    Output: ReceivedShieldedOutput<AccountId = <DbT as LowLevelWalletRead>::AccountId>,
+    Output::Note: Clone,
 {
     for output in outputs {
         match output.transfer_type() {
             TransferType::Outgoing => {
+                let note = output.note().clone().into();
+                let receiver = note.receiver();
+                let value = note.value();
+
                 let recipient = {
-                    let receiver = receiver(output.note());
                     let recipient_address = wallet_db
-                        .select_receiving_address(*output.account(), &receiver)?
+                        .select_receiving_address(output.account_id(), &receiver)?
                         .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     Recipient::External {
                         recipient_address,
-                        output_pool,
+                        output_pool: Output::POOL_TYPE,
                     }
                 };
 
                 wallet_db.put_sent_output(
-                    *output.account(),
+                    output.account_id(),
                     tx_ref,
                     output.index(),
                     &recipient,
-                    value(output),
-                    Some(output.memo()),
+                    value,
+                    output.memo(),
                 )?;
             }
             TransferType::WalletInternal => {
                 put_received_note(wallet_db, output, tx_ref)?;
 
+                let note = output.note().clone().into();
+                let value = note.value();
+
                 let recipient = Recipient::InternalAccount {
-                    receiving_account: *output.account(),
+                    receiving_account: output.account_id(),
                     external_address: None,
-                    note: Box::new(note(output.note().clone())),
+                    note: Box::new(note),
                 };
 
                 wallet_db.put_sent_output(
-                    *output.account(),
+                    output.account_id(),
                     tx_ref,
                     output.index(),
                     &recipient,
-                    value(output),
-                    Some(output.memo()),
+                    value,
+                    output.memo(),
                 )?;
             }
             TransferType::Incoming => {
                 put_received_note(wallet_db, output, tx_ref)?;
-                on_external_account(*output.account());
+                on_external_account(output.account_id());
 
                 if let Some(account_id) = funding_account {
+                    let note = output.note().clone().into();
+                    let receiver = note.receiver();
+                    let value = note.value();
+
                     // Even if the recipient address is external, record the send as internal.
                     let recipient = Recipient::InternalAccount {
-                        receiving_account: *output.account(),
+                        receiving_account: output.account_id(),
                         external_address: {
-                            let receiver = receiver(output.note());
                             Some(
                                 wallet_db
-                                    .select_receiving_address(*output.account(), &receiver)?
+                                    .select_receiving_address(output.account_id(), &receiver)?
                                     .unwrap_or_else(|| {
                                         receiver.to_zcash_address(params.network_type())
                                     }),
                             )
                         },
-                        note: Box::new(note(output.note().clone())),
+                        note: Box::new(note),
                     };
 
                     wallet_db.put_sent_output(
@@ -1142,8 +1140,8 @@ where
                         tx_ref,
                         output.index(),
                         &recipient,
-                        value(output),
-                        Some(output.memo()),
+                        value,
+                        output.memo(),
                     )?;
                 }
             }
