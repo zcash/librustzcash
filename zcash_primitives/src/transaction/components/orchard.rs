@@ -118,11 +118,11 @@ pub fn read_v6_bundle<R: Read>(
     }
     let flags = read_flags(&mut reader)?;
     let anchor = read_anchor(&mut reader)?;
-    let timelimit = reader.read_u32_le()?;
-    if timelimit != 0 {
+    let n_ag_expiry_height = reader.read_u32_le()?;
+    if n_ag_expiry_height != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Timelimit field must be set to zero",
+            "nAGExpiryHeight field must be set to zero",
         ));
     }
     let burn = read_burn(&mut reader)?;
@@ -371,7 +371,7 @@ pub fn write_v6_bundle<W: Write>(
         writer.write_all(&[bundle.flags().to_byte()])?;
         writer.write_all(&bundle.anchor().to_bytes())?;
 
-        // Timelimit must be zero for NU7
+        // nAGExpiryHeight must be zero for NU7
         writer.write_u32_le(0)?;
 
         write_burn(&mut writer, bundle.burn())?;

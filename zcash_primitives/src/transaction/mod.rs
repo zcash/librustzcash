@@ -989,13 +989,6 @@ impl Transaction {
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
 
-        if header_fragment.expiry_height != BlockHeight::from(0u32) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "v6 transactions must have expiry_height = 0",
-            ));
-        }
-
         let transparent_bundle = Self::read_transparent_v6(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v6_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
