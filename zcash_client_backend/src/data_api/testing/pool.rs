@@ -4714,12 +4714,12 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     test_meta(
         &st,
         NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(1000_0000)),
-        Some(1),
+        Some(0),
     );
     test_meta(
         &st,
         NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(500_0000)),
-        Some(6),
+        Some(5),
     );
     test_meta(
         &st,

@@ -89,6 +89,12 @@ workspace.
 - Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
   have been modified. It now abstracts over the transaction type, to permit
   use with partial or compact transaction data instead of full transactions.
+- The semantics of `zcash_client_backend::data_api::NoteFilter::ExceedsMinValue`
+  have changed; this filter now selects notes having value strictly greater
+  than the provided minimum value, instead of notes having value greater
+  than or equal to the provided minimum value. This fixes an inconsistency
+  in the various tests related to notes having no economic value in
+  `zcash_client_sqlite`.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

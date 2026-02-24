@@ -250,7 +250,7 @@ impl Balance {
         Ok(())
     }
 
-    /// Returns the value in the account of notes that have value less than the marginal
+    /// Returns the value in the account of notes that have value less than or equal to the marginal
     /// fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
         self.uneconomic_value
@@ -1401,7 +1401,7 @@ impl<const MAX: u8> From<BoundedU8<MAX>> for usize {
 /// contexts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoteFilter {
-    /// Selects notes having value greater than or equal to the provided value.
+    /// Selects notes having value strictly greater than the provided value.
     ExceedsMinValue(Zatoshis),
     /// Selects notes having value greater than or equal to approximately the n'th percentile of
     /// previously sent notes in the account, irrespective of pool. The wrapped value must be in
