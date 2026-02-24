@@ -115,6 +115,18 @@ pub struct AccountPubKey {
     key: ExtendedPublicKey<PublicKey>,
 }
 
+impl PartialOrd for AccountPubKey {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AccountPubKey {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
 impl AccountPubKey {
     /// Attempts to parse a [BIP 388 `KEY_INFO` expression] as a ZIP 48 public key.
     ///
@@ -249,8 +261,10 @@ impl FullViewingKey {
                 }
             }
 
-            // TODO: Decide whether `key_info` should be sorted (or checked to be sorted)
-            // to ensure a canonical multipath descriptor.
+            // Enforce canonical ordering to ensure a deterministic multipath descriptor,
+            // as required for collision detection.
+            let mut key_info = key_info;
+            key_info.sort();
             Ok(Self {
                 threshold,
                 key_info,
@@ -440,7 +454,7 @@ mod tests {
         );
         assert_eq!(
             fvk.multipath_descriptor(&params),
-            "sh(sortedmulti(2,[4ba43603/48'/133'/0'/133000']xpub6E96VHgq8MKkYGuNLDjxLxH3LH93NGJX5xSufVjnh7zM8bKehGr3iekJLyc8WJiMemYWuXLPKwygt3j9nfJCapPkYRfCc5YFvzb3aMLsQdV/<0;1>/*,[8dfc9b34/48'/133'/0'/133000']xpub6EuQaJQHwbf2mbyHoYcyjcj9ByB8EeKp4zSKTT9EdxfaQJDgou3SR3oYtP7AYoHQtEUsnsjgdZD8n7c7G4Pv4iXMt98sCvdWNXs1bvhEu29/<0;1>/*,[56c4fac3/48'/133'/0'/133000']xpub6EVJBC6rV3qaNwfK3ChbjpEHnqhymSLmvqB1rKu7sRPH7szS9f4jDAiPyAF7PbnRH512uHhT4te6EJppbCWURtDKbiygGWphd5ej21oNqAx/<0;1>/*))",
+            "sh(sortedmulti(2,[56c4fac3/48'/133'/0'/133000']xpub6EVJBC6rV3qaNwfK3ChbjpEHnqhymSLmvqB1rKu7sRPH7szS9f4jDAiPyAF7PbnRH512uHhT4te6EJppbCWURtDKbiygGWphd5ej21oNqAx/<0;1>/*,[8dfc9b34/48'/133'/0'/133000']xpub6EuQaJQHwbf2mbyHoYcyjcj9ByB8EeKp4zSKTT9EdxfaQJDgou3SR3oYtP7AYoHQtEUsnsjgdZD8n7c7G4Pv4iXMt98sCvdWNXs1bvhEu29/<0;1>/*,[4ba43603/48'/133'/0'/133000']xpub6E96VHgq8MKkYGuNLDjxLxH3LH93NGJX5xSufVjnh7zM8bKehGr3iekJLyc8WJiMemYWuXLPKwygt3j9nfJCapPkYRfCc5YFvzb3aMLsQdV/<0;1>/*))",
         );
         for (i, addr) in [
             (0, "t3gDnw36YBC6SSmccqJYCsq6xtzGXamGxKd"),
@@ -541,12 +555,18 @@ mod tests {
                 tv.wallet_descriptor_template,
             );
 
-            for (key, expected) in fvk.key_info.iter().zip(tv.key_information_vector) {
-                assert_eq!(
-                    AccountPubKey::parse_key_info_expression(expected, &params).as_ref(),
-                    Some(key),
+            // The test vectors list keys in seed order, but FullViewingKey sorts
+            // them canonically (by compressed public key). Verify each key parses
+            // correctly, round-trips, and is present in the FVK.
+            assert_eq!(fvk.key_info.len(), tv.key_information_vector.len());
+            for expected in tv.key_information_vector {
+                let key = AccountPubKey::parse_key_info_expression(expected, &params)
+                    .expect("valid key_info expression");
+                assert_eq!(&key.key_info_expression(&params), *expected);
+                assert!(
+                    fvk.key_info.iter().any(|k| k == &key),
+                    "key from test vector not found in FVK: {expected}",
                 );
-                assert_eq!(&key.key_info_expression(&params), expected);
             }
 
             for (i, seed) in seeds.iter().enumerate() {

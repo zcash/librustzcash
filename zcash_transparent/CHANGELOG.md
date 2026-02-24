@@ -21,6 +21,8 @@ workspace.
 - `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
 - `zcash_transparent::builder::Builder::add_p2pkh_input`
 - `impl Hash for zcash_transparent::keys::TransparentKeyScope`
+- `impl PartialOrd for zcash_transparent::zip48::AccountPubkey`
+- `impl Ord for zcash_transparent::zip48::AccountPubkey`
 
 ### Changed
 - MSRV is now 1.85.1.
@@ -33,6 +35,7 @@ workspace.
   instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
   previous API.
 - Made `zcash_transparent::zip48::coin_type_and_account()` public
+- Sort BIP 388 `key_info` to ensure canonical encoding of ZIP 48 multipath descriptors
 
 ## [0.6.3] - 2025-12-17
 
