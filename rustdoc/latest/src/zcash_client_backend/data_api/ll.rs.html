@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/ll.rs`."><title>ll.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (7f99507f5 2026-02-19)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>ll.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Low-level data API
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/ll.rs`."><title>ll.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (b3869b94c 2026-02-23)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>ll.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Low-level data API
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module provides default implementations for several common client operations that rely on
 <a href=#4 id=4 data-nosnippet>4</a>//! lower-level and more granular access to data. Client implementers should consider using the
@@ -20,7 +20,7 @@
 <a href=#20 id=20 data-nosnippet>20</a>    transaction::{Transaction, TransactionData},
 <a href=#21 id=21 data-nosnippet>21</a>};
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>zcash_protocol::{
-<a href=#23 id=23 data-nosnippet>23</a>    ShieldedProtocol, TxId,
+<a href=#23 id=23 data-nosnippet>23</a>    PoolType, ShieldedProtocol, TxId,
 <a href=#24 id=24 data-nosnippet>24</a>    consensus::{BlockHeight, TxIndex},
 <a href=#25 id=25 data-nosnippet>25</a>    memo::MemoBytes,
 <a href=#26 id=26 data-nosnippet>26</a>    value::{BalanceError, Zatoshis},
@@ -592,180 +592,214 @@
 <a href=#592 id=592 data-nosnippet>592</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
 <a href=#593 id=593 data-nosnippet>593</a>}
 <a href=#594 id=594 data-nosnippet>594</a>
-<a href=#595 id=595 data-nosnippet>595</a><span class="doccomment">/// This trait provides a generalization over shielded Sapling output representations.
-<a href=#596 id=596 data-nosnippet>596</a></span><span class="kw">pub trait </span>ReceivedSaplingOutput {
-<a href=#597 id=597 data-nosnippet>597</a>    <span class="kw">type </span>AccountId;
-<a href=#598 id=598 data-nosnippet>598</a>
-<a href=#599 id=599 data-nosnippet>599</a>    <span class="doccomment">/// Returns the index of the Sapling output within the Sapling bundle.
-<a href=#600 id=600 data-nosnippet>600</a>    </span><span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
-<a href=#601 id=601 data-nosnippet>601</a>    <span class="doccomment">/// Returns the account ID for the account that received this output.
-<a href=#602 id=602 data-nosnippet>602</a>    </span><span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId;
-<a href=#603 id=603 data-nosnippet>603</a>    <span class="doccomment">/// Returns the received note.
-<a href=#604 id=604 data-nosnippet>604</a>    </span><span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::sapling::Note;
-<a href=#605 id=605 data-nosnippet>605</a>    <span class="doccomment">/// Returns any memo associated with the output.
-<a href=#606 id=606 data-nosnippet>606</a>    </span><span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;;
-<a href=#607 id=607 data-nosnippet>607</a>    <span class="doccomment">/// Returns whether or not the received output is counted as wallet-internal change, for the
-<a href=#608 id=608 data-nosnippet>608</a>    /// purpose of display.
-<a href=#609 id=609 data-nosnippet>609</a>    </span><span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
-<a href=#610 id=610 data-nosnippet>610</a>    <span class="doccomment">/// Returns the nullifier that will be revealed when the note is spent, if the output was
-<a href=#611 id=611 data-nosnippet>611</a>    /// observed using a key that provides the capability for nullifier computation.
-<a href=#612 id=612 data-nosnippet>612</a>    </span><span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::sapling::Nullifier&gt;;
-<a href=#613 id=613 data-nosnippet>613</a>    <span class="doccomment">/// Returns the position of the note in the note commitment tree, if the transaction that
-<a href=#614 id=614 data-nosnippet>614</a>    /// produced the output has been mined.
-<a href=#615 id=615 data-nosnippet>615</a>    </span><span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt;;
-<a href=#616 id=616 data-nosnippet>616</a>    <span class="doccomment">/// Returns the HD derivation scope of the viewing key that decrypted the note, if known.
-<a href=#617 id=617 data-nosnippet>617</a>    </span><span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt;;
-<a href=#618 id=618 data-nosnippet>618</a>}
-<a href=#619 id=619 data-nosnippet>619</a>
-<a href=#620 id=620 data-nosnippet>620</a><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedSaplingOutput <span class="kw">for </span>WalletSaplingOutput&lt;AccountId&gt; {
-<a href=#621 id=621 data-nosnippet>621</a>    <span class="kw">type </span>AccountId = AccountId;
-<a href=#622 id=622 data-nosnippet>622</a>
-<a href=#623 id=623 data-nosnippet>623</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#624 id=624 data-nosnippet>624</a>        <span class="self">self</span>.index()
-<a href=#625 id=625 data-nosnippet>625</a>    }
-<a href=#626 id=626 data-nosnippet>626</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
-<a href=#627 id=627 data-nosnippet>627</a>        <span class="kw-2">*</span>WalletSaplingOutput::account_id(<span class="self">self</span>)
-<a href=#628 id=628 data-nosnippet>628</a>    }
-<a href=#629 id=629 data-nosnippet>629</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::sapling::Note {
-<a href=#630 id=630 data-nosnippet>630</a>        WalletSaplingOutput::note(<span class="self">self</span>)
-<a href=#631 id=631 data-nosnippet>631</a>    }
-<a href=#632 id=632 data-nosnippet>632</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
-<a href=#633 id=633 data-nosnippet>633</a>        <span class="prelude-val">None
-<a href=#634 id=634 data-nosnippet>634</a>    </span>}
-<a href=#635 id=635 data-nosnippet>635</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#636 id=636 data-nosnippet>636</a>        WalletSaplingOutput::is_change(<span class="self">self</span>)
-<a href=#637 id=637 data-nosnippet>637</a>    }
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::sapling::Nullifier&gt; {
-<a href=#639 id=639 data-nosnippet>639</a>        <span class="self">self</span>.nf()
-<a href=#640 id=640 data-nosnippet>640</a>    }
-<a href=#641 id=641 data-nosnippet>641</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
-<a href=#642 id=642 data-nosnippet>642</a>        <span class="prelude-val">Some</span>(WalletSaplingOutput::note_commitment_tree_position(<span class="self">self</span>))
-<a href=#643 id=643 data-nosnippet>643</a>    }
-<a href=#644 id=644 data-nosnippet>644</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
-<a href=#645 id=645 data-nosnippet>645</a>        <span class="self">self</span>.recipient_key_scope()
-<a href=#646 id=646 data-nosnippet>646</a>    }
-<a href=#647 id=647 data-nosnippet>647</a>}
-<a href=#648 id=648 data-nosnippet>648</a>
-<a href=#649 id=649 data-nosnippet>649</a><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedSaplingOutput <span class="kw">for </span>DecryptedOutput&lt;::sapling::Note, AccountId&gt; {
-<a href=#650 id=650 data-nosnippet>650</a>    <span class="kw">type </span>AccountId = AccountId;
-<a href=#651 id=651 data-nosnippet>651</a>
-<a href=#652 id=652 data-nosnippet>652</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#653 id=653 data-nosnippet>653</a>        <span class="self">self</span>.index()
-<a href=#654 id=654 data-nosnippet>654</a>    }
-<a href=#655 id=655 data-nosnippet>655</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
-<a href=#656 id=656 data-nosnippet>656</a>        <span class="kw-2">*</span><span class="self">self</span>.account()
-<a href=#657 id=657 data-nosnippet>657</a>    }
-<a href=#658 id=658 data-nosnippet>658</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::sapling::Note {
-<a href=#659 id=659 data-nosnippet>659</a>        <span class="self">self</span>.note()
+<a href=#595 id=595 data-nosnippet>595</a><span class="doccomment">/// This trait provides a generalization over output representations.
+<a href=#596 id=596 data-nosnippet>596</a></span><span class="kw">pub trait </span>ReceivedShieldedOutput {
+<a href=#597 id=597 data-nosnippet>597</a>    <span class="kw">const </span>POOL_TYPE: PoolType;
+<a href=#598 id=598 data-nosnippet>598</a>    <span class="kw">type </span>AccountId;
+<a href=#599 id=599 data-nosnippet>599</a>    <span class="kw">type </span>Note: Into&lt;<span class="kw">crate</span>::wallet::Note&gt;;
+<a href=#600 id=600 data-nosnippet>600</a>    <span class="kw">type </span>Nullifier;
+<a href=#601 id=601 data-nosnippet>601</a>
+<a href=#602 id=602 data-nosnippet>602</a>    <span class="doccomment">/// Returns the index of the output within its corresponding bundle.
+<a href=#603 id=603 data-nosnippet>603</a>    </span><span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
+<a href=#604 id=604 data-nosnippet>604</a>    <span class="doccomment">/// Returns the account ID for the account that received this output.
+<a href=#605 id=605 data-nosnippet>605</a>    </span><span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId;
+<a href=#606 id=606 data-nosnippet>606</a>    <span class="doccomment">/// Returns the received note.
+<a href=#607 id=607 data-nosnippet>607</a>    </span><span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Note;
+<a href=#608 id=608 data-nosnippet>608</a>    <span class="doccomment">/// Returns any memo associated with the output.
+<a href=#609 id=609 data-nosnippet>609</a>    </span><span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;;
+<a href=#610 id=610 data-nosnippet>610</a>    <span class="doccomment">/// Returns a [`TransferType`] value that is determined based upon what type of key was used to
+<a href=#611 id=611 data-nosnippet>611</a>    /// decrypt the transaction.
+<a href=#612 id=612 data-nosnippet>612</a>    </span><span class="kw">fn </span>transfer_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TransferType;
+<a href=#613 id=613 data-nosnippet>613</a>    <span class="doccomment">/// Returns whether or not the received output is counted as wallet-internal change, for the
+<a href=#614 id=614 data-nosnippet>614</a>    /// purpose of display.
+<a href=#615 id=615 data-nosnippet>615</a>    </span><span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="doccomment">/// Returns the nullifier that will be revealed when the note is spent, if the output was
+<a href=#617 id=617 data-nosnippet>617</a>    /// observed using a key that provides the capability for nullifier computation.
+<a href=#618 id=618 data-nosnippet>618</a>    </span><span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="self">Self</span>::Nullifier&gt;;
+<a href=#619 id=619 data-nosnippet>619</a>    <span class="doccomment">/// Returns the position of the note in the note commitment tree, if the transaction that
+<a href=#620 id=620 data-nosnippet>620</a>    /// produced the output has been mined.
+<a href=#621 id=621 data-nosnippet>621</a>    </span><span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt;;
+<a href=#622 id=622 data-nosnippet>622</a>    <span class="doccomment">/// Returns the HD derivation scope of the viewing key that decrypted the note, if known.
+<a href=#623 id=623 data-nosnippet>623</a>    </span><span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt;;
+<a href=#624 id=624 data-nosnippet>624</a>}
+<a href=#625 id=625 data-nosnippet>625</a>
+<a href=#626 id=626 data-nosnippet>626</a><span class="doccomment">/// This trait provides a generalization over shielded Sapling output representations.
+<a href=#627 id=627 data-nosnippet>627</a></span><span class="kw">pub trait </span>ReceivedSaplingOutput:
+<a href=#628 id=628 data-nosnippet>628</a>    ReceivedShieldedOutput&lt;Note = ::sapling::Note, Nullifier = ::sapling::Nullifier&gt;
+<a href=#629 id=629 data-nosnippet>629</a>{
+<a href=#630 id=630 data-nosnippet>630</a>}
+<a href=#631 id=631 data-nosnippet>631</a><span class="kw">impl</span>&lt;T: ReceivedShieldedOutput&lt;Note = ::sapling::Note, Nullifier = ::sapling::Nullifier&gt;&gt;
+<a href=#632 id=632 data-nosnippet>632</a>    ReceivedSaplingOutput <span class="kw">for </span>T
+<a href=#633 id=633 data-nosnippet>633</a>{
+<a href=#634 id=634 data-nosnippet>634</a>}
+<a href=#635 id=635 data-nosnippet>635</a>
+<a href=#636 id=636 data-nosnippet>636</a><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedShieldedOutput <span class="kw">for </span>WalletSaplingOutput&lt;AccountId&gt; {
+<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">const </span>POOL_TYPE: PoolType = PoolType::SAPLING;
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="kw">type </span>AccountId = AccountId;
+<a href=#639 id=639 data-nosnippet>639</a>    <span class="kw">type </span>Note = ::sapling::Note;
+<a href=#640 id=640 data-nosnippet>640</a>    <span class="kw">type </span>Nullifier = ::sapling::Nullifier;
+<a href=#641 id=641 data-nosnippet>641</a>
+<a href=#642 id=642 data-nosnippet>642</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#643 id=643 data-nosnippet>643</a>        <span class="self">self</span>.index()
+<a href=#644 id=644 data-nosnippet>644</a>    }
+<a href=#645 id=645 data-nosnippet>645</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
+<a href=#646 id=646 data-nosnippet>646</a>        <span class="kw-2">*</span>WalletSaplingOutput::account_id(<span class="self">self</span>)
+<a href=#647 id=647 data-nosnippet>647</a>    }
+<a href=#648 id=648 data-nosnippet>648</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::sapling::Note {
+<a href=#649 id=649 data-nosnippet>649</a>        WalletSaplingOutput::note(<span class="self">self</span>)
+<a href=#650 id=650 data-nosnippet>650</a>    }
+<a href=#651 id=651 data-nosnippet>651</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
+<a href=#652 id=652 data-nosnippet>652</a>        <span class="prelude-val">None
+<a href=#653 id=653 data-nosnippet>653</a>    </span>}
+<a href=#654 id=654 data-nosnippet>654</a>    <span class="kw">fn </span>transfer_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TransferType {
+<a href=#655 id=655 data-nosnippet>655</a>        <span class="kw">if </span><span class="self">self</span>.is_change() {
+<a href=#656 id=656 data-nosnippet>656</a>            TransferType::WalletInternal
+<a href=#657 id=657 data-nosnippet>657</a>        } <span class="kw">else </span>{
+<a href=#658 id=658 data-nosnippet>658</a>            TransferType::Incoming
+<a href=#659 id=659 data-nosnippet>659</a>        }
 <a href=#660 id=660 data-nosnippet>660</a>    }
-<a href=#661 id=661 data-nosnippet>661</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
-<a href=#662 id=662 data-nosnippet>662</a>        <span class="prelude-val">Some</span>(<span class="self">self</span>.memo())
+<a href=#661 id=661 data-nosnippet>661</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#662 id=662 data-nosnippet>662</a>        WalletSaplingOutput::is_change(<span class="self">self</span>)
 <a href=#663 id=663 data-nosnippet>663</a>    }
-<a href=#664 id=664 data-nosnippet>664</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#665 id=665 data-nosnippet>665</a>        <span class="self">self</span>.transfer_type() == TransferType::WalletInternal
+<a href=#664 id=664 data-nosnippet>664</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::sapling::Nullifier&gt; {
+<a href=#665 id=665 data-nosnippet>665</a>        <span class="self">self</span>.nf()
 <a href=#666 id=666 data-nosnippet>666</a>    }
-<a href=#667 id=667 data-nosnippet>667</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::sapling::Nullifier&gt; {
-<a href=#668 id=668 data-nosnippet>668</a>        <span class="prelude-val">None
-<a href=#669 id=669 data-nosnippet>669</a>    </span>}
-<a href=#670 id=670 data-nosnippet>670</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
-<a href=#671 id=671 data-nosnippet>671</a>        <span class="prelude-val">None
-<a href=#672 id=672 data-nosnippet>672</a>    </span>}
-<a href=#673 id=673 data-nosnippet>673</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
-<a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">if </span><span class="self">self</span>.transfer_type() == TransferType::WalletInternal {
-<a href=#675 id=675 data-nosnippet>675</a>            <span class="prelude-val">Some</span>(Scope::Internal)
-<a href=#676 id=676 data-nosnippet>676</a>        } <span class="kw">else </span>{
-<a href=#677 id=677 data-nosnippet>677</a>            <span class="prelude-val">Some</span>(Scope::External)
-<a href=#678 id=678 data-nosnippet>678</a>        }
-<a href=#679 id=679 data-nosnippet>679</a>    }
-<a href=#680 id=680 data-nosnippet>680</a>}
-<a href=#681 id=681 data-nosnippet>681</a>
-<a href=#682 id=682 data-nosnippet>682</a><span class="doccomment">/// This trait provides a generalization over shielded Orchard output representations.
-<a href=#683 id=683 data-nosnippet>683</a></span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#684 id=684 data-nosnippet>684</a></span><span class="kw">pub trait </span>ReceivedOrchardOutput {
-<a href=#685 id=685 data-nosnippet>685</a>    <span class="kw">type </span>AccountId;
-<a href=#686 id=686 data-nosnippet>686</a>
-<a href=#687 id=687 data-nosnippet>687</a>    <span class="doccomment">/// Returns the index of the Orchard action that produced this output within the Orchard bundle.
-<a href=#688 id=688 data-nosnippet>688</a>    </span><span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
-<a href=#689 id=689 data-nosnippet>689</a>    <span class="doccomment">/// Returns the account ID for the account that received this output.
-<a href=#690 id=690 data-nosnippet>690</a>    </span><span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId;
-<a href=#691 id=691 data-nosnippet>691</a>    <span class="doccomment">/// Returns the received note.
-<a href=#692 id=692 data-nosnippet>692</a>    </span><span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::orchard::note::Note;
-<a href=#693 id=693 data-nosnippet>693</a>    <span class="doccomment">/// Returns any memo associated with the output.
-<a href=#694 id=694 data-nosnippet>694</a>    </span><span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;;
-<a href=#695 id=695 data-nosnippet>695</a>    <span class="doccomment">/// Returns whether or not the received output is counted as wallet-internal change, for the
-<a href=#696 id=696 data-nosnippet>696</a>    /// purpose of display.
-<a href=#697 id=697 data-nosnippet>697</a>    </span><span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
-<a href=#698 id=698 data-nosnippet>698</a>    <span class="doccomment">/// Returns the nullifier that will be revealed when the note is spent, if the output was
-<a href=#699 id=699 data-nosnippet>699</a>    /// observed using a key that provides the capability for nullifier computation.
-<a href=#700 id=700 data-nosnippet>700</a>    </span><span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::orchard::note::Nullifier&gt;;
-<a href=#701 id=701 data-nosnippet>701</a>    <span class="doccomment">/// Returns the position of the note in the note commitment tree, if the transaction that
-<a href=#702 id=702 data-nosnippet>702</a>    /// produced the output has been mined.
-<a href=#703 id=703 data-nosnippet>703</a>    </span><span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt;;
-<a href=#704 id=704 data-nosnippet>704</a>    <span class="doccomment">/// Returns the HD derivation scope of the viewing key that decrypted the note, if known.
-<a href=#705 id=705 data-nosnippet>705</a>    </span><span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt;;
-<a href=#706 id=706 data-nosnippet>706</a>}
-<a href=#707 id=707 data-nosnippet>707</a>
-<a href=#708 id=708 data-nosnippet>708</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#709 id=709 data-nosnippet>709</a></span><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedOrchardOutput <span class="kw">for </span>WalletOrchardOutput&lt;AccountId&gt; {
-<a href=#710 id=710 data-nosnippet>710</a>    <span class="kw">type </span>AccountId = AccountId;
-<a href=#711 id=711 data-nosnippet>711</a>
-<a href=#712 id=712 data-nosnippet>712</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#713 id=713 data-nosnippet>713</a>        <span class="self">self</span>.index()
-<a href=#714 id=714 data-nosnippet>714</a>    }
-<a href=#715 id=715 data-nosnippet>715</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
-<a href=#716 id=716 data-nosnippet>716</a>        <span class="kw-2">*</span>WalletOrchardOutput::account_id(<span class="self">self</span>)
-<a href=#717 id=717 data-nosnippet>717</a>    }
-<a href=#718 id=718 data-nosnippet>718</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::orchard::note::Note {
-<a href=#719 id=719 data-nosnippet>719</a>        WalletOrchardOutput::note(<span class="self">self</span>)
-<a href=#720 id=720 data-nosnippet>720</a>    }
-<a href=#721 id=721 data-nosnippet>721</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
-<a href=#722 id=722 data-nosnippet>722</a>        <span class="prelude-val">None
-<a href=#723 id=723 data-nosnippet>723</a>    </span>}
-<a href=#724 id=724 data-nosnippet>724</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#725 id=725 data-nosnippet>725</a>        WalletOrchardOutput::is_change(<span class="self">self</span>)
-<a href=#726 id=726 data-nosnippet>726</a>    }
-<a href=#727 id=727 data-nosnippet>727</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::orchard::note::Nullifier&gt; {
-<a href=#728 id=728 data-nosnippet>728</a>        <span class="self">self</span>.nf()
-<a href=#729 id=729 data-nosnippet>729</a>    }
-<a href=#730 id=730 data-nosnippet>730</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
-<a href=#731 id=731 data-nosnippet>731</a>        <span class="prelude-val">Some</span>(WalletOrchardOutput::note_commitment_tree_position(<span class="self">self</span>))
-<a href=#732 id=732 data-nosnippet>732</a>    }
-<a href=#733 id=733 data-nosnippet>733</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
-<a href=#734 id=734 data-nosnippet>734</a>        <span class="self">self</span>.recipient_key_scope()
+<a href=#667 id=667 data-nosnippet>667</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
+<a href=#668 id=668 data-nosnippet>668</a>        <span class="prelude-val">Some</span>(WalletSaplingOutput::note_commitment_tree_position(<span class="self">self</span>))
+<a href=#669 id=669 data-nosnippet>669</a>    }
+<a href=#670 id=670 data-nosnippet>670</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
+<a href=#671 id=671 data-nosnippet>671</a>        <span class="self">self</span>.recipient_key_scope()
+<a href=#672 id=672 data-nosnippet>672</a>    }
+<a href=#673 id=673 data-nosnippet>673</a>}
+<a href=#674 id=674 data-nosnippet>674</a>
+<a href=#675 id=675 data-nosnippet>675</a><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedShieldedOutput <span class="kw">for </span>DecryptedOutput&lt;::sapling::Note, AccountId&gt; {
+<a href=#676 id=676 data-nosnippet>676</a>    <span class="kw">const </span>POOL_TYPE: PoolType = PoolType::SAPLING;
+<a href=#677 id=677 data-nosnippet>677</a>    <span class="kw">type </span>AccountId = AccountId;
+<a href=#678 id=678 data-nosnippet>678</a>    <span class="kw">type </span>Note = ::sapling::Note;
+<a href=#679 id=679 data-nosnippet>679</a>    <span class="kw">type </span>Nullifier = ::sapling::Nullifier;
+<a href=#680 id=680 data-nosnippet>680</a>
+<a href=#681 id=681 data-nosnippet>681</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#682 id=682 data-nosnippet>682</a>        <span class="self">self</span>.index()
+<a href=#683 id=683 data-nosnippet>683</a>    }
+<a href=#684 id=684 data-nosnippet>684</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
+<a href=#685 id=685 data-nosnippet>685</a>        <span class="kw-2">*</span><span class="self">self</span>.account()
+<a href=#686 id=686 data-nosnippet>686</a>    }
+<a href=#687 id=687 data-nosnippet>687</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::sapling::Note {
+<a href=#688 id=688 data-nosnippet>688</a>        <span class="self">self</span>.note()
+<a href=#689 id=689 data-nosnippet>689</a>    }
+<a href=#690 id=690 data-nosnippet>690</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="prelude-val">Some</span>(<span class="self">self</span>.memo())
+<a href=#692 id=692 data-nosnippet>692</a>    }
+<a href=#693 id=693 data-nosnippet>693</a>    <span class="kw">fn </span>transfer_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TransferType {
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="self">self</span>.transfer_type()
+<a href=#695 id=695 data-nosnippet>695</a>    }
+<a href=#696 id=696 data-nosnippet>696</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#697 id=697 data-nosnippet>697</a>        <span class="self">self</span>.transfer_type() == TransferType::WalletInternal
+<a href=#698 id=698 data-nosnippet>698</a>    }
+<a href=#699 id=699 data-nosnippet>699</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::sapling::Nullifier&gt; {
+<a href=#700 id=700 data-nosnippet>700</a>        <span class="prelude-val">None
+<a href=#701 id=701 data-nosnippet>701</a>    </span>}
+<a href=#702 id=702 data-nosnippet>702</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
+<a href=#703 id=703 data-nosnippet>703</a>        <span class="prelude-val">None
+<a href=#704 id=704 data-nosnippet>704</a>    </span>}
+<a href=#705 id=705 data-nosnippet>705</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
+<a href=#706 id=706 data-nosnippet>706</a>        <span class="kw">if </span><span class="self">self</span>.transfer_type() == TransferType::WalletInternal {
+<a href=#707 id=707 data-nosnippet>707</a>            <span class="prelude-val">Some</span>(Scope::Internal)
+<a href=#708 id=708 data-nosnippet>708</a>        } <span class="kw">else </span>{
+<a href=#709 id=709 data-nosnippet>709</a>            <span class="prelude-val">Some</span>(Scope::External)
+<a href=#710 id=710 data-nosnippet>710</a>        }
+<a href=#711 id=711 data-nosnippet>711</a>    }
+<a href=#712 id=712 data-nosnippet>712</a>}
+<a href=#713 id=713 data-nosnippet>713</a>
+<a href=#714 id=714 data-nosnippet>714</a><span class="doccomment">/// This trait provides a generalization over shielded Orchard output representations.
+<a href=#715 id=715 data-nosnippet>715</a></span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#716 id=716 data-nosnippet>716</a></span><span class="kw">pub trait </span>ReceivedOrchardOutput:
+<a href=#717 id=717 data-nosnippet>717</a>    ReceivedShieldedOutput&lt;Note = ::orchard::Note, Nullifier = ::orchard::note::Nullifier&gt;
+<a href=#718 id=718 data-nosnippet>718</a>{
+<a href=#719 id=719 data-nosnippet>719</a>}
+<a href=#720 id=720 data-nosnippet>720</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#721 id=721 data-nosnippet>721</a></span><span class="kw">impl</span>&lt;T: ReceivedShieldedOutput&lt;Note = ::orchard::Note, Nullifier = ::orchard::note::Nullifier&gt;&gt;
+<a href=#722 id=722 data-nosnippet>722</a>    ReceivedOrchardOutput <span class="kw">for </span>T
+<a href=#723 id=723 data-nosnippet>723</a>{
+<a href=#724 id=724 data-nosnippet>724</a>}
+<a href=#725 id=725 data-nosnippet>725</a>
+<a href=#726 id=726 data-nosnippet>726</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#727 id=727 data-nosnippet>727</a></span><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedShieldedOutput <span class="kw">for </span>WalletOrchardOutput&lt;AccountId&gt; {
+<a href=#728 id=728 data-nosnippet>728</a>    <span class="kw">const </span>POOL_TYPE: PoolType = PoolType::ORCHARD;
+<a href=#729 id=729 data-nosnippet>729</a>    <span class="kw">type </span>AccountId = AccountId;
+<a href=#730 id=730 data-nosnippet>730</a>    <span class="kw">type </span>Note = ::orchard::Note;
+<a href=#731 id=731 data-nosnippet>731</a>    <span class="kw">type </span>Nullifier = ::orchard::note::Nullifier;
+<a href=#732 id=732 data-nosnippet>732</a>
+<a href=#733 id=733 data-nosnippet>733</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#734 id=734 data-nosnippet>734</a>        <span class="self">self</span>.index()
 <a href=#735 id=735 data-nosnippet>735</a>    }
-<a href=#736 id=736 data-nosnippet>736</a>}
-<a href=#737 id=737 data-nosnippet>737</a>
-<a href=#738 id=738 data-nosnippet>738</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#739 id=739 data-nosnippet>739</a></span><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedOrchardOutput <span class="kw">for </span>DecryptedOutput&lt;::orchard::note::Note, AccountId&gt; {
-<a href=#740 id=740 data-nosnippet>740</a>    <span class="kw">type </span>AccountId = AccountId;
-<a href=#741 id=741 data-nosnippet>741</a>
-<a href=#742 id=742 data-nosnippet>742</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#743 id=743 data-nosnippet>743</a>        <span class="self">self</span>.index()
-<a href=#744 id=744 data-nosnippet>744</a>    }
-<a href=#745 id=745 data-nosnippet>745</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
-<a href=#746 id=746 data-nosnippet>746</a>        <span class="kw-2">*</span><span class="self">self</span>.account()
-<a href=#747 id=747 data-nosnippet>747</a>    }
-<a href=#748 id=748 data-nosnippet>748</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>orchard::note::Note {
-<a href=#749 id=749 data-nosnippet>749</a>        <span class="self">self</span>.note()
-<a href=#750 id=750 data-nosnippet>750</a>    }
-<a href=#751 id=751 data-nosnippet>751</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
-<a href=#752 id=752 data-nosnippet>752</a>        <span class="prelude-val">Some</span>(<span class="self">self</span>.memo())
-<a href=#753 id=753 data-nosnippet>753</a>    }
-<a href=#754 id=754 data-nosnippet>754</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#755 id=755 data-nosnippet>755</a>        <span class="self">self</span>.transfer_type() == TransferType::WalletInternal
-<a href=#756 id=756 data-nosnippet>756</a>    }
-<a href=#757 id=757 data-nosnippet>757</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::orchard::note::Nullifier&gt; {
-<a href=#758 id=758 data-nosnippet>758</a>        <span class="prelude-val">None
-<a href=#759 id=759 data-nosnippet>759</a>    </span>}
-<a href=#760 id=760 data-nosnippet>760</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
-<a href=#761 id=761 data-nosnippet>761</a>        <span class="prelude-val">None
-<a href=#762 id=762 data-nosnippet>762</a>    </span>}
-<a href=#763 id=763 data-nosnippet>763</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
-<a href=#764 id=764 data-nosnippet>764</a>        <span class="kw">if </span><span class="self">self</span>.transfer_type() == TransferType::WalletInternal {
-<a href=#765 id=765 data-nosnippet>765</a>            <span class="prelude-val">Some</span>(Scope::Internal)
-<a href=#766 id=766 data-nosnippet>766</a>        } <span class="kw">else </span>{
-<a href=#767 id=767 data-nosnippet>767</a>            <span class="prelude-val">Some</span>(Scope::External)
-<a href=#768 id=768 data-nosnippet>768</a>        }
-<a href=#769 id=769 data-nosnippet>769</a>    }
-<a href=#770 id=770 data-nosnippet>770</a>}
+<a href=#736 id=736 data-nosnippet>736</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
+<a href=#737 id=737 data-nosnippet>737</a>        <span class="kw-2">*</span>WalletOrchardOutput::account_id(<span class="self">self</span>)
+<a href=#738 id=738 data-nosnippet>738</a>    }
+<a href=#739 id=739 data-nosnippet>739</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>::orchard::note::Note {
+<a href=#740 id=740 data-nosnippet>740</a>        WalletOrchardOutput::note(<span class="self">self</span>)
+<a href=#741 id=741 data-nosnippet>741</a>    }
+<a href=#742 id=742 data-nosnippet>742</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
+<a href=#743 id=743 data-nosnippet>743</a>        <span class="prelude-val">None
+<a href=#744 id=744 data-nosnippet>744</a>    </span>}
+<a href=#745 id=745 data-nosnippet>745</a>    <span class="kw">fn </span>transfer_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TransferType {
+<a href=#746 id=746 data-nosnippet>746</a>        <span class="kw">if </span><span class="self">self</span>.is_change() {
+<a href=#747 id=747 data-nosnippet>747</a>            TransferType::WalletInternal
+<a href=#748 id=748 data-nosnippet>748</a>        } <span class="kw">else </span>{
+<a href=#749 id=749 data-nosnippet>749</a>            TransferType::Incoming
+<a href=#750 id=750 data-nosnippet>750</a>        }
+<a href=#751 id=751 data-nosnippet>751</a>    }
+<a href=#752 id=752 data-nosnippet>752</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#753 id=753 data-nosnippet>753</a>        WalletOrchardOutput::is_change(<span class="self">self</span>)
+<a href=#754 id=754 data-nosnippet>754</a>    }
+<a href=#755 id=755 data-nosnippet>755</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::orchard::note::Nullifier&gt; {
+<a href=#756 id=756 data-nosnippet>756</a>        <span class="self">self</span>.nf()
+<a href=#757 id=757 data-nosnippet>757</a>    }
+<a href=#758 id=758 data-nosnippet>758</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
+<a href=#759 id=759 data-nosnippet>759</a>        <span class="prelude-val">Some</span>(WalletOrchardOutput::note_commitment_tree_position(<span class="self">self</span>))
+<a href=#760 id=760 data-nosnippet>760</a>    }
+<a href=#761 id=761 data-nosnippet>761</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
+<a href=#762 id=762 data-nosnippet>762</a>        <span class="self">self</span>.recipient_key_scope()
+<a href=#763 id=763 data-nosnippet>763</a>    }
+<a href=#764 id=764 data-nosnippet>764</a>}
+<a href=#765 id=765 data-nosnippet>765</a>
+<a href=#766 id=766 data-nosnippet>766</a><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#767 id=767 data-nosnippet>767</a></span><span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedShieldedOutput <span class="kw">for </span>DecryptedOutput&lt;::orchard::Note, AccountId&gt; {
+<a href=#768 id=768 data-nosnippet>768</a>    <span class="kw">const </span>POOL_TYPE: PoolType = PoolType::ORCHARD;
+<a href=#769 id=769 data-nosnippet>769</a>    <span class="kw">type </span>AccountId = AccountId;
+<a href=#770 id=770 data-nosnippet>770</a>    <span class="kw">type </span>Note = ::orchard::Note;
+<a href=#771 id=771 data-nosnippet>771</a>    <span class="kw">type </span>Nullifier = ::orchard::note::Nullifier;
+<a href=#772 id=772 data-nosnippet>772</a>
+<a href=#773 id=773 data-nosnippet>773</a>    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="self">self</span>.index()
+<a href=#775 id=775 data-nosnippet>775</a>    }
+<a href=#776 id=776 data-nosnippet>776</a>    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="kw-2">*</span><span class="self">self</span>.account()
+<a href=#778 id=778 data-nosnippet>778</a>    }
+<a href=#779 id=779 data-nosnippet>779</a>    <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>orchard::note::Note {
+<a href=#780 id=780 data-nosnippet>780</a>        <span class="self">self</span>.note()
+<a href=#781 id=781 data-nosnippet>781</a>    }
+<a href=#782 id=782 data-nosnippet>782</a>    <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt; {
+<a href=#783 id=783 data-nosnippet>783</a>        <span class="prelude-val">Some</span>(<span class="self">self</span>.memo())
+<a href=#784 id=784 data-nosnippet>784</a>    }
+<a href=#785 id=785 data-nosnippet>785</a>    <span class="kw">fn </span>transfer_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TransferType {
+<a href=#786 id=786 data-nosnippet>786</a>        <span class="self">self</span>.transfer_type()
+<a href=#787 id=787 data-nosnippet>787</a>    }
+<a href=#788 id=788 data-nosnippet>788</a>    <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#789 id=789 data-nosnippet>789</a>        <span class="self">self</span>.transfer_type() == TransferType::WalletInternal
+<a href=#790 id=790 data-nosnippet>790</a>    }
+<a href=#791 id=791 data-nosnippet>791</a>    <span class="kw">fn </span>nullifier(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>::orchard::note::Nullifier&gt; {
+<a href=#792 id=792 data-nosnippet>792</a>        <span class="prelude-val">None
+<a href=#793 id=793 data-nosnippet>793</a>    </span>}
+<a href=#794 id=794 data-nosnippet>794</a>    <span class="kw">fn </span>note_commitment_tree_position(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Position&gt; {
+<a href=#795 id=795 data-nosnippet>795</a>        <span class="prelude-val">None
+<a href=#796 id=796 data-nosnippet>796</a>    </span>}
+<a href=#797 id=797 data-nosnippet>797</a>    <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt; {
+<a href=#798 id=798 data-nosnippet>798</a>        <span class="kw">if </span><span class="self">self</span>.transfer_type() == TransferType::WalletInternal {
+<a href=#799 id=799 data-nosnippet>799</a>            <span class="prelude-val">Some</span>(Scope::Internal)
+<a href=#800 id=800 data-nosnippet>800</a>        } <span class="kw">else </span>{
+<a href=#801 id=801 data-nosnippet>801</a>            <span class="prelude-val">Some</span>(Scope::External)
+<a href=#802 id=802 data-nosnippet>802</a>        }
+<a href=#803 id=803 data-nosnippet>803</a>    }
+<a href=#804 id=804 data-nosnippet>804</a>}
 </code></pre></div></section></main></body></html>
