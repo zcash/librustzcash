@@ -13,9 +13,11 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api`:
   - `ll` module
-  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
+  - `Balance::{locked_value, add_locked_value}`
+  - `AccountBalance::locked_value`
   - `DecryptableTransaction`
   - `ReceivedTransactionOutput`
+  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
 - in `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
   - Added types `CompactTxIn`, `TxOut`
@@ -116,6 +118,9 @@ workspace.
   than or equal to the provided minimum value. This fixes an inconsistency
   in the various tests related to notes having no economic value in
   `zcash_client_sqlite`.
+- `zcash_client_backend::data_api::Balance` has been modified to now make it
+  possible to represent locked value; this is value that is committed to be
+  spent by an in-flight proposal or PCZT.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

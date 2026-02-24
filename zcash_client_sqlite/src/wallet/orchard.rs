@@ -133,6 +133,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    include_locked: bool,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -142,9 +143,11 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
         ShieldedProtocol::Orchard,
         target_height,
         to_received_note,
+        include_locked,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -153,6 +156,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    include_locked: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -164,6 +168,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         exclude,
         ShieldedProtocol::Orchard,
         to_received_note,
+        include_locked,
     )
 }
 

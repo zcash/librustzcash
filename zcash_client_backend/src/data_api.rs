@@ -190,6 +190,7 @@ pub enum MaxSpendMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     spendable_value: Zatoshis,
+    locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
     uneconomic_value: Zatoshis,
@@ -199,6 +200,7 @@ impl Balance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         spendable_value: Zatoshis::ZERO,
+        locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
@@ -206,6 +208,7 @@ impl Balance {
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
         (self.spendable_value
+            + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
             + value)
@@ -219,10 +222,25 @@ impl Balance {
         self.spendable_value
     }
 
+    /// Returns the value in the account that is currently "locked".
+    ///
+    /// The outputs that comprise this balance are seen by the wallet as being committed to be
+    /// spent by a transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        self.locked_value
+    }
+
     /// Adds the specified value to the spendable total, checking for overflow.
     pub fn add_spendable_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.spendable_value = (self.spendable_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Adds the specified value to the locked total, checking for overflow.
+    pub fn add_locked_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.locked_value = (self.locked_value + value).unwrap();
         Ok(())
     }
 
@@ -267,7 +285,10 @@ impl Balance {
 
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
-        (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
+        (self.spendable_value
+            + self.locked_value
+            + self.change_pending_confirmation
+            + self.value_pending_spendability)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -279,6 +300,7 @@ impl core::ops::Add<Balance> for Balance {
         let result = Balance {
             spendable_value: (self.spendable_value + rhs.spendable_value)
                 .ok_or(BalanceError::Overflow)?,
+            locked_value: (self.locked_value + rhs.locked_value).ok_or(BalanceError::Overflow)?,
             change_pending_confirmation: (self.change_pending_confirmation
                 + rhs.change_pending_confirmation)
                 .ok_or(BalanceError::Overflow)?,
@@ -399,6 +421,15 @@ impl AccountBalance {
     pub fn spendable_value(&self) -> Zatoshis {
         (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of notes and UTXOs that are locked, having been committed to
+    /// an in-flight transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        (self.sapling_balance.locked_value()
+            + self.orchard_balance.locked_value()
+            + self.unshielded_balance.locked_value())
+        .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
