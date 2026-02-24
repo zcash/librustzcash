@@ -2604,6 +2604,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             Zatoshis,
             Zatoshis,
             Zatoshis,
+            Zatoshis,
         ) -> Result<(), SqliteClientError>,
     {
         let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
@@ -2645,7 +2646,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
-                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
+                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust,
+                    rn.lock_expiry_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
@@ -2663,11 +2665,12 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
              AND rn.id NOT IN ({}) -- and the received note is unspent
              GROUP BY rn.id",
             common::tx_unexpired_condition("t"),
-            common::spent_notes_clause(table_prefix)
+            common::spent_notes_clause(table_prefix),
         ))?;
 
-        let mut rows =
-            stmt_select_notes.query(named_params![":target_height": u32::from(target_height)])?;
+        let mut rows = stmt_select_notes.query(named_params![
+            ":target_height": u32::from(target_height),
+        ])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
 
@@ -2714,6 +2717,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
 
+            let is_locked = row
+                .get::<_, Option<u32>>("lock_expiry_height")?
+                .iter()
+                .any(|h| *h >= u32::from(target_height));
+
             // A stabilized note is unconditionally spendable. Its originating transaction has been
             // confirmed well beyond any reasonable confirmation policy, and its witness data
             // cannot be removed by truncation.
@@ -2740,19 +2748,22 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let (
                 spendable_value,
+                locked_value,
                 change_pending_confirmation,
                 value_pending_spendability,
                 uneconomic_value,
             ) = {
                 let zero = Zatoshis::ZERO;
                 if value <= zip317::MARGINAL_FEE {
-                    (zero, zero, zero, value)
+                    (zero, zero, zero, zero, value)
+                } else if is_spendable && is_locked {
+                    (zero, value, zero, zero, zero)
                 } else if is_spendable {
-                    (value, zero, zero, zero)
+                    (value, zero, zero, zero, zero)
                 } else if is_pending_change {
-                    (zero, value, zero, zero)
+                    (zero, zero, value, zero, zero)
                 } else {
-                    (zero, zero, value, zero)
+                    (zero, zero, zero, value, zero)
                 }
             };
 
@@ -2760,6 +2771,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 with_pool_balance(
                     balances,
                     spendable_value,
+                    locked_value,
                     change_pending_confirmation,
                     value_pending_spendability,
                     uneconomic_value,
@@ -2781,11 +2793,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             ShieldedPool::Orchard,
             |balances,
              spendable_value,
+             locked_value,
              change_pending_confirmation,
              value_pending_spendability,
              uneconomic_value| {
                 balances.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
                     bal.add_spendable_value(spendable_value)?;
+                    bal.add_locked_value(locked_value)?;
                     bal.add_pending_change_value(change_pending_confirmation)?;
                     bal.add_pending_spendable_value(value_pending_spendability)?;
                     bal.add_uneconomic_value(uneconomic_value)?;
@@ -2808,11 +2822,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             ShieldedPool::Ironwood,
             |balances,
              spendable_value,
+             locked_value,
              change_pending_confirmation,
              value_pending_spendability,
              uneconomic_value| {
                 balances.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
                     bal.add_spendable_value(spendable_value)?;
+                    bal.add_locked_value(locked_value)?;
                     bal.add_pending_change_value(change_pending_confirmation)?;
                     bal.add_pending_spendable_value(value_pending_spendability)?;
                     bal.add_uneconomic_value(uneconomic_value)?;
@@ -2833,11 +2849,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         |balances,
          spendable_value,
+         locked_value,
          change_pending_confirmation,
          value_pending_spendability,
          uneconomic_value| {
             balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
                 bal.add_spendable_value(spendable_value)?;
+                bal.add_locked_value(locked_value)?;
                 bal.add_pending_change_value(change_pending_confirmation)?;
                 bal.add_pending_spendable_value(value_pending_spendability)?;
                 bal.add_uneconomic_value(uneconomic_value)?;

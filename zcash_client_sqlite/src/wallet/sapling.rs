@@ -139,6 +139,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    include_locked: bool,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -148,6 +149,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         target_height,
         to_received_note,
+        include_locked,
     )
 }
 
@@ -156,6 +158,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
 /// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
 /// the wallet birthday, none of our notes can be spent because we cannot construct witnesses at
 /// the provided anchor height.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -164,6 +167,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    include_locked: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -175,6 +179,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Sapling,
         to_received_note,
+        include_locked,
     )
 }
 

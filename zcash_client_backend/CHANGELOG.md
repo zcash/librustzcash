@@ -23,6 +23,8 @@ workspace.
   API of this crate; it exists so code in this crate that constructs
   `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
   exactly when the underlying crate expects them.
+- `zcash_client_backend::data_api::Balance::{locked_value, add_locked_value}`
+- `zcash_client_backend::data_api::AccountBalance::locked_value`
 - `zcash_client_backend::data_api::error::LockError`
 - `zcash_client_backend::wallet::OutputRef`
 - `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
@@ -53,6 +55,9 @@ workspace.
     reaches coinbase maturity.
 - `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
   `OutputRef` instead of `(PoolType, TxId, u32)`.
+- `zcash_client_backend::data_api::Balance` has been modified to now make it
+  possible to represent locked value; this is value that is committed to be
+  spent by an in-flight proposal or PCZT.
 - The following `InputSource` trait methods now take an additional
   `include_locked: bool` parameter that controls whether locked notes
   are included in results:
