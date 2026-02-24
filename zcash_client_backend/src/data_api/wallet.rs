@@ -47,7 +47,8 @@ use super::InputSource;
 use crate::{
     data_api::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
-        WalletCommitmentTrees, WalletRead, WalletWrite, error::Error,
+        WalletCommitmentTrees, WalletRead, WalletWrite,
+        error::{Error, LockError},
         wallet::input_selection::propose_send_max,
     },
     decrypt_transaction,
@@ -55,7 +56,7 @@ use crate::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
-    wallet::{Note, OvkPolicy, Recipient},
+    wallet::{Note, OutputRef, OvkPolicy, Recipient},
 };
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
@@ -668,6 +669,69 @@ impl ConfirmationsPolicy {
     }
 }
 
+/// Returns the set of [`OutputRef`]s for all inputs selected by the given proposal.
+fn proposal_input_refs<FeeRuleT, NoteRef>(
+    proposal: &Proposal<FeeRuleT, NoteRef>,
+) -> impl Iterator<Item = OutputRef> {
+    proposal.steps().iter().flat_map(|step| {
+        step.shielded_inputs()
+            .into_iter()
+            .flat_map(|shielded_inputs| {
+                shielded_inputs.notes().iter().map(|note| {
+                    OutputRef::new(
+                        *note.txid(),
+                        PoolType::Shielded(note.note().pool()),
+                        u32::from(note.output_index()),
+                    )
+                })
+            })
+            .chain(step.transparent_inputs().iter().map(|utxo| {
+                let outpoint = utxo.outpoint();
+                OutputRef::new(
+                    TxId::from_bytes(*outpoint.hash()),
+                    PoolType::TRANSPARENT,
+                    outpoint.n(),
+                )
+            }))
+    })
+}
+
+/// Locks all inputs selected by the given proposal, preventing them from being
+/// selected by subsequent proposals. The lock expires at the given height.
+#[allow(clippy::type_complexity)]
+fn lock_proposal_inputs<DbT, FeeRuleT, NoteRef, TE, SE, FE, CE>(
+    wallet_db: &mut DbT,
+    proposal: &Proposal<FeeRuleT, NoteRef>,
+    lock_expiry_height: BlockHeight,
+) -> Result<(), Error<DbT::Error, TE, SE, FE, CE, NoteRef>>
+where
+    DbT: WalletWrite,
+{
+    match wallet_db.lock_outputs(proposal_input_refs(proposal), lock_expiry_height) {
+        Ok(_) => Ok(()),
+        Err(LockError::LockFailure(out_ref)) => {
+            Err(Error::Proposal(ProposalError::ChainDoubleSpend(out_ref)))
+        }
+        Err(LockError::Storage(e)) => Err(Error::DataSource(e)),
+    }
+}
+
+///
+/// This is useful when a proposal is rejected or abandoned after its inputs
+/// were locked via [`lock_proposal_inputs`].
+pub fn unlock_proposal_inputs<DbT, FeeRuleT, NoteRef>(
+    wallet_db: &mut DbT,
+    proposal: &Proposal<FeeRuleT, NoteRef>,
+) -> Result<(), DbT::Error>
+where
+    DbT: WalletWrite,
+{
+    for output_ref in proposal_input_refs(proposal) {
+        wallet_db.unlock_output(&output_ref)?;
+    }
+    Ok(())
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -682,13 +746,14 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
     spend_policy: &input_selection::SpendPolicy,
+    lock_for_blocks: Option<u32>,
     proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
 >
 where
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
@@ -716,6 +781,11 @@ where
         spend_policy,
         proposed_version,
     )?;
+    if let Some(n) = lock_for_blocks {
+        let lock_expiry_height = target_height + n;
+        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    }
+
     // Record the requested version on the proposal so that it is carried through to transaction
     // building; when `None`, building falls back to the version implied by the target height.
     Ok(proposal.with_proposed_version(proposed_version))
@@ -759,6 +829,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
+    lock_for_blocks: Option<u32>,
     proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
@@ -772,7 +843,10 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 where
     ParamsT: consensus::Parameters + Clone,
     DbT: InputSource,
-    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
+    DbT: WalletWrite<
+            Error = <DbT as InputSource>::Error,
+            AccountId = <DbT as InputSource>::AccountId,
+        >,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![
@@ -807,6 +881,7 @@ where
         request,
         confirmations_policy,
         &input_selection::SpendPolicy::default(),
+        lock_for_blocks,
         proposed_version,
     )
 }
@@ -826,12 +901,13 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
+    lock_for_blocks: Option<u32>,
 ) -> Result<
     Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
 >
 where
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule + Clone,
@@ -859,6 +935,11 @@ where
         memo,
     )?;
 
+    if let Some(n) = lock_for_blocks {
+        let lock_expiry_height = target_height + n;
+        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    }
+
     Ok(proposal)
 }
 
@@ -880,13 +961,14 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
+    lock_for_blocks: Option<u32>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
@@ -895,7 +977,7 @@ where
         .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
-    input_selector
+    let proposal = input_selector
         .propose_shielding(
             params,
             wallet_db,
@@ -908,7 +990,14 @@ where
             confirmations_policy,
             output_filter,
         )
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+
+    if let Some(n) = lock_for_blocks {
+        let lock_expiry_height = target_height + n;
+        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    }
+
+    Ok(proposal)
 }
 
 /// Errors that may be generated in construction of proposals for shielding coinbase
@@ -3298,6 +3387,7 @@ where
         to_account,
         confirmations_policy,
         CoinbaseFilter::AllTransparentOutputs,
+        None,
     )?;
 
     create_proposed_transactions(

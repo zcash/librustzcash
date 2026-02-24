@@ -1065,6 +1065,7 @@ where
             confirmations_policy,
             &SpendPolicy::default(),
             None,
+            None,
         )?;
 
         create_proposed_transactions(
@@ -1106,6 +1107,7 @@ where
             confirmations_policy,
             &SpendPolicy::default(),
             None,
+            None,
         )
     }
 
@@ -1144,6 +1146,7 @@ where
             confirmations_policy,
             spend_policy,
             None,
+            None,
         )
     }
 
@@ -1175,6 +1178,7 @@ where
             memo,
             mode,
             confirmations_policy,
+            None,
         )
     }
 
@@ -1212,6 +1216,7 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            None,
             None,
         );
 
@@ -1259,6 +1264,7 @@ where
             to_account,
             confirmations_policy,
             output_filter,
+            None,
         )
     }
 
