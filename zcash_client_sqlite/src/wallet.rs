@@ -2972,6 +2972,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         transparent::mark_transparent_utxo_spent(conn, tx_ref, utxo_outpoint)?;
     }
 
+    // Unlock any notes that were locked for this transaction, since the spend records
+    // now prevent them from being selected by subsequent proposals.
+    unlock_spent_notes(conn, tx_ref)?;
+
     for output in sent_tx.outputs() {
         insert_sent_output(conn, params, tx_ref, *sent_tx.account_id(), output)?;
 
@@ -4539,6 +4543,40 @@ pub(crate) fn unlock_output(
         )?,
     };
     Ok(rows_updated > 0)
+}
+
+/// Unlocks all notes that have been recorded as spent by the given transaction.
+/// This is called after marking notes as spent in `store_transaction_to_be_sent`,
+/// since the spend records now prevent them from being selected by subsequent proposals.
+fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE sapling_received_notes SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT sapling_received_note_id FROM sapling_received_note_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    conn.execute(
+        "UPDATE orchard_received_notes SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT orchard_received_note_id FROM orchard_received_note_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    conn.execute(
+        "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT transparent_received_output_id FROM transparent_received_output_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    Ok(())
 }
 
 pub(crate) fn get_received_outputs(

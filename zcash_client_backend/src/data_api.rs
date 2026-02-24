@@ -3158,6 +3158,11 @@ pub trait WalletWrite: WalletRead {
     ///
     /// Transactions that have been stored by this method should be retransmitted while it
     /// is still possible that they could be mined.
+    ///
+    /// Implementations must unlock any locked outputs that are recorded as spent by the
+    /// stored transactions. Once spend records exist, the outputs are protected from
+    /// double-selection by the spend tracking mechanism, so the explicit locks are no
+    /// longer needed.
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
