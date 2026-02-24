@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use rusqlite::named_params;
+use rusqlite::{Connection, OptionalExtension, named_params};
 use transparent::{
     address::TransparentAddress,
     keys::{NonHardenedChildIndex, NonHardenedChildRange, TransparentKeyScope},
@@ -61,6 +61,21 @@ pub(crate) fn generate_zip48_multisig_address_range<P: consensus::Parameters>(
     }
 
     Ok(())
+}
+
+/// Retrieves the ZIP 48 FVK from an account if it is a multisig account.
+pub(crate) fn get_zip48_fvk(
+    conn: &Connection,
+    account_id: AccountRef,
+) -> Result<Option<Vec<u8>>, SqliteClientError> {
+    conn.query_row(
+        "SELECT zip48_fvk FROM accounts WHERE id = :id AND account_kind = 2",
+        named_params![":id": account_id.0],
+        |row| row.get::<_, Option<Vec<u8>>>(0),
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .map(|opt| opt.flatten())
 }
 
 /// Inserts a new multisig address into the addresses table, or updates the `exposed_at_height`
@@ -135,6 +150,81 @@ pub(crate) fn insert_zip48_multisig_address<P: consensus::Parameters>(
     Ok(address_id)
 }
 
+/// Gets the next available address index for a multisig account.
+///
+/// This returns MAX(transparent_child_index) + 1 for existing multisig addresses.
+pub(crate) fn get_next_zip48_multisig_address_index(
+    conn: &Connection,
+    account_id: AccountRef,
+    scope: TransparentKeyScope,
+) -> Result<NonHardenedChildIndex, SqliteClientError> {
+    let key_scope = KeyScope::try_from(scope)?;
+
+    let max_index: Option<u32> = conn
+        .query_row(
+            "SELECT MAX(transparent_child_index)
+                 FROM addresses
+                 WHERE account_id = :account_id
+                 AND key_scope = :key_scope
+                 AND redeem_script IS NOT NULL",
+            named_params![
+                ":account_id": account_id.0,
+                ":key_scope": key_scope.encode()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    let next_index = max_index.map_or(0, |i| i.saturating_add(1));
+
+    NonHardenedChildIndex::from_index(next_index).ok_or_else(|| {
+        SqliteClientError::CorruptedData(
+            "Next address index exceeds maximum non-hardened index".to_owned(),
+        )
+    })
+}
+
+/// Finds the first unexposed ZIP 48 multisig address for the given account and scope.
+///
+/// Returns the address index if an unexposed address exists, or None if all addresses
+/// have been exposed.
+pub(crate) fn get_first_unexposed_zip48_multisig_address_index(
+    conn: &Connection,
+    account_id: AccountRef,
+    scope: TransparentKeyScope,
+) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
+    let key_scope = KeyScope::try_from(scope)?;
+
+    let index: Option<u32> = conn
+        .query_row(
+            "SELECT MIN(transparent_child_index)
+                 FROM addresses
+                 WHERE account_id = :account_id
+                 AND key_scope = :key_scope
+                 AND redeem_script IS NOT NULL
+                 AND exposed_at_height IS NULL",
+            named_params![
+                ":account_id": account_id.0,
+                ":key_scope": key_scope.encode()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    match index {
+        Some(i) => NonHardenedChildIndex::from_index(i)
+            .map(Some)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Address index exceeds maximum non-hardened index".to_owned(),
+                )
+            }),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +295,116 @@ mod tests {
 
     // The default gap limits pre-generate 10 external and 5 internal addresses on import.
     const GAP_EXTERNAL: u32 = 10;
+    const GAP_INTERNAL: u32 = 5;
+
+    #[test]
+    fn next_index_after_import() {
+        with_zip48_test_env(|st, account_ref, _fvk, _params| {
+            // After import, gap fill has already generated GAP_EXTERNAL addresses (0..9).
+            let next = get_next_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(
+                next,
+                NonHardenedChildIndex::from_index(GAP_EXTERNAL).unwrap()
+            );
+
+            let next_internal = get_next_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::INTERNAL,
+            )
+            .unwrap();
+            assert_eq!(
+                next_internal,
+                NonHardenedChildIndex::from_index(GAP_INTERNAL).unwrap()
+            );
+        });
+    }
+
+    #[test]
+    fn next_index_after_additional_insert() {
+        with_zip48_test_env(|st, account_ref, fvk, params| {
+            // Generate addresses beyond the gap fill range (10..15).
+            let range_start = NonHardenedChildIndex::from_index(GAP_EXTERNAL).unwrap();
+            let range_end = NonHardenedChildIndex::from_index(GAP_EXTERNAL + 5).unwrap();
+            {
+                let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+                generate_zip48_multisig_address_range(
+                    &tx,
+                    &params,
+                    account_ref,
+                    fvk,
+                    TransparentKeyScope::EXTERNAL,
+                    range_start..range_end,
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+
+            let next = get_next_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(
+                next,
+                NonHardenedChildIndex::from_index(GAP_EXTERNAL + 5).unwrap()
+            );
+        });
+    }
+
+    #[test]
+    fn first_unexposed_returns_unexposed_index() {
+        with_zip48_test_env(|st, account_ref, _fvk, _params| {
+            // The gap-fill addresses created during import are all unexposed.
+            let result = get_first_unexposed_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(result, Some(NonHardenedChildIndex::ZERO));
+        });
+    }
+
+    #[test]
+    fn first_unexposed_none_when_all_exposed() {
+        with_zip48_test_env(|st, account_ref, fvk, params| {
+            // Mark all gap-fill addresses as exposed by re-inserting with exposed_at_height.
+            for i in 0..GAP_EXTERNAL {
+                let index = NonHardenedChildIndex::from_index(i).unwrap();
+                let (address, redeem_script) = fvk.derive_address(zip32::Scope::External, index);
+                {
+                    let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+                    insert_zip48_multisig_address(
+                        &tx,
+                        &params,
+                        account_ref,
+                        TransparentKeyScope::EXTERNAL,
+                        index,
+                        &address,
+                        &redeem_script,
+                        Some(BlockHeight::from_u32(100)),
+                    )
+                    .unwrap();
+                    tx.commit().unwrap();
+                }
+            }
+
+            let result = get_first_unexposed_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(result, None);
+        });
+    }
 
     #[test]
     fn insert_rejects_non_p2sh_address() {
@@ -372,6 +572,61 @@ mod tests {
                 );
                 assert_eq!(row.2, None, "expected unexposed at index {i}");
             }
+        });
+    }
+
+    #[test]
+    fn generate_range_inserts_correct_count() {
+        with_zip48_test_env(|st, account_ref, fvk, params| {
+            // Generate 5 more external addresses beyond the gap fill (10..15).
+            let range_start = NonHardenedChildIndex::from_index(GAP_EXTERNAL).unwrap();
+            let range_end = NonHardenedChildIndex::from_index(GAP_EXTERNAL + 5).unwrap();
+            {
+                let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+                generate_zip48_multisig_address_range(
+                    &tx,
+                    &params,
+                    account_ref,
+                    fvk,
+                    TransparentKeyScope::EXTERNAL,
+                    range_start..range_end,
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+
+            // The next index should be GAP_EXTERNAL + 5.
+            let next = get_next_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(
+                next,
+                NonHardenedChildIndex::from_index(GAP_EXTERNAL + 5).unwrap()
+            );
+
+            // Gap-fill addresses are still unexposed, first one at index 0.
+            let first_unexposed = get_first_unexposed_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::EXTERNAL,
+            )
+            .unwrap();
+            assert_eq!(first_unexposed, Some(NonHardenedChildIndex::ZERO));
+
+            // Internal scope should still have only the gap fill addresses.
+            let next_internal = get_next_zip48_multisig_address_index(
+                st.wallet().conn(),
+                account_ref,
+                TransparentKeyScope::INTERNAL,
+            )
+            .unwrap();
+            assert_eq!(
+                next_internal,
+                NonHardenedChildIndex::from_index(GAP_INTERNAL).unwrap()
+            );
         });
     }
 }

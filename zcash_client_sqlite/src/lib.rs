@@ -1391,6 +1391,41 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         }
     }
 
+    #[cfg(feature = "zip-48")]
+    fn get_next_zip48_multisig_address(
+        &mut self,
+        account: Self::AccountId,
+        scope: zip32::Scope,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::get_next_available_zip48_multisig_address(
+                wdb.conn.0,
+                &wdb.params,
+                &wdb.gap_limits,
+                account,
+                scope,
+            )
+        })
+    }
+
+    #[cfg(feature = "zip-48")]
+    fn get_zip48_multisig_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        scope: zip32::Scope,
+        address_index: NonHardenedChildIndex,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::get_zip48_multisig_address_for_index(
+                wdb.conn.0,
+                &wdb.params,
+                account,
+                scope,
+                address_index,
+            )
+        })
+    }
+
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             wallet::scanning::update_chain_tip(wdb.conn.0, &wdb.params, tip_height)?;

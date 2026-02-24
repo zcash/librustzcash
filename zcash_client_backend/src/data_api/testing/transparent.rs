@@ -729,7 +729,12 @@ where
         .build();
 
     // --- ZIP 48 account ---
-    let (zip48_account_id, _taddr, _birthday, fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+    let (zip48_account_id, _taddr, birthday_height, fvk) =
+        create_zip48_test_account::<_, DSF>(&mut st);
+
+    // Set the chain tip so that address exposure heights can be recorded.
+    let height = birthday_height + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
 
     // First call should derive index 0 (External).
     let (addr0, meta0) = st
@@ -793,7 +798,12 @@ where
         .build();
 
     // --- ZIP 48 account ---
-    let (zip48_account_id, _taddr, _birthday, fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+    let (zip48_account_id, _taddr, birthday_height, fvk) =
+        create_zip48_test_account::<_, DSF>(&mut st);
+
+    // Set the chain tip so that address exposure heights can be recorded.
+    let height = birthday_height + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
 
     // Derive at index 5.
     let index_5 = NonHardenedChildIndex::from_index(5).unwrap();

@@ -74,7 +74,10 @@ pub(crate) mod zip48_multisig;
 
 // Re-export ZIP 48 multisig functions for use in other modules
 #[cfg(feature = "zip-48")]
-pub(crate) use zip48_multisig::generate_zip48_multisig_address_range;
+pub(crate) use zip48_multisig::{
+    generate_zip48_multisig_address_range, get_first_unexposed_zip48_multisig_address_index,
+    get_next_zip48_multisig_address_index, get_zip48_fvk, insert_zip48_multisig_address,
+};
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -2297,6 +2300,22 @@ mod tests {
     #[cfg(feature = "zip-48")]
     fn import_account_zip48_multisig() {
         zcash_client_backend::data_api::testing::transparent::import_account_zip48_multisig(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zip-48")]
+    fn get_next_zip48_multisig_address() {
+        zcash_client_backend::data_api::testing::transparent::get_next_zip48_multisig_address(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zip-48")]
+    fn get_zip48_multisig_address_for_index() {
+        zcash_client_backend::data_api::testing::transparent::get_zip48_multisig_address_for_index(
             TestDbFactory::default(),
         );
     }

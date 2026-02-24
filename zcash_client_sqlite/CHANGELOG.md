@@ -26,6 +26,8 @@ workspace.
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
 - `impl zcash_client_backend::data_api::WalletWrite::import_account_zip48_multisig()`
+- `impl zcash_client_backend::data_api::WalletWrite::get_next_zip48_multisig_address()`
+- `impl zcash_client_backend::data_api::WalletWrite::get_zip48_multisig_address_for_index()`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.

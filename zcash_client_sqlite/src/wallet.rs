@@ -86,7 +86,11 @@ use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
 
-use ::transparent::zip48;
+#[cfg(feature = "zip-48")]
+use {
+    ::transparent::{address::TransparentAddress, zip48},
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+};
 
 use zcash_client_backend::{
     DecryptedOutput,
@@ -4601,6 +4605,147 @@ pub mod testing {
 
         Ok(results)
     }
+}
+
+/// Derives and persists the next available address for a ZIP 48 transparent multisig account.
+///
+/// If there are pre-generated unexposed addresses, returns the first unexposed one.
+/// Otherwise, derives a new address at the next index.
+#[cfg(feature = "zip-48")]
+pub(crate) fn get_next_available_zip48_multisig_address<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    gap_limits: &GapLimits,
+    account_uuid: AccountUuid,
+    scope: zip32::Scope,
+) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    use ::transparent::keys::TransparentKeyScope;
+    use zcash_client_backend::wallet::{Exposure, GapMetadata};
+    use zcash_keys::keys::ReceiverRequirement::*;
+    use zcash_keys::keys::UnifiedAddressRequest;
+
+    let account =
+        get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+
+    // Get the ZIP 48 FVK
+    let fvk_bytes = transparent::get_zip48_fvk(conn, account.id)?;
+    let fvk_bytes = match fvk_bytes {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+
+    let fvk = zip48::FullViewingKey::parse_multipath_descriptor(&fvk_bytes, params)?;
+
+    let t_scope = TransparentKeyScope::from(scope);
+
+    // Ensure that we have pre-generated as many addresses as we can within the gap.
+    transparent::generate_gap_addresses(
+        conn,
+        params,
+        gap_limits,
+        account.id,
+        t_scope,
+        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        true,
+    )?;
+
+    // First, try to find an unexposed pre-generated address
+    let address_index = if let Some(unexposed_index) =
+        transparent::get_first_unexposed_zip48_multisig_address_index(conn, account.id, t_scope)?
+    {
+        unexposed_index
+    } else {
+        // No unexposed addresses, derive a new one
+        transparent::get_next_zip48_multisig_address_index(conn, account.id, t_scope)?
+    };
+
+    let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    // Derive the address and redeem script
+    let (address, redeem_script) = fvk.derive_address(scope, address_index);
+
+    // Insert/update the address in the database (this marks it as exposed at chain_tip)
+    transparent::insert_zip48_multisig_address(
+        conn,
+        params,
+        account.id,
+        t_scope,
+        address_index,
+        &address,
+        &redeem_script,
+        Some(chain_tip),
+    )?;
+
+    Ok(Some((
+        address,
+        TransparentAddressMetadata::zip48_multisig(
+            t_scope,
+            address_index,
+            redeem_script,
+            Exposure::Exposed {
+                at_height: chain_tip,
+                gap_metadata: GapMetadata::DerivationUnknown,
+            },
+            None,
+        ),
+    )))
+}
+
+/// Derives and persists an address at a specific index for a ZIP 48 transparent multisig account.
+#[cfg(feature = "zip-48")]
+pub(crate) fn get_zip48_multisig_address_for_index<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    account_uuid: AccountUuid,
+    scope: zip32::Scope,
+    address_index: ::transparent::keys::NonHardenedChildIndex,
+) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    use ::transparent::keys::TransparentKeyScope;
+    use zcash_client_backend::wallet::{Exposure, GapMetadata};
+
+    let account =
+        get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+
+    // Get the ZIP 48 FVK
+    let fvk_bytes = transparent::get_zip48_fvk(conn, account.id)?;
+    let fvk_bytes = match fvk_bytes {
+        Some(bytes) => bytes,
+        None => return Ok(None), // Not a multisig account
+    };
+
+    let fvk = zip48::FullViewingKey::parse_multipath_descriptor(&fvk_bytes, params)?;
+
+    let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    // Derive the address and redeem script
+    let (address, redeem_script) = fvk.derive_address(scope, address_index);
+
+    // Insert the address into the database (marks it as exposed at chain_tip)
+    let t_scope = TransparentKeyScope::from(scope);
+    transparent::insert_zip48_multisig_address(
+        conn,
+        params,
+        account.id,
+        t_scope,
+        address_index,
+        &address,
+        &redeem_script,
+        Some(chain_tip),
+    )?;
+
+    Ok(Some((
+        address,
+        TransparentAddressMetadata::zip48_multisig(
+            t_scope,
+            address_index,
+            redeem_script,
+            Exposure::Exposed {
+                at_height: chain_tip,
+                gap_metadata: GapMetadata::DerivationUnknown,
+            },
+            None,
+        ),
+    )))
 }
 
 #[cfg(test)]
