@@ -1268,6 +1268,13 @@ where
         self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
     }
 
+    /// Returns the locked balance in the given account at this point in the test.
+    pub fn get_locked_balance(&self, account: AccountIdT) -> Zatoshis {
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| {
+            balance.locked_value()
+        })
+    }
+
     /// Returns the balance in the given account that is spendable with the given number
     /// of confirmations at this point in the test.
     pub fn get_spendable_balance(

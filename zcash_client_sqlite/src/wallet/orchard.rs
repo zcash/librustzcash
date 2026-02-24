@@ -519,6 +519,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn explicit_note_locking() {
+        testing::pool::explicit_note_locking::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn proposal_level_note_locking() {
+        testing::pool::proposal_level_note_locking::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<OrchardPoolTester>()
     }
