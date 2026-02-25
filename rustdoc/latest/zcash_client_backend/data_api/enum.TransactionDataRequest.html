@@ -24,7 +24,7 @@ transparent address is requested.</p>
 <p>Fully transparent transactions, and transactions that do not contain either shielded inputs
 or shielded outputs belonging to the wallet, may not be discovered by the process of chain
 scanning; as a consequence, the wallet must actively query to find transactions that spend
-such funds. Ideally we’d be able to query by <a href="../../zcash_transparent/bundle/struct.OutPoint.html" title="struct zcash_transparent::bundle::OutPoint"><code>OutPoint</code></a> but this is not currently
+such funds. Ideally we’d be able to query by [<code>OutPoint</code>] but this is not currently
 functionality that is supported by the light wallet server.</p>
 <p>The caller evaluating this request on behalf of the wallet backend should respond to this
 request by detecting transactions involving the specified address within the provided block
@@ -34,7 +34,7 @@ for each transaction so detected. If no transactions are detected within the giv
 the caller should instead invoke <a href="trait.WalletWrite.html#method.notify_address_checked" title="method zcash_client_backend::data_api::WalletWrite::notify_address_checked"><code>WalletWrite::notify_address_checked</code></a> with
 <code>block_end_height - 1</code> as the <code>as_of_height</code> argument.</p>
 </div></div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-TransactionDataRequest" class="impl"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1178-1219">Source</a><a href="#impl-TransactionDataRequest" class="anchor">§</a><h3 class="code-header">impl <a class="enum" href="enum.TransactionDataRequest.html" title="enum zcash_client_backend::data_api::TransactionDataRequest">TransactionDataRequest</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.transactions_involving_address" class="method"><a class="src rightside" href="../../src/zcash_client_backend/data_api.rs.html#1202-1218">Source</a><h4 class="code-header">pub fn <a href="#method.transactions_involving_address" class="fn">transactions_involving_address</a>(
-    address: <a class="enum" href="../../zcash_transparent/address/enum.TransparentAddress.html" title="enum zcash_transparent::address::TransparentAddress">TransparentAddress</a>,
+    address: TransparentAddress,
     block_range_start: BlockHeight,
     block_range_end: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;,
     request_at: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/std/time/struct.SystemTime.html" title="struct std::time::SystemTime">SystemTime</a>&gt;,

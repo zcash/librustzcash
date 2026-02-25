@@ -4,7 +4,7 @@
         required: Zatoshis,
     },
     DustInputs {
-        transparent: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../zcash_transparent/bundle/struct.OutPoint.html" title="struct zcash_transparent::bundle::OutPoint">OutPoint</a>&gt;,
+        transparent: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;OutPoint&gt;,
         sapling: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;NoteRefT&gt;,
         orchard: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;NoteRefT&gt;,
     },
@@ -24,7 +24,7 @@ with value less than or equal to the marginal fee might be excluded, even
 though in practice they would not cause the fee to increase. Inputs with
 value greater than the marginal fee will never be excluded.</p>
 <p>The ordering of the inputs in each list is unspecified.</p>
-</div><div class="sub-variant" id="variant.DustInputs.fields"><h4>Fields</h4><div class="sub-variant-field"><span id="variant.DustInputs.field.transparent" class="section-header"><a href="#variant.DustInputs.field.transparent" class="anchor field">§</a><code>transparent: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../zcash_transparent/bundle/struct.OutPoint.html" title="struct zcash_transparent::bundle::OutPoint">OutPoint</a>&gt;</code></span><div class="docblock"><p>The outpoints for transparent inputs that could not be determined to
+</div><div class="sub-variant" id="variant.DustInputs.fields"><h4>Fields</h4><div class="sub-variant-field"><span id="variant.DustInputs.field.transparent" class="section-header"><a href="#variant.DustInputs.field.transparent" class="anchor field">§</a><code>transparent: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;OutPoint&gt;</code></span><div class="docblock"><p>The outpoints for transparent inputs that could not be determined to
 have economic value in the context of this input selection.</p>
 </div></div><div class="sub-variant-field"><span id="variant.DustInputs.field.sapling" class="section-header"><a href="#variant.DustInputs.field.sapling" class="anchor field">§</a><code>sapling: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;NoteRefT&gt;</code></span><div class="docblock"><p>The identifiers for Sapling inputs that could not be determined to
 have economic value in the context of this input selection.</p>
