@@ -2,12 +2,37 @@
 
 use std::{borrow::Cow, collections::BTreeMap};
 
-use nom::{AsChar, Parser};
+use nom::{
+    AsChar, Parser,
+    branch::alt,
+    bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
+    character::complete::{char, digit0},
+    combinator::{map_parser, opt, success, value},
+    multi::separated_list0,
+    sequence::{preceded, separated_pair, terminated, tuple},
+};
 use primitive_types::U256;
 use sha3::{Digest, Keccak256};
 use snafu::{OptionExt, ResultExt};
 
 use crate::error::*;
+
+/// Succeeds if all the input has been consumed by its child parser.
+///
+/// Identical to [`nom::combinator::all_consuming`] except it only accepts `&str` inputs
+/// and returns a different error.
+fn all_consuming<'i, O, F>(
+    mut f: F,
+) -> impl FnMut(&'i str) -> nom::IResult<&'i str, O, ParseError<'i>>
+where
+    F: Parser<&'i str, O, ParseError<'i>>,
+{
+    move |input| {
+        let (input, res) = f.parse(input)?;
+        snafu::ensure!(input.is_empty(), UnexpectedLeftoverInputSnafu { input });
+        Ok((input, res))
+    }
+}
 
 /// Zero or more consecutive digits.
 ///
@@ -90,32 +115,28 @@ impl Digits {
     }
 
     /// Parse at least `min` digits.
-    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, places) = parse_min(i, min, false)?;
-        Ok((i, Digits { places }))
-    }
-}
-
-/// Parse at least `min` digits.
-pub fn parse_min(i: &str, min: usize, is_hex: bool) -> nom::IResult<&str, Vec<u8>, ParseError<'_>> {
-    let radix = if is_hex { 16 } else { 10 };
-    let (i, chars) = nom::bytes::complete::take_while(|c: char| c.is_digit(radix))(i)?;
-    let data = chars
-        .chars()
-        .map(|c| {
-            c.to_digit(radix)
-                .expect("we already checked that this char was a digit") as u8
-        })
-        .collect::<Vec<_>>();
-    snafu::ensure!(
-        data.len() >= min,
-        DigitsMinimumSnafu {
-            min,
-            digits_len: data.len(),
-            input: i
+    pub fn parse_min(min: usize) -> impl Fn(&str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        move |i| {
+            let (i, chars) = digit0(i)?;
+            let places = chars
+                .chars()
+                .map(|c| {
+                    c.to_digit(10)
+                        .expect("we already checked that this char was a digit")
+                        as u8
+                })
+                .collect::<Vec<_>>();
+            snafu::ensure!(
+                places.len() >= min,
+                DigitsMinimumSnafu {
+                    min,
+                    digits_len: places.len(),
+                    input: i
+                }
+            );
+            Ok((i, Digits { places }))
         }
-    );
-    Ok((i, data))
+    }
 }
 
 /// One case-sensitive hexadecimal digit.
@@ -245,22 +266,24 @@ impl core::fmt::Display for HexDigits {
 
 impl HexDigits {
     /// Parse at least `min` digits.
-    pub fn parse_min(i: &str, min: usize) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, data) = nom::bytes::complete::take_while(|c: char| c.is_ascii_hexdigit())(i)?;
-        snafu::ensure!(
-            data.len() >= min,
-            DigitsMinimumSnafu {
-                min,
-                digits_len: data.len(),
-                input: i
+    pub fn parse_min(min: usize) -> impl Fn(&str) -> nom::IResult<&str, Self, ParseError<'_>> {
+        move |i| {
+            let (i, data) = take_while(|c: char| c.is_ascii_hexdigit())(i)?;
+            snafu::ensure!(
+                data.len() >= min,
+                DigitsMinimumSnafu {
+                    min,
+                    digits_len: data.len(),
+                    input: i
+                }
+            );
+            let mut places = vec![];
+            for c in data.chars() {
+                let digit = CaseSensitiveHexDigit::from_char(c)?;
+                places.push(digit);
             }
-        );
-        let mut places = vec![];
-        for c in data.chars() {
-            let digit = CaseSensitiveHexDigit::from_char(c)?;
-            places.push(digit);
+            Ok((i, HexDigits { places }))
         }
-        Ok((i, HexDigits { places }))
     }
 
     /// Returns whether all alphabetic digits are lowercase.
@@ -409,47 +432,36 @@ impl Number {
     /// number = [ "-" / "+" ] *DIGIT [ "." 1*DIGIT ] [ ( "e" / "E" ) [ 1*DIGIT ] ]
     /// ```
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        // Parse [ "-" / "+" ]
-        let parse_signum_pos = nom::character::complete::char('+').map(|_| true);
-        let parse_signum_neg = nom::character::complete::char('-').map(|_| false);
-        let parse_signum = parse_signum_pos.or(parse_signum_neg);
-        let (i, signum) = nom::combinator::opt(parse_signum)(i)?;
+        // Parse [ "-" / "+" ], returning `true` if "+"
+        let parse_signum = opt(char('+').map(|_| true).or(char('-').map(|_| false)));
 
         // Parse *DIGIT
-        let (i, integer) = Digits::parse_min(i, 0)?;
+        let parse_integer = Digits::parse_min(0);
 
         // Parse [ "." 1*DIGIT ]
-        fn parse_decimal(i: &str) -> nom::IResult<&str, Digits, ParseError<'_>> {
-            let (i, _dot) = nom::character::complete::char('.')(i)?;
-            let (i, digits) = Digits::parse_min(i, 1)?;
-            Ok((i, digits))
-        }
-        let (i, decimal) = nom::combinator::opt(parse_decimal)(i)?;
+        let parse_decimal = opt(preceded(char('.'), Digits::parse_min(1)));
 
         // Parse [ ( "e" / "E" ) [ 1*DIGIT ] ]
-        fn parse_exponent(i: &str) -> nom::IResult<&str, (bool, Option<Digits>), ParseError<'_>> {
-            // Parse ( "e" / "E" )
-            let parse_little_e = nom::character::complete::char('e').map(|_| true);
-            let parse_big_e = nom::character::complete::char('E').map(|_| false);
-            let mut parse_e = parse_little_e.or(parse_big_e);
-            let (i, little_e) = parse_e.parse(i)?;
+        fn parse_exponent(
+            i: &str,
+        ) -> nom::IResult<&str, Option<(bool, Option<Digits>)>, ParseError<'_>> {
+            // Parse ( "e" / "E" ), returning `true` if "e"
+            let parse_e = char('e').map(|_| true).or(char('E').map(|_| false));
 
             // Parse [ 1*DIGIT ]
-            let (i, maybe_exp) = nom::combinator::opt(|i| Digits::parse_min(i, 1))(i)?;
+            let maybe_exp = opt(Digits::parse_min(1));
 
-            Ok((i, (little_e, maybe_exp)))
+            opt(tuple((parse_e, maybe_exp))).parse(i)
         }
-        let (i, exponent) = nom::combinator::opt(parse_exponent)(i)?;
 
-        Ok((
-            i,
-            Self {
+        tuple((parse_signum, parse_integer, parse_decimal, parse_exponent))
+            .map(|(signum, integer, decimal, exponent)| Self {
                 signum,
                 integer,
                 decimal,
                 exponent,
-            },
-        ))
+            })
+            .parse(i)
     }
 
     /// Returns the value of the integer portion of the number.
@@ -652,7 +664,7 @@ impl EnsName {
             !c.is_whitespace() && !EnsName::DELIMITERS.contains(&c)
         }
 
-        let (i, name) = nom::bytes::complete::take_till(|c| !continue_parsing(c))(i)?;
+        let (i, name) = take_till(|c| !continue_parsing(c))(i)?;
         snafu::ensure!(!name.is_empty(), EnsMissingSnafu);
         snafu::ensure!(name.contains('.'), EnsDomainSnafu);
 
@@ -698,15 +710,12 @@ impl AddressOrEnsName {
     /// Parse an `EthereumAddress`.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse "0x" and then 40+ hex digits
-        fn parse_40plus_hex(i: &str) -> nom::IResult<&str, AddressOrEnsName, ParseError<'_>> {
-            let (i, _) = nom::bytes::complete::tag("0x")(i)?;
-            let (i, digits) = HexDigits::parse_min(i, 40)?;
-            Ok((i, AddressOrEnsName::Address(digits)))
-        }
-        let parse_ens = EnsName::parse.map(AddressOrEnsName::Name);
-        let mut parse_address = parse_40plus_hex.or(parse_ens);
-        let (i, address) = parse_address.parse(i)?;
-        Ok((i, address))
+        let parse_40plus_hex = preceded(tag("0x"), HexDigits::parse_min(40));
+
+        parse_40plus_hex
+            .map(AddressOrEnsName::Address)
+            .or(EnsName::parse.map(AddressOrEnsName::Name))
+            .parse(i)
     }
 
     /// Returns the ERC-55 validated string representation of the address, or the ENS name, if possible.
@@ -745,11 +754,9 @@ impl core::fmt::Display for UrlEncodedUnicodeString {
 
 impl UrlEncodedUnicodeString {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        fn should_continue_parsing(c: char) -> bool {
-            c.is_alphanumeric() || c == '%'
-        }
-        let (i, s) = nom::bytes::complete::take_while(should_continue_parsing)(i)?;
-        Ok((i, UrlEncodedUnicodeString(s.to_string())))
+        take_while(|c: char| c.is_alphanumeric() || c == '%')
+            .map(|s: &str| UrlEncodedUnicodeString(s.to_string()))
+            .parse(i)
     }
 
     pub fn encode(input: impl AsRef<str>) -> Self {
@@ -875,8 +882,9 @@ impl EthereumAbiTypeName {
             ];
             c.is_alphanum() || chars.contains(&c)
         }
-        let (i, s) = nom::bytes::complete::take_while1(is_type_char)(i)?;
-        Ok((i, EthereumAbiTypeName { name: s.to_owned() }))
+        take_while1(is_type_char)
+            .map(|s: &str| EthereumAbiTypeName { name: s.to_owned() })
+            .parse(i)
     }
 }
 
@@ -943,29 +951,28 @@ impl Parameter {
 
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // Parse the key blob
-        let (i, key_blob) = nom::bytes::complete::take_till1(|c| c == '=')(i)?;
-        let (i, _) = nom::bytes::complete::tag("=")(i)?;
+        let (i, key_blob) = terminated(take_till1(|c| c == '='), tag("="))(i)?;
 
         fn parse_number(
-            i: &str,
             f: fn(Number) -> Parameter,
-        ) -> nom::IResult<&str, Parameter, ParseError<'_>> {
-            let (i, number) =
-                Number::parse
-                    .parse(i)
-                    .map_err(|_| ParseError::InvalidParameterValue {
+        ) -> impl Fn(&str) -> nom::IResult<&str, Parameter, ParseError<'_>> {
+            move |i| {
+                Number::parse.map(f).parse(i).map_err(|_| {
+                    ParseError::InvalidParameterValue {
                         ty: "Number".to_string(),
-                    })?;
-            Ok((i, f(number)))
+                    }
+                    .into()
+                })
+            }
         }
         // If key in the parameter list is value, gasLimit, gasPrice or gas then
         // value MUST be a number. Otherwise, it must correspond to the TYPE
         // string used as key.
         Ok(match key_blob {
-            "value" => parse_number(i, Parameter::Value)?,
-            "gas" => parse_number(i, Parameter::Gas)?,
-            "gasLimit" => parse_number(i, Parameter::GasLimit)?,
-            "gasPrice" => parse_number(i, Parameter::GasPrice)?,
+            "value" => parse_number(Parameter::Value)(i)?,
+            "gas" => parse_number(Parameter::Gas)(i)?,
+            "gasLimit" => parse_number(Parameter::GasLimit)(i)?,
+            "gasPrice" => parse_number(Parameter::GasPrice)(i)?,
             other_key_blob => {
                 let (remaining_name_input, type_name) = EthereumAbiTypeName::parse(other_key_blob)?;
                 snafu::ensure!(
@@ -1019,17 +1026,12 @@ impl Parameters {
     /// This parser never fails.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
         // First parse into parameter "blobs", separated by '&'
-        let (i, blobs) = nom::multi::separated_list0(
-            nom::bytes::complete::tag("&"),
-            nom::bytes::complete::take_till1(|c| c == '&'),
-        )(i)?;
-        let mut params = vec![];
-        for blob in blobs.into_iter() {
-            let (j, param) = Parameter::parse(blob)?;
-            snafu::ensure!(j.is_empty(), UnexpectedLeftoverInputSnafu { input: j });
-            params.push(param);
-        }
-        Ok((i, Parameters(params)))
+        separated_list0(
+            tag("&"),
+            map_parser(take_till1(|c| c == '&'), all_consuming(Parameter::parse)),
+        )
+        .map(Parameters)
+        .parse(i)
     }
 
     /// Return an iterator over all parameters.
@@ -1159,17 +1161,16 @@ impl core::fmt::Display for SchemaPrefix {
 
 impl SchemaPrefix {
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, prefix) = nom::bytes::complete::take_till1(|c| c == ':')(i)?;
-        let (i, _) = nom::character::complete::char(':')(i)?;
-        let (i, maybe_pay) = nom::combinator::opt(nom::bytes::complete::tag("pay-"))(i)?;
-        let has_pay = maybe_pay.is_some();
-        Ok((
-            i,
-            SchemaPrefix {
-                prefix: prefix.to_string(),
-                has_pay,
-            },
-        ))
+        separated_pair(
+            take_till1(|c| c == ':'),
+            char(':'),
+            alt((value(true, tag("pay-")), success(false))),
+        )
+        .map(|(prefix, has_pay): (&str, _)| SchemaPrefix {
+            prefix: prefix.to_string(),
+            has_pay,
+        })
+        .parse(i)
     }
 
     /// Returns the schema prefix.
@@ -1198,7 +1199,7 @@ pub struct RawTransactionRequest {
     pub target_address: AddressOrEnsName,
     pub chain_id: Option<Digits>,
     pub function_name: Option<UrlEncodedUnicodeString>,
-    pub parameters: Parameters,
+    pub parameters: Option<Parameters>,
 }
 
 impl core::fmt::Display for RawTransactionRequest {
@@ -1220,7 +1221,7 @@ impl core::fmt::Display for RawTransactionRequest {
             f.write_str("/")?;
             fn_name.fmt(f)?;
         }
-        if !parameters.0.is_empty() {
+        if let Some(parameters) = parameters {
             f.write_str("?")?;
             parameters.fmt(f)?;
         }
@@ -1232,38 +1233,26 @@ impl core::fmt::Display for RawTransactionRequest {
 impl RawTransactionRequest {
     /// Parse a transaction request.
     pub fn parse(i: &str) -> nom::IResult<&str, Self, ParseError<'_>> {
-        let (i, schema_prefix) = SchemaPrefix::parse(i)?;
-        let (i, address_blob) = nom::bytes::complete::is_not("@/?")(i)?;
-        let (remaining_address_input, target_address) = AddressOrEnsName::parse(address_blob)?;
-        snafu::ensure!(
-            remaining_address_input.is_empty(),
-            UnexpectedLeftoverInputSnafu {
-                input: remaining_address_input
-            }
-        );
+        let chain_id = Digits::parse_min(1);
+        let function_name = UrlEncodedUnicodeString::parse;
 
-        let parse_chain_id =
-            nom::sequence::preceded(nom::bytes::complete::tag("@"), |i| Digits::parse_min(i, 1));
-        let (i, chain_id) = nom::combinator::opt(parse_chain_id)(i)?;
-
-        let parse_function_name = nom::sequence::preceded(
-            nom::bytes::complete::tag("/"),
-            UrlEncodedUnicodeString::parse,
-        );
-        let (i, function_name) = nom::combinator::opt(parse_function_name)(i)?;
-
-        let (i, _) = nom::combinator::opt(nom::bytes::complete::tag("?"))(i)?;
-        let (i, parameters) = Parameters::parse(i)?;
-        Ok((
-            i,
-            Self {
+        tuple((
+            SchemaPrefix::parse,
+            map_parser(is_not("@/?"), all_consuming(AddressOrEnsName::parse)),
+            opt(preceded(tag("@"), chain_id)),
+            opt(preceded(tag("/"), function_name)),
+            opt(preceded(tag("?"), Parameters::parse)),
+        ))
+        .map(
+            |(schema_prefix, target_address, chain_id, function_name, parameters)| Self {
                 schema_prefix,
                 target_address,
                 chain_id,
                 function_name,
                 parameters,
             },
-        ))
+        )
+        .parse(i)
     }
 }
 
@@ -1369,7 +1358,7 @@ mod test {
 
     #[test]
     fn parse_digits_sanity() {
-        let (i, seen_digits) = Digits::parse_min("256", 0).unwrap();
+        let (i, seen_digits) = Digits::parse_min(0)("256").unwrap();
         assert!(i.is_empty());
         assert_eq!(256, seen_digits.as_u64().unwrap())
     }
@@ -1378,7 +1367,7 @@ mod test {
         #[test]
         fn parse_digits(digits in arb_digits(1)) {
             let s = digits.to_string();
-            let (i, seen_digits) = Digits::parse_min(&s, 1).unwrap();
+            let (i, seen_digits) = Digits::parse_min(1)(&s).unwrap();
             assert_eq!("", i);
             assert_eq!(digits, seen_digits);
         }
@@ -1965,13 +1954,13 @@ mod test {
             prop::option::of(arb_parameters()),
         )
             .prop_map(
-                |(schema_prefix, target_address, chain_id, function_name, paramaters)| {
+                |(schema_prefix, target_address, chain_id, function_name, parameters)| {
                     RawTransactionRequest {
                         schema_prefix,
                         target_address,
                         chain_id,
                         function_name,
-                        parameters: paramaters.unwrap_or(Parameters(vec![])),
+                        parameters,
                     }
                 },
             )
@@ -2005,7 +1994,7 @@ mod test {
             "0xfb6916095ca1df60bb79Ce92ce3ea74c37c5d359",
             seen.target_address.to_string()
         );
-        let number = seen.parameters.value().unwrap().unwrap();
+        let number = seen.parameters.unwrap().value().unwrap().unwrap();
         assert_eq!(2, number.integer().unwrap());
         assert_eq!(2.014e18 as i128, number.as_i128().unwrap());
     }
@@ -2029,7 +2018,7 @@ mod test {
         ];
 
         for addy in addresses {
-            let (i, hexdigits) = HexDigits::parse_min(addy, 40).unwrap();
+            let (i, hexdigits) = HexDigits::parse_min(40)(addy).unwrap();
             assert!(i.is_empty(), "Should consume all input");
             let validation_result = hexdigits.validate_erc55();
             assert!(
@@ -2053,7 +2042,7 @@ mod test {
         ];
 
         for addy in borked_cases {
-            let (i, hexdigits) = HexDigits::parse_min(addy, 40).unwrap();
+            let (i, hexdigits) = HexDigits::parse_min(40)(addy).unwrap();
             assert!(i.is_empty(), "Should consume all input");
             let validation_result = hexdigits.validate_erc55();
             assert!(
@@ -2066,7 +2055,7 @@ mod test {
     #[test]
     fn digits_as_decimal_ratio_sanity() {
         let input = "0001234";
-        let (_, digits) = Digits::parse_min(input, 1).unwrap();
+        let (_, digits) = Digits::parse_min(1)(input).unwrap();
         let ratio = digits.as_decimal_ratio().unwrap();
         assert_eq!((1234, 10_000_000), ratio);
         assert_eq!(0.0001234, ratio.0 as f32 / ratio.1 as f32);
@@ -2077,5 +2066,17 @@ mod test {
         let input = "0e0";
         let (_, n) = Number::parse(input).unwrap();
         assert_eq!(n.as_i128().unwrap(), 0);
+    }
+
+    #[test]
+    fn round_trip_empty_params() {
+        let input = "ethereum:0x4040404040404040404040404040404040404040?";
+        let (i, seen) = RawTransactionRequest::parse(input)
+            .unwrap_or_else(|e| panic!("could not parse '{input}': {e}"));
+        pretty_assertions::assert_str_eq!(
+            input,
+            seen.to_string().as_str(),
+            "input: {input}\ni: {i}"
+        );
     }
 }
