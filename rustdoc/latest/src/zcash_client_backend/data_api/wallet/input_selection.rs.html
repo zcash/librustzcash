@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet/input_selection.rs`."><title>input_selection.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (b3869b94c 2026-02-23)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/wallet/</div>input_selection.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types related to the process of selecting inputs to be spent given a transaction request.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet/input_selection.rs`."><title>input_selection.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (859951e3c 2026-02-24)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/wallet/</div>input_selection.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Types related to the process of selecting inputs to be spent given a transaction request.
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="kw">use </span>core::marker::PhantomData;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>nonempty::NonEmpty;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>std::{
@@ -17,7 +17,7 @@
 <a href=#17 id=17 data-nosnippet>17</a>};
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>zcash_protocol::{
 <a href=#19 id=19 data-nosnippet>19</a>    PoolType, ShieldedProtocol,
-<a href=#20 id=20 data-nosnippet>20</a>    consensus::{<span class="self">self</span>, BlockHeight, BranchId},
+<a href=#20 id=20 data-nosnippet>20</a>    consensus::{<span class="self">self</span>, BlockHeight},
 <a href=#21 id=21 data-nosnippet>21</a>    memo::MemoBytes,
 <a href=#22 id=22 data-nosnippet>22</a>    value::{BalanceError, Zatoshis},
 <a href=#23 id=23 data-nosnippet>23</a>};
@@ -406,778 +406,779 @@
 <a href=#406 id=406 data-nosnippet>406</a>        <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
 <a href=#407 id=407 data-nosnippet>407</a>        </span><span class="kw">let </span>(sapling_supported, orchard_supported) =
 <a href=#408 id=408 data-nosnippet>408</a>            proposed_version.map_or(<span class="prelude-val">Ok</span>((<span class="bool-val">true</span>, <span class="bool-val">true</span>)), |v| {
-<a href=#409 id=409 data-nosnippet>409</a>                <span class="kw">let </span>branch_id = BranchId::for_height(params, BlockHeight::from(target_height));
-<a href=#410 id=410 data-nosnippet>410</a>                <span class="kw">if </span>v.valid_in_branch(branch_id) {
-<a href=#411 id=411 data-nosnippet>411</a>                    <span class="prelude-val">Ok</span>((
-<a href=#412 id=412 data-nosnippet>412</a>                        v.has_sapling(),
-<a href=#413 id=413 data-nosnippet>413</a>                        <span class="macro">cfg!</span>(feature = <span class="string">"orchard"</span>) &amp;&amp; v.has_orchard(),
-<a href=#414 id=414 data-nosnippet>414</a>                    ))
-<a href=#415 id=415 data-nosnippet>415</a>                } <span class="kw">else </span>{
-<a href=#416 id=416 data-nosnippet>416</a>                    <span class="prelude-val">Err</span>(ProposalError::IncompatibleTxVersion(branch_id))
-<a href=#417 id=417 data-nosnippet>417</a>                }
-<a href=#418 id=418 data-nosnippet>418</a>            })<span class="question-mark">?</span>;
-<a href=#419 id=419 data-nosnippet>419</a>        <span class="attr">#[cfg(not(feature = <span class="string">"unstable"</span>))]
-<a href=#420 id=420 data-nosnippet>420</a>        </span><span class="kw">let </span>(sapling_supported, orchard_supported) = (<span class="bool-val">true</span>, <span class="macro">cfg!</span>(feature = <span class="string">"orchard"</span>));
-<a href=#421 id=421 data-nosnippet>421</a>
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span><span class="kw-2">mut </span>transparent_outputs = <span class="macro">vec!</span>[];
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span><span class="kw-2">mut </span>sapling_outputs = <span class="macro">vec!</span>[];
-<a href=#424 id=424 data-nosnippet>424</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#425 id=425 data-nosnippet>425</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>orchard_outputs = <span class="macro">vec!</span>[];
-<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">let </span><span class="kw-2">mut </span>payment_pools = BTreeMap::new();
-<a href=#427 id=427 data-nosnippet>427</a>
-<a href=#428 id=428 data-nosnippet>428</a>        <span class="comment">// In a ZIP 320 pair, tr0 refers to the first transaction request that
-<a href=#429 id=429 data-nosnippet>429</a>        // collects shielded value and sends it to an ephemeral address, and tr1
-<a href=#430 id=430 data-nosnippet>430</a>        // refers to the second transaction request that pays the TEX addresses.
-<a href=#431 id=431 data-nosnippet>431</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#432 id=432 data-nosnippet>432</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_transparent_outputs = <span class="macro">vec!</span>[];
-<a href=#433 id=433 data-nosnippet>433</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#434 id=434 data-nosnippet>434</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_payments = <span class="macro">vec!</span>[];
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#436 id=436 data-nosnippet>436</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_payment_pools = BTreeMap::new();
-<a href=#437 id=437 data-nosnippet>437</a>        <span class="comment">// This balance value is just used for overflow checking; the actual value of ephemeral
-<a href=#438 id=438 data-nosnippet>438</a>        // outputs will be computed from the constructed `tr1_transparent_outputs` value
-<a href=#439 id=439 data-nosnippet>439</a>        // constructed below.
-<a href=#440 id=440 data-nosnippet>440</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#441 id=441 data-nosnippet>441</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>total_ephemeral = Zatoshis::ZERO;
-<a href=#442 id=442 data-nosnippet>442</a>
-<a href=#443 id=443 data-nosnippet>443</a>        <span class="kw">for </span>(idx, payment) <span class="kw">in </span>transaction_request.payments() {
-<a href=#444 id=444 data-nosnippet>444</a>            <span class="kw">let </span>payment_amount = payment
-<a href=#445 id=445 data-nosnippet>445</a>                .amount()
-<a href=#446 id=446 data-nosnippet>446</a>                .ok_or(ProposalError::PaymentAmountMissing(<span class="kw-2">*</span>idx))<span class="question-mark">?</span>;
-<a href=#447 id=447 data-nosnippet>447</a>            <span class="kw">let </span>recipient_address: Address = payment
-<a href=#448 id=448 data-nosnippet>448</a>                .recipient_address()
-<a href=#449 id=449 data-nosnippet>449</a>                .clone()
-<a href=#450 id=450 data-nosnippet>450</a>                .convert_if_network(params.network_type())<span class="question-mark">?</span>;
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a>            <span class="kw">match </span>recipient_address {
-<a href=#453 id=453 data-nosnippet>453</a>                Address::Transparent(addr) =&gt; {
-<a href=#454 id=454 data-nosnippet>454</a>                    payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
-<a href=#455 id=455 data-nosnippet>455</a>                    transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
-<a href=#456 id=456 data-nosnippet>456</a>                }
-<a href=#457 id=457 data-nosnippet>457</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#458 id=458 data-nosnippet>458</a>                </span>Address::Tex(data) =&gt; {
-<a href=#459 id=459 data-nosnippet>459</a>                    <span class="kw">let </span>p2pkh_addr = TransparentAddress::PublicKeyHash(data);
-<a href=#460 id=460 data-nosnippet>460</a>
-<a href=#461 id=461 data-nosnippet>461</a>                    tr1_payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
-<a href=#462 id=462 data-nosnippet>462</a>                    tr1_transparent_outputs
-<a href=#463 id=463 data-nosnippet>463</a>                        .push(TxOut::new(payment_amount, p2pkh_addr.script().into()));
-<a href=#464 id=464 data-nosnippet>464</a>                    tr1_payments.push(
-<a href=#465 id=465 data-nosnippet>465</a>                        Payment::new(
-<a href=#466 id=466 data-nosnippet>466</a>                            payment.recipient_address().clone(),
-<a href=#467 id=467 data-nosnippet>467</a>                            payment.amount(),
-<a href=#468 id=468 data-nosnippet>468</a>                            <span class="prelude-val">None</span>,
-<a href=#469 id=469 data-nosnippet>469</a>                            payment.label().cloned(),
-<a href=#470 id=470 data-nosnippet>470</a>                            payment.message().cloned(),
-<a href=#471 id=471 data-nosnippet>471</a>                            payment.other_params().to_vec(),
-<a href=#472 id=472 data-nosnippet>472</a>                        )
-<a href=#473 id=473 data-nosnippet>473</a>                        .expect(<span class="string">"cannot fail because memo is None"</span>),
-<a href=#474 id=474 data-nosnippet>474</a>                    );
-<a href=#475 id=475 data-nosnippet>475</a>                    total_ephemeral = (total_ephemeral + payment_amount)
-<a href=#476 id=476 data-nosnippet>476</a>                        .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))<span class="question-mark">?</span>;
-<a href=#477 id=477 data-nosnippet>477</a>                }
-<a href=#478 id=478 data-nosnippet>478</a>                <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#479 id=479 data-nosnippet>479</a>                </span>Address::Tex(<span class="kw">_</span>) =&gt; {
-<a href=#480 id=480 data-nosnippet>480</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Selection(
-<a href=#481 id=481 data-nosnippet>481</a>                        GreedyInputSelectorError::UnsupportedTexAddress,
-<a href=#482 id=482 data-nosnippet>482</a>                    ));
-<a href=#483 id=483 data-nosnippet>483</a>                }
-<a href=#484 id=484 data-nosnippet>484</a>                Address::Sapling(<span class="kw">_</span>) =&gt; {
-<a href=#485 id=485 data-nosnippet>485</a>                    payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::SAPLING);
-<a href=#486 id=486 data-nosnippet>486</a>                    sapling_outputs.push(SaplingPayment(payment_amount));
-<a href=#487 id=487 data-nosnippet>487</a>                }
-<a href=#488 id=488 data-nosnippet>488</a>                Address::Unified(addr) =&gt; {
-<a href=#489 id=489 data-nosnippet>489</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#490 id=490 data-nosnippet>490</a>                    </span><span class="kw">if </span>addr.has_orchard() &amp;&amp; orchard_supported {
-<a href=#491 id=491 data-nosnippet>491</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::ORCHARD);
-<a href=#492 id=492 data-nosnippet>492</a>                        orchard_outputs.push(OrchardPayment(payment_amount));
-<a href=#493 id=493 data-nosnippet>493</a>                        <span class="kw">continue</span>;
-<a href=#494 id=494 data-nosnippet>494</a>                    }
-<a href=#495 id=495 data-nosnippet>495</a>
-<a href=#496 id=496 data-nosnippet>496</a>                    <span class="kw">if </span>addr.has_sapling() &amp;&amp; sapling_supported {
-<a href=#497 id=497 data-nosnippet>497</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::SAPLING);
-<a href=#498 id=498 data-nosnippet>498</a>                        sapling_outputs.push(SaplingPayment(payment_amount));
-<a href=#499 id=499 data-nosnippet>499</a>                        <span class="kw">continue</span>;
-<a href=#500 id=500 data-nosnippet>500</a>                    }
-<a href=#501 id=501 data-nosnippet>501</a>
-<a href=#502 id=502 data-nosnippet>502</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(addr) = addr.transparent() {
-<a href=#503 id=503 data-nosnippet>503</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
-<a href=#504 id=504 data-nosnippet>504</a>                        transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
-<a href=#505 id=505 data-nosnippet>505</a>                        <span class="kw">continue</span>;
-<a href=#506 id=506 data-nosnippet>506</a>                    }
-<a href=#507 id=507 data-nosnippet>507</a>
-<a href=#508 id=508 data-nosnippet>508</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Selection(
-<a href=#509 id=509 data-nosnippet>509</a>                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
-<a href=#510 id=510 data-nosnippet>510</a>                    ));
-<a href=#511 id=511 data-nosnippet>511</a>                }
-<a href=#512 id=512 data-nosnippet>512</a>            }
-<a href=#513 id=513 data-nosnippet>513</a>        }
-<a href=#514 id=514 data-nosnippet>514</a>
-<a href=#515 id=515 data-nosnippet>515</a>        <span class="kw">let </span><span class="kw-2">mut </span>shielded_inputs = ReceivedNotes::empty();
-<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">let </span><span class="kw-2">mut </span>prior_available = Zatoshis::ZERO;
-<a href=#517 id=517 data-nosnippet>517</a>        <span class="kw">let </span><span class="kw-2">mut </span>amount_required = Zatoshis::ZERO;
-<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span><span class="kw-2">mut </span>exclude: Vec&lt;DbT::NoteRef&gt; = <span class="macro">vec!</span>[];
-<a href=#519 id=519 data-nosnippet>519</a>
-<a href=#520 id=520 data-nosnippet>520</a>        <span class="comment">// This loop is guaranteed to terminate because on each iteration we check that the amount
-<a href=#521 id=521 data-nosnippet>521</a>        // of funds selected is strictly increasing. The loop will either return a successful
-<a href=#522 id=522 data-nosnippet>522</a>        // result or the wallet will eventually run out of funds to select.
-<a href=#523 id=523 data-nosnippet>523</a>        </span><span class="kw">loop </span>{
-<a href=#524 id=524 data-nosnippet>524</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#525 id=525 data-nosnippet>525</a>            </span><span class="kw">let </span>use_sapling = <span class="bool-val">true</span>;
-<a href=#526 id=526 data-nosnippet>526</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#527 id=527 data-nosnippet>527</a>            </span><span class="kw">let </span>(use_sapling, use_orchard) = {
-<a href=#528 id=528 data-nosnippet>528</a>                <span class="kw">let </span>(sapling_input_total, orchard_input_total) = (
-<a href=#529 id=529 data-nosnippet>529</a>                    shielded_inputs.sapling_value()<span class="question-mark">?</span>,
-<a href=#530 id=530 data-nosnippet>530</a>                    shielded_inputs.orchard_value()<span class="question-mark">?</span>,
-<a href=#531 id=531 data-nosnippet>531</a>                );
-<a href=#532 id=532 data-nosnippet>532</a>
-<a href=#533 id=533 data-nosnippet>533</a>                <span class="comment">// Use Sapling inputs if there are no Orchard outputs or if there are insufficient
-<a href=#534 id=534 data-nosnippet>534</a>                // funds from Orchard inputs to cover the amount required.
-<a href=#535 id=535 data-nosnippet>535</a>                </span><span class="kw">let </span>use_sapling =
-<a href=#536 id=536 data-nosnippet>536</a>                    orchard_outputs.is_empty() || amount_required &gt; orchard_input_total;
-<a href=#537 id=537 data-nosnippet>537</a>                <span class="comment">// Use Orchard inputs if there are insufficient funds from Sapling inputs to cover
-<a href=#538 id=538 data-nosnippet>538</a>                // the amount required.
-<a href=#539 id=539 data-nosnippet>539</a>                </span><span class="kw">let </span>use_orchard = !use_sapling || amount_required &gt; sapling_input_total;
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>                (use_sapling, use_orchard)
-<a href=#542 id=542 data-nosnippet>542</a>            };
-<a href=#543 id=543 data-nosnippet>543</a>
-<a href=#544 id=544 data-nosnippet>544</a>            <span class="kw">let </span>sapling_inputs = <span class="kw">if </span>use_sapling {
-<a href=#545 id=545 data-nosnippet>545</a>                shielded_inputs
-<a href=#546 id=546 data-nosnippet>546</a>                    .sapling()
-<a href=#547 id=547 data-nosnippet>547</a>                    .iter()
-<a href=#548 id=548 data-nosnippet>548</a>                    .map(|i| (<span class="kw-2">*</span>i.internal_note_id(), i.note().value()))
-<a href=#549 id=549 data-nosnippet>549</a>                    .collect()
-<a href=#550 id=550 data-nosnippet>550</a>            } <span class="kw">else </span>{
-<a href=#551 id=551 data-nosnippet>551</a>                <span class="macro">vec!</span>[]
-<a href=#552 id=552 data-nosnippet>552</a>            };
-<a href=#553 id=553 data-nosnippet>553</a>
-<a href=#554 id=554 data-nosnippet>554</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#555 id=555 data-nosnippet>555</a>            </span><span class="kw">let </span>orchard_inputs = <span class="kw">if </span>use_orchard {
-<a href=#556 id=556 data-nosnippet>556</a>                shielded_inputs
-<a href=#557 id=557 data-nosnippet>557</a>                    .orchard()
-<a href=#558 id=558 data-nosnippet>558</a>                    .iter()
-<a href=#559 id=559 data-nosnippet>559</a>                    .map(|i| (<span class="kw-2">*</span>i.internal_note_id(), i.note().value()))
-<a href=#560 id=560 data-nosnippet>560</a>                    .collect()
-<a href=#561 id=561 data-nosnippet>561</a>            } <span class="kw">else </span>{
-<a href=#562 id=562 data-nosnippet>562</a>                <span class="macro">vec!</span>[]
-<a href=#563 id=563 data-nosnippet>563</a>            };
-<a href=#564 id=564 data-nosnippet>564</a>
-<a href=#565 id=565 data-nosnippet>565</a>            <span class="kw">let </span>selected_input_ids = sapling_inputs.iter().map(|(id, <span class="kw">_</span>)| id);
-<a href=#566 id=566 data-nosnippet>566</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#567 id=567 data-nosnippet>567</a>            </span><span class="kw">let </span>selected_input_ids =
-<a href=#568 id=568 data-nosnippet>568</a>                selected_input_ids.chain(orchard_inputs.iter().map(|(id, <span class="kw">_</span>)| id));
-<a href=#569 id=569 data-nosnippet>569</a>
-<a href=#570 id=570 data-nosnippet>570</a>            <span class="kw">let </span>selected_input_ids = selected_input_ids.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-<a href=#571 id=571 data-nosnippet>571</a>
-<a href=#572 id=572 data-nosnippet>572</a>            <span class="kw">let </span>wallet_meta = change_strategy
-<a href=#573 id=573 data-nosnippet>573</a>                .fetch_wallet_meta(wallet_db, account, target_height, <span class="kw-2">&amp;</span>selected_input_ids)
-<a href=#574 id=574 data-nosnippet>574</a>                .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
-<a href=#575 id=575 data-nosnippet>575</a>
-<a href=#576 id=576 data-nosnippet>576</a>            <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#577 id=577 data-nosnippet>577</a>            </span><span class="kw">let </span>ephemeral_output_value = <span class="prelude-val">None</span>;
-<a href=#578 id=578 data-nosnippet>578</a>
-<a href=#579 id=579 data-nosnippet>579</a>            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#580 id=580 data-nosnippet>580</a>            </span><span class="kw">let </span>(ephemeral_output_value, tr1_balance_opt) = {
-<a href=#581 id=581 data-nosnippet>581</a>                <span class="kw">if </span>tr1_transparent_outputs.is_empty() {
-<a href=#582 id=582 data-nosnippet>582</a>                    (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
-<a href=#583 id=583 data-nosnippet>583</a>                } <span class="kw">else </span>{
-<a href=#584 id=584 data-nosnippet>584</a>                    <span class="comment">// The ephemeral input going into transaction 1 must be able to pay that
-<a href=#585 id=585 data-nosnippet>585</a>                    // transaction's fee, as well as the TEX address payments.
-<a href=#586 id=586 data-nosnippet>586</a>
-<a href=#587 id=587 data-nosnippet>587</a>                    // First compute the required total with an additional zero input,
-<a href=#588 id=588 data-nosnippet>588</a>                    // catching the `InsufficientFunds` error to obtain the required amount
-<a href=#589 id=589 data-nosnippet>589</a>                    // given the provided change strategy. Ignore the change memo in order
-<a href=#590 id=590 data-nosnippet>590</a>                    // to avoid adding a change output.
-<a href=#591 id=591 data-nosnippet>591</a>                    </span><span class="kw">let </span>tr1_required_input_value = <span class="kw">match </span>change_strategy
-<a href=#592 id=592 data-nosnippet>592</a>                        .compute_balance::&lt;<span class="kw">_</span>, DbT::NoteRef&gt;(
-<a href=#593 id=593 data-nosnippet>593</a>                            params,
-<a href=#594 id=594 data-nosnippet>594</a>                            target_height,
-<a href=#595 id=595 data-nosnippet>595</a>                            <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
-<a href=#596 id=596 data-nosnippet>596</a>                            <span class="kw-2">&amp;</span>tr1_transparent_outputs,
-<a href=#597 id=597 data-nosnippet>597</a>                            <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
-<a href=#598 id=598 data-nosnippet>598</a>                            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#599 id=599 data-nosnippet>599</a>                            </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
-<a href=#600 id=600 data-nosnippet>600</a>                            <span class="prelude-val">Some</span>(EphemeralBalance::Input(Zatoshis::ZERO)),
-<a href=#601 id=601 data-nosnippet>601</a>                            <span class="kw-2">&amp;</span>wallet_meta,
-<a href=#602 id=602 data-nosnippet>602</a>                        ) {
-<a href=#603 id=603 data-nosnippet>603</a>                        <span class="prelude-val">Err</span>(ChangeError::InsufficientFunds { required, .. }) =&gt; required,
-<a href=#604 id=604 data-nosnippet>604</a>                        <span class="prelude-val">Err</span>(ChangeError::DustInputs { .. }) =&gt; {
-<a href=#605 id=605 data-nosnippet>605</a>                            <span class="macro">unreachable!</span>(<span class="string">"no inputs were supplied"</span>)
-<a href=#606 id=606 data-nosnippet>606</a>                        }
-<a href=#607 id=607 data-nosnippet>607</a>                        <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
-<a href=#608 id=608 data-nosnippet>608</a>                        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; Zatoshis::ZERO, <span class="comment">// shouldn't happen
-<a href=#609 id=609 data-nosnippet>609</a>                    </span>};
-<a href=#610 id=610 data-nosnippet>610</a>
-<a href=#611 id=611 data-nosnippet>611</a>                    <span class="comment">// Now recompute to obtain the `TransactionBalance` and verify that it
-<a href=#612 id=612 data-nosnippet>612</a>                    // fully accounts for the required fees.
-<a href=#613 id=613 data-nosnippet>613</a>                    </span><span class="kw">let </span>tr1_balance = change_strategy.compute_balance::&lt;<span class="kw">_</span>, DbT::NoteRef&gt;(
-<a href=#614 id=614 data-nosnippet>614</a>                        params,
-<a href=#615 id=615 data-nosnippet>615</a>                        target_height,
-<a href=#616 id=616 data-nosnippet>616</a>                        <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
-<a href=#617 id=617 data-nosnippet>617</a>                        <span class="kw-2">&amp;</span>tr1_transparent_outputs,
-<a href=#618 id=618 data-nosnippet>618</a>                        <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
-<a href=#619 id=619 data-nosnippet>619</a>                        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#620 id=620 data-nosnippet>620</a>                        </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
-<a href=#621 id=621 data-nosnippet>621</a>                        <span class="prelude-val">Some</span>(EphemeralBalance::Input(tr1_required_input_value)),
-<a href=#622 id=622 data-nosnippet>622</a>                        <span class="kw-2">&amp;</span>wallet_meta,
-<a href=#623 id=623 data-nosnippet>623</a>                    )<span class="question-mark">?</span>;
-<a href=#624 id=624 data-nosnippet>624</a>                    <span class="macro">assert_eq!</span>(tr1_balance.total(), tr1_balance.fee_required());
-<a href=#625 id=625 data-nosnippet>625</a>
-<a href=#626 id=626 data-nosnippet>626</a>                    (<span class="prelude-val">Some</span>(tr1_required_input_value), <span class="prelude-val">Some</span>(tr1_balance))
-<a href=#627 id=627 data-nosnippet>627</a>                }
-<a href=#628 id=628 data-nosnippet>628</a>            };
-<a href=#629 id=629 data-nosnippet>629</a>
-<a href=#630 id=630 data-nosnippet>630</a>            <span class="comment">// In the ZIP 320 case, this is the balance for transaction 0, taking into account
-<a href=#631 id=631 data-nosnippet>631</a>            // the ephemeral output.
-<a href=#632 id=632 data-nosnippet>632</a>            </span><span class="kw">let </span>tr0_balance = change_strategy.compute_balance(
-<a href=#633 id=633 data-nosnippet>633</a>                params,
-<a href=#634 id=634 data-nosnippet>634</a>                target_height,
-<a href=#635 id=635 data-nosnippet>635</a>                <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
-<a href=#636 id=636 data-nosnippet>636</a>                <span class="kw-2">&amp;</span>transparent_outputs,
-<a href=#637 id=637 data-nosnippet>637</a>                <span class="kw-2">&amp;</span>(
-<a href=#638 id=638 data-nosnippet>638</a>                    ::sapling::builder::BundleType::DEFAULT,
-<a href=#639 id=639 data-nosnippet>639</a>                    <span class="kw-2">&amp;</span>sapling_inputs[..],
-<a href=#640 id=640 data-nosnippet>640</a>                    <span class="kw-2">&amp;</span>sapling_outputs[..],
-<a href=#641 id=641 data-nosnippet>641</a>                ),
-<a href=#642 id=642 data-nosnippet>642</a>                <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#643 id=643 data-nosnippet>643</a>                </span><span class="kw-2">&amp;</span>(
-<a href=#644 id=644 data-nosnippet>644</a>                    ::orchard::builder::BundleType::DEFAULT,
-<a href=#645 id=645 data-nosnippet>645</a>                    <span class="kw-2">&amp;</span>orchard_inputs[..],
-<a href=#646 id=646 data-nosnippet>646</a>                    <span class="kw-2">&amp;</span>orchard_outputs[..],
-<a href=#647 id=647 data-nosnippet>647</a>                ),
-<a href=#648 id=648 data-nosnippet>648</a>                ephemeral_output_value.map(EphemeralBalance::Output),
-<a href=#649 id=649 data-nosnippet>649</a>                <span class="kw-2">&amp;</span>wallet_meta,
-<a href=#650 id=650 data-nosnippet>650</a>            );
-<a href=#651 id=651 data-nosnippet>651</a>
-<a href=#652 id=652 data-nosnippet>652</a>            <span class="kw">match </span>tr0_balance {
-<a href=#653 id=653 data-nosnippet>653</a>                <span class="prelude-val">Ok</span>(tr0_balance) =&gt; {
-<a href=#654 id=654 data-nosnippet>654</a>                    <span class="comment">// At this point, we have enough input value to pay for everything, so we
-<a href=#655 id=655 data-nosnippet>655</a>                    // return here.
-<a href=#656 id=656 data-nosnippet>656</a>                    </span><span class="kw">let </span>shielded_inputs =
-<a href=#657 id=657 data-nosnippet>657</a>                        NonEmpty::from_vec(shielded_inputs.into_vec(<span class="kw-2">&amp;</span>SimpleNoteRetention {
-<a href=#658 id=658 data-nosnippet>658</a>                            sapling: use_sapling,
-<a href=#659 id=659 data-nosnippet>659</a>                            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#660 id=660 data-nosnippet>660</a>                            </span>orchard: use_orchard,
-<a href=#661 id=661 data-nosnippet>661</a>                        }))
-<a href=#662 id=662 data-nosnippet>662</a>                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
-<a href=#663 id=663 data-nosnippet>663</a>
-<a href=#664 id=664 data-nosnippet>664</a>                    <span class="kw">return </span>build_proposal(
-<a href=#665 id=665 data-nosnippet>665</a>                        change_strategy.fee_rule(),
-<a href=#666 id=666 data-nosnippet>666</a>                        tr0_balance,
-<a href=#667 id=667 data-nosnippet>667</a>                        target_height,
-<a href=#668 id=668 data-nosnippet>668</a>                        shielded_inputs,
-<a href=#669 id=669 data-nosnippet>669</a>                        transaction_request,
-<a href=#670 id=670 data-nosnippet>670</a>                        payment_pools,
-<a href=#671 id=671 data-nosnippet>671</a>                        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#672 id=672 data-nosnippet>672</a>                        </span>ephemeral_output_value.zip(tr1_balance_opt).map(
-<a href=#673 id=673 data-nosnippet>673</a>                            |(ephemeral_output_value, tr1_balance)| EphemeralStepConfig {
-<a href=#674 id=674 data-nosnippet>674</a>                                ephemeral_output_value,
-<a href=#675 id=675 data-nosnippet>675</a>                                tr1_balance,
-<a href=#676 id=676 data-nosnippet>676</a>                                tr1_payments,
-<a href=#677 id=677 data-nosnippet>677</a>                                tr1_payment_pools,
-<a href=#678 id=678 data-nosnippet>678</a>                            },
-<a href=#679 id=679 data-nosnippet>679</a>                        ),
-<a href=#680 id=680 data-nosnippet>680</a>                    )
-<a href=#681 id=681 data-nosnippet>681</a>                    .map_err(InputSelectorError::Proposal);
-<a href=#682 id=682 data-nosnippet>682</a>                }
-<a href=#683 id=683 data-nosnippet>683</a>                <span class="prelude-val">Err</span>(ChangeError::DustInputs {
-<a href=#684 id=684 data-nosnippet>684</a>                    <span class="kw-2">mut </span>sapling,
-<a href=#685 id=685 data-nosnippet>685</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#686 id=686 data-nosnippet>686</a>                    </span><span class="kw-2">mut </span>orchard,
-<a href=#687 id=687 data-nosnippet>687</a>                    ..
-<a href=#688 id=688 data-nosnippet>688</a>                }) =&gt; {
-<a href=#689 id=689 data-nosnippet>689</a>                    exclude.append(<span class="kw-2">&amp;mut </span>sapling);
-<a href=#690 id=690 data-nosnippet>690</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#691 id=691 data-nosnippet>691</a>                    </span>exclude.append(<span class="kw-2">&amp;mut </span>orchard);
-<a href=#692 id=692 data-nosnippet>692</a>                }
-<a href=#693 id=693 data-nosnippet>693</a>                <span class="prelude-val">Err</span>(ChangeError::InsufficientFunds { required, .. }) =&gt; {
-<a href=#694 id=694 data-nosnippet>694</a>                    amount_required = required;
-<a href=#695 id=695 data-nosnippet>695</a>                }
-<a href=#696 id=696 data-nosnippet>696</a>                <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
-<a href=#697 id=697 data-nosnippet>697</a>            }
-<a href=#698 id=698 data-nosnippet>698</a>
-<a href=#699 id=699 data-nosnippet>699</a>            <span class="kw">let </span>selectable_pools = {
-<a href=#700 id=700 data-nosnippet>700</a>                <span class="kw">if </span>orchard_supported &amp;&amp; sapling_supported {
-<a href=#701 id=701 data-nosnippet>701</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
-<a href=#702 id=702 data-nosnippet>702</a>                } <span class="kw">else if </span>orchard_supported {
-<a href=#703 id=703 data-nosnippet>703</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Orchard][..]
-<a href=#704 id=704 data-nosnippet>704</a>                } <span class="kw">else if </span>sapling_supported {
-<a href=#705 id=705 data-nosnippet>705</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Sapling][..]
-<a href=#706 id=706 data-nosnippet>706</a>                } <span class="kw">else </span>{
-<a href=#707 id=707 data-nosnippet>707</a>                    <span class="kw-2">&amp;</span>[]
-<a href=#708 id=708 data-nosnippet>708</a>                }
-<a href=#709 id=709 data-nosnippet>709</a>            };
-<a href=#710 id=710 data-nosnippet>710</a>
-<a href=#711 id=711 data-nosnippet>711</a>            shielded_inputs = wallet_db
-<a href=#712 id=712 data-nosnippet>712</a>                .select_spendable_notes(
-<a href=#713 id=713 data-nosnippet>713</a>                    account,
-<a href=#714 id=714 data-nosnippet>714</a>                    TargetValue::AtLeast(amount_required),
-<a href=#715 id=715 data-nosnippet>715</a>                    selectable_pools,
-<a href=#716 id=716 data-nosnippet>716</a>                    target_height,
-<a href=#717 id=717 data-nosnippet>717</a>                    confirmations_policy,
-<a href=#718 id=718 data-nosnippet>718</a>                    <span class="kw-2">&amp;</span>exclude,
-<a href=#719 id=719 data-nosnippet>719</a>                )
-<a href=#720 id=720 data-nosnippet>720</a>                .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
-<a href=#721 id=721 data-nosnippet>721</a>
-<a href=#722 id=722 data-nosnippet>722</a>            <span class="kw">let </span>new_available = shielded_inputs.total_value()<span class="question-mark">?</span>;
-<a href=#723 id=723 data-nosnippet>723</a>            <span class="kw">if </span>new_available &lt;= prior_available {
-<a href=#724 id=724 data-nosnippet>724</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::InsufficientFunds {
-<a href=#725 id=725 data-nosnippet>725</a>                    required: amount_required,
-<a href=#726 id=726 data-nosnippet>726</a>                    available: new_available,
-<a href=#727 id=727 data-nosnippet>727</a>                });
-<a href=#728 id=728 data-nosnippet>728</a>            } <span class="kw">else </span>{
-<a href=#729 id=729 data-nosnippet>729</a>                <span class="comment">// If the set of selected inputs has changed after selection, we will loop again
-<a href=#730 id=730 data-nosnippet>730</a>                // and see whether we now have enough funds.
-<a href=#731 id=731 data-nosnippet>731</a>                </span>prior_available = new_available;
-<a href=#732 id=732 data-nosnippet>732</a>            }
-<a href=#733 id=733 data-nosnippet>733</a>        }
-<a href=#734 id=734 data-nosnippet>734</a>    }
-<a href=#735 id=735 data-nosnippet>735</a>}
-<a href=#736 id=736 data-nosnippet>736</a>
-<a href=#737 id=737 data-nosnippet>737</a><span class="attr">#[allow(clippy::type_complexity, clippy::too_many_arguments)]
-<a href=#738 id=738 data-nosnippet>738</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>propose_send_max&lt;ParamsT, InputSourceT, FeeRuleT&gt;(
-<a href=#739 id=739 data-nosnippet>739</a>    params: <span class="kw-2">&amp;</span>ParamsT,
-<a href=#740 id=740 data-nosnippet>740</a>    wallet_db: <span class="kw-2">&amp;</span>InputSourceT,
-<a href=#741 id=741 data-nosnippet>741</a>    fee_rule: <span class="kw-2">&amp;</span>FeeRuleT,
-<a href=#742 id=742 data-nosnippet>742</a>    source_account: InputSourceT::AccountId,
-<a href=#743 id=743 data-nosnippet>743</a>    spend_pools: <span class="kw-2">&amp;</span>[ShieldedProtocol],
-<a href=#744 id=744 data-nosnippet>744</a>    target_height: TargetHeight,
-<a href=#745 id=745 data-nosnippet>745</a>    anchor_height: BlockHeight,
-<a href=#746 id=746 data-nosnippet>746</a>    mode: MaxSpendMode,
-<a href=#747 id=747 data-nosnippet>747</a>    confirmations_policy: ConfirmationsPolicy,
-<a href=#748 id=748 data-nosnippet>748</a>    recipient: ZcashAddress,
-<a href=#749 id=749 data-nosnippet>749</a>    memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
-<a href=#750 id=750 data-nosnippet>750</a>) -&gt; <span class="prelude-ty">Result</span>&lt;
-<a href=#751 id=751 data-nosnippet>751</a>    Proposal&lt;FeeRuleT, InputSourceT::NoteRef&gt;,
-<a href=#752 id=752 data-nosnippet>752</a>    InputSelectorError&lt;InputSourceT::Error, BalanceError, FeeRuleT::Error, InputSourceT::NoteRef&gt;,
-<a href=#753 id=753 data-nosnippet>753</a>&gt;
-<a href=#754 id=754 data-nosnippet>754</a><span class="kw">where
-<a href=#755 id=755 data-nosnippet>755</a>    </span>ParamsT: consensus::Parameters,
-<a href=#756 id=756 data-nosnippet>756</a>    InputSourceT: InputSource,
-<a href=#757 id=757 data-nosnippet>757</a>    FeeRuleT: FeeRule + Clone,
-<a href=#758 id=758 data-nosnippet>758</a>{
-<a href=#759 id=759 data-nosnippet>759</a>    <span class="kw">let </span>spendable_notes = wallet_db
-<a href=#760 id=760 data-nosnippet>760</a>        .select_spendable_notes(
-<a href=#761 id=761 data-nosnippet>761</a>            source_account,
-<a href=#762 id=762 data-nosnippet>762</a>            TargetValue::AllFunds(mode),
-<a href=#763 id=763 data-nosnippet>763</a>            spend_pools,
-<a href=#764 id=764 data-nosnippet>764</a>            target_height,
-<a href=#765 id=765 data-nosnippet>765</a>            confirmations_policy,
-<a href=#766 id=766 data-nosnippet>766</a>            <span class="kw-2">&amp;</span>[],
-<a href=#767 id=767 data-nosnippet>767</a>        )
-<a href=#768 id=768 data-nosnippet>768</a>        .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
-<a href=#769 id=769 data-nosnippet>769</a>
-<a href=#770 id=770 data-nosnippet>770</a>    <span class="kw">let </span>input_total = spendable_notes
-<a href=#771 id=771 data-nosnippet>771</a>        .total_value()
-<a href=#772 id=772 data-nosnippet>772</a>        .map_err(InputSelectorError::Selection)<span class="question-mark">?</span>;
-<a href=#773 id=773 data-nosnippet>773</a>
-<a href=#774 id=774 data-nosnippet>774</a>    <span class="kw">let </span><span class="kw-2">mut </span>payment_pools = BTreeMap::new();
-<a href=#775 id=775 data-nosnippet>775</a>
-<a href=#776 id=776 data-nosnippet>776</a>    <span class="kw">let </span>sapling_output_count = {
-<a href=#777 id=777 data-nosnippet>777</a>        <span class="comment">// we require a sapling output if the recipient has a Sapling receiver but not an Orchard
-<a href=#778 id=778 data-nosnippet>778</a>        // receiver.
-<a href=#779 id=779 data-nosnippet>779</a>        </span><span class="kw">let </span>requested_sapling_outputs: usize = <span class="kw">if </span>recipient.can_receive_as(PoolType::SAPLING)
-<a href=#780 id=780 data-nosnippet>780</a>            &amp;&amp; !recipient.can_receive_as(PoolType::ORCHARD)
-<a href=#781 id=781 data-nosnippet>781</a>        {
-<a href=#782 id=782 data-nosnippet>782</a>            payment_pools.insert(<span class="number">0</span>, PoolType::SAPLING);
-<a href=#783 id=783 data-nosnippet>783</a>            <span class="number">1
-<a href=#784 id=784 data-nosnippet>784</a>        </span>} <span class="kw">else </span>{
-<a href=#785 id=785 data-nosnippet>785</a>            <span class="number">0
-<a href=#786 id=786 data-nosnippet>786</a>        </span>};
-<a href=#787 id=787 data-nosnippet>787</a>
-<a href=#788 id=788 data-nosnippet>788</a>        ::sapling::builder::BundleType::DEFAULT
-<a href=#789 id=789 data-nosnippet>789</a>            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
-<a href=#790 id=790 data-nosnippet>790</a>            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))<span class="question-mark">?
-<a href=#791 id=791 data-nosnippet>791</a>    </span>};
-<a href=#792 id=792 data-nosnippet>792</a>
-<a href=#793 id=793 data-nosnippet>793</a>    <span class="kw">let </span>use_sapling = !spendable_notes.sapling().is_empty() || sapling_output_count &gt; <span class="number">0</span>;
-<a href=#794 id=794 data-nosnippet>794</a>
-<a href=#795 id=795 data-nosnippet>795</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#796 id=796 data-nosnippet>796</a>    </span><span class="kw">let </span>orchard_action_count = {
-<a href=#797 id=797 data-nosnippet>797</a>        <span class="kw">let </span>requested_orchard_actions: usize = <span class="kw">if </span>recipient.can_receive_as(PoolType::ORCHARD) {
-<a href=#798 id=798 data-nosnippet>798</a>            payment_pools.insert(<span class="number">0</span>, PoolType::ORCHARD);
-<a href=#799 id=799 data-nosnippet>799</a>            <span class="number">1
-<a href=#800 id=800 data-nosnippet>800</a>        </span>} <span class="kw">else </span>{
-<a href=#801 id=801 data-nosnippet>801</a>            <span class="number">0
-<a href=#802 id=802 data-nosnippet>802</a>        </span>};
-<a href=#803 id=803 data-nosnippet>803</a>        orchard::builder::BundleType::DEFAULT
-<a href=#804 id=804 data-nosnippet>804</a>            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
-<a href=#805 id=805 data-nosnippet>805</a>            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))<span class="question-mark">?
-<a href=#806 id=806 data-nosnippet>806</a>    </span>};
-<a href=#807 id=807 data-nosnippet>807</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#808 id=808 data-nosnippet>808</a>    </span><span class="kw">let </span>orchard_action_count: usize = <span class="number">0</span>;
-<a href=#809 id=809 data-nosnippet>809</a>
-<a href=#810 id=810 data-nosnippet>810</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#811 id=811 data-nosnippet>811</a>    </span><span class="kw">let </span>use_orchard = orchard_action_count &gt; <span class="number">0</span>;
-<a href=#812 id=812 data-nosnippet>812</a>
-<a href=#813 id=813 data-nosnippet>813</a>    <span class="kw">let </span>recipient_address: Address = recipient
-<a href=#814 id=814 data-nosnippet>814</a>        .clone()
-<a href=#815 id=815 data-nosnippet>815</a>        .convert_if_network(params.network_type())<span class="question-mark">?</span>;
-<a href=#816 id=816 data-nosnippet>816</a>
-<a href=#817 id=817 data-nosnippet>817</a>    <span class="kw">let </span>(tr0_fee, tr1_fee) = <span class="kw">match </span>recipient_address {
-<a href=#818 id=818 data-nosnippet>818</a>        Address::Sapling(<span class="kw">_</span>) =&gt; fee_rule
-<a href=#819 id=819 data-nosnippet>819</a>            .fee_required(
-<a href=#820 id=820 data-nosnippet>820</a>                params,
-<a href=#821 id=821 data-nosnippet>821</a>                BlockHeight::from(target_height),
-<a href=#822 id=822 data-nosnippet>822</a>                [],
+<a href=#409 id=409 data-nosnippet>409</a>                <span class="kw">let </span>branch_id =
+<a href=#410 id=410 data-nosnippet>410</a>                    consensus::BranchId::for_height(params, BlockHeight::from(target_height));
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw">if </span>v.valid_in_branch(branch_id) {
+<a href=#412 id=412 data-nosnippet>412</a>                    <span class="prelude-val">Ok</span>((
+<a href=#413 id=413 data-nosnippet>413</a>                        v.has_sapling(),
+<a href=#414 id=414 data-nosnippet>414</a>                        <span class="macro">cfg!</span>(feature = <span class="string">"orchard"</span>) &amp;&amp; v.has_orchard(),
+<a href=#415 id=415 data-nosnippet>415</a>                    ))
+<a href=#416 id=416 data-nosnippet>416</a>                } <span class="kw">else </span>{
+<a href=#417 id=417 data-nosnippet>417</a>                    <span class="prelude-val">Err</span>(ProposalError::IncompatibleTxVersion(branch_id))
+<a href=#418 id=418 data-nosnippet>418</a>                }
+<a href=#419 id=419 data-nosnippet>419</a>            })<span class="question-mark">?</span>;
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="attr">#[cfg(not(feature = <span class="string">"unstable"</span>))]
+<a href=#421 id=421 data-nosnippet>421</a>        </span><span class="kw">let </span>(sapling_supported, orchard_supported) = (<span class="bool-val">true</span>, <span class="macro">cfg!</span>(feature = <span class="string">"orchard"</span>));
+<a href=#422 id=422 data-nosnippet>422</a>
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span><span class="kw-2">mut </span>transparent_outputs = <span class="macro">vec!</span>[];
+<a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">let </span><span class="kw-2">mut </span>sapling_outputs = <span class="macro">vec!</span>[];
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#426 id=426 data-nosnippet>426</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>orchard_outputs = <span class="macro">vec!</span>[];
+<a href=#427 id=427 data-nosnippet>427</a>        <span class="kw">let </span><span class="kw-2">mut </span>payment_pools = BTreeMap::new();
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="comment">// In a ZIP 320 pair, tr0 refers to the first transaction request that
+<a href=#430 id=430 data-nosnippet>430</a>        // collects shielded value and sends it to an ephemeral address, and tr1
+<a href=#431 id=431 data-nosnippet>431</a>        // refers to the second transaction request that pays the TEX addresses.
+<a href=#432 id=432 data-nosnippet>432</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#433 id=433 data-nosnippet>433</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_transparent_outputs = <span class="macro">vec!</span>[];
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#435 id=435 data-nosnippet>435</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_payments = <span class="macro">vec!</span>[];
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#437 id=437 data-nosnippet>437</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tr1_payment_pools = BTreeMap::new();
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="comment">// This balance value is just used for overflow checking; the actual value of ephemeral
+<a href=#439 id=439 data-nosnippet>439</a>        // outputs will be computed from the constructed `tr1_transparent_outputs` value
+<a href=#440 id=440 data-nosnippet>440</a>        // constructed below.
+<a href=#441 id=441 data-nosnippet>441</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#442 id=442 data-nosnippet>442</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>total_ephemeral = Zatoshis::ZERO;
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw">for </span>(idx, payment) <span class="kw">in </span>transaction_request.payments() {
+<a href=#445 id=445 data-nosnippet>445</a>            <span class="kw">let </span>payment_amount = payment
+<a href=#446 id=446 data-nosnippet>446</a>                .amount()
+<a href=#447 id=447 data-nosnippet>447</a>                .ok_or(ProposalError::PaymentAmountMissing(<span class="kw-2">*</span>idx))<span class="question-mark">?</span>;
+<a href=#448 id=448 data-nosnippet>448</a>            <span class="kw">let </span>recipient_address: Address = payment
+<a href=#449 id=449 data-nosnippet>449</a>                .recipient_address()
+<a href=#450 id=450 data-nosnippet>450</a>                .clone()
+<a href=#451 id=451 data-nosnippet>451</a>                .convert_if_network(params.network_type())<span class="question-mark">?</span>;
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a>            <span class="kw">match </span>recipient_address {
+<a href=#454 id=454 data-nosnippet>454</a>                Address::Transparent(addr) =&gt; {
+<a href=#455 id=455 data-nosnippet>455</a>                    payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
+<a href=#456 id=456 data-nosnippet>456</a>                    transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
+<a href=#457 id=457 data-nosnippet>457</a>                }
+<a href=#458 id=458 data-nosnippet>458</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#459 id=459 data-nosnippet>459</a>                </span>Address::Tex(data) =&gt; {
+<a href=#460 id=460 data-nosnippet>460</a>                    <span class="kw">let </span>p2pkh_addr = TransparentAddress::PublicKeyHash(data);
+<a href=#461 id=461 data-nosnippet>461</a>
+<a href=#462 id=462 data-nosnippet>462</a>                    tr1_payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
+<a href=#463 id=463 data-nosnippet>463</a>                    tr1_transparent_outputs
+<a href=#464 id=464 data-nosnippet>464</a>                        .push(TxOut::new(payment_amount, p2pkh_addr.script().into()));
+<a href=#465 id=465 data-nosnippet>465</a>                    tr1_payments.push(
+<a href=#466 id=466 data-nosnippet>466</a>                        Payment::new(
+<a href=#467 id=467 data-nosnippet>467</a>                            payment.recipient_address().clone(),
+<a href=#468 id=468 data-nosnippet>468</a>                            payment.amount(),
+<a href=#469 id=469 data-nosnippet>469</a>                            <span class="prelude-val">None</span>,
+<a href=#470 id=470 data-nosnippet>470</a>                            payment.label().cloned(),
+<a href=#471 id=471 data-nosnippet>471</a>                            payment.message().cloned(),
+<a href=#472 id=472 data-nosnippet>472</a>                            payment.other_params().to_vec(),
+<a href=#473 id=473 data-nosnippet>473</a>                        )
+<a href=#474 id=474 data-nosnippet>474</a>                        .expect(<span class="string">"cannot fail because memo is None"</span>),
+<a href=#475 id=475 data-nosnippet>475</a>                    );
+<a href=#476 id=476 data-nosnippet>476</a>                    total_ephemeral = (total_ephemeral + payment_amount)
+<a href=#477 id=477 data-nosnippet>477</a>                        .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))<span class="question-mark">?</span>;
+<a href=#478 id=478 data-nosnippet>478</a>                }
+<a href=#479 id=479 data-nosnippet>479</a>                <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#480 id=480 data-nosnippet>480</a>                </span>Address::Tex(<span class="kw">_</span>) =&gt; {
+<a href=#481 id=481 data-nosnippet>481</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Selection(
+<a href=#482 id=482 data-nosnippet>482</a>                        GreedyInputSelectorError::UnsupportedTexAddress,
+<a href=#483 id=483 data-nosnippet>483</a>                    ));
+<a href=#484 id=484 data-nosnippet>484</a>                }
+<a href=#485 id=485 data-nosnippet>485</a>                Address::Sapling(<span class="kw">_</span>) =&gt; {
+<a href=#486 id=486 data-nosnippet>486</a>                    payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::SAPLING);
+<a href=#487 id=487 data-nosnippet>487</a>                    sapling_outputs.push(SaplingPayment(payment_amount));
+<a href=#488 id=488 data-nosnippet>488</a>                }
+<a href=#489 id=489 data-nosnippet>489</a>                Address::Unified(addr) =&gt; {
+<a href=#490 id=490 data-nosnippet>490</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#491 id=491 data-nosnippet>491</a>                    </span><span class="kw">if </span>addr.has_orchard() &amp;&amp; orchard_supported {
+<a href=#492 id=492 data-nosnippet>492</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::ORCHARD);
+<a href=#493 id=493 data-nosnippet>493</a>                        orchard_outputs.push(OrchardPayment(payment_amount));
+<a href=#494 id=494 data-nosnippet>494</a>                        <span class="kw">continue</span>;
+<a href=#495 id=495 data-nosnippet>495</a>                    }
+<a href=#496 id=496 data-nosnippet>496</a>
+<a href=#497 id=497 data-nosnippet>497</a>                    <span class="kw">if </span>addr.has_sapling() &amp;&amp; sapling_supported {
+<a href=#498 id=498 data-nosnippet>498</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::SAPLING);
+<a href=#499 id=499 data-nosnippet>499</a>                        sapling_outputs.push(SaplingPayment(payment_amount));
+<a href=#500 id=500 data-nosnippet>500</a>                        <span class="kw">continue</span>;
+<a href=#501 id=501 data-nosnippet>501</a>                    }
+<a href=#502 id=502 data-nosnippet>502</a>
+<a href=#503 id=503 data-nosnippet>503</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(addr) = addr.transparent() {
+<a href=#504 id=504 data-nosnippet>504</a>                        payment_pools.insert(<span class="kw-2">*</span>idx, PoolType::TRANSPARENT);
+<a href=#505 id=505 data-nosnippet>505</a>                        transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
+<a href=#506 id=506 data-nosnippet>506</a>                        <span class="kw">continue</span>;
+<a href=#507 id=507 data-nosnippet>507</a>                    }
+<a href=#508 id=508 data-nosnippet>508</a>
+<a href=#509 id=509 data-nosnippet>509</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Selection(
+<a href=#510 id=510 data-nosnippet>510</a>                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
+<a href=#511 id=511 data-nosnippet>511</a>                    ));
+<a href=#512 id=512 data-nosnippet>512</a>                }
+<a href=#513 id=513 data-nosnippet>513</a>            }
+<a href=#514 id=514 data-nosnippet>514</a>        }
+<a href=#515 id=515 data-nosnippet>515</a>
+<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">let </span><span class="kw-2">mut </span>shielded_inputs = ReceivedNotes::empty();
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="kw">let </span><span class="kw-2">mut </span>prior_available = Zatoshis::ZERO;
+<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span><span class="kw-2">mut </span>amount_required = Zatoshis::ZERO;
+<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">let </span><span class="kw-2">mut </span>exclude: Vec&lt;DbT::NoteRef&gt; = <span class="macro">vec!</span>[];
+<a href=#520 id=520 data-nosnippet>520</a>
+<a href=#521 id=521 data-nosnippet>521</a>        <span class="comment">// This loop is guaranteed to terminate because on each iteration we check that the amount
+<a href=#522 id=522 data-nosnippet>522</a>        // of funds selected is strictly increasing. The loop will either return a successful
+<a href=#523 id=523 data-nosnippet>523</a>        // result or the wallet will eventually run out of funds to select.
+<a href=#524 id=524 data-nosnippet>524</a>        </span><span class="kw">loop </span>{
+<a href=#525 id=525 data-nosnippet>525</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#526 id=526 data-nosnippet>526</a>            </span><span class="kw">let </span>use_sapling = <span class="bool-val">true</span>;
+<a href=#527 id=527 data-nosnippet>527</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#528 id=528 data-nosnippet>528</a>            </span><span class="kw">let </span>(use_sapling, use_orchard) = {
+<a href=#529 id=529 data-nosnippet>529</a>                <span class="kw">let </span>(sapling_input_total, orchard_input_total) = (
+<a href=#530 id=530 data-nosnippet>530</a>                    shielded_inputs.sapling_value()<span class="question-mark">?</span>,
+<a href=#531 id=531 data-nosnippet>531</a>                    shielded_inputs.orchard_value()<span class="question-mark">?</span>,
+<a href=#532 id=532 data-nosnippet>532</a>                );
+<a href=#533 id=533 data-nosnippet>533</a>
+<a href=#534 id=534 data-nosnippet>534</a>                <span class="comment">// Use Sapling inputs if there are no Orchard outputs or if there are insufficient
+<a href=#535 id=535 data-nosnippet>535</a>                // funds from Orchard inputs to cover the amount required.
+<a href=#536 id=536 data-nosnippet>536</a>                </span><span class="kw">let </span>use_sapling =
+<a href=#537 id=537 data-nosnippet>537</a>                    orchard_outputs.is_empty() || amount_required &gt; orchard_input_total;
+<a href=#538 id=538 data-nosnippet>538</a>                <span class="comment">// Use Orchard inputs if there are insufficient funds from Sapling inputs to cover
+<a href=#539 id=539 data-nosnippet>539</a>                // the amount required.
+<a href=#540 id=540 data-nosnippet>540</a>                </span><span class="kw">let </span>use_orchard = !use_sapling || amount_required &gt; sapling_input_total;
+<a href=#541 id=541 data-nosnippet>541</a>
+<a href=#542 id=542 data-nosnippet>542</a>                (use_sapling, use_orchard)
+<a href=#543 id=543 data-nosnippet>543</a>            };
+<a href=#544 id=544 data-nosnippet>544</a>
+<a href=#545 id=545 data-nosnippet>545</a>            <span class="kw">let </span>sapling_inputs = <span class="kw">if </span>use_sapling {
+<a href=#546 id=546 data-nosnippet>546</a>                shielded_inputs
+<a href=#547 id=547 data-nosnippet>547</a>                    .sapling()
+<a href=#548 id=548 data-nosnippet>548</a>                    .iter()
+<a href=#549 id=549 data-nosnippet>549</a>                    .map(|i| (<span class="kw-2">*</span>i.internal_note_id(), i.note().value()))
+<a href=#550 id=550 data-nosnippet>550</a>                    .collect()
+<a href=#551 id=551 data-nosnippet>551</a>            } <span class="kw">else </span>{
+<a href=#552 id=552 data-nosnippet>552</a>                <span class="macro">vec!</span>[]
+<a href=#553 id=553 data-nosnippet>553</a>            };
+<a href=#554 id=554 data-nosnippet>554</a>
+<a href=#555 id=555 data-nosnippet>555</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#556 id=556 data-nosnippet>556</a>            </span><span class="kw">let </span>orchard_inputs = <span class="kw">if </span>use_orchard {
+<a href=#557 id=557 data-nosnippet>557</a>                shielded_inputs
+<a href=#558 id=558 data-nosnippet>558</a>                    .orchard()
+<a href=#559 id=559 data-nosnippet>559</a>                    .iter()
+<a href=#560 id=560 data-nosnippet>560</a>                    .map(|i| (<span class="kw-2">*</span>i.internal_note_id(), i.note().value()))
+<a href=#561 id=561 data-nosnippet>561</a>                    .collect()
+<a href=#562 id=562 data-nosnippet>562</a>            } <span class="kw">else </span>{
+<a href=#563 id=563 data-nosnippet>563</a>                <span class="macro">vec!</span>[]
+<a href=#564 id=564 data-nosnippet>564</a>            };
+<a href=#565 id=565 data-nosnippet>565</a>
+<a href=#566 id=566 data-nosnippet>566</a>            <span class="kw">let </span>selected_input_ids = sapling_inputs.iter().map(|(id, <span class="kw">_</span>)| id);
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#568 id=568 data-nosnippet>568</a>            </span><span class="kw">let </span>selected_input_ids =
+<a href=#569 id=569 data-nosnippet>569</a>                selected_input_ids.chain(orchard_inputs.iter().map(|(id, <span class="kw">_</span>)| id));
+<a href=#570 id=570 data-nosnippet>570</a>
+<a href=#571 id=571 data-nosnippet>571</a>            <span class="kw">let </span>selected_input_ids = selected_input_ids.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+<a href=#572 id=572 data-nosnippet>572</a>
+<a href=#573 id=573 data-nosnippet>573</a>            <span class="kw">let </span>wallet_meta = change_strategy
+<a href=#574 id=574 data-nosnippet>574</a>                .fetch_wallet_meta(wallet_db, account, target_height, <span class="kw-2">&amp;</span>selected_input_ids)
+<a href=#575 id=575 data-nosnippet>575</a>                .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
+<a href=#576 id=576 data-nosnippet>576</a>
+<a href=#577 id=577 data-nosnippet>577</a>            <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#578 id=578 data-nosnippet>578</a>            </span><span class="kw">let </span>ephemeral_output_value = <span class="prelude-val">None</span>;
+<a href=#579 id=579 data-nosnippet>579</a>
+<a href=#580 id=580 data-nosnippet>580</a>            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#581 id=581 data-nosnippet>581</a>            </span><span class="kw">let </span>(ephemeral_output_value, tr1_balance_opt) = {
+<a href=#582 id=582 data-nosnippet>582</a>                <span class="kw">if </span>tr1_transparent_outputs.is_empty() {
+<a href=#583 id=583 data-nosnippet>583</a>                    (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+<a href=#584 id=584 data-nosnippet>584</a>                } <span class="kw">else </span>{
+<a href=#585 id=585 data-nosnippet>585</a>                    <span class="comment">// The ephemeral input going into transaction 1 must be able to pay that
+<a href=#586 id=586 data-nosnippet>586</a>                    // transaction's fee, as well as the TEX address payments.
+<a href=#587 id=587 data-nosnippet>587</a>
+<a href=#588 id=588 data-nosnippet>588</a>                    // First compute the required total with an additional zero input,
+<a href=#589 id=589 data-nosnippet>589</a>                    // catching the `InsufficientFunds` error to obtain the required amount
+<a href=#590 id=590 data-nosnippet>590</a>                    // given the provided change strategy. Ignore the change memo in order
+<a href=#591 id=591 data-nosnippet>591</a>                    // to avoid adding a change output.
+<a href=#592 id=592 data-nosnippet>592</a>                    </span><span class="kw">let </span>tr1_required_input_value = <span class="kw">match </span>change_strategy
+<a href=#593 id=593 data-nosnippet>593</a>                        .compute_balance::&lt;<span class="kw">_</span>, DbT::NoteRef&gt;(
+<a href=#594 id=594 data-nosnippet>594</a>                            params,
+<a href=#595 id=595 data-nosnippet>595</a>                            target_height,
+<a href=#596 id=596 data-nosnippet>596</a>                            <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
+<a href=#597 id=597 data-nosnippet>597</a>                            <span class="kw-2">&amp;</span>tr1_transparent_outputs,
+<a href=#598 id=598 data-nosnippet>598</a>                            <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
+<a href=#599 id=599 data-nosnippet>599</a>                            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#600 id=600 data-nosnippet>600</a>                            </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
+<a href=#601 id=601 data-nosnippet>601</a>                            <span class="prelude-val">Some</span>(EphemeralBalance::Input(Zatoshis::ZERO)),
+<a href=#602 id=602 data-nosnippet>602</a>                            <span class="kw-2">&amp;</span>wallet_meta,
+<a href=#603 id=603 data-nosnippet>603</a>                        ) {
+<a href=#604 id=604 data-nosnippet>604</a>                        <span class="prelude-val">Err</span>(ChangeError::InsufficientFunds { required, .. }) =&gt; required,
+<a href=#605 id=605 data-nosnippet>605</a>                        <span class="prelude-val">Err</span>(ChangeError::DustInputs { .. }) =&gt; {
+<a href=#606 id=606 data-nosnippet>606</a>                            <span class="macro">unreachable!</span>(<span class="string">"no inputs were supplied"</span>)
+<a href=#607 id=607 data-nosnippet>607</a>                        }
+<a href=#608 id=608 data-nosnippet>608</a>                        <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
+<a href=#609 id=609 data-nosnippet>609</a>                        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; Zatoshis::ZERO, <span class="comment">// shouldn't happen
+<a href=#610 id=610 data-nosnippet>610</a>                    </span>};
+<a href=#611 id=611 data-nosnippet>611</a>
+<a href=#612 id=612 data-nosnippet>612</a>                    <span class="comment">// Now recompute to obtain the `TransactionBalance` and verify that it
+<a href=#613 id=613 data-nosnippet>613</a>                    // fully accounts for the required fees.
+<a href=#614 id=614 data-nosnippet>614</a>                    </span><span class="kw">let </span>tr1_balance = change_strategy.compute_balance::&lt;<span class="kw">_</span>, DbT::NoteRef&gt;(
+<a href=#615 id=615 data-nosnippet>615</a>                        params,
+<a href=#616 id=616 data-nosnippet>616</a>                        target_height,
+<a href=#617 id=617 data-nosnippet>617</a>                        <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
+<a href=#618 id=618 data-nosnippet>618</a>                        <span class="kw-2">&amp;</span>tr1_transparent_outputs,
+<a href=#619 id=619 data-nosnippet>619</a>                        <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
+<a href=#620 id=620 data-nosnippet>620</a>                        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#621 id=621 data-nosnippet>621</a>                        </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
+<a href=#622 id=622 data-nosnippet>622</a>                        <span class="prelude-val">Some</span>(EphemeralBalance::Input(tr1_required_input_value)),
+<a href=#623 id=623 data-nosnippet>623</a>                        <span class="kw-2">&amp;</span>wallet_meta,
+<a href=#624 id=624 data-nosnippet>624</a>                    )<span class="question-mark">?</span>;
+<a href=#625 id=625 data-nosnippet>625</a>                    <span class="macro">assert_eq!</span>(tr1_balance.total(), tr1_balance.fee_required());
+<a href=#626 id=626 data-nosnippet>626</a>
+<a href=#627 id=627 data-nosnippet>627</a>                    (<span class="prelude-val">Some</span>(tr1_required_input_value), <span class="prelude-val">Some</span>(tr1_balance))
+<a href=#628 id=628 data-nosnippet>628</a>                }
+<a href=#629 id=629 data-nosnippet>629</a>            };
+<a href=#630 id=630 data-nosnippet>630</a>
+<a href=#631 id=631 data-nosnippet>631</a>            <span class="comment">// In the ZIP 320 case, this is the balance for transaction 0, taking into account
+<a href=#632 id=632 data-nosnippet>632</a>            // the ephemeral output.
+<a href=#633 id=633 data-nosnippet>633</a>            </span><span class="kw">let </span>tr0_balance = change_strategy.compute_balance(
+<a href=#634 id=634 data-nosnippet>634</a>                params,
+<a href=#635 id=635 data-nosnippet>635</a>                target_height,
+<a href=#636 id=636 data-nosnippet>636</a>                <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[WalletTransparentOutput],
+<a href=#637 id=637 data-nosnippet>637</a>                <span class="kw-2">&amp;</span>transparent_outputs,
+<a href=#638 id=638 data-nosnippet>638</a>                <span class="kw-2">&amp;</span>(
+<a href=#639 id=639 data-nosnippet>639</a>                    ::sapling::builder::BundleType::DEFAULT,
+<a href=#640 id=640 data-nosnippet>640</a>                    <span class="kw-2">&amp;</span>sapling_inputs[..],
+<a href=#641 id=641 data-nosnippet>641</a>                    <span class="kw-2">&amp;</span>sapling_outputs[..],
+<a href=#642 id=642 data-nosnippet>642</a>                ),
+<a href=#643 id=643 data-nosnippet>643</a>                <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#644 id=644 data-nosnippet>644</a>                </span><span class="kw-2">&amp;</span>(
+<a href=#645 id=645 data-nosnippet>645</a>                    ::orchard::builder::BundleType::DEFAULT,
+<a href=#646 id=646 data-nosnippet>646</a>                    <span class="kw-2">&amp;</span>orchard_inputs[..],
+<a href=#647 id=647 data-nosnippet>647</a>                    <span class="kw-2">&amp;</span>orchard_outputs[..],
+<a href=#648 id=648 data-nosnippet>648</a>                ),
+<a href=#649 id=649 data-nosnippet>649</a>                ephemeral_output_value.map(EphemeralBalance::Output),
+<a href=#650 id=650 data-nosnippet>650</a>                <span class="kw-2">&amp;</span>wallet_meta,
+<a href=#651 id=651 data-nosnippet>651</a>            );
+<a href=#652 id=652 data-nosnippet>652</a>
+<a href=#653 id=653 data-nosnippet>653</a>            <span class="kw">match </span>tr0_balance {
+<a href=#654 id=654 data-nosnippet>654</a>                <span class="prelude-val">Ok</span>(tr0_balance) =&gt; {
+<a href=#655 id=655 data-nosnippet>655</a>                    <span class="comment">// At this point, we have enough input value to pay for everything, so we
+<a href=#656 id=656 data-nosnippet>656</a>                    // return here.
+<a href=#657 id=657 data-nosnippet>657</a>                    </span><span class="kw">let </span>shielded_inputs =
+<a href=#658 id=658 data-nosnippet>658</a>                        NonEmpty::from_vec(shielded_inputs.into_vec(<span class="kw-2">&amp;</span>SimpleNoteRetention {
+<a href=#659 id=659 data-nosnippet>659</a>                            sapling: use_sapling,
+<a href=#660 id=660 data-nosnippet>660</a>                            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#661 id=661 data-nosnippet>661</a>                            </span>orchard: use_orchard,
+<a href=#662 id=662 data-nosnippet>662</a>                        }))
+<a href=#663 id=663 data-nosnippet>663</a>                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+<a href=#664 id=664 data-nosnippet>664</a>
+<a href=#665 id=665 data-nosnippet>665</a>                    <span class="kw">return </span>build_proposal(
+<a href=#666 id=666 data-nosnippet>666</a>                        change_strategy.fee_rule(),
+<a href=#667 id=667 data-nosnippet>667</a>                        tr0_balance,
+<a href=#668 id=668 data-nosnippet>668</a>                        target_height,
+<a href=#669 id=669 data-nosnippet>669</a>                        shielded_inputs,
+<a href=#670 id=670 data-nosnippet>670</a>                        transaction_request,
+<a href=#671 id=671 data-nosnippet>671</a>                        payment_pools,
+<a href=#672 id=672 data-nosnippet>672</a>                        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#673 id=673 data-nosnippet>673</a>                        </span>ephemeral_output_value.zip(tr1_balance_opt).map(
+<a href=#674 id=674 data-nosnippet>674</a>                            |(ephemeral_output_value, tr1_balance)| EphemeralStepConfig {
+<a href=#675 id=675 data-nosnippet>675</a>                                ephemeral_output_value,
+<a href=#676 id=676 data-nosnippet>676</a>                                tr1_balance,
+<a href=#677 id=677 data-nosnippet>677</a>                                tr1_payments,
+<a href=#678 id=678 data-nosnippet>678</a>                                tr1_payment_pools,
+<a href=#679 id=679 data-nosnippet>679</a>                            },
+<a href=#680 id=680 data-nosnippet>680</a>                        ),
+<a href=#681 id=681 data-nosnippet>681</a>                    )
+<a href=#682 id=682 data-nosnippet>682</a>                    .map_err(InputSelectorError::Proposal);
+<a href=#683 id=683 data-nosnippet>683</a>                }
+<a href=#684 id=684 data-nosnippet>684</a>                <span class="prelude-val">Err</span>(ChangeError::DustInputs {
+<a href=#685 id=685 data-nosnippet>685</a>                    <span class="kw-2">mut </span>sapling,
+<a href=#686 id=686 data-nosnippet>686</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#687 id=687 data-nosnippet>687</a>                    </span><span class="kw-2">mut </span>orchard,
+<a href=#688 id=688 data-nosnippet>688</a>                    ..
+<a href=#689 id=689 data-nosnippet>689</a>                }) =&gt; {
+<a href=#690 id=690 data-nosnippet>690</a>                    exclude.append(<span class="kw-2">&amp;mut </span>sapling);
+<a href=#691 id=691 data-nosnippet>691</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#692 id=692 data-nosnippet>692</a>                    </span>exclude.append(<span class="kw-2">&amp;mut </span>orchard);
+<a href=#693 id=693 data-nosnippet>693</a>                }
+<a href=#694 id=694 data-nosnippet>694</a>                <span class="prelude-val">Err</span>(ChangeError::InsufficientFunds { required, .. }) =&gt; {
+<a href=#695 id=695 data-nosnippet>695</a>                    amount_required = required;
+<a href=#696 id=696 data-nosnippet>696</a>                }
+<a href=#697 id=697 data-nosnippet>697</a>                <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
+<a href=#698 id=698 data-nosnippet>698</a>            }
+<a href=#699 id=699 data-nosnippet>699</a>
+<a href=#700 id=700 data-nosnippet>700</a>            <span class="kw">let </span>selectable_pools = {
+<a href=#701 id=701 data-nosnippet>701</a>                <span class="kw">if </span>orchard_supported &amp;&amp; sapling_supported {
+<a href=#702 id=702 data-nosnippet>702</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
+<a href=#703 id=703 data-nosnippet>703</a>                } <span class="kw">else if </span>orchard_supported {
+<a href=#704 id=704 data-nosnippet>704</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Orchard][..]
+<a href=#705 id=705 data-nosnippet>705</a>                } <span class="kw">else if </span>sapling_supported {
+<a href=#706 id=706 data-nosnippet>706</a>                    <span class="kw-2">&amp;</span>[ShieldedProtocol::Sapling][..]
+<a href=#707 id=707 data-nosnippet>707</a>                } <span class="kw">else </span>{
+<a href=#708 id=708 data-nosnippet>708</a>                    <span class="kw-2">&amp;</span>[]
+<a href=#709 id=709 data-nosnippet>709</a>                }
+<a href=#710 id=710 data-nosnippet>710</a>            };
+<a href=#711 id=711 data-nosnippet>711</a>
+<a href=#712 id=712 data-nosnippet>712</a>            shielded_inputs = wallet_db
+<a href=#713 id=713 data-nosnippet>713</a>                .select_spendable_notes(
+<a href=#714 id=714 data-nosnippet>714</a>                    account,
+<a href=#715 id=715 data-nosnippet>715</a>                    TargetValue::AtLeast(amount_required),
+<a href=#716 id=716 data-nosnippet>716</a>                    selectable_pools,
+<a href=#717 id=717 data-nosnippet>717</a>                    target_height,
+<a href=#718 id=718 data-nosnippet>718</a>                    confirmations_policy,
+<a href=#719 id=719 data-nosnippet>719</a>                    <span class="kw-2">&amp;</span>exclude,
+<a href=#720 id=720 data-nosnippet>720</a>                )
+<a href=#721 id=721 data-nosnippet>721</a>                .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
+<a href=#722 id=722 data-nosnippet>722</a>
+<a href=#723 id=723 data-nosnippet>723</a>            <span class="kw">let </span>new_available = shielded_inputs.total_value()<span class="question-mark">?</span>;
+<a href=#724 id=724 data-nosnippet>724</a>            <span class="kw">if </span>new_available &lt;= prior_available {
+<a href=#725 id=725 data-nosnippet>725</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::InsufficientFunds {
+<a href=#726 id=726 data-nosnippet>726</a>                    required: amount_required,
+<a href=#727 id=727 data-nosnippet>727</a>                    available: new_available,
+<a href=#728 id=728 data-nosnippet>728</a>                });
+<a href=#729 id=729 data-nosnippet>729</a>            } <span class="kw">else </span>{
+<a href=#730 id=730 data-nosnippet>730</a>                <span class="comment">// If the set of selected inputs has changed after selection, we will loop again
+<a href=#731 id=731 data-nosnippet>731</a>                // and see whether we now have enough funds.
+<a href=#732 id=732 data-nosnippet>732</a>                </span>prior_available = new_available;
+<a href=#733 id=733 data-nosnippet>733</a>            }
+<a href=#734 id=734 data-nosnippet>734</a>        }
+<a href=#735 id=735 data-nosnippet>735</a>    }
+<a href=#736 id=736 data-nosnippet>736</a>}
+<a href=#737 id=737 data-nosnippet>737</a>
+<a href=#738 id=738 data-nosnippet>738</a><span class="attr">#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+<a href=#739 id=739 data-nosnippet>739</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>propose_send_max&lt;ParamsT, InputSourceT, FeeRuleT&gt;(
+<a href=#740 id=740 data-nosnippet>740</a>    params: <span class="kw-2">&amp;</span>ParamsT,
+<a href=#741 id=741 data-nosnippet>741</a>    wallet_db: <span class="kw-2">&amp;</span>InputSourceT,
+<a href=#742 id=742 data-nosnippet>742</a>    fee_rule: <span class="kw-2">&amp;</span>FeeRuleT,
+<a href=#743 id=743 data-nosnippet>743</a>    source_account: InputSourceT::AccountId,
+<a href=#744 id=744 data-nosnippet>744</a>    spend_pools: <span class="kw-2">&amp;</span>[ShieldedProtocol],
+<a href=#745 id=745 data-nosnippet>745</a>    target_height: TargetHeight,
+<a href=#746 id=746 data-nosnippet>746</a>    anchor_height: BlockHeight,
+<a href=#747 id=747 data-nosnippet>747</a>    mode: MaxSpendMode,
+<a href=#748 id=748 data-nosnippet>748</a>    confirmations_policy: ConfirmationsPolicy,
+<a href=#749 id=749 data-nosnippet>749</a>    recipient: ZcashAddress,
+<a href=#750 id=750 data-nosnippet>750</a>    memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
+<a href=#751 id=751 data-nosnippet>751</a>) -&gt; <span class="prelude-ty">Result</span>&lt;
+<a href=#752 id=752 data-nosnippet>752</a>    Proposal&lt;FeeRuleT, InputSourceT::NoteRef&gt;,
+<a href=#753 id=753 data-nosnippet>753</a>    InputSelectorError&lt;InputSourceT::Error, BalanceError, FeeRuleT::Error, InputSourceT::NoteRef&gt;,
+<a href=#754 id=754 data-nosnippet>754</a>&gt;
+<a href=#755 id=755 data-nosnippet>755</a><span class="kw">where
+<a href=#756 id=756 data-nosnippet>756</a>    </span>ParamsT: consensus::Parameters,
+<a href=#757 id=757 data-nosnippet>757</a>    InputSourceT: InputSource,
+<a href=#758 id=758 data-nosnippet>758</a>    FeeRuleT: FeeRule + Clone,
+<a href=#759 id=759 data-nosnippet>759</a>{
+<a href=#760 id=760 data-nosnippet>760</a>    <span class="kw">let </span>spendable_notes = wallet_db
+<a href=#761 id=761 data-nosnippet>761</a>        .select_spendable_notes(
+<a href=#762 id=762 data-nosnippet>762</a>            source_account,
+<a href=#763 id=763 data-nosnippet>763</a>            TargetValue::AllFunds(mode),
+<a href=#764 id=764 data-nosnippet>764</a>            spend_pools,
+<a href=#765 id=765 data-nosnippet>765</a>            target_height,
+<a href=#766 id=766 data-nosnippet>766</a>            confirmations_policy,
+<a href=#767 id=767 data-nosnippet>767</a>            <span class="kw-2">&amp;</span>[],
+<a href=#768 id=768 data-nosnippet>768</a>        )
+<a href=#769 id=769 data-nosnippet>769</a>        .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
+<a href=#770 id=770 data-nosnippet>770</a>
+<a href=#771 id=771 data-nosnippet>771</a>    <span class="kw">let </span>input_total = spendable_notes
+<a href=#772 id=772 data-nosnippet>772</a>        .total_value()
+<a href=#773 id=773 data-nosnippet>773</a>        .map_err(InputSelectorError::Selection)<span class="question-mark">?</span>;
+<a href=#774 id=774 data-nosnippet>774</a>
+<a href=#775 id=775 data-nosnippet>775</a>    <span class="kw">let </span><span class="kw-2">mut </span>payment_pools = BTreeMap::new();
+<a href=#776 id=776 data-nosnippet>776</a>
+<a href=#777 id=777 data-nosnippet>777</a>    <span class="kw">let </span>sapling_output_count = {
+<a href=#778 id=778 data-nosnippet>778</a>        <span class="comment">// we require a sapling output if the recipient has a Sapling receiver but not an Orchard
+<a href=#779 id=779 data-nosnippet>779</a>        // receiver.
+<a href=#780 id=780 data-nosnippet>780</a>        </span><span class="kw">let </span>requested_sapling_outputs: usize = <span class="kw">if </span>recipient.can_receive_as(PoolType::SAPLING)
+<a href=#781 id=781 data-nosnippet>781</a>            &amp;&amp; !recipient.can_receive_as(PoolType::ORCHARD)
+<a href=#782 id=782 data-nosnippet>782</a>        {
+<a href=#783 id=783 data-nosnippet>783</a>            payment_pools.insert(<span class="number">0</span>, PoolType::SAPLING);
+<a href=#784 id=784 data-nosnippet>784</a>            <span class="number">1
+<a href=#785 id=785 data-nosnippet>785</a>        </span>} <span class="kw">else </span>{
+<a href=#786 id=786 data-nosnippet>786</a>            <span class="number">0
+<a href=#787 id=787 data-nosnippet>787</a>        </span>};
+<a href=#788 id=788 data-nosnippet>788</a>
+<a href=#789 id=789 data-nosnippet>789</a>        ::sapling::builder::BundleType::DEFAULT
+<a href=#790 id=790 data-nosnippet>790</a>            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
+<a href=#791 id=791 data-nosnippet>791</a>            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))<span class="question-mark">?
+<a href=#792 id=792 data-nosnippet>792</a>    </span>};
+<a href=#793 id=793 data-nosnippet>793</a>
+<a href=#794 id=794 data-nosnippet>794</a>    <span class="kw">let </span>use_sapling = !spendable_notes.sapling().is_empty() || sapling_output_count &gt; <span class="number">0</span>;
+<a href=#795 id=795 data-nosnippet>795</a>
+<a href=#796 id=796 data-nosnippet>796</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#797 id=797 data-nosnippet>797</a>    </span><span class="kw">let </span>orchard_action_count = {
+<a href=#798 id=798 data-nosnippet>798</a>        <span class="kw">let </span>requested_orchard_actions: usize = <span class="kw">if </span>recipient.can_receive_as(PoolType::ORCHARD) {
+<a href=#799 id=799 data-nosnippet>799</a>            payment_pools.insert(<span class="number">0</span>, PoolType::ORCHARD);
+<a href=#800 id=800 data-nosnippet>800</a>            <span class="number">1
+<a href=#801 id=801 data-nosnippet>801</a>        </span>} <span class="kw">else </span>{
+<a href=#802 id=802 data-nosnippet>802</a>            <span class="number">0
+<a href=#803 id=803 data-nosnippet>803</a>        </span>};
+<a href=#804 id=804 data-nosnippet>804</a>        orchard::builder::BundleType::DEFAULT
+<a href=#805 id=805 data-nosnippet>805</a>            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
+<a href=#806 id=806 data-nosnippet>806</a>            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))<span class="question-mark">?
+<a href=#807 id=807 data-nosnippet>807</a>    </span>};
+<a href=#808 id=808 data-nosnippet>808</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#809 id=809 data-nosnippet>809</a>    </span><span class="kw">let </span>orchard_action_count: usize = <span class="number">0</span>;
+<a href=#810 id=810 data-nosnippet>810</a>
+<a href=#811 id=811 data-nosnippet>811</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#812 id=812 data-nosnippet>812</a>    </span><span class="kw">let </span>use_orchard = orchard_action_count &gt; <span class="number">0</span>;
+<a href=#813 id=813 data-nosnippet>813</a>
+<a href=#814 id=814 data-nosnippet>814</a>    <span class="kw">let </span>recipient_address: Address = recipient
+<a href=#815 id=815 data-nosnippet>815</a>        .clone()
+<a href=#816 id=816 data-nosnippet>816</a>        .convert_if_network(params.network_type())<span class="question-mark">?</span>;
+<a href=#817 id=817 data-nosnippet>817</a>
+<a href=#818 id=818 data-nosnippet>818</a>    <span class="kw">let </span>(tr0_fee, tr1_fee) = <span class="kw">match </span>recipient_address {
+<a href=#819 id=819 data-nosnippet>819</a>        Address::Sapling(<span class="kw">_</span>) =&gt; fee_rule
+<a href=#820 id=820 data-nosnippet>820</a>            .fee_required(
+<a href=#821 id=821 data-nosnippet>821</a>                params,
+<a href=#822 id=822 data-nosnippet>822</a>                BlockHeight::from(target_height),
 <a href=#823 id=823 data-nosnippet>823</a>                [],
-<a href=#824 id=824 data-nosnippet>824</a>                spendable_notes.sapling().len(),
-<a href=#825 id=825 data-nosnippet>825</a>                sapling_output_count,
-<a href=#826 id=826 data-nosnippet>826</a>                orchard_action_count,
-<a href=#827 id=827 data-nosnippet>827</a>            )
-<a href=#828 id=828 data-nosnippet>828</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
-<a href=#829 id=829 data-nosnippet>829</a>        Address::Transparent(<span class="kw">_</span>) =&gt; fee_rule
-<a href=#830 id=830 data-nosnippet>830</a>            .fee_required(
-<a href=#831 id=831 data-nosnippet>831</a>                params,
-<a href=#832 id=832 data-nosnippet>832</a>                BlockHeight::from(target_height),
-<a href=#833 id=833 data-nosnippet>833</a>                [],
-<a href=#834 id=834 data-nosnippet>834</a>                [P2PKH_STANDARD_OUTPUT_SIZE],
-<a href=#835 id=835 data-nosnippet>835</a>                spendable_notes.sapling().len(),
-<a href=#836 id=836 data-nosnippet>836</a>                sapling_output_count,
-<a href=#837 id=837 data-nosnippet>837</a>                orchard_action_count,
-<a href=#838 id=838 data-nosnippet>838</a>            )
-<a href=#839 id=839 data-nosnippet>839</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
-<a href=#840 id=840 data-nosnippet>840</a>        Address::Unified(addr) =&gt; fee_rule
-<a href=#841 id=841 data-nosnippet>841</a>            .fee_required(
-<a href=#842 id=842 data-nosnippet>842</a>                params,
-<a href=#843 id=843 data-nosnippet>843</a>                BlockHeight::from(target_height),
-<a href=#844 id=844 data-nosnippet>844</a>                [],
-<a href=#845 id=845 data-nosnippet>845</a>                <span class="kw">if </span>addr.has_transparent() &amp;&amp; !(addr.has_sapling() || addr.has_orchard()) {
-<a href=#846 id=846 data-nosnippet>846</a>                    <span class="macro">vec!</span>[P2PKH_STANDARD_OUTPUT_SIZE]
-<a href=#847 id=847 data-nosnippet>847</a>                } <span class="kw">else </span>{
-<a href=#848 id=848 data-nosnippet>848</a>                    <span class="macro">vec!</span>[]
-<a href=#849 id=849 data-nosnippet>849</a>                },
-<a href=#850 id=850 data-nosnippet>850</a>                spendable_notes.sapling().len(),
-<a href=#851 id=851 data-nosnippet>851</a>                sapling_output_count,
-<a href=#852 id=852 data-nosnippet>852</a>                orchard_action_count,
-<a href=#853 id=853 data-nosnippet>853</a>            )
-<a href=#854 id=854 data-nosnippet>854</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
-<a href=#855 id=855 data-nosnippet>855</a>        Address::Tex(<span class="kw">_</span>) =&gt; fee_rule
-<a href=#856 id=856 data-nosnippet>856</a>            .fee_required(
-<a href=#857 id=857 data-nosnippet>857</a>                params,
-<a href=#858 id=858 data-nosnippet>858</a>                BlockHeight::from(target_height),
-<a href=#859 id=859 data-nosnippet>859</a>                [],
-<a href=#860 id=860 data-nosnippet>860</a>                [P2PKH_STANDARD_OUTPUT_SIZE],
-<a href=#861 id=861 data-nosnippet>861</a>                spendable_notes.sapling().len(),
-<a href=#862 id=862 data-nosnippet>862</a>                sapling_output_count,
-<a href=#863 id=863 data-nosnippet>863</a>                orchard_action_count,
-<a href=#864 id=864 data-nosnippet>864</a>            )
-<a href=#865 id=865 data-nosnippet>865</a>            .and_then(|tr0_fee| {
-<a href=#866 id=866 data-nosnippet>866</a>                <span class="kw">let </span>tr1_fee = fee_rule.fee_required(
-<a href=#867 id=867 data-nosnippet>867</a>                    params,
-<a href=#868 id=868 data-nosnippet>868</a>                    BlockHeight::from(target_height),
-<a href=#869 id=869 data-nosnippet>869</a>                    [InputSize::Known(P2PKH_STANDARD_INPUT_SIZE)],
-<a href=#870 id=870 data-nosnippet>870</a>                    [P2PKH_STANDARD_OUTPUT_SIZE],
-<a href=#871 id=871 data-nosnippet>871</a>                    <span class="number">0</span>,
+<a href=#824 id=824 data-nosnippet>824</a>                [],
+<a href=#825 id=825 data-nosnippet>825</a>                spendable_notes.sapling().len(),
+<a href=#826 id=826 data-nosnippet>826</a>                sapling_output_count,
+<a href=#827 id=827 data-nosnippet>827</a>                orchard_action_count,
+<a href=#828 id=828 data-nosnippet>828</a>            )
+<a href=#829 id=829 data-nosnippet>829</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
+<a href=#830 id=830 data-nosnippet>830</a>        Address::Transparent(<span class="kw">_</span>) =&gt; fee_rule
+<a href=#831 id=831 data-nosnippet>831</a>            .fee_required(
+<a href=#832 id=832 data-nosnippet>832</a>                params,
+<a href=#833 id=833 data-nosnippet>833</a>                BlockHeight::from(target_height),
+<a href=#834 id=834 data-nosnippet>834</a>                [],
+<a href=#835 id=835 data-nosnippet>835</a>                [P2PKH_STANDARD_OUTPUT_SIZE],
+<a href=#836 id=836 data-nosnippet>836</a>                spendable_notes.sapling().len(),
+<a href=#837 id=837 data-nosnippet>837</a>                sapling_output_count,
+<a href=#838 id=838 data-nosnippet>838</a>                orchard_action_count,
+<a href=#839 id=839 data-nosnippet>839</a>            )
+<a href=#840 id=840 data-nosnippet>840</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
+<a href=#841 id=841 data-nosnippet>841</a>        Address::Unified(addr) =&gt; fee_rule
+<a href=#842 id=842 data-nosnippet>842</a>            .fee_required(
+<a href=#843 id=843 data-nosnippet>843</a>                params,
+<a href=#844 id=844 data-nosnippet>844</a>                BlockHeight::from(target_height),
+<a href=#845 id=845 data-nosnippet>845</a>                [],
+<a href=#846 id=846 data-nosnippet>846</a>                <span class="kw">if </span>addr.has_transparent() &amp;&amp; !(addr.has_sapling() || addr.has_orchard()) {
+<a href=#847 id=847 data-nosnippet>847</a>                    <span class="macro">vec!</span>[P2PKH_STANDARD_OUTPUT_SIZE]
+<a href=#848 id=848 data-nosnippet>848</a>                } <span class="kw">else </span>{
+<a href=#849 id=849 data-nosnippet>849</a>                    <span class="macro">vec!</span>[]
+<a href=#850 id=850 data-nosnippet>850</a>                },
+<a href=#851 id=851 data-nosnippet>851</a>                spendable_notes.sapling().len(),
+<a href=#852 id=852 data-nosnippet>852</a>                sapling_output_count,
+<a href=#853 id=853 data-nosnippet>853</a>                orchard_action_count,
+<a href=#854 id=854 data-nosnippet>854</a>            )
+<a href=#855 id=855 data-nosnippet>855</a>            .map(|fee| (fee, <span class="prelude-val">None</span>)),
+<a href=#856 id=856 data-nosnippet>856</a>        Address::Tex(<span class="kw">_</span>) =&gt; fee_rule
+<a href=#857 id=857 data-nosnippet>857</a>            .fee_required(
+<a href=#858 id=858 data-nosnippet>858</a>                params,
+<a href=#859 id=859 data-nosnippet>859</a>                BlockHeight::from(target_height),
+<a href=#860 id=860 data-nosnippet>860</a>                [],
+<a href=#861 id=861 data-nosnippet>861</a>                [P2PKH_STANDARD_OUTPUT_SIZE],
+<a href=#862 id=862 data-nosnippet>862</a>                spendable_notes.sapling().len(),
+<a href=#863 id=863 data-nosnippet>863</a>                sapling_output_count,
+<a href=#864 id=864 data-nosnippet>864</a>                orchard_action_count,
+<a href=#865 id=865 data-nosnippet>865</a>            )
+<a href=#866 id=866 data-nosnippet>866</a>            .and_then(|tr0_fee| {
+<a href=#867 id=867 data-nosnippet>867</a>                <span class="kw">let </span>tr1_fee = fee_rule.fee_required(
+<a href=#868 id=868 data-nosnippet>868</a>                    params,
+<a href=#869 id=869 data-nosnippet>869</a>                    BlockHeight::from(target_height),
+<a href=#870 id=870 data-nosnippet>870</a>                    [InputSize::Known(P2PKH_STANDARD_INPUT_SIZE)],
+<a href=#871 id=871 data-nosnippet>871</a>                    [P2PKH_STANDARD_OUTPUT_SIZE],
 <a href=#872 id=872 data-nosnippet>872</a>                    <span class="number">0</span>,
 <a href=#873 id=873 data-nosnippet>873</a>                    <span class="number">0</span>,
-<a href=#874 id=874 data-nosnippet>874</a>                )<span class="question-mark">?</span>;
-<a href=#875 id=875 data-nosnippet>875</a>
-<a href=#876 id=876 data-nosnippet>876</a>                <span class="prelude-val">Ok</span>((tr0_fee, <span class="prelude-val">Some</span>(tr1_fee)))
-<a href=#877 id=877 data-nosnippet>877</a>            }),
-<a href=#878 id=878 data-nosnippet>878</a>    }
-<a href=#879 id=879 data-nosnippet>879</a>    .map_err(|fee_error| InputSelectorError::Change(ChangeError::StrategyError(fee_error)))<span class="question-mark">?</span>;
-<a href=#880 id=880 data-nosnippet>880</a>
-<a href=#881 id=881 data-nosnippet>881</a>    <span class="comment">// the total fee required for the all the involved transactions. For the case
-<a href=#882 id=882 data-nosnippet>882</a>    // of TEX it means the fee requied to send the max value to the ephemeral
-<a href=#883 id=883 data-nosnippet>883</a>    // address + the fee to send the value in that ephemeral change address to
-<a href=#884 id=884 data-nosnippet>884</a>    // the TEX address.
-<a href=#885 id=885 data-nosnippet>885</a>    </span><span class="kw">let </span>total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
-<a href=#886 id=886 data-nosnippet>886</a>        .expect(<span class="string">"fee value addition does not overflow"</span>);
-<a href=#887 id=887 data-nosnippet>887</a>
-<a href=#888 id=888 data-nosnippet>888</a>    <span class="comment">// the total amount involved in the "send max" operation. This is the total
-<a href=#889 id=889 data-nosnippet>889</a>    // spendable value present in the wallet minus the fees required to perform
-<a href=#890 id=890 data-nosnippet>890</a>    // the send max operation.
-<a href=#891 id=891 data-nosnippet>891</a>    </span><span class="kw">let </span>total_to_recipient =
-<a href=#892 id=892 data-nosnippet>892</a>        (input_total - total_fee_required).ok_or(InputSelectorError::InsufficientFunds {
-<a href=#893 id=893 data-nosnippet>893</a>            available: input_total,
-<a href=#894 id=894 data-nosnippet>894</a>            required: total_fee_required,
-<a href=#895 id=895 data-nosnippet>895</a>        })<span class="question-mark">?</span>;
-<a href=#896 id=896 data-nosnippet>896</a>
-<a href=#897 id=897 data-nosnippet>897</a>    <span class="comment">// when the recipient of the send max operation is a TEX address this is the
-<a href=#898 id=898 data-nosnippet>898</a>    // amount that will be needed to send the max available amount accounting the
-<a href=#899 id=899 data-nosnippet>899</a>    // fees needed to propose a transaction involving one transparent input and
-<a href=#900 id=900 data-nosnippet>900</a>    // one transparent output (the TEX address recipient.)
-<a href=#901 id=901 data-nosnippet>901</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#902 id=902 data-nosnippet>902</a>    </span><span class="kw">let </span>ephemeral_output_value =
-<a href=#903 id=903 data-nosnippet>903</a>        tr1_fee.map(|fee| (total_to_recipient + fee).expect(<span class="string">"overflow already checked"</span>));
-<a href=#904 id=904 data-nosnippet>904</a>
-<a href=#905 id=905 data-nosnippet>905</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#906 id=906 data-nosnippet>906</a>    </span><span class="kw">let </span>tr0_change = ephemeral_output_value
-<a href=#907 id=907 data-nosnippet>907</a>        .into_iter()
-<a href=#908 id=908 data-nosnippet>908</a>        .map(ChangeValue::ephemeral_transparent)
-<a href=#909 id=909 data-nosnippet>909</a>        .collect();
-<a href=#910 id=910 data-nosnippet>910</a>    <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#911 id=911 data-nosnippet>911</a>    </span><span class="kw">let </span>tr0_change = <span class="macro">vec!</span>[];
-<a href=#912 id=912 data-nosnippet>912</a>
-<a href=#913 id=913 data-nosnippet>913</a>    <span class="comment">// The transaction produces no change, unless this is a transaction to a TEX address; in this
-<a href=#914 id=914 data-nosnippet>914</a>    // case, the first transaction produces a single ephemeral change output.
-<a href=#915 id=915 data-nosnippet>915</a>    </span><span class="kw">let </span>tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
-<a href=#916 id=916 data-nosnippet>916</a>        .expect(<span class="string">"the sum of an single-element vector of fee values cannot overflow"</span>);
-<a href=#917 id=917 data-nosnippet>917</a>
-<a href=#918 id=918 data-nosnippet>918</a>    <span class="kw">let </span>payment = zip321::Payment::new(
-<a href=#919 id=919 data-nosnippet>919</a>        recipient,
-<a href=#920 id=920 data-nosnippet>920</a>        <span class="prelude-val">Some</span>(total_to_recipient),
-<a href=#921 id=921 data-nosnippet>921</a>        memo,
-<a href=#922 id=922 data-nosnippet>922</a>        <span class="prelude-val">None</span>,
+<a href=#874 id=874 data-nosnippet>874</a>                    <span class="number">0</span>,
+<a href=#875 id=875 data-nosnippet>875</a>                )<span class="question-mark">?</span>;
+<a href=#876 id=876 data-nosnippet>876</a>
+<a href=#877 id=877 data-nosnippet>877</a>                <span class="prelude-val">Ok</span>((tr0_fee, <span class="prelude-val">Some</span>(tr1_fee)))
+<a href=#878 id=878 data-nosnippet>878</a>            }),
+<a href=#879 id=879 data-nosnippet>879</a>    }
+<a href=#880 id=880 data-nosnippet>880</a>    .map_err(|fee_error| InputSelectorError::Change(ChangeError::StrategyError(fee_error)))<span class="question-mark">?</span>;
+<a href=#881 id=881 data-nosnippet>881</a>
+<a href=#882 id=882 data-nosnippet>882</a>    <span class="comment">// the total fee required for the all the involved transactions. For the case
+<a href=#883 id=883 data-nosnippet>883</a>    // of TEX it means the fee requied to send the max value to the ephemeral
+<a href=#884 id=884 data-nosnippet>884</a>    // address + the fee to send the value in that ephemeral change address to
+<a href=#885 id=885 data-nosnippet>885</a>    // the TEX address.
+<a href=#886 id=886 data-nosnippet>886</a>    </span><span class="kw">let </span>total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
+<a href=#887 id=887 data-nosnippet>887</a>        .expect(<span class="string">"fee value addition does not overflow"</span>);
+<a href=#888 id=888 data-nosnippet>888</a>
+<a href=#889 id=889 data-nosnippet>889</a>    <span class="comment">// the total amount involved in the "send max" operation. This is the total
+<a href=#890 id=890 data-nosnippet>890</a>    // spendable value present in the wallet minus the fees required to perform
+<a href=#891 id=891 data-nosnippet>891</a>    // the send max operation.
+<a href=#892 id=892 data-nosnippet>892</a>    </span><span class="kw">let </span>total_to_recipient =
+<a href=#893 id=893 data-nosnippet>893</a>        (input_total - total_fee_required).ok_or(InputSelectorError::InsufficientFunds {
+<a href=#894 id=894 data-nosnippet>894</a>            available: input_total,
+<a href=#895 id=895 data-nosnippet>895</a>            required: total_fee_required,
+<a href=#896 id=896 data-nosnippet>896</a>        })<span class="question-mark">?</span>;
+<a href=#897 id=897 data-nosnippet>897</a>
+<a href=#898 id=898 data-nosnippet>898</a>    <span class="comment">// when the recipient of the send max operation is a TEX address this is the
+<a href=#899 id=899 data-nosnippet>899</a>    // amount that will be needed to send the max available amount accounting the
+<a href=#900 id=900 data-nosnippet>900</a>    // fees needed to propose a transaction involving one transparent input and
+<a href=#901 id=901 data-nosnippet>901</a>    // one transparent output (the TEX address recipient.)
+<a href=#902 id=902 data-nosnippet>902</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#903 id=903 data-nosnippet>903</a>    </span><span class="kw">let </span>ephemeral_output_value =
+<a href=#904 id=904 data-nosnippet>904</a>        tr1_fee.map(|fee| (total_to_recipient + fee).expect(<span class="string">"overflow already checked"</span>));
+<a href=#905 id=905 data-nosnippet>905</a>
+<a href=#906 id=906 data-nosnippet>906</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#907 id=907 data-nosnippet>907</a>    </span><span class="kw">let </span>tr0_change = ephemeral_output_value
+<a href=#908 id=908 data-nosnippet>908</a>        .into_iter()
+<a href=#909 id=909 data-nosnippet>909</a>        .map(ChangeValue::ephemeral_transparent)
+<a href=#910 id=910 data-nosnippet>910</a>        .collect();
+<a href=#911 id=911 data-nosnippet>911</a>    <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#912 id=912 data-nosnippet>912</a>    </span><span class="kw">let </span>tr0_change = <span class="macro">vec!</span>[];
+<a href=#913 id=913 data-nosnippet>913</a>
+<a href=#914 id=914 data-nosnippet>914</a>    <span class="comment">// The transaction produces no change, unless this is a transaction to a TEX address; in this
+<a href=#915 id=915 data-nosnippet>915</a>    // case, the first transaction produces a single ephemeral change output.
+<a href=#916 id=916 data-nosnippet>916</a>    </span><span class="kw">let </span>tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
+<a href=#917 id=917 data-nosnippet>917</a>        .expect(<span class="string">"the sum of an single-element vector of fee values cannot overflow"</span>);
+<a href=#918 id=918 data-nosnippet>918</a>
+<a href=#919 id=919 data-nosnippet>919</a>    <span class="kw">let </span>payment = zip321::Payment::new(
+<a href=#920 id=920 data-nosnippet>920</a>        recipient,
+<a href=#921 id=921 data-nosnippet>921</a>        <span class="prelude-val">Some</span>(total_to_recipient),
+<a href=#922 id=922 data-nosnippet>922</a>        memo,
 <a href=#923 id=923 data-nosnippet>923</a>        <span class="prelude-val">None</span>,
-<a href=#924 id=924 data-nosnippet>924</a>        <span class="macro">vec!</span>[],
-<a href=#925 id=925 data-nosnippet>925</a>    )
-<a href=#926 id=926 data-nosnippet>926</a>    .ok_or_else(|| {
-<a href=#927 id=927 data-nosnippet>927</a>        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
-<a href=#928 id=928 data-nosnippet>928</a>            <span class="number">0</span>,
-<a href=#929 id=929 data-nosnippet>929</a>        )))
-<a href=#930 id=930 data-nosnippet>930</a>    })<span class="question-mark">?</span>;
-<a href=#931 id=931 data-nosnippet>931</a>
-<a href=#932 id=932 data-nosnippet>932</a>    <span class="kw">let </span>transaction_request =
-<a href=#933 id=933 data-nosnippet>933</a>        TransactionRequest::new(<span class="macro">vec!</span>[payment.clone()]).map_err(|payment_error| {
-<a href=#934 id=934 data-nosnippet>934</a>            InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
-<a href=#935 id=935 data-nosnippet>935</a>        })<span class="question-mark">?</span>;
-<a href=#936 id=936 data-nosnippet>936</a>
-<a href=#937 id=937 data-nosnippet>937</a>    <span class="kw">let </span>shielded_inputs = NonEmpty::from_vec(spendable_notes.into_vec(<span class="kw-2">&amp;</span>SimpleNoteRetention {
-<a href=#938 id=938 data-nosnippet>938</a>        sapling: use_sapling,
-<a href=#939 id=939 data-nosnippet>939</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#940 id=940 data-nosnippet>940</a>        </span>orchard: use_orchard,
-<a href=#941 id=941 data-nosnippet>941</a>    }))
-<a href=#942 id=942 data-nosnippet>942</a>    .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
-<a href=#943 id=943 data-nosnippet>943</a>
-<a href=#944 id=944 data-nosnippet>944</a>    build_proposal(
-<a href=#945 id=945 data-nosnippet>945</a>        fee_rule,
-<a href=#946 id=946 data-nosnippet>946</a>        tr0_balance,
-<a href=#947 id=947 data-nosnippet>947</a>        target_height,
-<a href=#948 id=948 data-nosnippet>948</a>        shielded_inputs,
-<a href=#949 id=949 data-nosnippet>949</a>        transaction_request,
-<a href=#950 id=950 data-nosnippet>950</a>        payment_pools,
-<a href=#951 id=951 data-nosnippet>951</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#952 id=952 data-nosnippet>952</a>        </span>ephemeral_output_value
-<a href=#953 id=953 data-nosnippet>953</a>            .zip(tr1_fee)
-<a href=#954 id=954 data-nosnippet>954</a>            .map(|(ephemeral_output_value, tr1_fee)| EphemeralStepConfig {
-<a href=#955 id=955 data-nosnippet>955</a>                ephemeral_output_value,
-<a href=#956 id=956 data-nosnippet>956</a>                tr1_balance: TransactionBalance::new(<span class="macro">vec!</span>[], tr1_fee)
-<a href=#957 id=957 data-nosnippet>957</a>                    .expect(<span class="string">"the sum of an empty vector of fee values cannot overflow"</span>),
-<a href=#958 id=958 data-nosnippet>958</a>                tr1_payments: <span class="macro">vec!</span>[payment],
-<a href=#959 id=959 data-nosnippet>959</a>                tr1_payment_pools: BTreeMap::from_iter([(<span class="number">0</span>, PoolType::Transparent)]),
-<a href=#960 id=960 data-nosnippet>960</a>            }),
-<a href=#961 id=961 data-nosnippet>961</a>    )
-<a href=#962 id=962 data-nosnippet>962</a>    .map_err(InputSelectorError::Proposal)
-<a href=#963 id=963 data-nosnippet>963</a>}
-<a href=#964 id=964 data-nosnippet>964</a>
-<a href=#965 id=965 data-nosnippet>965</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#966 id=966 data-nosnippet>966</a></span><span class="kw">struct </span>EphemeralStepConfig {
-<a href=#967 id=967 data-nosnippet>967</a>    ephemeral_output_value: Zatoshis,
-<a href=#968 id=968 data-nosnippet>968</a>    tr1_balance: TransactionBalance,
-<a href=#969 id=969 data-nosnippet>969</a>    tr1_payments: Vec&lt;Payment&gt;,
-<a href=#970 id=970 data-nosnippet>970</a>    tr1_payment_pools: BTreeMap&lt;usize, PoolType&gt;,
-<a href=#971 id=971 data-nosnippet>971</a>}
-<a href=#972 id=972 data-nosnippet>972</a>
-<a href=#973 id=973 data-nosnippet>973</a><span class="kw">fn </span>build_proposal&lt;FeeRuleT: FeeRule + Clone, NoteRef&gt;(
-<a href=#974 id=974 data-nosnippet>974</a>    fee_rule: <span class="kw-2">&amp;</span>FeeRuleT,
-<a href=#975 id=975 data-nosnippet>975</a>    tr0_balance: TransactionBalance,
-<a href=#976 id=976 data-nosnippet>976</a>    target_height: TargetHeight,
-<a href=#977 id=977 data-nosnippet>977</a>    shielded_inputs: <span class="prelude-ty">Option</span>&lt;ShieldedInputs&lt;NoteRef&gt;&gt;,
-<a href=#978 id=978 data-nosnippet>978</a>    transaction_request: TransactionRequest,
-<a href=#979 id=979 data-nosnippet>979</a>    payment_pools: BTreeMap&lt;usize, PoolType&gt;,
-<a href=#980 id=980 data-nosnippet>980</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>ephemeral_step_opt: <span class="prelude-ty">Option</span>&lt;EphemeralStepConfig&gt;,
-<a href=#981 id=981 data-nosnippet>981</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Proposal&lt;FeeRuleT, NoteRef&gt;, ProposalError&gt; {
-<a href=#982 id=982 data-nosnippet>982</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#983 id=983 data-nosnippet>983</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(ephemeral_step) = ephemeral_step_opt {
-<a href=#984 id=984 data-nosnippet>984</a>        <span class="kw">let </span>tr1_balance = ephemeral_step.tr1_balance;
-<a href=#985 id=985 data-nosnippet>985</a>        <span class="comment">// Construct two new `TransactionRequest`s:
-<a href=#986 id=986 data-nosnippet>986</a>        // * `tr0` excludes the TEX outputs, and in their place includes
-<a href=#987 id=987 data-nosnippet>987</a>        //   a single additional ephemeral output to the transparent pool.
-<a href=#988 id=988 data-nosnippet>988</a>        // * `tr1` spends from that ephemeral output to each TEX output.
-<a href=#989 id=989 data-nosnippet>989</a>
-<a href=#990 id=990 data-nosnippet>990</a>        // Find exactly one ephemeral change output.
-<a href=#991 id=991 data-nosnippet>991</a>        </span><span class="kw">let </span>ephemeral_outputs = tr0_balance
-<a href=#992 id=992 data-nosnippet>992</a>            .proposed_change()
-<a href=#993 id=993 data-nosnippet>993</a>            .iter()
-<a href=#994 id=994 data-nosnippet>994</a>            .enumerate()
-<a href=#995 id=995 data-nosnippet>995</a>            .filter(|(<span class="kw">_</span>, c)| c.is_ephemeral())
-<a href=#996 id=996 data-nosnippet>996</a>            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-<a href=#997 id=997 data-nosnippet>997</a>
-<a href=#998 id=998 data-nosnippet>998</a>        <span class="kw">let </span>ephemeral_output_index = <span class="kw">match </span><span class="kw-2">&amp;</span>ephemeral_outputs[..] {
-<a href=#999 id=999 data-nosnippet>999</a>            [(i, change_value)]
-<a href=#1000 id=1000 data-nosnippet>1000</a>                <span class="kw">if </span>change_value.value() == ephemeral_step.ephemeral_output_value =&gt;
-<a href=#1001 id=1001 data-nosnippet>1001</a>            {
-<a href=#1002 id=1002 data-nosnippet>1002</a>                <span class="prelude-val">Ok</span>(<span class="kw-2">*</span>i)
-<a href=#1003 id=1003 data-nosnippet>1003</a>            }
-<a href=#1004 id=1004 data-nosnippet>1004</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ProposalError::EphemeralOutputsInvalid),
-<a href=#1005 id=1005 data-nosnippet>1005</a>        }<span class="question-mark">?</span>;
-<a href=#1006 id=1006 data-nosnippet>1006</a>
-<a href=#1007 id=1007 data-nosnippet>1007</a>        <span class="kw">let </span>ephemeral_stepoutput =
-<a href=#1008 id=1008 data-nosnippet>1008</a>            StepOutput::new(<span class="number">0</span>, StepOutputIndex::Change(ephemeral_output_index));
-<a href=#1009 id=1009 data-nosnippet>1009</a>
-<a href=#1010 id=1010 data-nosnippet>1010</a>        <span class="kw">let </span>tr0 = TransactionRequest::from_indexed(
-<a href=#1011 id=1011 data-nosnippet>1011</a>            transaction_request
-<a href=#1012 id=1012 data-nosnippet>1012</a>                .payments()
-<a href=#1013 id=1013 data-nosnippet>1013</a>                .iter()
-<a href=#1014 id=1014 data-nosnippet>1014</a>                .filter(|(idx, _payment)| !ephemeral_step.tr1_payment_pools.contains_key(idx))
-<a href=#1015 id=1015 data-nosnippet>1015</a>                .map(|(k, v)| (<span class="kw-2">*</span>k, v.clone()))
-<a href=#1016 id=1016 data-nosnippet>1016</a>                .collect(),
-<a href=#1017 id=1017 data-nosnippet>1017</a>        )
-<a href=#1018 id=1018 data-nosnippet>1018</a>        .expect(<span class="string">"removing payments from a TransactionRequest preserves validity"</span>);
-<a href=#1019 id=1019 data-nosnippet>1019</a>
-<a href=#1020 id=1020 data-nosnippet>1020</a>        <span class="kw">let </span><span class="kw-2">mut </span>steps = <span class="macro">vec!</span>[];
-<a href=#1021 id=1021 data-nosnippet>1021</a>        steps.push(Step::from_parts(
-<a href=#1022 id=1022 data-nosnippet>1022</a>            <span class="kw-2">&amp;</span>[],
-<a href=#1023 id=1023 data-nosnippet>1023</a>            tr0,
-<a href=#1024 id=1024 data-nosnippet>1024</a>            payment_pools,
-<a href=#1025 id=1025 data-nosnippet>1025</a>            <span class="macro">vec!</span>[],
-<a href=#1026 id=1026 data-nosnippet>1026</a>            shielded_inputs,
-<a href=#1027 id=1027 data-nosnippet>1027</a>            <span class="macro">vec!</span>[],
-<a href=#1028 id=1028 data-nosnippet>1028</a>            tr0_balance,
-<a href=#1029 id=1029 data-nosnippet>1029</a>            <span class="bool-val">false</span>,
-<a href=#1030 id=1030 data-nosnippet>1030</a>        )<span class="question-mark">?</span>);
-<a href=#1031 id=1031 data-nosnippet>1031</a>
-<a href=#1032 id=1032 data-nosnippet>1032</a>        <span class="kw">let </span>tr1 =
-<a href=#1033 id=1033 data-nosnippet>1033</a>            TransactionRequest::new(ephemeral_step.tr1_payments).expect(<span class="string">"valid by construction"</span>);
-<a href=#1034 id=1034 data-nosnippet>1034</a>        steps.push(Step::from_parts(
-<a href=#1035 id=1035 data-nosnippet>1035</a>            <span class="kw-2">&amp;</span>steps,
-<a href=#1036 id=1036 data-nosnippet>1036</a>            tr1,
-<a href=#1037 id=1037 data-nosnippet>1037</a>            ephemeral_step.tr1_payment_pools,
-<a href=#1038 id=1038 data-nosnippet>1038</a>            <span class="macro">vec!</span>[],
-<a href=#1039 id=1039 data-nosnippet>1039</a>            <span class="prelude-val">None</span>,
-<a href=#1040 id=1040 data-nosnippet>1040</a>            <span class="macro">vec!</span>[ephemeral_stepoutput],
-<a href=#1041 id=1041 data-nosnippet>1041</a>            tr1_balance,
-<a href=#1042 id=1042 data-nosnippet>1042</a>            <span class="bool-val">false</span>,
-<a href=#1043 id=1043 data-nosnippet>1043</a>        )<span class="question-mark">?</span>);
-<a href=#1044 id=1044 data-nosnippet>1044</a>
-<a href=#1045 id=1045 data-nosnippet>1045</a>        <span class="kw">return </span>Proposal::multi_step(
-<a href=#1046 id=1046 data-nosnippet>1046</a>            fee_rule.clone(),
-<a href=#1047 id=1047 data-nosnippet>1047</a>            target_height,
-<a href=#1048 id=1048 data-nosnippet>1048</a>            NonEmpty::from_vec(steps).expect(<span class="string">"steps is known to be nonempty"</span>),
-<a href=#1049 id=1049 data-nosnippet>1049</a>        );
-<a href=#1050 id=1050 data-nosnippet>1050</a>    }
-<a href=#1051 id=1051 data-nosnippet>1051</a>
-<a href=#1052 id=1052 data-nosnippet>1052</a>    Proposal::single_step(
-<a href=#1053 id=1053 data-nosnippet>1053</a>        transaction_request,
-<a href=#1054 id=1054 data-nosnippet>1054</a>        payment_pools,
-<a href=#1055 id=1055 data-nosnippet>1055</a>        <span class="macro">vec!</span>[],
-<a href=#1056 id=1056 data-nosnippet>1056</a>        shielded_inputs,
-<a href=#1057 id=1057 data-nosnippet>1057</a>        tr0_balance,
-<a href=#1058 id=1058 data-nosnippet>1058</a>        fee_rule.clone(),
-<a href=#1059 id=1059 data-nosnippet>1059</a>        target_height,
-<a href=#1060 id=1060 data-nosnippet>1060</a>        <span class="bool-val">false</span>,
-<a href=#1061 id=1061 data-nosnippet>1061</a>    )
-<a href=#1062 id=1062 data-nosnippet>1062</a>}
-<a href=#1063 id=1063 data-nosnippet>1063</a>
-<a href=#1064 id=1064 data-nosnippet>1064</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#1065 id=1065 data-nosnippet>1065</a></span><span class="kw">impl</span>&lt;DbT: InputSource&gt; ShieldingSelector <span class="kw">for </span>GreedyInputSelector&lt;DbT&gt; {
-<a href=#1066 id=1066 data-nosnippet>1066</a>    <span class="kw">type </span>Error = GreedyInputSelectorError;
-<a href=#1067 id=1067 data-nosnippet>1067</a>    <span class="kw">type </span>InputSource = DbT;
-<a href=#1068 id=1068 data-nosnippet>1068</a>
-<a href=#1069 id=1069 data-nosnippet>1069</a>    <span class="attr">#[allow(clippy::type_complexity)]
-<a href=#1070 id=1070 data-nosnippet>1070</a>    </span><span class="kw">fn </span>propose_shielding&lt;ParamsT, ChangeT&gt;(
-<a href=#1071 id=1071 data-nosnippet>1071</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#1072 id=1072 data-nosnippet>1072</a>        params: <span class="kw-2">&amp;</span>ParamsT,
-<a href=#1073 id=1073 data-nosnippet>1073</a>        wallet_db: <span class="kw-2">&amp;</span><span class="self">Self</span>::InputSource,
-<a href=#1074 id=1074 data-nosnippet>1074</a>        change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-<a href=#1075 id=1075 data-nosnippet>1075</a>        shielding_threshold: Zatoshis,
-<a href=#1076 id=1076 data-nosnippet>1076</a>        source_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
-<a href=#1077 id=1077 data-nosnippet>1077</a>        to_account: &lt;<span class="self">Self</span>::InputSource <span class="kw">as </span>InputSource&gt;::AccountId,
-<a href=#1078 id=1078 data-nosnippet>1078</a>        target_height: TargetHeight,
-<a href=#1079 id=1079 data-nosnippet>1079</a>        confirmations_policy: ConfirmationsPolicy,
-<a href=#1080 id=1080 data-nosnippet>1080</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;
-<a href=#1081 id=1081 data-nosnippet>1081</a>        Proposal&lt;&lt;ChangeT <span class="kw">as </span>ChangeStrategy&gt;::FeeRule, Infallible&gt;,
-<a href=#1082 id=1082 data-nosnippet>1082</a>        InputSelectorError&lt;&lt;DbT <span class="kw">as </span>InputSource&gt;::Error, <span class="self">Self</span>::Error, ChangeT::Error, Infallible&gt;,
-<a href=#1083 id=1083 data-nosnippet>1083</a>    &gt;
-<a href=#1084 id=1084 data-nosnippet>1084</a>    <span class="kw">where
-<a href=#1085 id=1085 data-nosnippet>1085</a>        </span>ParamsT: consensus::Parameters,
-<a href=#1086 id=1086 data-nosnippet>1086</a>        ChangeT: ChangeStrategy&lt;MetaSource = <span class="self">Self</span>::InputSource&gt;,
-<a href=#1087 id=1087 data-nosnippet>1087</a>    {
-<a href=#1088 id=1088 data-nosnippet>1088</a>        <span class="kw">let </span>(<span class="kw-2">mut </span>transparent_inputs, <span class="kw">_</span>, <span class="kw">_</span>) = source_addrs.iter().try_fold(
-<a href=#1089 id=1089 data-nosnippet>1089</a>            (
-<a href=#1090 id=1090 data-nosnippet>1090</a>                <span class="macro">vec!</span>[],
-<a href=#1091 id=1091 data-nosnippet>1091</a>                BTreeSet::&lt;TransparentAddress&gt;::new(),
+<a href=#924 id=924 data-nosnippet>924</a>        <span class="prelude-val">None</span>,
+<a href=#925 id=925 data-nosnippet>925</a>        <span class="macro">vec!</span>[],
+<a href=#926 id=926 data-nosnippet>926</a>    )
+<a href=#927 id=927 data-nosnippet>927</a>    .ok_or_else(|| {
+<a href=#928 id=928 data-nosnippet>928</a>        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
+<a href=#929 id=929 data-nosnippet>929</a>            <span class="number">0</span>,
+<a href=#930 id=930 data-nosnippet>930</a>        )))
+<a href=#931 id=931 data-nosnippet>931</a>    })<span class="question-mark">?</span>;
+<a href=#932 id=932 data-nosnippet>932</a>
+<a href=#933 id=933 data-nosnippet>933</a>    <span class="kw">let </span>transaction_request =
+<a href=#934 id=934 data-nosnippet>934</a>        TransactionRequest::new(<span class="macro">vec!</span>[payment.clone()]).map_err(|payment_error| {
+<a href=#935 id=935 data-nosnippet>935</a>            InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
+<a href=#936 id=936 data-nosnippet>936</a>        })<span class="question-mark">?</span>;
+<a href=#937 id=937 data-nosnippet>937</a>
+<a href=#938 id=938 data-nosnippet>938</a>    <span class="kw">let </span>shielded_inputs = NonEmpty::from_vec(spendable_notes.into_vec(<span class="kw-2">&amp;</span>SimpleNoteRetention {
+<a href=#939 id=939 data-nosnippet>939</a>        sapling: use_sapling,
+<a href=#940 id=940 data-nosnippet>940</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#941 id=941 data-nosnippet>941</a>        </span>orchard: use_orchard,
+<a href=#942 id=942 data-nosnippet>942</a>    }))
+<a href=#943 id=943 data-nosnippet>943</a>    .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+<a href=#944 id=944 data-nosnippet>944</a>
+<a href=#945 id=945 data-nosnippet>945</a>    build_proposal(
+<a href=#946 id=946 data-nosnippet>946</a>        fee_rule,
+<a href=#947 id=947 data-nosnippet>947</a>        tr0_balance,
+<a href=#948 id=948 data-nosnippet>948</a>        target_height,
+<a href=#949 id=949 data-nosnippet>949</a>        shielded_inputs,
+<a href=#950 id=950 data-nosnippet>950</a>        transaction_request,
+<a href=#951 id=951 data-nosnippet>951</a>        payment_pools,
+<a href=#952 id=952 data-nosnippet>952</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#953 id=953 data-nosnippet>953</a>        </span>ephemeral_output_value
+<a href=#954 id=954 data-nosnippet>954</a>            .zip(tr1_fee)
+<a href=#955 id=955 data-nosnippet>955</a>            .map(|(ephemeral_output_value, tr1_fee)| EphemeralStepConfig {
+<a href=#956 id=956 data-nosnippet>956</a>                ephemeral_output_value,
+<a href=#957 id=957 data-nosnippet>957</a>                tr1_balance: TransactionBalance::new(<span class="macro">vec!</span>[], tr1_fee)
+<a href=#958 id=958 data-nosnippet>958</a>                    .expect(<span class="string">"the sum of an empty vector of fee values cannot overflow"</span>),
+<a href=#959 id=959 data-nosnippet>959</a>                tr1_payments: <span class="macro">vec!</span>[payment],
+<a href=#960 id=960 data-nosnippet>960</a>                tr1_payment_pools: BTreeMap::from_iter([(<span class="number">0</span>, PoolType::Transparent)]),
+<a href=#961 id=961 data-nosnippet>961</a>            }),
+<a href=#962 id=962 data-nosnippet>962</a>    )
+<a href=#963 id=963 data-nosnippet>963</a>    .map_err(InputSelectorError::Proposal)
+<a href=#964 id=964 data-nosnippet>964</a>}
+<a href=#965 id=965 data-nosnippet>965</a>
+<a href=#966 id=966 data-nosnippet>966</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#967 id=967 data-nosnippet>967</a></span><span class="kw">struct </span>EphemeralStepConfig {
+<a href=#968 id=968 data-nosnippet>968</a>    ephemeral_output_value: Zatoshis,
+<a href=#969 id=969 data-nosnippet>969</a>    tr1_balance: TransactionBalance,
+<a href=#970 id=970 data-nosnippet>970</a>    tr1_payments: Vec&lt;Payment&gt;,
+<a href=#971 id=971 data-nosnippet>971</a>    tr1_payment_pools: BTreeMap&lt;usize, PoolType&gt;,
+<a href=#972 id=972 data-nosnippet>972</a>}
+<a href=#973 id=973 data-nosnippet>973</a>
+<a href=#974 id=974 data-nosnippet>974</a><span class="kw">fn </span>build_proposal&lt;FeeRuleT: FeeRule + Clone, NoteRef&gt;(
+<a href=#975 id=975 data-nosnippet>975</a>    fee_rule: <span class="kw-2">&amp;</span>FeeRuleT,
+<a href=#976 id=976 data-nosnippet>976</a>    tr0_balance: TransactionBalance,
+<a href=#977 id=977 data-nosnippet>977</a>    target_height: TargetHeight,
+<a href=#978 id=978 data-nosnippet>978</a>    shielded_inputs: <span class="prelude-ty">Option</span>&lt;ShieldedInputs&lt;NoteRef&gt;&gt;,
+<a href=#979 id=979 data-nosnippet>979</a>    transaction_request: TransactionRequest,
+<a href=#980 id=980 data-nosnippet>980</a>    payment_pools: BTreeMap&lt;usize, PoolType&gt;,
+<a href=#981 id=981 data-nosnippet>981</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>ephemeral_step_opt: <span class="prelude-ty">Option</span>&lt;EphemeralStepConfig&gt;,
+<a href=#982 id=982 data-nosnippet>982</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Proposal&lt;FeeRuleT, NoteRef&gt;, ProposalError&gt; {
+<a href=#983 id=983 data-nosnippet>983</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#984 id=984 data-nosnippet>984</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(ephemeral_step) = ephemeral_step_opt {
+<a href=#985 id=985 data-nosnippet>985</a>        <span class="kw">let </span>tr1_balance = ephemeral_step.tr1_balance;
+<a href=#986 id=986 data-nosnippet>986</a>        <span class="comment">// Construct two new `TransactionRequest`s:
+<a href=#987 id=987 data-nosnippet>987</a>        // * `tr0` excludes the TEX outputs, and in their place includes
+<a href=#988 id=988 data-nosnippet>988</a>        //   a single additional ephemeral output to the transparent pool.
+<a href=#989 id=989 data-nosnippet>989</a>        // * `tr1` spends from that ephemeral output to each TEX output.
+<a href=#990 id=990 data-nosnippet>990</a>
+<a href=#991 id=991 data-nosnippet>991</a>        // Find exactly one ephemeral change output.
+<a href=#992 id=992 data-nosnippet>992</a>        </span><span class="kw">let </span>ephemeral_outputs = tr0_balance
+<a href=#993 id=993 data-nosnippet>993</a>            .proposed_change()
+<a href=#994 id=994 data-nosnippet>994</a>            .iter()
+<a href=#995 id=995 data-nosnippet>995</a>            .enumerate()
+<a href=#996 id=996 data-nosnippet>996</a>            .filter(|(<span class="kw">_</span>, c)| c.is_ephemeral())
+<a href=#997 id=997 data-nosnippet>997</a>            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+<a href=#998 id=998 data-nosnippet>998</a>
+<a href=#999 id=999 data-nosnippet>999</a>        <span class="kw">let </span>ephemeral_output_index = <span class="kw">match </span><span class="kw-2">&amp;</span>ephemeral_outputs[..] {
+<a href=#1000 id=1000 data-nosnippet>1000</a>            [(i, change_value)]
+<a href=#1001 id=1001 data-nosnippet>1001</a>                <span class="kw">if </span>change_value.value() == ephemeral_step.ephemeral_output_value =&gt;
+<a href=#1002 id=1002 data-nosnippet>1002</a>            {
+<a href=#1003 id=1003 data-nosnippet>1003</a>                <span class="prelude-val">Ok</span>(<span class="kw-2">*</span>i)
+<a href=#1004 id=1004 data-nosnippet>1004</a>            }
+<a href=#1005 id=1005 data-nosnippet>1005</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ProposalError::EphemeralOutputsInvalid),
+<a href=#1006 id=1006 data-nosnippet>1006</a>        }<span class="question-mark">?</span>;
+<a href=#1007 id=1007 data-nosnippet>1007</a>
+<a href=#1008 id=1008 data-nosnippet>1008</a>        <span class="kw">let </span>ephemeral_stepoutput =
+<a href=#1009 id=1009 data-nosnippet>1009</a>            StepOutput::new(<span class="number">0</span>, StepOutputIndex::Change(ephemeral_output_index));
+<a href=#1010 id=1010 data-nosnippet>1010</a>
+<a href=#1011 id=1011 data-nosnippet>1011</a>        <span class="kw">let </span>tr0 = TransactionRequest::from_indexed(
+<a href=#1012 id=1012 data-nosnippet>1012</a>            transaction_request
+<a href=#1013 id=1013 data-nosnippet>1013</a>                .payments()
+<a href=#1014 id=1014 data-nosnippet>1014</a>                .iter()
+<a href=#1015 id=1015 data-nosnippet>1015</a>                .filter(|(idx, _payment)| !ephemeral_step.tr1_payment_pools.contains_key(idx))
+<a href=#1016 id=1016 data-nosnippet>1016</a>                .map(|(k, v)| (<span class="kw-2">*</span>k, v.clone()))
+<a href=#1017 id=1017 data-nosnippet>1017</a>                .collect(),
+<a href=#1018 id=1018 data-nosnippet>1018</a>        )
+<a href=#1019 id=1019 data-nosnippet>1019</a>        .expect(<span class="string">"removing payments from a TransactionRequest preserves validity"</span>);
+<a href=#1020 id=1020 data-nosnippet>1020</a>
+<a href=#1021 id=1021 data-nosnippet>1021</a>        <span class="kw">let </span><span class="kw-2">mut </span>steps = <span class="macro">vec!</span>[];
+<a href=#1022 id=1022 data-nosnippet>1022</a>        steps.push(Step::from_parts(
+<a href=#1023 id=1023 data-nosnippet>1023</a>            <span class="kw-2">&amp;</span>[],
+<a href=#1024 id=1024 data-nosnippet>1024</a>            tr0,
+<a href=#1025 id=1025 data-nosnippet>1025</a>            payment_pools,
+<a href=#1026 id=1026 data-nosnippet>1026</a>            <span class="macro">vec!</span>[],
+<a href=#1027 id=1027 data-nosnippet>1027</a>            shielded_inputs,
+<a href=#1028 id=1028 data-nosnippet>1028</a>            <span class="macro">vec!</span>[],
+<a href=#1029 id=1029 data-nosnippet>1029</a>            tr0_balance,
+<a href=#1030 id=1030 data-nosnippet>1030</a>            <span class="bool-val">false</span>,
+<a href=#1031 id=1031 data-nosnippet>1031</a>        )<span class="question-mark">?</span>);
+<a href=#1032 id=1032 data-nosnippet>1032</a>
+<a href=#1033 id=1033 data-nosnippet>1033</a>        <span class="kw">let </span>tr1 =
+<a href=#1034 id=1034 data-nosnippet>1034</a>            TransactionRequest::new(ephemeral_step.tr1_payments).expect(<span class="string">"valid by construction"</span>);
+<a href=#1035 id=1035 data-nosnippet>1035</a>        steps.push(Step::from_parts(
+<a href=#1036 id=1036 data-nosnippet>1036</a>            <span class="kw-2">&amp;</span>steps,
+<a href=#1037 id=1037 data-nosnippet>1037</a>            tr1,
+<a href=#1038 id=1038 data-nosnippet>1038</a>            ephemeral_step.tr1_payment_pools,
+<a href=#1039 id=1039 data-nosnippet>1039</a>            <span class="macro">vec!</span>[],
+<a href=#1040 id=1040 data-nosnippet>1040</a>            <span class="prelude-val">None</span>,
+<a href=#1041 id=1041 data-nosnippet>1041</a>            <span class="macro">vec!</span>[ephemeral_stepoutput],
+<a href=#1042 id=1042 data-nosnippet>1042</a>            tr1_balance,
+<a href=#1043 id=1043 data-nosnippet>1043</a>            <span class="bool-val">false</span>,
+<a href=#1044 id=1044 data-nosnippet>1044</a>        )<span class="question-mark">?</span>);
+<a href=#1045 id=1045 data-nosnippet>1045</a>
+<a href=#1046 id=1046 data-nosnippet>1046</a>        <span class="kw">return </span>Proposal::multi_step(
+<a href=#1047 id=1047 data-nosnippet>1047</a>            fee_rule.clone(),
+<a href=#1048 id=1048 data-nosnippet>1048</a>            target_height,
+<a href=#1049 id=1049 data-nosnippet>1049</a>            NonEmpty::from_vec(steps).expect(<span class="string">"steps is known to be nonempty"</span>),
+<a href=#1050 id=1050 data-nosnippet>1050</a>        );
+<a href=#1051 id=1051 data-nosnippet>1051</a>    }
+<a href=#1052 id=1052 data-nosnippet>1052</a>
+<a href=#1053 id=1053 data-nosnippet>1053</a>    Proposal::single_step(
+<a href=#1054 id=1054 data-nosnippet>1054</a>        transaction_request,
+<a href=#1055 id=1055 data-nosnippet>1055</a>        payment_pools,
+<a href=#1056 id=1056 data-nosnippet>1056</a>        <span class="macro">vec!</span>[],
+<a href=#1057 id=1057 data-nosnippet>1057</a>        shielded_inputs,
+<a href=#1058 id=1058 data-nosnippet>1058</a>        tr0_balance,
+<a href=#1059 id=1059 data-nosnippet>1059</a>        fee_rule.clone(),
+<a href=#1060 id=1060 data-nosnippet>1060</a>        target_height,
+<a href=#1061 id=1061 data-nosnippet>1061</a>        <span class="bool-val">false</span>,
+<a href=#1062 id=1062 data-nosnippet>1062</a>    )
+<a href=#1063 id=1063 data-nosnippet>1063</a>}
+<a href=#1064 id=1064 data-nosnippet>1064</a>
+<a href=#1065 id=1065 data-nosnippet>1065</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#1066 id=1066 data-nosnippet>1066</a></span><span class="kw">impl</span>&lt;DbT: InputSource&gt; ShieldingSelector <span class="kw">for </span>GreedyInputSelector&lt;DbT&gt; {
+<a href=#1067 id=1067 data-nosnippet>1067</a>    <span class="kw">type </span>Error = GreedyInputSelectorError;
+<a href=#1068 id=1068 data-nosnippet>1068</a>    <span class="kw">type </span>InputSource = DbT;
+<a href=#1069 id=1069 data-nosnippet>1069</a>
+<a href=#1070 id=1070 data-nosnippet>1070</a>    <span class="attr">#[allow(clippy::type_complexity)]
+<a href=#1071 id=1071 data-nosnippet>1071</a>    </span><span class="kw">fn </span>propose_shielding&lt;ParamsT, ChangeT&gt;(
+<a href=#1072 id=1072 data-nosnippet>1072</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#1073 id=1073 data-nosnippet>1073</a>        params: <span class="kw-2">&amp;</span>ParamsT,
+<a href=#1074 id=1074 data-nosnippet>1074</a>        wallet_db: <span class="kw-2">&amp;</span><span class="self">Self</span>::InputSource,
+<a href=#1075 id=1075 data-nosnippet>1075</a>        change_strategy: <span class="kw-2">&amp;</span>ChangeT,
+<a href=#1076 id=1076 data-nosnippet>1076</a>        shielding_threshold: Zatoshis,
+<a href=#1077 id=1077 data-nosnippet>1077</a>        source_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
+<a href=#1078 id=1078 data-nosnippet>1078</a>        to_account: &lt;<span class="self">Self</span>::InputSource <span class="kw">as </span>InputSource&gt;::AccountId,
+<a href=#1079 id=1079 data-nosnippet>1079</a>        target_height: TargetHeight,
+<a href=#1080 id=1080 data-nosnippet>1080</a>        confirmations_policy: ConfirmationsPolicy,
+<a href=#1081 id=1081 data-nosnippet>1081</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;
+<a href=#1082 id=1082 data-nosnippet>1082</a>        Proposal&lt;&lt;ChangeT <span class="kw">as </span>ChangeStrategy&gt;::FeeRule, Infallible&gt;,
+<a href=#1083 id=1083 data-nosnippet>1083</a>        InputSelectorError&lt;&lt;DbT <span class="kw">as </span>InputSource&gt;::Error, <span class="self">Self</span>::Error, ChangeT::Error, Infallible&gt;,
+<a href=#1084 id=1084 data-nosnippet>1084</a>    &gt;
+<a href=#1085 id=1085 data-nosnippet>1085</a>    <span class="kw">where
+<a href=#1086 id=1086 data-nosnippet>1086</a>        </span>ParamsT: consensus::Parameters,
+<a href=#1087 id=1087 data-nosnippet>1087</a>        ChangeT: ChangeStrategy&lt;MetaSource = <span class="self">Self</span>::InputSource&gt;,
+<a href=#1088 id=1088 data-nosnippet>1088</a>    {
+<a href=#1089 id=1089 data-nosnippet>1089</a>        <span class="kw">let </span>(<span class="kw-2">mut </span>transparent_inputs, <span class="kw">_</span>, <span class="kw">_</span>) = source_addrs.iter().try_fold(
+<a href=#1090 id=1090 data-nosnippet>1090</a>            (
+<a href=#1091 id=1091 data-nosnippet>1091</a>                <span class="macro">vec!</span>[],
 <a href=#1092 id=1092 data-nosnippet>1092</a>                BTreeSet::&lt;TransparentAddress&gt;::new(),
-<a href=#1093 id=1093 data-nosnippet>1093</a>            ),
-<a href=#1094 id=1094 data-nosnippet>1094</a>            |(<span class="kw-2">mut </span>inputs, <span class="kw-2">mut </span>ephemeral_addrs, <span class="kw-2">mut </span>input_addrs), taddr| {
-<a href=#1095 id=1095 data-nosnippet>1095</a>                <span class="kw">use </span>transparent::keys::TransparentKeyScope;
-<a href=#1096 id=1096 data-nosnippet>1096</a>
-<a href=#1097 id=1097 data-nosnippet>1097</a>                <span class="kw">let </span>utxos = wallet_db
-<a href=#1098 id=1098 data-nosnippet>1098</a>                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
-<a href=#1099 id=1099 data-nosnippet>1099</a>                    .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
-<a href=#1100 id=1100 data-nosnippet>1100</a>
-<a href=#1101 id=1101 data-nosnippet>1101</a>                <span class="comment">// `InputSource::get_spendable_transparent_outputs` is required to return
-<a href=#1102 id=1102 data-nosnippet>1102</a>                // outputs received by `taddr`, so these `.extend()` calls are guaranteed
-<a href=#1103 id=1103 data-nosnippet>1103</a>                // to add at most a single new address to each set. But it's more
-<a href=#1104 id=1104 data-nosnippet>1104</a>                // convenient this way as we can reuse `utxo.recipient_key_scope()`
-<a href=#1105 id=1105 data-nosnippet>1105</a>                // instead of needing to query the wallet twice for each address to
-<a href=#1106 id=1106 data-nosnippet>1106</a>                // determine their scopes.
-<a href=#1107 id=1107 data-nosnippet>1107</a>                </span>ephemeral_addrs.extend(utxos.iter().filter_map(|utxo| {
-<a href=#1108 id=1108 data-nosnippet>1108</a>                    (utxo.recipient_key_scope() == <span class="prelude-val">Some</span>(TransparentKeyScope::EPHEMERAL))
-<a href=#1109 id=1109 data-nosnippet>1109</a>                        .then_some(utxo.recipient_address())
-<a href=#1110 id=1110 data-nosnippet>1110</a>                }));
-<a href=#1111 id=1111 data-nosnippet>1111</a>                input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
-<a href=#1112 id=1112 data-nosnippet>1112</a>                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
-<a href=#1113 id=1113 data-nosnippet>1113</a>
-<a href=#1114 id=1114 data-nosnippet>1114</a>                <span class="comment">// Funds may be spent from at most one ephemeral address at a time. If there are no
-<a href=#1115 id=1115 data-nosnippet>1115</a>                // ephemeral addresses, we allow shielding from multiple transparent addresses.
-<a href=#1116 id=1116 data-nosnippet>1116</a>                </span><span class="kw">if </span>!ephemeral_addrs.is_empty() &amp;&amp; input_addrs.len() &gt; <span class="number">1 </span>{
-<a href=#1117 id=1117 data-nosnippet>1117</a>                    <span class="prelude-val">Err</span>(InputSelectorError::Proposal(
-<a href=#1118 id=1118 data-nosnippet>1118</a>                        ProposalError::EphemeralAddressLinkability,
-<a href=#1119 id=1119 data-nosnippet>1119</a>                    ))
-<a href=#1120 id=1120 data-nosnippet>1120</a>                } <span class="kw">else </span>{
-<a href=#1121 id=1121 data-nosnippet>1121</a>                    <span class="prelude-val">Ok</span>((inputs, ephemeral_addrs, input_addrs))
-<a href=#1122 id=1122 data-nosnippet>1122</a>                }
-<a href=#1123 id=1123 data-nosnippet>1123</a>            },
-<a href=#1124 id=1124 data-nosnippet>1124</a>        )<span class="question-mark">?</span>;
-<a href=#1125 id=1125 data-nosnippet>1125</a>
-<a href=#1126 id=1126 data-nosnippet>1126</a>        <span class="kw">let </span>wallet_meta = change_strategy
-<a href=#1127 id=1127 data-nosnippet>1127</a>            .fetch_wallet_meta(wallet_db, to_account, target_height, <span class="kw-2">&amp;</span>[])
-<a href=#1128 id=1128 data-nosnippet>1128</a>            .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
-<a href=#1129 id=1129 data-nosnippet>1129</a>
-<a href=#1130 id=1130 data-nosnippet>1130</a>        <span class="kw">let </span>trial_balance = change_strategy.compute_balance(
-<a href=#1131 id=1131 data-nosnippet>1131</a>            params,
-<a href=#1132 id=1132 data-nosnippet>1132</a>            target_height,
-<a href=#1133 id=1133 data-nosnippet>1133</a>            <span class="kw-2">&amp;</span>transparent_inputs,
-<a href=#1134 id=1134 data-nosnippet>1134</a>            <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[TxOut],
-<a href=#1135 id=1135 data-nosnippet>1135</a>            <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
-<a href=#1136 id=1136 data-nosnippet>1136</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#1137 id=1137 data-nosnippet>1137</a>            </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
-<a href=#1138 id=1138 data-nosnippet>1138</a>            <span class="prelude-val">None</span>,
-<a href=#1139 id=1139 data-nosnippet>1139</a>            <span class="kw-2">&amp;</span>wallet_meta,
-<a href=#1140 id=1140 data-nosnippet>1140</a>        );
-<a href=#1141 id=1141 data-nosnippet>1141</a>
-<a href=#1142 id=1142 data-nosnippet>1142</a>        <span class="kw">let </span>balance = <span class="kw">match </span>trial_balance {
-<a href=#1143 id=1143 data-nosnippet>1143</a>            <span class="prelude-val">Ok</span>(balance) =&gt; balance,
-<a href=#1144 id=1144 data-nosnippet>1144</a>            <span class="prelude-val">Err</span>(ChangeError::DustInputs { transparent, .. }) =&gt; {
-<a href=#1145 id=1145 data-nosnippet>1145</a>                <span class="kw">let </span>exclusions: BTreeSet&lt;OutPoint&gt; = transparent.into_iter().collect();
-<a href=#1146 id=1146 data-nosnippet>1146</a>                transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
-<a href=#1147 id=1147 data-nosnippet>1147</a>
-<a href=#1148 id=1148 data-nosnippet>1148</a>                change_strategy.compute_balance(
-<a href=#1149 id=1149 data-nosnippet>1149</a>                    params,
-<a href=#1150 id=1150 data-nosnippet>1150</a>                    target_height,
-<a href=#1151 id=1151 data-nosnippet>1151</a>                    <span class="kw-2">&amp;</span>transparent_inputs,
-<a href=#1152 id=1152 data-nosnippet>1152</a>                    <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[TxOut],
-<a href=#1153 id=1153 data-nosnippet>1153</a>                    <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
-<a href=#1154 id=1154 data-nosnippet>1154</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#1155 id=1155 data-nosnippet>1155</a>                    </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
-<a href=#1156 id=1156 data-nosnippet>1156</a>                    <span class="prelude-val">None</span>,
-<a href=#1157 id=1157 data-nosnippet>1157</a>                    <span class="kw-2">&amp;</span>wallet_meta,
-<a href=#1158 id=1158 data-nosnippet>1158</a>                )<span class="question-mark">?
-<a href=#1159 id=1159 data-nosnippet>1159</a>            </span>}
-<a href=#1160 id=1160 data-nosnippet>1160</a>            <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
-<a href=#1161 id=1161 data-nosnippet>1161</a>        };
-<a href=#1162 id=1162 data-nosnippet>1162</a>
-<a href=#1163 id=1163 data-nosnippet>1163</a>        <span class="kw">if </span>balance.total() &gt;= shielding_threshold {
-<a href=#1164 id=1164 data-nosnippet>1164</a>            Proposal::single_step(
-<a href=#1165 id=1165 data-nosnippet>1165</a>                TransactionRequest::empty(),
-<a href=#1166 id=1166 data-nosnippet>1166</a>                BTreeMap::new(),
-<a href=#1167 id=1167 data-nosnippet>1167</a>                transparent_inputs,
-<a href=#1168 id=1168 data-nosnippet>1168</a>                <span class="prelude-val">None</span>,
-<a href=#1169 id=1169 data-nosnippet>1169</a>                balance,
-<a href=#1170 id=1170 data-nosnippet>1170</a>                (<span class="kw-2">*</span>change_strategy.fee_rule()).clone(),
-<a href=#1171 id=1171 data-nosnippet>1171</a>                target_height,
-<a href=#1172 id=1172 data-nosnippet>1172</a>                <span class="bool-val">true</span>,
-<a href=#1173 id=1173 data-nosnippet>1173</a>            )
-<a href=#1174 id=1174 data-nosnippet>1174</a>            .map_err(InputSelectorError::Proposal)
-<a href=#1175 id=1175 data-nosnippet>1175</a>        } <span class="kw">else </span>{
-<a href=#1176 id=1176 data-nosnippet>1176</a>            <span class="prelude-val">Err</span>(InputSelectorError::InsufficientFunds {
-<a href=#1177 id=1177 data-nosnippet>1177</a>                available: balance.total(),
-<a href=#1178 id=1178 data-nosnippet>1178</a>                required: shielding_threshold,
-<a href=#1179 id=1179 data-nosnippet>1179</a>            })
-<a href=#1180 id=1180 data-nosnippet>1180</a>        }
-<a href=#1181 id=1181 data-nosnippet>1181</a>    }
-<a href=#1182 id=1182 data-nosnippet>1182</a>}
+<a href=#1093 id=1093 data-nosnippet>1093</a>                BTreeSet::&lt;TransparentAddress&gt;::new(),
+<a href=#1094 id=1094 data-nosnippet>1094</a>            ),
+<a href=#1095 id=1095 data-nosnippet>1095</a>            |(<span class="kw-2">mut </span>inputs, <span class="kw-2">mut </span>ephemeral_addrs, <span class="kw-2">mut </span>input_addrs), taddr| {
+<a href=#1096 id=1096 data-nosnippet>1096</a>                <span class="kw">use </span>transparent::keys::TransparentKeyScope;
+<a href=#1097 id=1097 data-nosnippet>1097</a>
+<a href=#1098 id=1098 data-nosnippet>1098</a>                <span class="kw">let </span>utxos = wallet_db
+<a href=#1099 id=1099 data-nosnippet>1099</a>                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+<a href=#1100 id=1100 data-nosnippet>1100</a>                    .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
+<a href=#1101 id=1101 data-nosnippet>1101</a>
+<a href=#1102 id=1102 data-nosnippet>1102</a>                <span class="comment">// `InputSource::get_spendable_transparent_outputs` is required to return
+<a href=#1103 id=1103 data-nosnippet>1103</a>                // outputs received by `taddr`, so these `.extend()` calls are guaranteed
+<a href=#1104 id=1104 data-nosnippet>1104</a>                // to add at most a single new address to each set. But it's more
+<a href=#1105 id=1105 data-nosnippet>1105</a>                // convenient this way as we can reuse `utxo.recipient_key_scope()`
+<a href=#1106 id=1106 data-nosnippet>1106</a>                // instead of needing to query the wallet twice for each address to
+<a href=#1107 id=1107 data-nosnippet>1107</a>                // determine their scopes.
+<a href=#1108 id=1108 data-nosnippet>1108</a>                </span>ephemeral_addrs.extend(utxos.iter().filter_map(|utxo| {
+<a href=#1109 id=1109 data-nosnippet>1109</a>                    (utxo.recipient_key_scope() == <span class="prelude-val">Some</span>(TransparentKeyScope::EPHEMERAL))
+<a href=#1110 id=1110 data-nosnippet>1110</a>                        .then_some(utxo.recipient_address())
+<a href=#1111 id=1111 data-nosnippet>1111</a>                }));
+<a href=#1112 id=1112 data-nosnippet>1112</a>                input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
+<a href=#1113 id=1113 data-nosnippet>1113</a>                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
+<a href=#1114 id=1114 data-nosnippet>1114</a>
+<a href=#1115 id=1115 data-nosnippet>1115</a>                <span class="comment">// Funds may be spent from at most one ephemeral address at a time. If there are no
+<a href=#1116 id=1116 data-nosnippet>1116</a>                // ephemeral addresses, we allow shielding from multiple transparent addresses.
+<a href=#1117 id=1117 data-nosnippet>1117</a>                </span><span class="kw">if </span>!ephemeral_addrs.is_empty() &amp;&amp; input_addrs.len() &gt; <span class="number">1 </span>{
+<a href=#1118 id=1118 data-nosnippet>1118</a>                    <span class="prelude-val">Err</span>(InputSelectorError::Proposal(
+<a href=#1119 id=1119 data-nosnippet>1119</a>                        ProposalError::EphemeralAddressLinkability,
+<a href=#1120 id=1120 data-nosnippet>1120</a>                    ))
+<a href=#1121 id=1121 data-nosnippet>1121</a>                } <span class="kw">else </span>{
+<a href=#1122 id=1122 data-nosnippet>1122</a>                    <span class="prelude-val">Ok</span>((inputs, ephemeral_addrs, input_addrs))
+<a href=#1123 id=1123 data-nosnippet>1123</a>                }
+<a href=#1124 id=1124 data-nosnippet>1124</a>            },
+<a href=#1125 id=1125 data-nosnippet>1125</a>        )<span class="question-mark">?</span>;
+<a href=#1126 id=1126 data-nosnippet>1126</a>
+<a href=#1127 id=1127 data-nosnippet>1127</a>        <span class="kw">let </span>wallet_meta = change_strategy
+<a href=#1128 id=1128 data-nosnippet>1128</a>            .fetch_wallet_meta(wallet_db, to_account, target_height, <span class="kw-2">&amp;</span>[])
+<a href=#1129 id=1129 data-nosnippet>1129</a>            .map_err(InputSelectorError::DataSource)<span class="question-mark">?</span>;
+<a href=#1130 id=1130 data-nosnippet>1130</a>
+<a href=#1131 id=1131 data-nosnippet>1131</a>        <span class="kw">let </span>trial_balance = change_strategy.compute_balance(
+<a href=#1132 id=1132 data-nosnippet>1132</a>            params,
+<a href=#1133 id=1133 data-nosnippet>1133</a>            target_height,
+<a href=#1134 id=1134 data-nosnippet>1134</a>            <span class="kw-2">&amp;</span>transparent_inputs,
+<a href=#1135 id=1135 data-nosnippet>1135</a>            <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[TxOut],
+<a href=#1136 id=1136 data-nosnippet>1136</a>            <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
+<a href=#1137 id=1137 data-nosnippet>1137</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#1138 id=1138 data-nosnippet>1138</a>            </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
+<a href=#1139 id=1139 data-nosnippet>1139</a>            <span class="prelude-val">None</span>,
+<a href=#1140 id=1140 data-nosnippet>1140</a>            <span class="kw-2">&amp;</span>wallet_meta,
+<a href=#1141 id=1141 data-nosnippet>1141</a>        );
+<a href=#1142 id=1142 data-nosnippet>1142</a>
+<a href=#1143 id=1143 data-nosnippet>1143</a>        <span class="kw">let </span>balance = <span class="kw">match </span>trial_balance {
+<a href=#1144 id=1144 data-nosnippet>1144</a>            <span class="prelude-val">Ok</span>(balance) =&gt; balance,
+<a href=#1145 id=1145 data-nosnippet>1145</a>            <span class="prelude-val">Err</span>(ChangeError::DustInputs { transparent, .. }) =&gt; {
+<a href=#1146 id=1146 data-nosnippet>1146</a>                <span class="kw">let </span>exclusions: BTreeSet&lt;OutPoint&gt; = transparent.into_iter().collect();
+<a href=#1147 id=1147 data-nosnippet>1147</a>                transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
+<a href=#1148 id=1148 data-nosnippet>1148</a>
+<a href=#1149 id=1149 data-nosnippet>1149</a>                change_strategy.compute_balance(
+<a href=#1150 id=1150 data-nosnippet>1150</a>                    params,
+<a href=#1151 id=1151 data-nosnippet>1151</a>                    target_height,
+<a href=#1152 id=1152 data-nosnippet>1152</a>                    <span class="kw-2">&amp;</span>transparent_inputs,
+<a href=#1153 id=1153 data-nosnippet>1153</a>                    <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[TxOut],
+<a href=#1154 id=1154 data-nosnippet>1154</a>                    <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
+<a href=#1155 id=1155 data-nosnippet>1155</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#1156 id=1156 data-nosnippet>1156</a>                    </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
+<a href=#1157 id=1157 data-nosnippet>1157</a>                    <span class="prelude-val">None</span>,
+<a href=#1158 id=1158 data-nosnippet>1158</a>                    <span class="kw-2">&amp;</span>wallet_meta,
+<a href=#1159 id=1159 data-nosnippet>1159</a>                )<span class="question-mark">?
+<a href=#1160 id=1160 data-nosnippet>1160</a>            </span>}
+<a href=#1161 id=1161 data-nosnippet>1161</a>            <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
+<a href=#1162 id=1162 data-nosnippet>1162</a>        };
+<a href=#1163 id=1163 data-nosnippet>1163</a>
+<a href=#1164 id=1164 data-nosnippet>1164</a>        <span class="kw">if </span>balance.total() &gt;= shielding_threshold {
+<a href=#1165 id=1165 data-nosnippet>1165</a>            Proposal::single_step(
+<a href=#1166 id=1166 data-nosnippet>1166</a>                TransactionRequest::empty(),
+<a href=#1167 id=1167 data-nosnippet>1167</a>                BTreeMap::new(),
+<a href=#1168 id=1168 data-nosnippet>1168</a>                transparent_inputs,
+<a href=#1169 id=1169 data-nosnippet>1169</a>                <span class="prelude-val">None</span>,
+<a href=#1170 id=1170 data-nosnippet>1170</a>                balance,
+<a href=#1171 id=1171 data-nosnippet>1171</a>                (<span class="kw-2">*</span>change_strategy.fee_rule()).clone(),
+<a href=#1172 id=1172 data-nosnippet>1172</a>                target_height,
+<a href=#1173 id=1173 data-nosnippet>1173</a>                <span class="bool-val">true</span>,
+<a href=#1174 id=1174 data-nosnippet>1174</a>            )
+<a href=#1175 id=1175 data-nosnippet>1175</a>            .map_err(InputSelectorError::Proposal)
+<a href=#1176 id=1176 data-nosnippet>1176</a>        } <span class="kw">else </span>{
+<a href=#1177 id=1177 data-nosnippet>1177</a>            <span class="prelude-val">Err</span>(InputSelectorError::InsufficientFunds {
+<a href=#1178 id=1178 data-nosnippet>1178</a>                available: balance.total(),
+<a href=#1179 id=1179 data-nosnippet>1179</a>                required: shielding_threshold,
+<a href=#1180 id=1180 data-nosnippet>1180</a>            })
+<a href=#1181 id=1181 data-nosnippet>1181</a>        }
+<a href=#1182 id=1182 data-nosnippet>1182</a>    }
+<a href=#1183 id=1183 data-nosnippet>1183</a>}
 </code></pre></div></section></main></body></html>
