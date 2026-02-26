@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-26
+
 ### Fixed
 - Several missing feature flags dependencies have been fixed. The following
   missing feature flag dependencies have been added:
