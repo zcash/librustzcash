@@ -1,6 +1,6 @@
 [package]
 name = "pczt"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Jack Grigg <jack@electriccoin.co>"]
 edition.workspace = true
 rust-version.workspace = true
@@ -88,7 +88,12 @@ sapling = [
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.
-transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_script"]
+transparent = [
+  "dep:secp256k1",
+  "dep:transparent",
+  "dep:zcash_script",
+  "transparent/transparent-inputs"
+]
 
 ## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
 zcp-builder = ["dep:zcash_primitives"]
@@ -99,15 +104,30 @@ zcp-builder = ["dep:zcash_primitives"]
 #! function.
 
 ## Enables the I/O Finalizer role.
-io-finalizer = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
+io-finalizer = [
+    "dep:rand_core",
+    "rand_core/getrandom",
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "signer",
+    "transparent",
+]
 
 ## Enables the Prover role.
-prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
+prover = [
+    "dep:rand_core",
+    "rand_core/getrandom",
+    "orchard?/circuit",
+    "sapling?/circuit",
+    "sapling?/temporary-zcashd",
+]
 
 ## Enables the Signer role.
 signer = [
     "dep:blake2b_simd",
     "dep:rand_core",
+    "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
     "sapling",
@@ -120,9 +140,12 @@ spend-finalizer = ["transparent"]
 ## Enables the Transaction Extractor role.
 tx-extractor = [
     "dep:rand_core",
+    "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
+    "orchard/circuit",
     "sapling",
+    "sapling/circuit",
     "transparent",
 ]
 
