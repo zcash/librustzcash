@@ -17,6 +17,17 @@ workspace.
 - Migrated to `zcash_protocol 0.7`, `zcash_transparent 0.6`, `zcash_primitives 0.26`,
   `zcash_proofs 0.26`
 
+## [0.4.1] - 2026-02-26
+
+### Fixed
+- Several missing feature flags dependencies have been fixed. The following
+  missing feature flag dependencies have been added:
+  - `signer` for the `io-finalizer` feature due to cross-role code reuse
+  - `rand_core/getrandom` required by the `io-finalizer`, `prover`,
+    `signer`, and `tx-extractor` features for `OsRng` access
+  - `orchard/circuit` and `sapling/circuit` for the `prover`
+    and `tx-extractor` features.
+
 ## [0.4.0] - 2025-09-25
 
 ### Changed
