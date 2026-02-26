@@ -5,6 +5,10 @@
 version = "0.20.1"
 audited_as = "0.20.0"
 
+[[unpublished.zcash_client_sqlite]]
+version = "0.18.12"
+audited_as = "0.18.11"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
