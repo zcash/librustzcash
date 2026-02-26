@@ -558,11 +558,11 @@ where
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
-/// to the transaction have value less than the marginal fee, and could not be
+/// to the transaction have value less than or equal to the marginal fee, and could not be
 /// determined to have any economic value in the context of this input selection.
 ///
 /// This determination is potentially conservative in the sense that outputs
-/// with value less than the marginal fee might be excluded, even though in
+/// with value less than or equal to the marginal fee might be excluded, even though in
 /// practice they would not cause the fee to increase. Outputs with value
 /// greater than the marginal fee will never be excluded.
 ///

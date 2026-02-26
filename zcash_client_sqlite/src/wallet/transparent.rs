@@ -1115,7 +1115,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
          WHERE u.address = :address
-         AND u.value_zat >= :min_value
+         AND u.value_zat > :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
@@ -1213,7 +1213,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             })?;
 
         let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
-        if value < zip317::MARGINAL_FEE {
+        if value <= zip317::MARGINAL_FEE {
             entry.1.add_uneconomic_value(value)?;
         } else {
             entry.1.add_spendable_value(value)?;
@@ -1272,7 +1272,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
                 })?;
 
             let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
-            if value < zip317::MARGINAL_FEE {
+            if value <= zip317::MARGINAL_FEE {
                 entry.1.add_uneconomic_value(value)?;
             } else {
                 entry.1.add_spendable_value(value)?;
@@ -1329,10 +1329,10 @@ pub(crate) fn add_transparent_account_balances(
             .entry(account)
             .or_insert(AccountBalance::ZERO)
             .with_unshielded_balance_mut(|bal| {
-                if value >= zip317::MARGINAL_FEE {
-                    bal.add_spendable_value(value)
-                } else {
+                if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else {
+                    bal.add_spendable_value(value)
                 }
             })?;
     }
@@ -1383,10 +1383,10 @@ pub(crate) fn add_transparent_account_balances(
                 .entry(account)
                 .or_insert(AccountBalance::ZERO)
                 .with_unshielded_balance_mut(|bal| {
-                    if value >= zip317::MARGINAL_FEE {
-                        bal.add_pending_spendable_value(value)
-                    } else {
+                    if value <= zip317::MARGINAL_FEE {
                         bal.add_uneconomic_value(value)
+                    } else {
+                        bal.add_pending_spendable_value(value)
                     }
                 })?;
         }
