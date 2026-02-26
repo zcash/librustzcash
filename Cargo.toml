@@ -54,7 +54,7 @@ bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = { version = "0.13", default-features = false }
 group = "0.13"
 incrementalmerkletree = { version = "0.8.2", default-features = false }
-shardtree = "0.6.1"
+shardtree = "0.6.2"
 zcash_spec = "0.2"
 
 # Payment protocols

@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-02-26
+
+### Fixed
+- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
+
 ## [0.20.0] - 2025-09-25
 
 ### Added
