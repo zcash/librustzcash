@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.1, 0.21.1] - 2026-02-26
+
+### Fixed
+- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
+
 ## [0.21.0] - 2025-11-05
 
 ### Added
@@ -106,11 +111,6 @@ workspace.
 
 ### Removed
 - `zcash_client_backend::tor::http::cryptex::exchanges::GateIo`
-
-## [0.20.1] - 2026-02-26
-
-### Fixed
-- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
 
 ## [0.20.0] - 2025-09-25
 
