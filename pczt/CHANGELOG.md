@@ -20,6 +20,17 @@ workspace.
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 
+## [0.4.1, 0.5.1] - 2026-02-26
+
+### Fixed
+- Several missing feature flags dependencies have been fixed. The following
+  missing feature flag dependencies have been added:
+  - `signer` for the `io-finalizer` feature due to cross-role code reuse
+  - `rand_core/getrandom` required by the `io-finalizer`, `prover`,
+    `signer`, and `tx-extractor` features for `OsRng` access
+  - `orchard/circuit` and `sapling/circuit` for the `prover`
+    and `tx-extractor` features.
+
 ## [0.5.0] - 2025-11-05
 
 ### Changed
