@@ -85,8 +85,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.5.0"
-when = "2025-11-05"
+version = "0.5.1"
+when = "2026-02-27"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
