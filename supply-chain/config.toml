@@ -811,10 +811,6 @@ criteria = "safe-to-run"
 version = "1.16.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.objc2-core-foundation]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.objc2-io-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
@@ -885,10 +881,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pbkdf2]]
 version = "0.12.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.pem-rfc7468]]
-version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.petgraph]]
@@ -977,14 +969,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro-crate]]
 version = "1.2.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-error-attr2]]
-version = "2.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-error2]]
-version = "2.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro2]]
