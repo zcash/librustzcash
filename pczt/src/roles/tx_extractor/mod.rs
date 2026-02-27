@@ -76,22 +76,20 @@ impl<'a> TransactionExtractor<'a> {
             _unused,
         } = self;
 
-        let super::tx_data::ParsedPczt { tx_data, .. } =
-            super::tx_data::pczt_to_tx_data::<Unbound, Error>(
-                pczt,
-                |t| {
-                    t.extract()
-                        .map_err(|e| Error::Transparent(TransparentError::Extract(e)))
-                },
-                |s| {
-                    s.extract()
-                        .map_err(|e| Error::Sapling(SaplingError::Extract(e)))
-                },
-                |o| {
-                    o.extract()
-                        .map_err(|e| Error::Orchard(OrchardError::Extract(e)))
-                },
-            )?;
+        let crate::ParsedPczt { tx_data, .. } = pczt.extract_tx_data::<Unbound, Error>(
+            |t| {
+                t.extract()
+                    .map_err(|e| Error::Transparent(TransparentError::Extract(e)))
+            },
+            |s| {
+                s.extract()
+                    .map_err(|e| Error::Sapling(SaplingError::Extract(e)))
+            },
+            |o| {
+                o.extract()
+                    .map_err(|e| Error::Orchard(OrchardError::Extract(e)))
+            },
+        )?;
 
         // The commitment being signed is shared across all shielded inputs.
         let txid_parts = tx_data.digest(TxIdDigester);
@@ -149,25 +147,16 @@ impl Authorization for Unbound {
 /// Errors that can occur while extracting a transaction from a PCZT.
 #[derive(Debug)]
 pub enum Error {
+    Extract(crate::ExtractError),
     Orchard(OrchardError),
     Sapling(SaplingError),
     SaplingRequired,
     SighashMismatch,
     Transparent(TransparentError),
-    TxData(super::tx_data::Error),
 }
 
-impl From<super::tx_data::Error> for Error {
-    fn from(e: super::tx_data::Error) -> Self {
-        match e {
-            super::tx_data::Error::TransparentParse(e) => {
-                Error::Transparent(TransparentError::Parse(e))
-            }
-            super::tx_data::Error::SaplingParse(e) => Error::Sapling(SaplingError::Parse(e)),
-            super::tx_data::Error::OrchardParse(e) => Error::Orchard(OrchardError::Parse(e)),
-            other @ (super::tx_data::Error::IncompatibleLockTimes
-            | super::tx_data::Error::UnknownConsensusBranchId
-            | super::tx_data::Error::UnsupportedTxVersion { .. }) => Error::TxData(other),
-        }
+impl From<crate::ExtractError> for Error {
+    fn from(e: crate::ExtractError) -> Self {
+        Error::Extract(e)
     }
 }

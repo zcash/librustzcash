@@ -23,16 +23,15 @@ use zcash_primitives::transaction::{
 };
 
 use crate::{
-    Pczt,
+    ExtractError, ParsedPczt, Pczt,
     common::{
         FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE, Global,
     },
 };
 
-pub use super::tx_data::EffectsOnly;
-use super::tx_data::{pczt_to_tx_data, sighash};
-use crate::ExtractError;
+pub use crate::EffectsOnly;
+use crate::sighash;
 
 pub struct Signer {
     global: Global,
@@ -49,14 +48,13 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
-        let super::tx_data::ParsedPczt {
+        let ParsedPczt {
             global,
             transparent,
             sapling,
             orchard,
             tx_data,
-        } = pczt_to_tx_data(
-            pczt,
+        } = pczt.extract_tx_data(
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -358,11 +356,5 @@ pub enum Error {
 impl From<crate::ExtractError> for Error {
     fn from(e: crate::ExtractError) -> Self {
         Error::Extract(e)
-    }
-}
-
-impl From<super::tx_data::Error> for Error {
-    fn from(e: super::tx_data::Error) -> Self {
-        Error::Extract(crate::ExtractError::from(e))
     }
 }

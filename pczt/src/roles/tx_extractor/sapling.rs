@@ -30,5 +30,4 @@ pub enum SaplingError {
     ConsensusRuleViolation,
     Extract(sapling::pczt::TxExtractorError),
     InvalidProofsOrSignatures,
-    Parse(sapling::pczt::ParseError),
 }

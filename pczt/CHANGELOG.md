@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `pczt::ExtractError`
+- `pczt::EffectsOnly`
 - `pczt::roles::signer`:
   - `Signer::sighash`
   - `Signer::append_transparent_signature`
@@ -26,10 +27,19 @@ workspace.
   via `Extract(ExtractError)` instead of individual variants.
 - `pczt::roles::signer::Error` now wraps parse and extract errors
   via `Extract(ExtractError)` instead of individual variants.
+- `pczt::roles::tx_extractor::Error` now wraps parse and extract errors
+  via `Extract(ExtractError)` instead of `Global(GlobalError)`,
+  `IncompatibleLockTimes`, and protocol-specific `Parse` variants.
 
 ### Removed
-- `pczt::roles::tx_extractor::GlobalError` (replaced by
-  `pczt::roles::tx_extractor::Error::TxData`).
+- `pczt::roles::tx_extractor::GlobalError` (replaced by `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::TransparentError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::SaplingError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::OrchardError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::signer::EffectsOnly` (use `pczt::EffectsOnly` instead).
 
 ## [0.4.1, 0.5.1] - 2026-02-26
 

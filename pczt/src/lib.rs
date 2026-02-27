@@ -26,8 +26,27 @@ use alloc::vec::Vec;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 
+#[cfg(all(
+    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
+    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+    feature = "zip-233",
+))]
+use zcash_protocol::value::Zatoshis;
+#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+use {
+    common::{Global, determine_lock_time},
+    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
+    zcash_protocol::consensus::BranchId,
+    zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
+};
+
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-use {roles::tx_data::EffectsOnly, zcash_primitives::transaction::TransactionData};
+use {
+    blake2b_simd::Hash as Blake2bHash,
+    zcash_primitives::transaction::{
+        TxDigests, sighash::SignableInput, sighash_v5::v5_signature_hash,
+    },
+};
 
 pub mod roles;
 
@@ -88,11 +107,98 @@ impl Pczt {
         postcard::to_extend(self, bytes).expect("can serialize into memory")
     }
 
+    /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
+    /// bundle extraction closures.
+    ///
+    /// This handles bundle parsing, version validation, consensus branch ID parsing,
+    /// lock time computation, and final assembly, delegating bundle extraction to the
+    /// caller via closures that receive references to the parsed bundles.
+    #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+    pub(crate) fn extract_tx_data<A, E>(
+        self,
+        extract_transparent: impl FnOnce(
+            &::transparent::pczt::Bundle,
+        ) -> Result<
+            Option<::transparent::bundle::Bundle<A::TransparentAuth>>,
+            E,
+        >,
+        extract_sapling: impl FnOnce(
+            &::sapling::pczt::Bundle,
+        ) -> Result<
+            Option<::sapling::Bundle<A::SaplingAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+        extract_orchard: impl FnOnce(
+            &::orchard::pczt::Bundle,
+        ) -> Result<
+            Option<::orchard::Bundle<A::OrchardAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+    ) -> Result<ParsedPczt<A>, E>
+    where
+        A: Authorization,
+        E: From<ExtractError>,
+    {
+        let Pczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+        } = self;
+
+        let transparent = transparent
+            .into_parsed()
+            .map_err(ExtractError::TransparentParse)?;
+        let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
+        let orchard = orchard.into_parsed().map_err(ExtractError::OrchardParse)?;
+
+        let version = match (global.tx_version, global.version_group_id) {
+            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
+            (version, version_group_id) => Err(ExtractError::UnsupportedTxVersion {
+                version,
+                version_group_id,
+            }),
+        }?;
+
+        let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
+            .map_err(|_| ExtractError::UnknownConsensusBranchId)?;
+
+        let lock_time = determine_lock_time(&global, transparent.inputs())
+            .ok_or(ExtractError::IncompatibleLockTimes)?;
+
+        let transparent_bundle = extract_transparent(&transparent)?;
+        let sapling_bundle = extract_sapling(&sapling)?;
+        let orchard_bundle = extract_orchard(&orchard)?;
+
+        let tx_data = TransactionData::from_parts(
+            version,
+            consensus_branch_id,
+            lock_time,
+            global.expiry_height.into(),
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            Zatoshis::ZERO,
+            transparent_bundle,
+            None,
+            sapling_bundle,
+            orchard_bundle,
+        );
+
+        Ok(ParsedPczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+            tx_data,
+        })
+    }
+
     /// Gets the effects of this transaction.
     #[cfg(any(feature = "io-finalizer", feature = "signer"))]
     pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, ExtractError> {
-        roles::tx_data::pczt_to_tx_data(
-            self,
+        self.extract_tx_data(
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -104,31 +210,73 @@ impl Pczt {
     }
 }
 
-/// Errors that can occur while extracting effects-only transaction data from a PCZT.
-#[cfg(any(feature = "io-finalizer", feature = "signer"))]
-#[derive(Debug)]
-pub enum ExtractError {
-    OrchardExtract(::orchard::pczt::TxExtractorError),
-    OrchardParse(::orchard::pczt::ParseError),
-    SaplingExtract(::sapling::pczt::TxExtractorError),
-    SaplingParse(::sapling::pczt::ParseError),
-    TransparentExtract(::transparent::pczt::TxExtractorError),
-    TransparentParse(::transparent::pczt::ParseError),
-    TxData(roles::tx_data::Error),
+/// The result of parsing a PCZT and constructing its `TransactionData`.
+#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+#[cfg_attr(
+    not(any(feature = "io-finalizer", feature = "signer")),
+    allow(dead_code)
+)]
+pub(crate) struct ParsedPczt<A: Authorization> {
+    pub(crate) global: Global,
+    pub(crate) transparent: ::transparent::pczt::Bundle,
+    pub(crate) sapling: ::sapling::pczt::Bundle,
+    pub(crate) orchard: ::orchard::pczt::Bundle,
+    pub(crate) tx_data: TransactionData<A>,
 }
 
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-impl From<roles::tx_data::Error> for ExtractError {
-    fn from(e: roles::tx_data::Error) -> Self {
-        match e {
-            roles::tx_data::Error::TransparentParse(e) => ExtractError::TransparentParse(e),
-            roles::tx_data::Error::SaplingParse(e) => ExtractError::SaplingParse(e),
-            roles::tx_data::Error::OrchardParse(e) => ExtractError::OrchardParse(e),
-            other @ (roles::tx_data::Error::IncompatibleLockTimes
-            | roles::tx_data::Error::UnknownConsensusBranchId
-            | roles::tx_data::Error::UnsupportedTxVersion { .. }) => ExtractError::TxData(other),
-        }
-    }
+pub struct EffectsOnly;
+
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+impl Authorization for EffectsOnly {
+    type TransparentAuth = ::transparent::bundle::EffectsOnly;
+    type SaplingAuth = ::sapling::bundle::EffectsOnly;
+    type OrchardAuth = ::orchard::bundle::EffectsOnly;
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = core::convert::Infallible;
+}
+
+/// Helper to produce the correct sighash for a PCZT.
+///
+/// At present, only V5 transaction signature hashes are supported, and a version check *MUST* be
+/// performed prior to invoking this function. It is intended for use exclusively for use in the
+/// context of a callback to the `extract_tx_data` function, which performs this check.
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+pub(crate) fn sighash(
+    tx_data: &TransactionData<EffectsOnly>,
+    signable_input: &SignableInput,
+    txid_parts: &TxDigests<Blake2bHash>,
+) -> [u8; 32] {
+    // TODO: Pick sighash based on tx version
+    v5_signature_hash(tx_data, signable_input, txid_parts)
+        .as_ref()
+        .try_into()
+        .expect("correct length")
+}
+
+/// Errors that can occur while parsing PCZT bundles and extracting transaction data.
+#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ExtractError {
+    /// The PCZT's transparent inputs have incompatible lock time requirements.
+    IncompatibleLockTimes,
+    /// An error occurred extracting the Orchard protocol bundle from the Orchard PCZT bundle.
+    OrchardExtract(::orchard::pczt::TxExtractorError),
+    /// An error occurred parsing the Orchard PCZT bundle from the PCZT data.
+    OrchardParse(::orchard::pczt::ParseError),
+    /// An error occurred extracting the Sapling protocol bundle from the Sapling PCZT bundle.
+    SaplingExtract(::sapling::pczt::TxExtractorError),
+    /// An error occurred parsing the Sapling PCZT bundle from the PCZT data.
+    SaplingParse(::sapling::pczt::ParseError),
+    /// An error occurred extracting the transparent protocol bundle from the transparent PCZT bundle.
+    TransparentExtract(::transparent::pczt::TxExtractorError),
+    /// An error occurred parsing the transparent PCZT bundle from the PCZT data.
+    TransparentParse(::transparent::pczt::ParseError),
+    /// The consensus branch ID requested by the PCZT does not correspond to a known network upgrade.
+    UnknownConsensusBranchId,
+    /// The PCZT specifies an unsupported transaction version.
+    UnsupportedTxVersion { version: u32, version_group_id: u32 },
 }
 
 /// Errors that can occur while parsing a PCZT.

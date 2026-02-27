@@ -32,5 +32,4 @@ pub(super) fn verify_bundle(
 pub enum OrchardError {
     Extract(orchard::pczt::TxExtractorError),
     InvalidProof,
-    Parse(orchard::pczt::ParseError),
 }

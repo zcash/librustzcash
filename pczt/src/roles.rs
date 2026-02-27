@@ -10,9 +10,6 @@
 
 pub mod creator;
 
-#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
-pub(crate) mod tx_data;
-
 #[cfg(feature = "io-finalizer")]
 pub mod io_finalizer;
 

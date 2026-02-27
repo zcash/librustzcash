@@ -1,6 +1,6 @@
 use transparent::{
     bundle::{Authorization, Authorized, MapAuth},
-    pczt::{ParseError, TxExtractorError, Unbound},
+    pczt::{TxExtractorError, Unbound},
 };
 
 pub(super) struct RemoveInputInfo;
@@ -21,5 +21,4 @@ impl MapAuth<Unbound, Authorized> for RemoveInputInfo {
 #[derive(Debug)]
 pub enum TransparentError {
     Extract(TxExtractorError),
-    Parse(ParseError),
 }

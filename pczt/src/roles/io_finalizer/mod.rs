@@ -6,13 +6,13 @@
 use rand_core::OsRng;
 use zcash_primitives::transaction::{sighash::SignableInput, txid::TxIdDigester};
 
-use super::tx_data::{pczt_to_tx_data, sighash};
 use crate::{
-    ExtractError, Pczt,
+    ExtractError, ParsedPczt, Pczt,
     common::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
+    sighash,
 };
 
 pub struct IoFinalizer {
@@ -43,14 +43,13 @@ impl IoFinalizer {
             return Err(Error::NoOutputs);
         }
 
-        let super::tx_data::ParsedPczt {
+        let ParsedPczt {
             mut global,
             transparent,
             mut sapling,
             mut orchard,
             tx_data,
-        } = pczt_to_tx_data(
-            pczt,
+        } = pczt.extract_tx_data(
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -98,11 +97,5 @@ pub enum Error {
 impl From<crate::ExtractError> for Error {
     fn from(e: crate::ExtractError) -> Self {
         Error::Extract(e)
-    }
-}
-
-impl From<super::tx_data::Error> for Error {
-    fn from(e: super::tx_data::Error) -> Self {
-        Error::Extract(crate::ExtractError::from(e))
     }
 }
