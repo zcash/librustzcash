@@ -19,15 +19,8 @@ use rand_core::OsRng;
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    Authorization, TransactionData, TxDigests, TxVersion, sighash::SignableInput,
-    sighash_v5::v5_signature_hash, txid::TxIdDigester,
+    TransactionData, TxDigests, sighash::SignableInput, txid::TxIdDigester,
 };
-use zcash_protocol::consensus::BranchId;
-#[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233"
-))]
-use zcash_protocol::value::Zatoshis;
 
 use crate::{
     Pczt,
@@ -37,10 +30,8 @@ use crate::{
     },
 };
 
-use crate::common::determine_lock_time;
-
-const V5_TX_VERSION: u32 = 5;
-const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
+pub use super::tx_data::EffectsOnly;
+use super::tx_data::{pczt_to_tx_data, sighash};
 
 pub struct Signer {
     global: Global,
@@ -70,15 +61,6 @@ impl Signer {
 
         let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
         let txid_parts = tx_data.digest(TxIdDigester);
-
-        // TODO: Pick sighash based on tx version.
-        match (global.tx_version, global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
-            (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
-                version,
-                version_group_id,
-            })),
-        }?;
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         Ok(Self {
@@ -357,95 +339,23 @@ impl Signer {
     }
 }
 
-/// Extracts an unauthorized `TransactionData` from the PCZT.
-///
-/// We don't care about existing proofs or signatures here, because they do not affect the
-/// sighash; we only want the effects of the transaction.
-pub(crate) fn pczt_to_tx_data(
-    global: &Global,
-    transparent: &transparent::pczt::Bundle,
-    sapling: &sapling::pczt::Bundle,
-    orchard: &orchard::pczt::Bundle,
-) -> Result<TransactionData<EffectsOnly>, Error> {
-    let version = match (global.tx_version, global.version_group_id) {
-        (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
-        (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
-            version,
-            version_group_id,
-        })),
-    }?;
-
-    let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
-        .map_err(|_| Error::Global(GlobalError::UnknownConsensusBranchId))?;
-
-    let transparent_bundle = transparent
-        .extract_effects()
-        .map_err(Error::TransparentExtract)?;
-
-    let sapling_bundle = sapling.extract_effects().map_err(Error::SaplingExtract)?;
-
-    let orchard_bundle = orchard.extract_effects().map_err(Error::OrchardExtract)?;
-
-    Ok(TransactionData::from_parts(
-        version,
-        consensus_branch_id,
-        determine_lock_time(global, transparent.inputs()).ok_or(Error::IncompatibleLockTimes)?,
-        global.expiry_height.into(),
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        Zatoshis::ZERO,
-        transparent_bundle,
-        None,
-        sapling_bundle,
-        orchard_bundle,
-    ))
-}
-
-pub struct EffectsOnly;
-
-impl Authorization for EffectsOnly {
-    type TransparentAuth = transparent::bundle::EffectsOnly;
-    type SaplingAuth = sapling::bundle::EffectsOnly;
-    type OrchardAuth = orchard::bundle::EffectsOnly;
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = core::convert::Infallible;
-}
-
-/// Helper to produce the correct sighash for a PCZT.
-fn sighash(
-    tx_data: &TransactionData<EffectsOnly>,
-    signable_input: &SignableInput,
-    txid_parts: &TxDigests<Blake2bHash>,
-) -> [u8; 32] {
-    v5_signature_hash(tx_data, signable_input, txid_parts)
-        .as_ref()
-        .try_into()
-        .expect("correct length")
-}
-
 /// Errors that can occur while creating signatures for a PCZT.
 #[derive(Debug)]
 pub enum Error {
-    Global(GlobalError),
-    IncompatibleLockTimes,
     InvalidIndex,
-    OrchardExtract(orchard::pczt::TxExtractorError),
     OrchardParse(orchard::pczt::ParseError),
     OrchardSign(orchard::pczt::SignerError),
     OrchardVerify(orchard::pczt::VerifyError),
-    SaplingExtract(sapling::pczt::TxExtractorError),
     SaplingParse(sapling::pczt::ParseError),
     SaplingSign(sapling::pczt::SignerError),
     SaplingVerify(sapling::pczt::VerifyError),
-    TransparentExtract(transparent::pczt::TxExtractorError),
     TransparentParse(transparent::pczt::ParseError),
     TransparentSign(transparent::pczt::SignerError),
+    TxData(super::tx_data::Error),
 }
 
-#[derive(Debug)]
-pub enum GlobalError {
-    UnknownConsensusBranchId,
-    UnsupportedTxVersion { version: u32, version_group_id: u32 },
+impl From<super::tx_data::Error> for Error {
+    fn from(e: super::tx_data::Error) -> Self {
+        Error::TxData(e)
+    }
 }

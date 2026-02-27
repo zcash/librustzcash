@@ -26,8 +26,8 @@ use alloc::vec::Vec;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "signer")]
-use {roles::signer::EffectsOnly, zcash_primitives::transaction::TransactionData};
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+use {roles::tx_data::EffectsOnly, zcash_primitives::transaction::TransactionData};
 
 pub mod roles;
 
@@ -89,7 +89,7 @@ impl Pczt {
     }
 
     /// Gets the effects of this transaction.
-    #[cfg(feature = "signer")]
+    #[cfg(any(feature = "io-finalizer", feature = "signer"))]
     pub fn into_effects(self) -> Option<TransactionData<EffectsOnly>> {
         let Self {
             global,
@@ -102,7 +102,7 @@ impl Pczt {
         let sapling = sapling.into_parsed().ok()?;
         let orchard = orchard.into_parsed().ok()?;
 
-        roles::signer::pczt_to_tx_data(&global, &transparent, &sapling, &orchard).ok()
+        roles::tx_data::pczt_to_tx_data(&global, &transparent, &sapling, &orchard).ok()
     }
 }
 

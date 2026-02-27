@@ -107,12 +107,12 @@ zcp-builder = ["dep:zcash_primitives"]
 
 ## Enables the I/O Finalizer role.
 io-finalizer = [
+    "dep:blake2b_simd",
     "dep:rand_core",
     "rand_core/getrandom",
     "dep:zcash_primitives",
     "orchard",
     "sapling",
-    "signer",
     "transparent",
 ]
 
