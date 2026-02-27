@@ -90,19 +90,44 @@ impl Pczt {
 
     /// Gets the effects of this transaction.
     #[cfg(any(feature = "io-finalizer", feature = "signer"))]
-    pub fn into_effects(self) -> Option<TransactionData<EffectsOnly>> {
-        let Self {
-            global,
-            transparent,
-            sapling,
-            orchard,
-        } = self;
+    pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, ExtractError> {
+        roles::tx_data::pczt_to_tx_data(
+            self,
+            |t| {
+                t.extract_effects()
+                    .map_err(ExtractError::TransparentExtract)
+            },
+            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
+            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+        )
+        .map(|parsed| parsed.tx_data)
+    }
+}
 
-        let transparent = transparent.into_parsed().ok()?;
-        let sapling = sapling.into_parsed().ok()?;
-        let orchard = orchard.into_parsed().ok()?;
+/// Errors that can occur while extracting effects-only transaction data from a PCZT.
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+#[derive(Debug)]
+pub enum ExtractError {
+    OrchardExtract(::orchard::pczt::TxExtractorError),
+    OrchardParse(::orchard::pczt::ParseError),
+    SaplingExtract(::sapling::pczt::TxExtractorError),
+    SaplingParse(::sapling::pczt::ParseError),
+    TransparentExtract(::transparent::pczt::TxExtractorError),
+    TransparentParse(::transparent::pczt::ParseError),
+    TxData(roles::tx_data::Error),
+}
 
-        roles::tx_data::pczt_to_tx_data(&global, &transparent, &sapling, &orchard).ok()
+#[cfg(any(feature = "io-finalizer", feature = "signer"))]
+impl From<roles::tx_data::Error> for ExtractError {
+    fn from(e: roles::tx_data::Error) -> Self {
+        match e {
+            roles::tx_data::Error::TransparentParse(e) => ExtractError::TransparentParse(e),
+            roles::tx_data::Error::SaplingParse(e) => ExtractError::SaplingParse(e),
+            roles::tx_data::Error::OrchardParse(e) => ExtractError::OrchardParse(e),
+            other @ (roles::tx_data::Error::IncompatibleLockTimes
+            | roles::tx_data::Error::UnknownConsensusBranchId
+            | roles::tx_data::Error::UnsupportedTxVersion { .. }) => ExtractError::TxData(other),
+        }
     }
 }
 

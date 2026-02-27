@@ -1,17 +1,7 @@
 use transparent::{
-    bundle::{Authorization, Authorized, Bundle, MapAuth},
+    bundle::{Authorization, Authorized, MapAuth},
     pczt::{ParseError, TxExtractorError, Unbound},
 };
-
-pub(super) fn extract_bundle(
-    bundle: crate::transparent::Bundle,
-) -> Result<Option<Bundle<Unbound>>, TransparentError> {
-    bundle
-        .into_parsed()
-        .map_err(TransparentError::Parse)?
-        .extract()
-        .map_err(TransparentError::Extract)
-}
 
 pub(super) struct RemoveInputInfo;
 

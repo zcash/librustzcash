@@ -32,6 +32,7 @@ use crate::{
 
 pub use super::tx_data::EffectsOnly;
 use super::tx_data::{pczt_to_tx_data, sighash};
+use crate::ExtractError;
 
 pub struct Signer {
     global: Global,
@@ -48,18 +49,21 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
-        let Pczt {
+        let super::tx_data::ParsedPczt {
             global,
             transparent,
             sapling,
             orchard,
-        } = pczt;
-
-        let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
-        let sapling = sapling.into_parsed().map_err(Error::SaplingParse)?;
-        let orchard = orchard.into_parsed().map_err(Error::OrchardParse)?;
-
-        let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
+            tx_data,
+        } = pczt_to_tx_data(
+            pczt,
+            |t| {
+                t.extract_effects()
+                    .map_err(ExtractError::TransparentExtract)
+            },
+            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
+            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+        )?;
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
@@ -342,20 +346,23 @@ impl Signer {
 /// Errors that can occur while creating signatures for a PCZT.
 #[derive(Debug)]
 pub enum Error {
+    Extract(crate::ExtractError),
     InvalidIndex,
-    OrchardParse(orchard::pczt::ParseError),
     OrchardSign(orchard::pczt::SignerError),
     OrchardVerify(orchard::pczt::VerifyError),
-    SaplingParse(sapling::pczt::ParseError),
     SaplingSign(sapling::pczt::SignerError),
     SaplingVerify(sapling::pczt::VerifyError),
-    TransparentParse(transparent::pczt::ParseError),
     TransparentSign(transparent::pczt::SignerError),
-    TxData(super::tx_data::Error),
+}
+
+impl From<crate::ExtractError> for Error {
+    fn from(e: crate::ExtractError) -> Self {
+        Error::Extract(e)
+    }
 }
 
 impl From<super::tx_data::Error> for Error {
     fn from(e: super::tx_data::Error) -> Self {
-        Error::TxData(e)
+        Error::Extract(crate::ExtractError::from(e))
     }
 }

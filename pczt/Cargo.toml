@@ -141,6 +141,7 @@ spend-finalizer = ["transparent"]
 
 ## Enables the Transaction Extractor role.
 tx-extractor = [
+    "dep:blake2b_simd",
     "dep:rand_core",
     "rand_core/getrandom",
     "dep:zcash_primitives",

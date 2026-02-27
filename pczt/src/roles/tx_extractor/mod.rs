@@ -6,21 +6,12 @@ use core::marker::PhantomData;
 use rand_core::OsRng;
 
 use zcash_primitives::transaction::{
-    Authorization, Transaction, TransactionData, TxVersion,
+    Authorization, Transaction,
     sighash::{SignableInput, signature_hash},
     txid::TxIdDigester,
 };
-#[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233"
-))]
-use zcash_protocol::value::Zatoshis;
-use zcash_protocol::{
-    consensus::BranchId,
-    constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
-};
 
-use crate::{Pczt, common::determine_lock_time};
+use crate::Pczt;
 
 mod orchard;
 pub use self::orchard::OrchardError;
@@ -85,40 +76,22 @@ impl<'a> TransactionExtractor<'a> {
             _unused,
         } = self;
 
-        let version = match (pczt.global.tx_version, pczt.global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
-            (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
-                version,
-                version_group_id,
-            })),
-        }?;
-
-        let consensus_branch_id = BranchId::try_from(pczt.global.consensus_branch_id)
-            .map_err(|_| Error::Global(GlobalError::UnknownConsensusBranchId))?;
-
-        let lock_time = determine_lock_time(&pczt.global, &pczt.transparent.inputs)
-            .ok_or(Error::IncompatibleLockTimes)?;
-
-        let transparent_bundle =
-            transparent::extract_bundle(pczt.transparent).map_err(Error::Transparent)?;
-        let sapling_bundle = sapling::extract_bundle(pczt.sapling).map_err(Error::Sapling)?;
-        let orchard_bundle = orchard::extract_bundle(pczt.orchard).map_err(Error::Orchard)?;
-
-        let tx_data = TransactionData::<Unbound>::from_parts(
-            version,
-            consensus_branch_id,
-            lock_time,
-            pczt.global.expiry_height.into(),
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            Zatoshis::ZERO,
-            transparent_bundle,
-            None,
-            sapling_bundle,
-            orchard_bundle,
-        );
+        let super::tx_data::ParsedPczt { tx_data, .. } =
+            super::tx_data::pczt_to_tx_data::<Unbound, Error>(
+                pczt,
+                |t| {
+                    t.extract()
+                        .map_err(|e| Error::Transparent(TransparentError::Extract(e)))
+                },
+                |s| {
+                    s.extract()
+                        .map_err(|e| Error::Sapling(SaplingError::Extract(e)))
+                },
+                |o| {
+                    o.extract()
+                        .map_err(|e| Error::Orchard(OrchardError::Extract(e)))
+                },
+            )?;
 
         // The commitment being signed is shared across all shielded inputs.
         let txid_parts = tx_data.digest(TxIdDigester);
@@ -176,17 +149,25 @@ impl Authorization for Unbound {
 /// Errors that can occur while extracting a transaction from a PCZT.
 #[derive(Debug)]
 pub enum Error {
-    Global(GlobalError),
-    IncompatibleLockTimes,
     Orchard(OrchardError),
     Sapling(SaplingError),
     SaplingRequired,
     SighashMismatch,
     Transparent(TransparentError),
+    TxData(super::tx_data::Error),
 }
 
-#[derive(Debug)]
-pub enum GlobalError {
-    UnknownConsensusBranchId,
-    UnsupportedTxVersion { version: u32, version_group_id: u32 },
+impl From<super::tx_data::Error> for Error {
+    fn from(e: super::tx_data::Error) -> Self {
+        match e {
+            super::tx_data::Error::TransparentParse(e) => {
+                Error::Transparent(TransparentError::Parse(e))
+            }
+            super::tx_data::Error::SaplingParse(e) => Error::Sapling(SaplingError::Parse(e)),
+            super::tx_data::Error::OrchardParse(e) => Error::Orchard(OrchardError::Parse(e)),
+            other @ (super::tx_data::Error::IncompatibleLockTimes
+            | super::tx_data::Error::UnknownConsensusBranchId
+            | super::tx_data::Error::UnsupportedTxVersion { .. }) => Error::TxData(other),
+        }
+    }
 }

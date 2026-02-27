@@ -8,7 +8,7 @@ use zcash_primitives::transaction::{sighash::SignableInput, txid::TxIdDigester};
 
 use super::tx_data::{pczt_to_tx_data, sighash};
 use crate::{
-    Pczt,
+    ExtractError, Pczt,
     common::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
@@ -43,12 +43,21 @@ impl IoFinalizer {
             return Err(Error::NoOutputs);
         }
 
-        let Pczt {
+        let super::tx_data::ParsedPczt {
             mut global,
             transparent,
-            sapling,
-            orchard,
-        } = pczt;
+            mut sapling,
+            mut orchard,
+            tx_data,
+        } = pczt_to_tx_data(
+            pczt,
+            |t| {
+                t.extract_effects()
+                    .map_err(ExtractError::TransparentExtract)
+            },
+            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
+            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+        )?;
 
         // After shielded IO finalization, the transaction effects cannot be modified
         // because dummy spends will have been signed.
@@ -57,12 +66,6 @@ impl IoFinalizer {
                 | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
                 | FLAG_SHIELDED_MODIFIABLE);
         }
-
-        let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
-        let mut sapling = sapling.into_parsed().map_err(Error::SaplingParse)?;
-        let mut orchard = orchard.into_parsed().map_err(Error::OrchardParse)?;
-
-        let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
@@ -85,18 +88,21 @@ impl IoFinalizer {
 /// Errors that can occur while finalizing the IO of a PCZT.
 #[derive(Debug)]
 pub enum Error {
+    Extract(crate::ExtractError),
     NoOutputs,
     NoSpends,
     OrchardFinalize(orchard::pczt::IoFinalizerError),
-    OrchardParse(orchard::pczt::ParseError),
     SaplingFinalize(sapling::pczt::IoFinalizerError),
-    SaplingParse(sapling::pczt::ParseError),
-    TransparentParse(transparent::pczt::ParseError),
-    TxData(super::tx_data::Error),
+}
+
+impl From<crate::ExtractError> for Error {
+    fn from(e: crate::ExtractError) -> Self {
+        Error::Extract(e)
+    }
 }
 
 impl From<super::tx_data::Error> for Error {
     fn from(e: super::tx_data::Error) -> Self {
-        Error::TxData(e)
+        Error::Extract(crate::ExtractError::from(e))
     }
 }

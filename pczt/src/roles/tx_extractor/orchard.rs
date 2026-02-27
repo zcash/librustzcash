@@ -1,16 +1,6 @@
-use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey, pczt::Unbound};
+use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
-
-pub(super) fn extract_bundle(
-    bundle: crate::orchard::Bundle,
-) -> Result<Option<Bundle<Unbound, ZatBalance>>, OrchardError> {
-    bundle
-        .into_parsed()
-        .map_err(OrchardError::Parse)?
-        .extract()
-        .map_err(OrchardError::Extract)
-}
 
 pub(super) fn verify_bundle(
     bundle: &Bundle<Authorized, ZatBalance>,
