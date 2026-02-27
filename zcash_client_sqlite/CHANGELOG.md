@@ -1,4 +1,4 @@
- Changelog
+# Changelog
 All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -10,7 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.12, 0.19.4] - 2026-02-26
+
+### Fixed
+- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
+
 ## [0.19.3] - 2026-02-19
+
 ### Fixed
 - Migration no longer crashes in regtest mode.
 
