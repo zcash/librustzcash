@@ -801,12 +801,12 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
             // The key has already been imported; nothing to do.
             return Ok(());
         } else {
-            return Err(SqliteClientError::PubkeyImportConflict(current));
+            return Err(SqliteClientError::StandaloneImportConflict(current));
         }
     }
 
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
-    conn.execute(
+    let rows_affected = conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
@@ -817,7 +817,6 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
           :receiver_flags, :imported_transparent_receiver_pubkey
           FROM accounts
           WHERE accounts.uuid = :account_uuid
-        ON CONFLICT (imported_transparent_receiver_pubkey) DO NOTHING
         "#,
         named_params![
             ":account_uuid": account_uuid.0,
@@ -827,6 +826,92 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
             ":imported_transparent_receiver_pubkey": pubkey.serialize()
         ],
     )?;
+
+    if rows_affected == 0 {
+        return Err(SqliteClientError::AccountUnknown);
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    redeem_script: zcash_script::script::Redeem,
+) -> Result<(), SqliteClientError> {
+    use ::transparent::address::TransparentAddress;
+    use zcash_script::descriptor::sh;
+    use zcash_script::script::Evaluable;
+
+    // This mirrors `zcash_script::opcode::push_value::LargeValue::MAX_SIZE`, which is
+    // currently `pub(crate)`. Replace with a direct reference if it becomes public.
+    const MAX_P2SH_REDEEM_SCRIPT_SIZE: usize = 520;
+    let rs_bytes = redeem_script.to_bytes();
+    if rs_bytes.len() > MAX_P2SH_REDEEM_SCRIPT_SIZE {
+        return Err(SqliteClientError::BadAccountData(format!(
+            "Redeem script exceeds maximum P2SH size of {MAX_P2SH_REDEEM_SCRIPT_SIZE} bytes (got {} bytes)",
+            rs_bytes.len()
+        )));
+    }
+
+    let script_pubkey = sh(&redeem_script);
+    // `sh()` always produces a valid P2SH scriptPubKey, so `from_script_pubkey`
+    // should always succeed here. This is a defensive check.
+    let addr = TransparentAddress::from_script_pubkey(&script_pubkey).ok_or_else(|| {
+        SqliteClientError::CorruptedData(
+            "Could not derive P2SH address from redeem script".to_owned(),
+        )
+    })?;
+
+    let existing_import_account = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE imported_transparent_receiver_script = :imported_transparent_receiver_script",
+            named_params![
+                ":imported_transparent_receiver_script": &rs_bytes[..]
+            ],
+            |row| row.get::<_, Uuid>("account_uuid"),
+        )
+        .optional()?;
+
+    if let Some(current) = existing_import_account {
+        if current == account_uuid.expose_uuid() {
+            // The key has already been imported; nothing to do.
+            return Ok(());
+        } else {
+            return Err(SqliteClientError::StandaloneImportConflict(current));
+        }
+    }
+
+    let addr_str = Address::Transparent(addr).encode(params);
+    let rows_affected = conn.execute(
+        r#"
+        INSERT INTO addresses (
+          account_id, key_scope, address, cached_transparent_receiver_address,
+          receiver_flags, imported_transparent_receiver_script
+        )
+        SELECT
+          id, :key_scope, :address, :address,
+          :receiver_flags, :imported_transparent_receiver_script
+          FROM accounts
+          WHERE accounts.uuid = :account_uuid
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+            ":key_scope": KeyScope::Foreign.encode(),
+            ":address": addr_str,
+            ":receiver_flags": ReceiverFlags::P2SH.bits(),
+            ":imported_transparent_receiver_script": &rs_bytes[..]
+        ],
+    )?;
+
+    if rows_affected == 0 {
+        return Err(SqliteClientError::AccountUnknown);
+    }
 
     Ok(())
 }
