@@ -1314,6 +1314,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        account: Self::AccountId,
+        script: zcash_script::script::Redeem,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::import_standalone_transparent_script(wdb.conn.0, wdb.params, account, script)
+        })
+    }
+
     fn get_next_available_address(
         &mut self,
         account_uuid: Self::AccountId,
