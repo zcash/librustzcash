@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module
   - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
@@ -32,6 +33,12 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- Import standalone transparent P2SH addresses
+  - `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_script()`
+  - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneScript`
+  - `zcash_client_backend::wallet::TransparentAddressSource::redeem_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::redeem_script()`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -71,8 +78,8 @@ workspace.
     that would otherwise only be recoverable using the wallet's internal
     IVK.
 - `zcash_client_backend::data_api::WalletRead::get_transparent_balances` now returns
-  `TransparentBalances` (using `Option<TransparentKeyScope>`) to support standalone
-  transparent addresses that have no key scope.
+  `TransparentBalances` (using `TransparentKeyOrigin`) to distinguish standalone
+  transparent addresses from HD-derived ones.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
@@ -99,6 +106,10 @@ workspace.
   than or equal to the provided minimum value. This fixes an inconsistency
   in the various tests related to notes having no economic value in
   `zcash_client_sqlite`.
+- Renamed `zcash_client_backend::wallet::TransparentAddressSource::Standalone`
+  to `zcash_client_backend::wallet::TransparentAddressSource::StandalonePubkey`
+- Renamed `zcash_client_backend::wallet::TransparentAddressMetadata::standalone()`
+  to `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_p2pkh()`
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

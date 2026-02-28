@@ -1264,6 +1264,15 @@ Instead derive the ufvk in the calling code and import it using `import_account_
     ) -> Result<(), Self::Error> {
         todo!()
     }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: zcash_script::script::Redeem,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]

@@ -41,6 +41,8 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
 
@@ -2858,6 +2860,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: Self::AccountId,
         _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: script::Redeem,
     ) -> Result<(), Self::Error> {
         todo!()
     }
