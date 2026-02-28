@@ -32,6 +32,12 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- Import standalone transparent P2SH addresses
+  - `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_script()`
+  - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneScript`
+  - `zcash_client_backend::wallet::TransparentAddressSource::redeem_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::redeem_script()`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -99,6 +105,10 @@ workspace.
   than or equal to the provided minimum value. This fixes an inconsistency
   in the various tests related to notes having no economic value in
   `zcash_client_sqlite`.
+- Renamed `zcash_client_backend::wallet::TransparentAddressSource::Standalone`
+  to `zcash_client_backend::wallet::TransparentAddressSource::StandalonePubkey`
+- Renamed `zcash_client_backend::wallet::TransparentAddressMetadata::standalone()`
+  to `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_p2pkh()`
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

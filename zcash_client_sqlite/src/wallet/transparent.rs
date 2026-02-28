@@ -266,7 +266,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
                         SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
                     })?;
-                    TransparentAddressMetadata::standalone(pubkey, exposure, next_check_time)
+                    TransparentAddressMetadata::standalone_p2pkh(pubkey, exposure, next_check_time)
                 }
                 derived => {
                     let (scope, address_index) = derived
@@ -1819,7 +1819,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
 
-                                    let addr_meta = TransparentAddressMetadata::standalone(
+                                    let addr_meta = TransparentAddressMetadata::standalone_p2pkh(
                                         pubkey,
                                         exposed_at_height.map_or(
                                             Exposure::Unknown,

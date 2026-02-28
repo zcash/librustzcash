@@ -1337,7 +1337,11 @@ where
                         .derive_address_pubkey(*scope, *address_index)
                         .expect("spending key derivation should not fail"),
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::Standalone(pubkey) => *pubkey,
+                    TransparentAddressSource::StandalonePubkey(pubkey) => *pubkey,
+                    #[cfg(feature = "transparent-key-import")]
+                    TransparentAddressSource::StandaloneScript(_) => {
+                        return Err(Error::ProposalNotSupported);
+                    }
                 };
 
                 utxos_spent.push(outpoint.clone());
@@ -1702,10 +1706,14 @@ where
                 .derive_secret_key(*scope, *address_index)
                 .expect("spending key derivation should not fail"),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => *spending_keys
+            TransparentAddressSource::StandalonePubkey(_) => *spending_keys
                 .standalone_transparent_keys
                 .get(&_address)
                 .ok_or(Error::AddressNotRecognized(_address))?,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(_) => {
+                return Err(Error::ProposalNotSupported);
+            }
         });
     }
     let sapling_extsks = &[
@@ -2077,7 +2085,9 @@ where
                                     address_index,
                                 } => Some((index, *scope, *address_index)),
                                 #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressSource::Standalone(_) => None,
+                                TransparentAddressSource::StandalonePubkey(_) => None,
+                                #[cfg(feature = "transparent-key-import")]
+                                TransparentAddressSource::StandaloneScript(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();
