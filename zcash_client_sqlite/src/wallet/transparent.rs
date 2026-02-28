@@ -161,7 +161,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             transparent_child_index,
             imported_transparent_receiver_pubkey,
             exposed_at_height,
-            transparent_receiver_next_check_time
+            transparent_receiver_next_check_time,
+            imported_transparent_receiver_script
          FROM addresses
          WHERE account_id = :account_id
          AND cached_transparent_receiver_address IS NOT NULL
@@ -243,50 +244,105 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .map(decode_epoch_seconds)
             .transpose()?;
 
-        if let Some(taddr) = taddr {
-            let metadata = match key_scope {
-                #[cfg(feature = "transparent-key-import")]
-                KeyScope::Foreign => {
-                    let pubkey_bytes = row
-                        .get::<_, Option<Vec<u8>>>(3)?
-                        .ok_or_else(|| {
-                            SqliteClientError::CorruptedData(
-                            "Pubkey bytes must be present for all imported transparent addresses."
-                                .to_owned(),
-                        )
-                        })
-                        .and_then(|b| {
-                            <[u8; 33]>::try_from(&b[..]).map_err(|_| {
-                                SqliteClientError::CorruptedData(format!(
-                                    "Invalid public key byte length; must be 33 bytes, got {}.",
-                                    b.len()
-                                ))
-                            })
-                        })?;
-                    let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
-                        SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
-                    })?;
-                    TransparentAddressMetadata::standalone_p2pkh(pubkey, exposure, next_check_time)
-                }
-                derived => {
-                    let (scope, address_index) = derived
-                        .as_transparent()
-                        .zip(address_index_opt)
-                        .ok_or_else(|| {
-                            SqliteClientError::CorruptedData(
-                                "Derived addresses must have derivation metadata present."
-                                    .to_owned(),
-                            )
-                        })?;
+        #[cfg(feature = "transparent-key-import")]
+        let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
+            row.get("imported_transparent_receiver_script")?;
 
-                    TransparentAddressMetadata::derived(
-                        scope,
-                        address_index,
+        if let Some(taddr) = taddr {
+            let non_script_metadata =
+                || -> Result<TransparentAddressMetadata, SqliteClientError> {
+                    match key_scope {
+                        #[cfg(feature = "transparent-key-import")]
+                        KeyScope::Foreign => {
+                            let pubkey_bytes = row
+                                .get::<_, Option<Vec<u8>>>(3)?
+                                .ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(
+                                    "Pubkey bytes must be present for all imported transparent P2PKH addresses."
+                                        .to_owned(),
+                                )
+                                })
+                                .and_then(|b| {
+                                    <[u8; 33]>::try_from(&b[..]).map_err(|_| {
+                                        SqliteClientError::CorruptedData(format!(
+                                            "Invalid public key byte length; must be 33 bytes, got {}.",
+                                            b.len()
+                                        ))
+                                    })
+                                })?;
+                            let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Invalid public key: {}",
+                                    e
+                                ))
+                            })?;
+                            Ok(TransparentAddressMetadata::standalone_p2pkh(
+                                pubkey,
+                                exposure,
+                                next_check_time,
+                            ))
+                        }
+                        derived => {
+                            let (scope, address_index) = derived
+                                .as_transparent()
+                                .zip(address_index_opt)
+                                .ok_or_else(|| {
+                                    SqliteClientError::CorruptedData(
+                                        "Derived addresses must have derivation metadata present."
+                                            .to_owned(),
+                                    )
+                                })?;
+
+                            Ok(TransparentAddressMetadata::derived(
+                                scope,
+                                address_index,
+                                exposure,
+                                next_check_time,
+                            ))
+                        }
+                    }
+                };
+
+            #[cfg(feature = "transparent-key-import")]
+            let metadata = if let Some(ref rs_bytes) = imported_transparent_receiver_script_bytes {
+                use zcash_script::script::{self, Code};
+
+                let imported_transparent_receiver_script =
+                    script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
+                        SqliteClientError::CorruptedData(format!("Invalid redeem script: {:?}", e))
+                    })?;
+
+                if matches!(key_scope, KeyScope::Foreign) {
+                    // Standalone P2SH import
+                    TransparentAddressMetadata::standalone_script(
+                        imported_transparent_receiver_script,
                         exposure,
                         next_check_time,
                     )
+                } else {
+                    return Err(SqliteClientError::CorruptedData(
+                        "Redeem script found for non-foreign-scoped address, which is not supported."
+                            .to_owned(),
+                    ));
                 }
+            } else {
+                non_script_metadata()?
             };
+
+            #[cfg(not(feature = "transparent-key-import"))]
+            let metadata = p2pkh_metadata()?;
+
+            #[cfg(not(feature = "transparent-key-import"))]
+            {
+                if matches!(key_scope, KeyScope::Foreign) {
+                    // Foreign-scoped addresses (standalone imports) require
+                    // transparent-key-import. Skip gracefully for DB compatibility.
+                    continue;
+                }
+            }
+
+            #[cfg(not(feature = "transparent-key-import"))]
+            let metadata = non_script_metadata()?;
 
             ret.insert(taddr, metadata);
         }
@@ -1745,7 +1801,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                 key_scope,
                 imported_transparent_receiver_pubkey,
                 exposed_at_height,
-                transparent_receiver_next_check_time
+                transparent_receiver_next_check_time,
+                imported_transparent_receiver_script
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
@@ -1804,39 +1861,66 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             ))
                         }
                         None => {
-                            if let Some(_pubkey_bytes) = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")? {
-                                #[cfg(not(feature = "transparent-key-import"))]
-                                let addr_meta = Err(SqliteClientError::CorruptedData(
-                                    "standalone imported transparent addresses are not supported by this build of `zcash_client_sqlite`".to_string()
-                                ));
+                            let _imported_transparent_receiver_script_bytes: Option<Vec<u8>> = row.get("imported_transparent_receiver_script")?;
+                            let _pubkey_bytes = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")?;
 
-                                #[cfg(feature = "transparent-key-import")]
-                                let addr_meta = {
-                                    let pubkey_bytes = PublicKeyBytes::try_from(_pubkey_bytes).map_err(|_| {
+                            let _standalone_exposure = exposed_at_height.map_or(
+                                Exposure::Unknown,
+                                |at_height| Exposure::Exposed {
+                                    at_height,
+                                    gap_metadata: GapMetadata::DerivationUnknown
+                                }
+                            );
+
+                            #[cfg(feature = "transparent-key-import")]
+                            {
+                                if let Some(ref rs_bytes) = _imported_transparent_receiver_script_bytes {
+                                    use zcash_script::script::{self, Code};
+
+                                    let imported_transparent_receiver_script =
+                                        script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
+                                            SqliteClientError::CorruptedData(format!(
+                                                "Invalid redeem script: {:?}",
+                                                e
+                                            ))
+                                        })?;
+
+                                    Ok(TransparentAddressMetadata::standalone_script(
+                                        imported_transparent_receiver_script,
+                                        _standalone_exposure,
+                                        next_check_time,
+                                    ))
+                                } else if let Some(ref pubkey_bytes_vec) = _pubkey_bytes {
+                                    let pubkey_bytes = PublicKeyBytes::try_from(pubkey_bytes_vec.clone()).map_err(|_| {
                                         SqliteClientError::CorruptedData(
                                             "imported_transparent_receiver_pubkey must be 33 bytes in length".to_string()
                                         )
                                     })?;
                                     let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
 
-                                    let addr_meta = TransparentAddressMetadata::standalone_p2pkh(
+                                    Ok(TransparentAddressMetadata::standalone_p2pkh(
                                         pubkey,
-                                        exposed_at_height.map_or(
-                                            Exposure::Unknown,
-                                            |at_height| Exposure::Exposed {
-                                                at_height,
-                                                gap_metadata: GapMetadata::DerivationUnknown
-                                            }
-                                        ),
-                                        next_check_time
-                                    );
+                                        _standalone_exposure,
+                                        next_check_time,
+                                    ))
+                                } else {
+                                    Err(SqliteClientError::CorruptedData(
+                                        "imported_transparent_receiver_pubkey or imported_transparent_receiver_script must be set for \"standalone\" transparent addresses".to_string()
+                                    ))
+                                }
+                            }
 
-                                    Ok(addr_meta)
-                                };
-
-                                addr_meta
-                            } else {
-                                Err(SqliteClientError::CorruptedData("imported_transparent_receiver_pubkey must be set for \"standalone\" transparent addresses".to_string()))
+                            #[cfg(not(feature = "transparent-key-import"))]
+                            {
+                                if _pubkey_bytes.is_some() || _imported_transparent_receiver_script_bytes.is_some() {
+                                    Err(SqliteClientError::CorruptedData(
+                                        "standalone imported transparent addresses are not supported by this build of `zcash_client_sqlite`".to_string()
+                                    ))
+                                } else {
+                                    Err(SqliteClientError::CorruptedData(
+                                        "imported_transparent_receiver_pubkey or imported_transparent_receiver_script must be set for \"standalone\" transparent addresses".to_string()
+                                    ))
+                                }
                             }
                         }
                     }
@@ -2224,6 +2308,38 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::spend_from_standalone_pubkey(
             TestDbFactory::default(),
             BlockCache::new(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_p2sh() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_p2sh(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_p2sh_idempotent() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_p2sh_idempotent(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_p2sh_conflict() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_p2sh_conflict(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_p2sh_balance() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_p2sh_balance(
+            TestDbFactory::default(),
         );
     }
 

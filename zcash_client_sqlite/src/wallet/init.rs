@@ -250,8 +250,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't service transaction data requests in migrations")
         }
         #[cfg(feature = "transparent-key-import")]
-        SqliteClientError::PubkeyImportConflict(_) => {
-            unreachable!("we do not import pubkeys in migrations")
+        SqliteClientError::StandaloneImportConflict(_) => {
+            unreachable!("we do not import standalone transparent addresses in migrations")
         }
     }
 }
