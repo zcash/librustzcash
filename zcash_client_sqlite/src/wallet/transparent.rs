@@ -2187,6 +2187,47 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey_idempotent() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_idempotent(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey_conflict() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_conflict(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_import_standalone_transparent_pubkey_balance() {
+        zcash_client_backend::data_api::testing::transparent::import_standalone_transparent_pubkey_balance(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_spend_from_standalone_pubkey() {
+        zcash_client_backend::data_api::testing::transparent::spend_from_standalone_pubkey(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn ephemeral_address_management() {
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())

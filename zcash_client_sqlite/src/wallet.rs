@@ -4658,28 +4658,4 @@ mod tests {
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
     }
-
-    #[test]
-    #[cfg(feature = "transparent-key-import")]
-    fn test_import_standalone_transparent_pubkey() {
-        use rand::SeedableRng;
-        use rand_chacha::ChaChaRng;
-        use secp256k1::{Secp256k1, SecretKey};
-
-        let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory::default())
-            .with_account_from_sapling_activation(BlockHash([0; 32]))
-            .build();
-
-        let account_id = st.test_account().unwrap().id();
-
-        let mut rng = ChaChaRng::from_seed([0u8; 32]);
-        let secp = Secp256k1::new();
-        let pubkey = SecretKey::new(&mut rng).public_key(&secp);
-        assert_matches!(
-            st.wallet_mut()
-                .import_standalone_transparent_pubkey(account_id, pubkey),
-            Ok(_)
-        );
-    }
 }
