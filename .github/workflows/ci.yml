@@ -57,6 +57,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -76,7 +77,13 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
         run: >
+          cargo nextest run
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run doctests
+        run: >
           cargo test
+          --doc
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
@@ -131,6 +138,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -150,7 +158,13 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
         run: >
+          cargo nextest run
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run doctests
+        run: >
           cargo test
+          --doc
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
@@ -193,6 +207,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -212,7 +227,7 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run slow tests
         run: >
-          cargo test
+          cargo nextest run
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
