@@ -14,6 +14,9 @@ use zcash_keys::{
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
+#[cfg(feature = "transparent-key-import")]
+use crate::wallet::TransparentAddressSource;
+
 use super::TestAccount;
 use crate::{
     data_api::{
@@ -533,4 +536,301 @@ where
     // sent to any of the set of {addresses in the gap limit range | address prior to the gap}.
     let query_height = st.wallet().utxo_query_height(account_uuid).unwrap();
     assert_eq!(query_height, h0);
+}
+
+/// Tests that importing a standalone transparent public key succeeds.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+}
+
+/// Tests that importing the same pubkey twice to the same account is idempotent.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_idempotent<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // First import
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+
+    // Snapshot state after first import
+    let receivers_before = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // Second import to same account should also succeed (idempotent)
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+
+    // Verify wallet state is unchanged
+    let receivers_after = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    assert_eq!(receivers_before.len(), receivers_after.len());
+
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+    let metadata = receivers_after
+        .get(&taddr)
+        .expect("address should be present");
+    assert!(matches!(
+        metadata.source(),
+        TransparentAddressSource::Standalone(_)
+    ));
+}
+
+/// Tests that importing the same pubkey to a different account fails.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_conflict<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+    use secrecy::Secret;
+
+    use crate::data_api::{AccountBirthday, chain::ChainState};
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account1_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import to first account
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account1_id, pubkey),
+        Ok(_)
+    );
+
+    // Create a second account
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let seed2 = Secret::new(vec![42u8; 32]);
+    let (account2_id, _) = st
+        .wallet_mut()
+        .create_account("account2", &seed2, &birthday, None)
+        .unwrap();
+
+    // Import same pubkey to second account should fail
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account2_id, pubkey),
+        Err(_)
+    );
+}
+
+/// Tests that a UTXO received at a standalone P2PKH address is reflected in the wallet balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_balance<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    use crate::data_api::wallet::ConfirmationsPolicy;
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import the public key.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .unwrap();
+
+    // Derive the P2PKH address.
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake UTXO at the P2PKH address.
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Verify the balance is reflected via get_transparent_balances.
+    let target_height = TargetHeight::from(height + 1);
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    assert_eq!(
+        balances.get(&taddr).map(|(_, b)| b.spendable_value()),
+        Some(value),
+    );
+
+    // Verify the UTXO is returned by get_spendable_transparent_outputs.
+    let utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(&taddr, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    assert_eq!(utxos.len(), 1);
+    assert_eq!(utxos[0].value(), value);
+}
+
+/// Tests spending from a standalone P2PKH address by shielding its balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_from_standalone_pubkey<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::data_api::wallet::{self, SpendingKeys};
+    use secp256k1::{Secp256k1, SecretKey};
+    use std::collections::HashMap;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Create a keypair and derive the P2PKH address.
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import the public key.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .unwrap();
+
+    // Derive the P2PKH address.
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    // Initialize chain data with blocks (needed for shielding transaction creation).
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Create a fake UTXO at the P2PKH address.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Build SpendingKeys with the standalone key for the P2PKH address.
+    let mut standalone_keys = HashMap::new();
+    standalone_keys.insert(taddr, secret_key);
+    let spending_keys = SpendingKeys::new(
+        account.usk().clone(),
+        #[cfg(feature = "transparent-key-import")]
+        standalone_keys,
+    );
+
+    // Shield the P2PKH UTXO.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
+    let network = *st.network();
+    let txids = wallet::shield_transparent_funds(
+        st.wallet_mut(),
+        &network,
+        &prover,
+        &prover,
+        &input_selector,
+        &change_strategy,
+        value,
+        &spending_keys,
+        &[taddr],
+        account_id,
+        ConfirmationsPolicy::MIN,
+    )
+    .unwrap();
+
+    assert!(!txids.is_empty());
+
+    // The wallet should have zero transparent balance after shielding.
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 }
