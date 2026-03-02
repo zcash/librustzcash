@@ -3,13 +3,13 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use nom::{
-    AsChar, Parser,
     branch::alt,
     bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
     character::complete::{char, digit0},
     combinator::{map_parser, opt, success, value},
     multi::separated_list0,
     sequence::{preceded, separated_pair, terminated, tuple},
+    AsChar, Parser,
 };
 use primitive_types::U256;
 use sha3::{Digest, Keccak256};
@@ -1151,7 +1151,8 @@ pub struct SchemaPrefix {
 
 impl core::fmt::Display for SchemaPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ethereum:")?;
+        f.write_str(&self.prefix)?;
+        f.write_str(":")?;
         if self.has_pay {
             f.write_str("pay-")?;
         }
