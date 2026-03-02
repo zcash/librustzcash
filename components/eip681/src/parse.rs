@@ -3,13 +3,13 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use nom::{
+    AsChar, Parser,
     branch::alt,
     bytes::complete::{is_not, tag, take_till, take_till1, take_while, take_while1},
     character::complete::{char, digit0},
     combinator::{map_parser, opt, success, value},
     multi::separated_list0,
     sequence::{preceded, separated_pair, terminated, tuple},
-    AsChar, Parser,
 };
 use primitive_types::U256;
 use sha3::{Digest, Keccak256};
@@ -1048,7 +1048,7 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (number, n) = match p {
-                Parameter::Value(n) => (n.as_i128()?, n),
+                Parameter::Value(n) => (n.as_uint256()?, n),
                 _ => continue,
             };
             values.insert(("value", number), n.clone());
@@ -1075,8 +1075,8 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (k, number, n) = match p {
-                Parameter::Gas(n) => ("gas", n.as_i128()?, n),
-                Parameter::GasLimit(n) => ("gasLimit", n.as_i128()?, n),
+                Parameter::Gas(n) => ("gas", n.as_uint256()?, n),
+                Parameter::GasLimit(n) => ("gasLimit", n.as_uint256()?, n),
                 _ => continue,
             };
             // Also return the actual key for error reporting
@@ -1105,7 +1105,7 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (number, n) = match p {
-                Parameter::GasPrice(n) => (n.as_i128()?, n),
+                Parameter::GasPrice(n) => (n.as_uint256()?, n),
                 _ => continue,
             };
             values.insert(("gasPrice", number), n.clone());
