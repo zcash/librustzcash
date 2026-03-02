@@ -4671,8 +4671,7 @@ pub(crate) fn get_next_available_zip48_multisig_address<P: consensus::Parameters
         account.id,
         t_scope,
         address_index,
-        &address,
-        &redeem_script,
+        (&address, &redeem_script),
         Some(chain_tip),
     )?;
 
@@ -4728,8 +4727,7 @@ pub(crate) fn get_zip48_multisig_address_for_index<P: consensus::Parameters>(
         account.id,
         t_scope,
         address_index,
-        &address,
-        &redeem_script,
+        (&address, &redeem_script),
         Some(chain_tip),
     )?;
 

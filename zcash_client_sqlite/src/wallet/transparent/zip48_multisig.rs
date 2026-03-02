@@ -54,8 +54,7 @@ pub(crate) fn generate_zip48_multisig_address_range<P: consensus::Parameters>(
             account_id,
             key_scope,
             address_index,
-            &address,
-            &redeem_script,
+            (&address, &redeem_script),
             None,
         )?;
     }
@@ -90,12 +89,13 @@ pub(crate) fn insert_zip48_multisig_address<P: consensus::Parameters>(
     account_id: AccountRef,
     scope: TransparentKeyScope,
     address_index: NonHardenedChildIndex,
-    address: &TransparentAddress,
-    redeem_script: &script::Redeem,
+    derived: (&TransparentAddress, &script::Redeem),
     exposed_at_height: Option<BlockHeight>,
 ) -> Result<AddressRef, SqliteClientError> {
     use zcash_keys::encoding::AddressCodec;
     use zcash_script::script::Evaluable;
+
+    let (address, redeem_script) = derived;
 
     if !matches!(address, TransparentAddress::ScriptHash(_)) {
         return Err(SqliteClientError::TransparentAddress(
@@ -387,8 +387,7 @@ mod tests {
                         account_ref,
                         TransparentKeyScope::EXTERNAL,
                         index,
-                        &address,
-                        &redeem_script,
+                        (&address, &redeem_script),
                         Some(BlockHeight::from_u32(100)),
                     )
                     .unwrap();
@@ -421,8 +420,7 @@ mod tests {
                 account_ref,
                 TransparentKeyScope::EXTERNAL,
                 NonHardenedChildIndex::ZERO,
-                &p2pkh_address,
-                &redeem_script,
+                (&p2pkh_address, &redeem_script),
                 None,
             );
             assert_matches!(result, Err(SqliteClientError::TransparentAddress(_)));
@@ -448,8 +446,7 @@ mod tests {
                     account_ref,
                     TransparentKeyScope::EXTERNAL,
                     index,
-                    &address,
-                    &redeem_script,
+                    (&address, &redeem_script),
                     exposed_height,
                 )
                 .unwrap();
