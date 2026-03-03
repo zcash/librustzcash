@@ -7411,7 +7411,6 @@ name = "zcash_transparent"
 version = "0.6.3"
 dependencies = [
  "bip32",
- "blake2b_simd",
  "bs58",
  "core2",
  "document-features",
