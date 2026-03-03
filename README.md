@@ -42,95 +42,98 @@ graph TB
         zcash_spec
     end
 
+    %% Direct edges that also have a transitive path are left in (so the linter checks
+    %% they are deliberate edges) but commented out (to simplify the graph).
+
     zcash_client_sqlite --> zcash_client_backend
     zcash_client_memory --> zcash_client_backend
 
     zcash_client_backend --> pczt
 
-    zcash_client_sqlite --> zcash_keys
-    zcash_client_memory --> zcash_keys
+    %% zcash_client_sqlite --> zcash_keys
+    %% zcash_client_memory --> zcash_keys
     zcash_client_backend --> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 
+    zcash_extensions --> zcash_primitives
     zcash_proofs --> zcash_primitives
     pczt --> zcash_primitives
-    zcash_client_backend --> zcash_primitives
-    zcash_client_sqlite --> zcash_primitives
-    zcash_client_memory --> zcash_primitives
-    zcash_extensions --> zcash_primitives
+    %% zcash_client_backend --> zcash_primitives
+    %% zcash_client_sqlite --> zcash_primitives
+    %% zcash_client_memory --> zcash_primitives
 
-    zcash_client_sqlite --> zcash_transparent
-    zcash_client_memory --> zcash_transparent
-    zcash_client_backend --> zcash_transparent
-    pczt --> zcash_transparent
+    %% zcash_client_sqlite --> zcash_transparent
+    %% zcash_client_memory --> zcash_transparent
+    %% zcash_client_backend --> zcash_transparent
+    %% pczt --> zcash_transparent
     zcash_keys --> zcash_transparent
     zcash_primitives --> zcash_transparent
 
     zcash_client_backend --> zip321
 
     zcash_transparent --> zcash_address
-    zcash_keys --> zcash_address
-    zcash_client_backend --> zcash_address
-    zcash_client_sqlite --> zcash_address
-    zcash_client_memory --> zcash_address
+    %% zcash_keys --> zcash_address
+    %% zcash_client_backend --> zcash_address
+    %% zcash_client_sqlite --> zcash_address
+    %% zcash_client_memory --> zcash_address
     zip321 --> zcash_address
 
-    zcash_transparent --> zcash_protocol
-    zcash_keys --> zcash_protocol
-    zcash_client_sqlite --> zcash_protocol
-    zcash_client_memory --> zcash_protocol
-    zcash_primitives --> zcash_protocol
-    zcash_client_backend --> zcash_protocol
-    pczt --> zcash_protocol
-    zcash_extensions --> zcash_protocol
+    %% zcash_transparent --> zcash_protocol
+    %% zcash_keys --> zcash_protocol
+    %% zcash_client_sqlite --> zcash_protocol
+    %% zcash_client_memory --> zcash_protocol
+    %% zcash_primitives --> zcash_protocol
+    %% zcash_client_backend --> zcash_protocol
+    %% pczt --> zcash_protocol
+    %% zcash_extensions --> zcash_protocol
     zcash_address --> zcash_protocol
-    zip321 --> zcash_protocol
+    %% zip321 --> zcash_protocol
 
-    zcash_client_sqlite --> zcash_encoding
-    zcash_transparent --> zcash_encoding
-    zcash_client_memory --> zcash_encoding
-    zcash_client_backend --> zcash_encoding
-    zcash_keys --> zcash_encoding
-    zcash_primitives --> zcash_encoding
-    zcash_address --> zcash_encoding
+    %% zcash_client_sqlite --> zcash_encoding
+    %% zcash_transparent --> zcash_encoding
+    %% zcash_client_memory --> zcash_encoding
+    %% zcash_client_backend --> zcash_encoding
+    %% zcash_keys --> zcash_encoding
+    %% zcash_primitives --> zcash_encoding
+    %% zcash_address --> zcash_encoding
     zcash_protocol --> zcash_encoding
 
     zcash_primitives --> equihash
     zcash_address --> f4jumble
 
+    %% zcash_client_backend --> orchard
+    %% pczt --> orchard
     zcash_keys --> orchard
     zcash_primitives --> orchard
-    pczt --> orchard
-    zcash_client_sqlite --> orchard
-    zcash_client_memory --> orchard
-    zcash_client_backend --> orchard
+    %% zcash_client_sqlite --> orchard
+    %% zcash_client_memory --> orchard
 
-    zcash_client_sqlite --> sapling-crypto
-    zcash_client_memory --> sapling-crypto
-    zcash_client_backend --> sapling-crypto
-    zcash_proofs --> sapling-crypto
-    pczt --> sapling-crypto
+    %% zcash_client_sqlite --> sapling-crypto
+    %% zcash_client_memory --> sapling-crypto
+    %% zcash_client_backend --> sapling-crypto
     zcash_keys --> sapling-crypto
+    %% zcash_proofs --> sapling-crypto
     zcash_primitives --> sapling-crypto
+    %% pczt --> sapling-crypto
 
     orchard --> zcash_note_encryption
     sapling-crypto --> zcash_note_encryption
-    zcash_primitives --> zcash_note_encryption
-    pczt --> zcash_note_encryption
-    zcash_client_backend --> zcash_note_encryption
+    %% zcash_primitives --> zcash_note_encryption
+    %% pczt --> zcash_note_encryption
+    %% zcash_client_backend --> zcash_note_encryption
 
-    zcash_client_sqlite --> zip32
-    zcash_client_memory --> zip32
-    zcash_client_backend --> zip32
-    zcash_keys --> zip32
-    zcash_transparent --> zip32
+    %% zcash_client_sqlite --> zip32
+    %% zcash_client_memory --> zip32
+    %% zcash_client_backend --> zip32
+    %% zcash_keys --> zip32
     orchard --> zip32
     sapling-crypto --> zip32
+    zcash_transparent --> zip32
 
-    zcash_transparent --> zcash_spec
-    orchard --> zcash_spec
-    sapling-crypto --> zcash_spec
+    %% zcash_transparent --> zcash_spec
+    %% orchard --> zcash_spec
+    %% sapling-crypto --> zcash_spec
     zip32 --> zcash_spec
 
     main --> standalone_components

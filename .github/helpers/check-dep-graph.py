@@ -46,6 +46,10 @@ def main():
         line = f.readline()
         while not 'END mermaid-dependency-graph' in line:
             if '-->' in line:
+                # Include commented-out edges for linting purposes.
+                line = line.strip()
+                if line.startswith('%% '):
+                    line = line[3:]
                 (crate, dependency) = line.strip().split(' --> ', 1)
                 if crate in CRATES_IN_GRAPH and dependency in CRATES_IN_GRAPH:
                     readme_edges.append((crate, dependency))
