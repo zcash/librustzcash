@@ -485,41 +485,6 @@ jobs:
           args: >
             -W clippy::all
 
-  codecov:
-    name: Code coverage
-    runs-on: ubuntu-latest
-    container:
-      image: xd009642/tarpaulin:develop-nightly
-      options: --security-opt seccomp=unconfined
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Generate coverage report
-        run: >
-          cargo tarpaulin
-          --engine llvm
-          ${{ steps.prepare.outputs.feature-flags }}
-          --release
-          --timeout 600
-          --out xml
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
   # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
   # docs.rs and in `.github/workflows/book.yml` as closely as possible.
   doc-links:
