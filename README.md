@@ -14,9 +14,11 @@ graph TB
             zcash_primitives
             zcash_transparent
             zcash_proofs
+            zcash_extensions
             zcash_protocol
             pczt
             zcash_client_backend
+            zcash_client_memory
             zcash_client_sqlite
             zcash_keys
             zip321
@@ -41,62 +43,121 @@ graph TB
     end
 
     zcash_client_sqlite --> zcash_client_backend
-    zcash_client_backend --> zcash_primitives
-    zcash_client_backend --> zip321
-    zcash_client_backend --> zcash_keys
+    zcash_client_memory --> zcash_client_backend
+
     zcash_client_backend --> pczt
-    pczt --> zcash_primitives
+
+    zcash_client_sqlite --> zcash_keys
+    zcash_client_memory --> zcash_keys
+    zcash_client_backend --> zcash_keys
+
+    zcash_client_backend --> zcash_proofs
+
     zcash_proofs --> zcash_primitives
-    zcash_primitives --> zcash_protocol
-    zcash_primitives --> equihash
-    zcash_primitives --> zcash_encoding
-    zcash_primitives --> zcash_transparent
-    zcash_primitives --> sapling-crypto
-    zcash_primitives --> orchard
-    zcash_keys --> zcash_address
-    zcash_keys --> zcash_encoding
-    zcash_keys --> zip32
+    pczt --> zcash_primitives
+    zcash_client_backend --> zcash_primitives
+    zcash_client_sqlite --> zcash_primitives
+    zcash_client_memory --> zcash_primitives
+    zcash_extensions --> zcash_primitives
+
+    zcash_client_sqlite --> zcash_transparent
+    zcash_client_memory --> zcash_transparent
+    zcash_client_backend --> zcash_transparent
+    pczt --> zcash_transparent
     zcash_keys --> zcash_transparent
-    zcash_keys --> orchard
-    zcash_keys --> sapling-crypto
-    zcash_transparent --> zcash_protocol
+    zcash_primitives --> zcash_transparent
+
+    zcash_client_backend --> zip321
+
     zcash_transparent --> zcash_address
-    zcash_transparent --> zip32
+    zcash_keys --> zcash_address
+    zcash_client_backend --> zcash_address
+    zcash_client_sqlite --> zcash_address
+    zcash_client_memory --> zcash_address
     zip321 --> zcash_address
-    zip321 --> zcash_protocol
+
+    zcash_transparent --> zcash_protocol
+    zcash_keys --> zcash_protocol
+    zcash_client_sqlite --> zcash_protocol
+    zcash_client_memory --> zcash_protocol
+    zcash_primitives --> zcash_protocol
+    zcash_client_backend --> zcash_protocol
+    pczt --> zcash_protocol
+    zcash_extensions --> zcash_protocol
     zcash_address --> zcash_protocol
-    zcash_address --> f4jumble
+    zip321 --> zcash_protocol
+
+    zcash_client_sqlite --> zcash_encoding
+    zcash_transparent --> zcash_encoding
+    zcash_client_memory --> zcash_encoding
+    zcash_client_backend --> zcash_encoding
+    zcash_keys --> zcash_encoding
+    zcash_primitives --> zcash_encoding
     zcash_address --> zcash_encoding
-    sapling-crypto --> zcash_note_encryption
-    sapling-crypto --> zip32
-    sapling-crypto --> zcash_spec
+    zcash_protocol --> zcash_encoding
+
+    zcash_primitives --> equihash
+    zcash_address --> f4jumble
+
+    zcash_keys --> orchard
+    zcash_primitives --> orchard
+    pczt --> orchard
+    zcash_client_sqlite --> orchard
+    zcash_client_memory --> orchard
+    zcash_client_backend --> orchard
+
+    zcash_client_sqlite --> sapling-crypto
+    zcash_client_memory --> sapling-crypto
+    zcash_client_backend --> sapling-crypto
+    zcash_proofs --> sapling-crypto
+    pczt --> sapling-crypto
+    zcash_keys --> sapling-crypto
+    zcash_primitives --> sapling-crypto
+
     orchard --> zcash_note_encryption
+    sapling-crypto --> zcash_note_encryption
+    zcash_primitives --> zcash_note_encryption
+    pczt --> zcash_note_encryption
+    zcash_client_backend --> zcash_note_encryption
+
+    zcash_client_sqlite --> zip32
+    zcash_client_memory --> zip32
+    zcash_client_backend --> zip32
+    zcash_keys --> zip32
+    zcash_transparent --> zip32
     orchard --> zip32
+    sapling-crypto --> zip32
+
+    zcash_transparent --> zcash_spec
     orchard --> zcash_spec
+    sapling-crypto --> zcash_spec
+    zip32 --> zcash_spec
 
     main --> standalone_components
 
     librustzcash --> shielded_protocols
     shielded_protocols --> protocol_components
 
-    click zcash_address "https://docs.rs/zcash_address/" _blank
-    click zcash_primitives "https://docs.rs/zcash_primitives/" _blank
-    click zcash_transparent "https://docs.rs/zcash_transparent/" _blank
-    click zcash_proofs "https://docs.rs/zcash_proofs/" _blank
-    click zcash_protocol "https://docs.rs/zcash_protocol/" _blank
-    click zcash_keys "https://docs.rs/zcash_keys/" _blank
-    click zip321 "https://docs.rs/zip321/" _blank
-    click pczt "https://docs.rs/pczt/" _blank
-    click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
-    click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
     click equihash "https://docs.rs/equihash/" _blank
     click f4jumble "https://docs.rs/f4jumble/" _blank
-    click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
-    click sapling-crypto "https://docs.rs/sapling-crypto/" _blank
     click orchard "https://docs.rs/orchard/" _blank
+    click pczt "https://docs.rs/pczt/" _blank
+    click sapling-crypto "https://docs.rs/sapling-crypto/" _blank
+    click zcash_address "https://docs.rs/zcash_address/" _blank
+    click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
+    click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
+    click zcash_client_memory "https://docs.rs/zcash_client_memory/" _blank
+    click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
+    click zcash_extensions "https://docs.rs/zcash_extensions/" _blank
+    click zcash_keys "https://docs.rs/zcash_keys/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
-    click zip32 "https://docs.rs/zip32/" _blank
+    click zcash_primitives "https://docs.rs/zcash_primitives/" _blank
+    click zcash_proofs "https://docs.rs/zcash_proofs/" _blank
+    click zcash_protocol "https://docs.rs/zcash_protocol/" _blank
     click zcash_spec "https://docs.rs/zcash_spec/" _blank
+    click zcash_transparent "https://docs.rs/zcash_transparent/" _blank
+    click zip321 "https://docs.rs/zip321/" _blank
+    click zip32 "https://docs.rs/zip32/" _blank
 ```
 
 <!-- END mermaid-dependency-graph -->
