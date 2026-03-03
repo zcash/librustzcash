@@ -65,15 +65,10 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
         run: >
           cargo test
@@ -139,15 +134,10 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
         run: >
           cargo test
@@ -201,15 +191,10 @@ jobs:
           all-pools: false
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: "false"
       - name: Run slow tests
         run: >
           cargo test
@@ -260,15 +245,10 @@ jobs:
         with:
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: "false"
       - name: Run check
         run: >
           cargo check
@@ -291,15 +271,9 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-latest
+          shared-key: latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set "${TOOLCHAIN}"
