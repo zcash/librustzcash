@@ -48,7 +48,6 @@ graph TB
     zcash_primitives --> zcash_protocol
     zcash_primitives --> equihash
     zcash_primitives --> zcash_encoding
-    zcash_primitives --> zcash_address
     zcash_primitives --> zcash_transparent
     zcash_primitives --> sapling
     zcash_primitives --> orchard
