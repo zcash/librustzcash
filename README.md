@@ -8,34 +8,34 @@ graph TB
     subgraph librustzcash
         direction TB
         subgraph main
-        zcash_address
-        zcash_primitives
-        zcash_transparent
-        zcash_proofs
-        zcash_protocol
-        pczt
-        zcash_client_backend
-        zcash_client_sqlite
-        zcash_keys
-        zip321
+            zcash_address
+            zcash_primitives
+            zcash_transparent
+            zcash_proofs
+            zcash_protocol
+            pczt
+            zcash_client_backend
+            zcash_client_sqlite
+            zcash_keys
+            zip321
         end
 
         subgraph standalone_components
-        equihash
-        f4jumble
-        zcash_encoding
+            equihash
+            f4jumble
+            zcash_encoding
         end
     end
 
     subgraph shielded_protocols
-    sapling[sapling-crypto]
-    orchard[orchard]
+        sapling-crypto
+        orchard
     end
 
     subgraph protocol_components
-    zcash_note_encryption
-    zip32
-    zcash_spec
+        zcash_note_encryption
+        zip32
+        zcash_spec
     end
 
     zcash_client_sqlite --> zcash_client_backend
@@ -49,14 +49,14 @@ graph TB
     zcash_primitives --> equihash
     zcash_primitives --> zcash_encoding
     zcash_primitives --> zcash_transparent
-    zcash_primitives --> sapling
+    zcash_primitives --> sapling-crypto
     zcash_primitives --> orchard
     zcash_keys --> zcash_address
     zcash_keys --> zcash_encoding
     zcash_keys --> zip32
     zcash_keys --> zcash_transparent
     zcash_keys --> orchard
-    zcash_keys --> sapling
+    zcash_keys --> sapling-crypto
     zcash_transparent --> zcash_protocol
     zcash_transparent --> zcash_address
     zcash_transparent --> zip32
@@ -65,9 +65,9 @@ graph TB
     zcash_address --> zcash_protocol
     zcash_address --> f4jumble
     zcash_address --> zcash_encoding
-    sapling --> zcash_note_encryption
-    sapling --> zip32
-    sapling --> zcash_spec
+    sapling-crypto --> zcash_note_encryption
+    sapling-crypto --> zip32
+    sapling-crypto --> zcash_spec
     orchard --> zcash_note_encryption
     orchard --> zip32
     orchard --> zcash_spec
@@ -90,7 +90,7 @@ graph TB
     click equihash "https://docs.rs/equihash/" _blank
     click f4jumble "https://docs.rs/f4jumble/" _blank
     click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
-    click sapling "https://docs.rs/sapling-crypto/" _blank
+    click sapling-crypto "https://docs.rs/sapling-crypto/" _blank
     click orchard "https://docs.rs/orchard/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
     click zip32 "https://docs.rs/zip32/" _blank
