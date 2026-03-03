@@ -3,6 +3,8 @@
 This repository contains a (work-in-progress) set of Rust crates for working
 with Zcash.
 
+<!-- START mermaid-dependency-graph -->
+
 ```mermaid
 graph TB
     subgraph librustzcash
@@ -96,6 +98,8 @@ graph TB
     click zip32 "https://docs.rs/zip32/" _blank
     click zcash_spec "https://docs.rs/zcash_spec/" _blank
 ```
+
+<!-- END mermaid-dependency-graph -->
 
 ### Crates
 
