@@ -31,7 +31,7 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
           - state: transparent
             transparent-pool: true
@@ -103,7 +103,7 @@ jobs:
           - target: macOS
             os: macOS-latest
           - target: Windows
-            os: windows-latest-8cores
+            os: ${{ vars.WINDOWS_LARGE_RUNNER || 'windows-latest' }}
 
           - state: transparent
             transparent-pool: true
@@ -173,7 +173,7 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
           - state: transparent
             transparent-pool: true
