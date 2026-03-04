@@ -4,20 +4,16 @@
 //! - Updates the various bsk values using the rcv information from spends and outputs.
 
 use rand_core::OsRng;
-use zcash_primitives::transaction::{
-    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester,
-};
+use zcash_primitives::transaction::{sighash::SignableInput, txid::TxIdDigester};
 
 use crate::{
-    Pczt,
+    ExtractError, ParsedPczt, Pczt,
     common::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
+    sighash,
 };
-use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
-
-use super::signer::pczt_to_tx_data;
 
 pub struct IoFinalizer {
     pczt: Pczt,
@@ -47,12 +43,20 @@ impl IoFinalizer {
             return Err(Error::NoOutputs);
         }
 
-        let Pczt {
+        let ParsedPczt {
             mut global,
             transparent,
-            sapling,
-            orchard,
-        } = pczt;
+            mut sapling,
+            mut orchard,
+            tx_data,
+        } = pczt.extract_tx_data(
+            |t| {
+                t.extract_effects()
+                    .map_err(ExtractError::TransparentExtract)
+            },
+            |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
+            |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+        )?;
 
         // After shielded IO finalization, the transaction effects cannot be modified
         // because dummy spends will have been signed.
@@ -61,26 +65,8 @@ impl IoFinalizer {
                 | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
                 | FLAG_SHIELDED_MODIFIABLE);
         }
-
-        let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
-        let mut sapling = sapling.into_parsed().map_err(Error::SaplingParse)?;
-        let mut orchard = orchard.into_parsed().map_err(Error::OrchardParse)?;
-
-        let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
         let txid_parts = tx_data.digest(TxIdDigester);
-
-        // TODO: Pick sighash based on tx version.
-        match (global.tx_version, global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
-            (version, version_group_id) => Err(Error::UnsupportedTxVersion {
-                version,
-                version_group_id,
-            }),
-        }?;
-        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-            .as_ref()
-            .try_into()
-            .expect("correct length");
+        let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         sapling
             .finalize_io(shielded_sighash, OsRng)
@@ -101,26 +87,15 @@ impl IoFinalizer {
 /// Errors that can occur while finalizing the IO of a PCZT.
 #[derive(Debug)]
 pub enum Error {
+    Extract(crate::ExtractError),
     NoOutputs,
     NoSpends,
     OrchardFinalize(orchard::pczt::IoFinalizerError),
-    OrchardParse(orchard::pczt::ParseError),
     SaplingFinalize(sapling::pczt::IoFinalizerError),
-    SaplingParse(sapling::pczt::ParseError),
-    Sign(super::signer::Error),
-    TransparentParse(transparent::pczt::ParseError),
-    UnsupportedTxVersion { version: u32, version_group_id: u32 },
 }
 
-impl From<super::signer::Error> for Error {
-    fn from(e: super::signer::Error) -> Self {
-        match e {
-            super::signer::Error::OrchardParse(parse_error) => Error::OrchardParse(parse_error),
-            super::signer::Error::SaplingParse(parse_error) => Error::SaplingParse(parse_error),
-            super::signer::Error::TransparentParse(parse_error) => {
-                Error::TransparentParse(parse_error)
-            }
-            _ => Error::Sign(e),
-        }
+impl From<crate::ExtractError> for Error {
+    fn from(e: crate::ExtractError) -> Self {
+        Error::Extract(e)
     }
 }
