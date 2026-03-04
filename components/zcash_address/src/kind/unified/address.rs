@@ -6,6 +6,8 @@ use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
+///
+/// Defined in [ZIP 316][zip-0316].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
@@ -24,6 +26,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
             Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
             Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
             Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
+            // Preserve unknown typecodes for forward compatibility.
             Typecode::Unknown(_) => Ok(Receiver::Unknown {
                 typecode,
                 data: addr.to_vec(),
