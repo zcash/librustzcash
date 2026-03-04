@@ -810,7 +810,7 @@ where
 
     // Build SpendingKeys with the standalone key for the P2PKH address.
     let mut standalone_keys = HashMap::new();
-    standalone_keys.insert(taddr, secret_key);
+    standalone_keys.insert(taddr, vec![secret_key]);
     let spending_keys = SpendingKeys::new(
         account.usk().clone(),
         #[cfg(feature = "transparent-key-import")]
@@ -1060,4 +1060,99 @@ where
         .unwrap();
     assert_eq!(utxos.len(), 1);
     assert_eq!(utxos[0].value(), value);
+}
+
+/// Tests spending from a standalone P2SH (multisig) address by shielding its balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_from_standalone_p2sh<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::data_api::wallet::{self, SpendingKeys};
+    use std::collections::HashMap;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    // Build the redeem script and get the signing key.
+    let (redeem_script, secret_key) = build_test_redeem_script();
+
+    // Import the P2SH address.
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .unwrap();
+
+    // Derive the P2SH address.
+    let script_pubkey = sh(&redeem_script);
+    let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+
+    // Initialize chain data with blocks (needed for shielding transaction creation).
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Create a fake UTXO at the P2SH address.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Build SpendingKeys with the standalone key for the P2SH address.
+    let mut standalone_keys = HashMap::new();
+    standalone_keys.insert(taddr, vec![secret_key]);
+    let spending_keys = SpendingKeys::new(
+        account.usk().clone(),
+        #[cfg(feature = "transparent-key-import")]
+        standalone_keys,
+    );
+
+    // Shield the P2SH UTXO.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
+    let network = *st.network();
+    let txids = wallet::shield_transparent_funds(
+        st.wallet_mut(),
+        &network,
+        &prover,
+        &prover,
+        &input_selector,
+        &change_strategy,
+        value,
+        &spending_keys,
+        &[taddr],
+        account_id,
+        ConfirmationsPolicy::MIN,
+    )
+    .unwrap();
+
+    assert!(!txids.is_empty());
+
+    // The wallet should have zero transparent balance after shielding.
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 }

@@ -18,6 +18,10 @@ workspace.
 - `zcash_primitives::transaction::TxVersion::valid_in_branch`
 
 ### Changed
+- `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
+  is no longer restricted to the PCZT workflow; it can now be used with
+  `Builder::build`.
+
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_primitives::transaction::builder`:

@@ -178,6 +178,9 @@ pub struct WalletTransparentOutput {
     txout: TxOut,
     mined_height: Option<BlockHeight>,
     recipient_address: TransparentAddress,
+    /// The known serialized input size for this output, if available.
+    /// This is set for P2SH outputs where the redeem script is known.
+    known_input_size: Option<usize>,
 }
 
 impl WalletTransparentOutput {
@@ -197,7 +200,17 @@ impl WalletTransparentOutput {
                 txout,
                 mined_height,
                 recipient_address,
+                known_input_size: None,
             })
+    }
+
+    /// Sets the known serialized input size for this output.
+    ///
+    /// This should be used for P2SH outputs where the wallet knows the redeem script
+    /// and can compute the expected input size for fee calculation.
+    pub fn with_known_input_size(mut self, size: usize) -> Self {
+        self.known_input_size = Some(size);
+        self
     }
 
     /// Returns the [`OutPoint`] corresponding to the output.
@@ -232,6 +245,24 @@ impl transparent_fees::InputView for WalletTransparentOutput {
     }
     fn coin(&self) -> &TxOut {
         &self.txout
+    }
+    fn serialized_size(&self) -> transparent_fees::InputSize {
+        match self.known_input_size {
+            Some(size) => transparent_fees::InputSize::Known(size),
+            None => {
+                // Fall back to default: only P2PKH is recognized.
+                match zcash_script::script::PubKey::parse(&self.txout.script_pubkey().0)
+                    .ok()
+                    .as_ref()
+                    .and_then(zcash_script::solver::standard)
+                {
+                    Some(zcash_script::solver::ScriptKind::PubKeyHash { .. }) => {
+                        transparent_fees::InputSize::STANDARD_P2PKH
+                    }
+                    _ => transparent_fees::InputSize::Unknown(self.outpoint.clone()),
+                }
+            }
+        }
     }
 }
 

@@ -51,6 +51,33 @@ impl super::Bundle {
                             .map_err(|_| SpendFinalizerError::UnsupportedRedeemScript)?;
 
                         match solver::standard(&redeem_script) {
+                            Some(solver::ScriptKind::PubKeyHash { hash }) => {
+                                let mut iter = input.partial_signatures.iter();
+                                match (iter.next(), iter.next()) {
+                                    (Some(entry), None) => Ok(entry),
+                                    (None, _) => Err(SpendFinalizerError::MissingSignature),
+                                    (Some(_), Some(_)) => {
+                                        Err(SpendFinalizerError::UnexpectedSignatures)
+                                    }
+                                }
+                                .and_then(|(pubkey, sig_bytes)| {
+                                    // Check that the signature is for this input.
+                                    if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
+                                        Err(SpendFinalizerError::UnexpectedSignatures)
+                                    } else {
+                                        // P2PKH-in-P2SH scriptSig
+                                        let redeem_script_ref =
+                                            input.redeem_script.as_ref().unwrap();
+                                        input.script_sig = Some(script::Component(vec![
+                                            pv::push_value(sig_bytes).expect("short enough"),
+                                            pv::push_value(pubkey).expect("short enough"),
+                                            push_script(redeem_script_ref)
+                                                .ok_or(SpendFinalizerError::RedeemScriptTooLong)?,
+                                        ]));
+                                        Ok(())
+                                    }
+                                })
+                            }
                             Some(solver::ScriptKind::MultiSig { required, pubkeys }) => {
                                 // P2MS-in-P2SH `script_sig` format is:
                                 // - Dummy OP_0 to bypass OP_CHECKMULTISIG bug.

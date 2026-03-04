@@ -29,7 +29,8 @@ use {
         sighash::{SIGHASH_ALL, SighashType},
     },
     core::iter,
-    sha2::Digest,
+    ripemd::Ripemd160,
+    sha2::{Digest, Sha256},
     zcash_encoding::CompactSize,
     zcash_script::{pattern::push_script, pv, solver},
 };
@@ -43,7 +44,8 @@ pub enum Error {
     UnsupportedScript,
     InvalidAddress,
     InvalidAmount,
-    /// A bundle could not be built because a required signing keys was missing.
+    /// A bundle could not be built because a required signing key was missing, or
+    /// insufficient keys were provided to meet a multisig threshold.
     MissingSigningKey,
     /// Provided null data is longer than the maximum supported length.
     NullDataTooLong {
@@ -211,8 +213,6 @@ impl TransparentInputInfo {
                     Some(TransparentAddress::ScriptHash(hash)) => {
                         use ripemd::Ripemd160;
                         use sha2::Sha256;
-                        use zcash_script::script::Evaluable;
-
                         if hash[..]
                             != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..]
                         {
@@ -252,54 +252,65 @@ impl TransparentInputInfo {
     ///
     /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
     pub fn serialized_len(&self) -> Option<usize> {
-        // PushData(secp256k1::ecdsa::serialized_signature::MAX_LEN + 1)
-        let fake_sig = pv::push_value(&[0; 72 + 1]).expect("short enough");
-
-        let script_len = match &self.spend_info {
+        match &self.spend_info {
             SpendInfo::P2pkh { .. } => {
-                // P2PKH `script_sig` format is:
-                // - PushData(signature || sigtype)
-                // - PushData(pubkey)
+                let fake_sig = pv::push_value(&[0; 72 + 1]).expect("short enough");
                 let fake_pubkey = pv::push_value(&[0; secp256k1::constants::PUBLIC_KEY_SIZE])
                     .expect("short enough");
-                Some(script::Component(vec![fake_sig, fake_pubkey]).byte_len())
+                let script_len = script::Component(vec![fake_sig, fake_pubkey]).byte_len();
+                let prevout_len = 32 + 4;
+                let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
+                let sequence_len = 4;
+                Some(prevout_len + script_sig_len + sequence_len)
             }
-            SpendInfo::P2sh { redeem_script } => {
-                redeem_script
-                    .refine()
-                    .ok()
-                    .as_ref()
-                    .and_then(solver::standard)
-                    .and_then(|spend_info| match spend_info {
-                        solver::ScriptKind::MultiSig { required, .. } => {
-                            // P2MS-in-P2SH `script_sig` format is:
-                            // - Dummy OP_0 to bypass OP_CHECKMULTISIG bug.
-                            // - PushData(signature || sigtype) * required
-                            // - PushData(redeem_script)
-                            Some(
-                                script::Component(
-                                    iter::empty()
-                                        .chain(Some(pv::_0))
-                                        .chain(core::iter::repeat_n(
-                                            fake_sig,
-                                            usize::from(required),
-                                        ))
-                                        .chain(push_script(redeem_script))
-                                        .collect(),
-                                )
-                                .byte_len(),
-                            )
-                        }
-                        _ => None,
-                    })
-            }
-        }?;
-
-        let prevout_len = 32 + 4;
-        let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
-        let sequence_len = 4;
-        Some(prevout_len + script_sig_len + sequence_len)
+            SpendInfo::P2sh { redeem_script } => p2sh_input_serialized_len(redeem_script),
+        }
     }
+}
+
+/// Computes the serialized input size for a P2SH input given the redeem script.
+///
+/// Returns `None` if the redeem script is not a recognized P2SH script kind (currently
+/// only P2MS-in-P2SH is supported).
+#[cfg(feature = "transparent-inputs")]
+pub fn p2sh_input_serialized_len(redeem_script: &script::FromChain) -> Option<usize> {
+    let fake_sig = pv::push_value(&[0; 72 + 1]).expect("short enough");
+    let fake_pubkey =
+        pv::push_value(&[0; secp256k1::constants::PUBLIC_KEY_SIZE]).expect("short enough");
+
+    let script_len = redeem_script
+        .refine()
+        .ok()
+        .as_ref()
+        .and_then(solver::standard)
+        .and_then(|spend_info| match spend_info {
+            solver::ScriptKind::PubKeyHash { .. } => Some(
+                script::Component(
+                    iter::empty()
+                        .chain(Some(fake_sig.clone()))
+                        .chain(Some(fake_pubkey))
+                        .chain(push_script(redeem_script))
+                        .collect(),
+                )
+                .byte_len(),
+            ),
+            solver::ScriptKind::MultiSig { required, .. } => Some(
+                script::Component(
+                    iter::empty()
+                        .chain(Some(pv::_0))
+                        .chain(core::iter::repeat_n(fake_sig, usize::from(required)))
+                        .chain(push_script(redeem_script))
+                        .collect(),
+                )
+                .byte_len(),
+            ),
+            _ => None,
+        })?;
+
+    let prevout_len = 32 + 4;
+    let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
+    let sequence_len = 4;
+    Some(prevout_len + script_sig_len + sequence_len)
 }
 
 pub struct TransparentBuilder {
@@ -408,10 +419,6 @@ impl TransparentBuilder {
 
     /// Adds a P2SH coin (the output of a previous transaction) to be spent in the
     /// transaction.
-    ///
-    /// This is only for use with [`Self::build_for_pczt`]. It is unsupported with
-    /// [`Self::build`]; the resulting bundle's [`Bundle::apply_signatures`] will return
-    /// an error.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_p2sh_input(
         &mut self,
@@ -629,13 +636,13 @@ impl Bundle<Unauthorized> {
             .iter()
             .enumerate()
             .map(|(index, info)| {
-                match info.spend_info {
+                match &info.spend_info {
                     SpendInfo::P2pkh { pubkey } => {
                         // Find the matching signing key.
                         let (sk, _) = signing_set
                             .keys
                             .iter()
-                            .find(|(_, pk)| pk == &pubkey)
+                            .find(|(_, pk)| pk == pubkey)
                             .ok_or(Error::MissingSigningKey)?;
 
                         let sighash = calculate_sighash(SignableInput {
@@ -649,18 +656,99 @@ impl Bundle<Unauthorized> {
                         let msg = secp256k1::Message::from_digest(sighash);
                         let sig = signing_set.secp.sign_ecdsa(&msg, sk);
 
-                        // Signature has to have "SIGHASH_ALL" appended to it
-                        let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                        sig_bytes.extend([SIGHASH_ALL]);
-
-                        // P2PKH scriptSig
-                        Ok(script::Component(vec![
-                            op::push_value(&sig_bytes).expect("length checked"),
-                            op::push_value(&pubkey.serialize()).expect("length checked"),
-                        ]))
+                        Ok(construct_script_sig(&sig, pubkey))
                     }
-                    // P2SH is unsupported here; use the PCZT workflow instead.
-                    SpendInfo::P2sh { .. } => Err(Error::InvalidAddress),
+                    SpendInfo::P2sh { redeem_script } => {
+                        let refined = redeem_script
+                            .refine()
+                            .map_err(|_| Error::UnsupportedScript)?;
+                        let script_code = Script::from(redeem_script);
+                        match solver::standard(&refined) {
+                            Some(solver::ScriptKind::PubKeyHash { hash }) => {
+                                let sighash = calculate_sighash(SignableInput {
+                                    hash_type: SighashType::ALL,
+                                    index,
+                                    script_code: &script_code,
+                                    script_pubkey: info.coin.script_pubkey(),
+                                    value: info.coin.value(),
+                                });
+
+                                let msg = secp256k1::Message::from_digest(sighash);
+
+                                // Find the signing key whose pubkey matches the hash.
+                                let (sk, pubkey) = signing_set
+                                    .keys
+                                    .iter()
+                                    .find(|(_, pk)| {
+                                        Ripemd160::digest(Sha256::digest(pk.serialize()))[..]
+                                            == hash[..]
+                                    })
+                                    .ok_or(Error::MissingSigningKey)?;
+
+                                let sig = signing_set.secp.sign_ecdsa(&msg, sk);
+                                let mut sig_bytes: Vec<u8> = sig.serialize_der().to_vec();
+                                sig_bytes.push(SIGHASH_ALL);
+
+                                let script_sig = vec![
+                                    pv::push_value(&sig_bytes).expect("short enough"),
+                                    pv::push_value(&pubkey.serialize()).expect("short enough"),
+                                    push_script(redeem_script).ok_or(Error::UnsupportedScript)?,
+                                ];
+
+                                Ok(script::Component(script_sig))
+                            }
+                            Some(solver::ScriptKind::MultiSig { required, pubkeys }) => {
+                                let sighash = calculate_sighash(SignableInput {
+                                    hash_type: SighashType::ALL,
+                                    index,
+                                    script_code: &script_code,
+                                    script_pubkey: info.coin.script_pubkey(),
+                                    value: info.coin.value(),
+                                });
+
+                                let msg = secp256k1::Message::from_digest(sighash);
+
+                                // Collect signatures in pubkey order
+                                let mut script_sig = vec![pv::_0];
+                                let mut sigs_found: u8 = 0;
+
+                                for pubkey_data in pubkeys {
+                                    if sigs_found == required {
+                                        break;
+                                    }
+                                    let pubkey_bytes: [u8; 33] = pubkey_data
+                                        .as_slice()
+                                        .try_into()
+                                        .map_err(|_| Error::UnsupportedScript)?;
+
+                                    if let Some((sk, _)) = signing_set
+                                        .keys
+                                        .iter()
+                                        .find(|(_, pk)| pk.serialize() == pubkey_bytes)
+                                    {
+                                        let sig = signing_set.secp.sign_ecdsa(&msg, sk);
+                                        let mut sig_bytes: Vec<u8> = sig.serialize_der().to_vec();
+                                        sig_bytes.push(SIGHASH_ALL);
+                                        script_sig.push(
+                                            pv::push_value(&sig_bytes).expect("short enough"),
+                                        );
+                                        sigs_found += 1;
+                                    }
+                                }
+
+                                if sigs_found < required {
+                                    return Err(Error::MissingSigningKey);
+                                }
+
+                                script_sig.push(
+                                    push_script(redeem_script).ok_or(Error::UnsupportedScript)?,
+                                );
+
+                                Ok(script::Component(script_sig))
+                            }
+                            _ => Err(Error::UnsupportedScript),
+                        }
+                    }
                 }
             });
 
@@ -844,6 +932,8 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use std::vec::Vec;
+
     use super::{Error, OutPoint, SignableInput, TransparentBuilder, TxOut};
     use crate::address::TransparentAddress;
     use ripemd::Ripemd160;
@@ -884,7 +974,7 @@ mod tests {
 
         // Create two inputs with corresponding secret keys for signing
         let (sk1, pk1, coin1, utxo1) = new_p2pkh_spend_with_key([1; 32]);
-        let (sk2, pk2, coin2, utxo2) = new_p2pkh_spend_with_key([1; 32]);
+        let (sk2, pk2, coin2, utxo2) = new_p2pkh_spend_with_key([2; 32]);
 
         // Create a builder and add the inputs and a dummy output
         let mut builder = TransparentBuilder::empty();
@@ -1045,5 +1135,114 @@ mod tests {
             "Should fail with MissingSignatures, but got: {:?}",
             final_bundle_result
         );
+    }
+
+    /// Helper to create a 2-of-2 P2SH multisig spend input.
+    fn new_p2sh_2of2_spend(
+        key_bytes_1: [u8; 32],
+        key_bytes_2: [u8; 32],
+    ) -> (
+        Vec<SecretKey>,
+        zcash_script::script::FromChain,
+        TxOut,
+        OutPoint,
+    ) {
+        use zcash_script::script::{Code, Evaluable, FromChain};
+
+        let secp = Secp256k1::new();
+        let sk1 = SecretKey::from_slice(&key_bytes_1).unwrap();
+        let sk2 = SecretKey::from_slice(&key_bytes_2).unwrap();
+        let pk1 = secp256k1::PublicKey::from_secret_key(&secp, &sk1);
+        let pk2 = secp256k1::PublicKey::from_secret_key(&secp, &sk2);
+
+        // Build a 2-of-2 multisig redeem script:
+        // OP_2 PUSHBYTES_33 <pubkey1> PUSHBYTES_33 <pubkey2> OP_2 OP_CHECKMULTISIG
+        let mut script_bytes: Vec<u8> = Vec::new();
+        script_bytes.push(0x52); // OP_2
+        script_bytes.push(0x21); // PUSHBYTES_33
+        script_bytes.extend_from_slice(&pk1.serialize());
+        script_bytes.push(0x21); // PUSHBYTES_33
+        script_bytes.extend_from_slice(&pk2.serialize());
+        script_bytes.push(0x52); // OP_2
+        script_bytes.push(0xae); // OP_CHECKMULTISIG
+
+        let redeem_script =
+            FromChain::parse(&Code(script_bytes.clone())).expect("valid multisig script");
+
+        // Create P2SH address from HASH160(redeem_script)
+        let hash = Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()));
+        let hash_bytes: [u8; 20] = hash.into();
+        let taddr = TransparentAddress::ScriptHash(hash_bytes);
+
+        let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
+        let outpoint = OutPoint::new([0u8; 32], 0);
+
+        (vec![sk1, sk2], redeem_script, txout, outpoint)
+    }
+
+    #[test]
+    fn apply_signatures_p2sh() {
+        use super::TransparentSigningSet;
+
+        let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
+        let taddr: TransparentAddress =
+            addr_str.parse::<ZcashAddress>().unwrap().convert().unwrap();
+
+        let (sks, redeem_script, coin, utxo) = new_p2sh_2of2_spend([1; 32], [2; 32]);
+
+        let mut builder = TransparentBuilder::empty();
+        builder.add_p2sh_input(redeem_script, utxo, coin).unwrap();
+        builder
+            .add_output(&taddr, Zatoshis::from_u64(5000).unwrap())
+            .unwrap();
+
+        let bundle = builder.build().unwrap();
+
+        // Add both signing keys to the signing set
+        let mut signing_set = TransparentSigningSet::new();
+        for sk in &sks {
+            signing_set.add_key(*sk);
+        }
+
+        let calculate_sighash = |input: SignableInput| {
+            let mut sighash = [0u8; 32];
+            sighash[0] = input.index as u8;
+            sighash
+        };
+
+        let result = bundle.apply_signatures(calculate_sighash, &signing_set);
+        assert!(result.is_ok(), "P2SH apply_signatures failed: {:?}", result);
+    }
+
+    #[test]
+    fn apply_signatures_p2sh_missing_key() {
+        use super::TransparentSigningSet;
+
+        let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
+        let taddr: TransparentAddress =
+            addr_str.parse::<ZcashAddress>().unwrap().convert().unwrap();
+
+        let (sks, redeem_script, coin, utxo) = new_p2sh_2of2_spend([1; 32], [2; 32]);
+
+        let mut builder = TransparentBuilder::empty();
+        builder.add_p2sh_input(redeem_script, utxo, coin).unwrap();
+        builder
+            .add_output(&taddr, Zatoshis::from_u64(5000).unwrap())
+            .unwrap();
+
+        let bundle = builder.build().unwrap();
+
+        // Only add one signing key (need 2-of-2)
+        let mut signing_set = TransparentSigningSet::new();
+        signing_set.add_key(sks[0]);
+
+        let calculate_sighash = |input: SignableInput| {
+            let mut sighash = [0u8; 32];
+            sighash[0] = input.index as u8;
+            sighash
+        };
+
+        let result = bundle.apply_signatures(calculate_sighash, &signing_set);
+        assert!(matches!(result, Err(Error::MissingSigningKey)));
     }
 }
