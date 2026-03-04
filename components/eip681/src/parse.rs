@@ -1048,7 +1048,7 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (number, n) = match p {
-                Parameter::Value(n) => (n.as_i128()?, n),
+                Parameter::Value(n) => (n.as_uint256()?, n),
                 _ => continue,
             };
             values.insert(("value", number), n.clone());
@@ -1075,8 +1075,8 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (k, number, n) = match p {
-                Parameter::Gas(n) => ("gas", n.as_i128()?, n),
-                Parameter::GasLimit(n) => ("gasLimit", n.as_i128()?, n),
+                Parameter::Gas(n) => ("gas", n.as_uint256()?, n),
+                Parameter::GasLimit(n) => ("gasLimit", n.as_uint256()?, n),
                 _ => continue,
             };
             // Also return the actual key for error reporting
@@ -1105,7 +1105,7 @@ impl Parameters {
         let mut values = BTreeMap::default();
         for p in self.iter() {
             let (number, n) = match p {
-                Parameter::GasPrice(n) => (n.as_i128()?, n),
+                Parameter::GasPrice(n) => (n.as_uint256()?, n),
                 _ => continue,
             };
             values.insert(("gasPrice", number), n.clone());
@@ -1151,7 +1151,8 @@ pub struct SchemaPrefix {
 
 impl core::fmt::Display for SchemaPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ethereum:")?;
+        f.write_str(&self.prefix)?;
+        f.write_str(":")?;
         if self.has_pay {
             f.write_str("pay-")?;
         }

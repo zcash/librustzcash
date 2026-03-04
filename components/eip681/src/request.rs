@@ -52,6 +52,52 @@ pub enum TransactionRequest {
 }
 
 impl TransactionRequest {
+    /// Construct a `TransactionRequest` from `NativeRequest` parts, if possible.
+    pub fn from_native_request_parts(
+        schema_prefix: &str,
+        has_pay: bool,
+        chain_id: Option<u64>,
+        recipient: &str,
+        value: Option<U256>,
+        gas_limit: Option<U256>,
+        gas_price: Option<U256>,
+    ) -> Result<Self, Error> {
+        let chain_id = chain_id.map(|id| format!("@{id}")).unwrap_or_default();
+        let value = value.map(|v| format!("value={v}"));
+        let gas_limit = gas_limit.map(|v| format!("gasLimit={v}"));
+        let gas_price = gas_price.map(|v| format!("gasPrice={v}"));
+        let params: String = [value, gas_limit, gas_price]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("&");
+        let pay = if has_pay { "pay-" } else { "" };
+        let query = if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{params}")
+        };
+        let req = format!("{schema_prefix}:{pay}{recipient}{chain_id}{query}");
+        Self::parse(&req)
+    }
+
+    /// Construct a `TransactionRequest` from `Erc20Request` parts, if possible.
+    pub fn from_erc20_request_parts(
+        schema_prefix: &str,
+        has_pay: bool,
+        chain_id: Option<u64>,
+        token_contract_address: &str,
+        recipient_address: &str,
+        value: U256,
+    ) -> Result<Self, Error> {
+        let chain_id = chain_id.map(|id| format!("@{id}")).unwrap_or_default();
+        let pay = if has_pay { "pay-" } else { "" };
+        let req = format!(
+            "{schema_prefix}:{pay}{token_contract_address}{chain_id}/transfer?address={recipient_address}&uint256={value}"
+        );
+        Self::parse(&req)
+    }
+
     /// Parse an EIP-681 URI into a categorized transaction request.
     ///
     /// The request is automatically categorized based on its structure:
@@ -155,7 +201,7 @@ impl TryFrom<&RawTransactionRequest> for NativeRequest {
     type Error = NativeTransferError;
 
     fn try_from(raw: &RawTransactionRequest) -> Result<Self, Self::Error> {
-        // A notive request cannot have a function name
+        // A native request cannot have a function name
         ensure!(raw.function_name.is_none(), HasFunctionNameSnafu);
 
         if let Some(parameters) = &raw.parameters {
@@ -195,6 +241,11 @@ impl NativeRequest {
     /// Returns the schema prefix of the request.
     pub fn schema_prefix(&self) -> &str {
         self.inner.schema_prefix.prefix()
+    }
+
+    /// Returns whether the request has a "pay-" appendage after the schema prefix.
+    pub fn has_pay(&self) -> bool {
+        self.inner.schema_prefix.has_pay()
     }
 
     /// Returns the chain ID, if specified.
@@ -350,6 +401,16 @@ impl TryFrom<&RawTransactionRequest> for Erc20Request {
 }
 
 impl Erc20Request {
+    /// Returns the schema prefix.
+    pub fn schema_prefix(&self) -> &str {
+        self.inner.schema_prefix.prefix()
+    }
+
+    /// Returns whether the request shows a "pay-" appendage after the schema prefix.
+    pub fn has_pay(&self) -> bool {
+        self.inner.schema_prefix.has_pay()
+    }
+
     /// Returns the chain ID, if specified.
     pub fn chain_id(&self) -> Option<u64> {
         let digits = self.inner.chain_id.as_ref()?;
@@ -457,6 +518,128 @@ mod test {
                 assert_eq!(a.value_atomic(), b.value_atomic());
             }
             _ => panic!("Roundtrip changed request type"),
+        }
+    }
+
+    use proptest::prelude::*;
+
+    /// Valid ERC-55 addresses for use in proptests.
+    const ERC55_ADDRESSES: &[&str] = &[
+        "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+        "0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB",
+    ];
+
+    fn arb_erc55_address() -> impl Strategy<Value = &'static str> {
+        prop::sample::select(ERC55_ADDRESSES)
+    }
+
+    fn arb_schema_prefix() -> impl Strategy<Value = &'static str> {
+        prop::sample::select(&["ethereum", "chaos_emerald"][..])
+    }
+
+    fn arb_u256() -> impl Strategy<Value = U256> {
+        (any::<u128>(), any::<u128>())
+            .prop_map(|(upper, lower)| (U256::from(upper) << 128) | U256::from(lower))
+    }
+
+    fn arb_opt_u256() -> impl Strategy<Value = Option<U256>> {
+        prop::option::of(arb_u256())
+    }
+
+    fn arb_opt_chain_id() -> impl Strategy<Value = Option<u64>> {
+        prop::option::of(1..=u64::MAX)
+    }
+
+    proptest! {
+        #[test]
+        fn from_native_request_parts_roundtrip(
+            schema_prefix in arb_schema_prefix(),
+            has_pay in any::<bool>(),
+            chain_id in arb_opt_chain_id(),
+            recipient in arb_erc55_address(),
+            value in arb_opt_u256(),
+            gas_limit in arb_opt_u256(),
+            gas_price in arb_opt_u256(),
+        ) {
+            let request = TransactionRequest::from_native_request_parts(
+                schema_prefix,
+                has_pay,
+                chain_id,
+                recipient,
+                value,
+                gas_limit,
+                gas_price,
+            )
+            .unwrap();
+
+            let native = request.as_native().expect("Expected NativeRequest");
+            assert_eq!(native.schema_prefix(), schema_prefix);
+            assert_eq!(native.has_pay(), has_pay);
+            assert_eq!(native.chain_id(), chain_id);
+            assert_eq!(native.recipient_address(), recipient);
+            assert_eq!(native.value_atomic(), value);
+            assert_eq!(native.gas_limit(), gas_limit);
+            assert_eq!(native.gas_price(), gas_price);
+
+            // Display -> reparse roundtrip
+            let output = request.to_string();
+            let reparsed = TransactionRequest::parse(&output).unwrap();
+            let native_b = reparsed
+                .as_native()
+                .expect("Roundtrip changed request type");
+            assert_eq!(native.schema_prefix(), native_b.schema_prefix());
+            assert_eq!(native.has_pay(), native_b.has_pay());
+            assert_eq!(native.chain_id(), native_b.chain_id());
+            assert_eq!(native.recipient_address(), native_b.recipient_address());
+            assert_eq!(native.value_atomic(), native_b.value_atomic());
+            assert_eq!(native.gas_limit(), native_b.gas_limit());
+            assert_eq!(native.gas_price(), native_b.gas_price());
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn from_erc20_request_parts_roundtrip(
+            schema_prefix in arb_schema_prefix(),
+            has_pay in any::<bool>(),
+            chain_id in arb_opt_chain_id(),
+            token_contract_address in arb_erc55_address(),
+            recipient_address in arb_erc55_address(),
+            value in arb_u256(),
+        ) {
+            let request = TransactionRequest::from_erc20_request_parts(
+                schema_prefix,
+                has_pay,
+                chain_id,
+                token_contract_address,
+                recipient_address,
+                value,
+            )
+            .unwrap();
+
+            let erc20 = request.as_erc20().expect("Expected Erc20Request");
+            assert_eq!(erc20.schema_prefix(), schema_prefix);
+            assert_eq!(erc20.has_pay(), has_pay);
+            assert_eq!(erc20.chain_id(), chain_id);
+            assert_eq!(erc20.token_contract_address(), token_contract_address);
+            assert_eq!(erc20.recipient_address(), recipient_address);
+            assert_eq!(erc20.value_atomic(), value);
+
+            // Display -> reparse roundtrip
+            let output = request.to_string();
+            let reparsed = TransactionRequest::parse(&output).unwrap();
+            let erc20_b = reparsed.as_erc20().expect("Roundtrip changed request type");
+            assert_eq!(erc20.schema_prefix(), erc20_b.schema_prefix());
+            assert_eq!(erc20.has_pay(), erc20_b.has_pay());
+            assert_eq!(erc20.chain_id(), erc20_b.chain_id());
+            assert_eq!(
+                erc20.token_contract_address(),
+                erc20_b.token_contract_address()
+            );
+            assert_eq!(erc20.recipient_address(), erc20_b.recipient_address());
+            assert_eq!(erc20.value_atomic(), erc20_b.value_atomic());
         }
     }
 }
