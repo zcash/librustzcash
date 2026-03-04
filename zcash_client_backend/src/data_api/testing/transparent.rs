@@ -67,7 +67,7 @@ fn check_balance<DSF>(
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+            .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy, false)
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
@@ -125,13 +125,14 @@ where
         st.wallet().get_spendable_transparent_outputs(
             taddr,
             target_height,
-            ConfirmationsPolicy::MIN
+            ConfirmationsPolicy::MIN,
+            false,
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height),
+        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height, false),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -147,14 +148,19 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                false
+            )
             .as_deref(),
         Ok(&[])
     );
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height),
+        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height, false),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
@@ -162,7 +168,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, false)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );

@@ -126,6 +126,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
+                false,
             )
             .map(|n| n.take_orchard())
     }
@@ -142,6 +143,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 &[ShieldedProtocol::Orchard],
                 target_height,
                 exclude,
+                false,
             )
             .map(|n| n.take_orchard())
     }

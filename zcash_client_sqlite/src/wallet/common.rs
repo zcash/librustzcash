@@ -120,6 +120,20 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
     )
 }
 
+/// Generates an SQL condition that filters out locked notes/outputs.
+///
+/// A note is considered locked when its `lock_expiry_height` is set and greater than the
+/// target height. Locks expire automatically when the chain advances past the expiry height.
+///
+/// # Usage requirements
+/// - `tbl` must be set to the SQL alias for the received notes/outputs table.
+/// - The parent must provide `:target_height` and `:include_locked` as named arguments.
+pub(crate) fn output_unlocked_condition(tbl: &str) -> String {
+    format!(
+        "{tbl}.lock_expiry_height IS NULL OR {tbl}.lock_expiry_height <= :target_height OR :include_locked"
+    )
+}
+
 fn unscanned_tip_exists(
     conn: &Connection,
     anchor_height: BlockHeight,
@@ -200,6 +214,7 @@ pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
@@ -208,6 +223,7 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     protocol: ShieldedProtocol,
     target_height: TargetHeight,
     to_spendable_note: F,
+    include_locked: bool,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -242,14 +258,17 @@ where
              AND rn.recipient_key_scope IS NOT NULL
              AND rn.nf IS NOT NULL
              AND rn.commitment_tree_position IS NOT NULL
-             AND rn.id NOT IN ({})
+             AND rn.id NOT IN ({}) -- the note is unspent
+             AND ({}) -- the note is not locked
              GROUP BY rn.id",
-            spent_notes_clause(table_prefix)
+            spent_notes_clause(table_prefix),
+            output_unlocked_condition("rn"),
         ),
         named_params![
            ":txid": txid.as_ref(),
            ":output_index": index,
            ":target_height": u32::from(target_height),
+           ":include_locked": include_locked,
         ],
         |row| to_spendable_note(params, row),
     );
@@ -306,6 +325,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
+    include_locked: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -327,6 +347,7 @@ where
             protocol,
             &to_spendable_note,
             NoteRequest::from_max_spend_mode(mode, anchor_height),
+            include_locked,
         ),
         TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
@@ -339,6 +360,7 @@ where
             exclude,
             protocol,
             &to_spendable_note,
+            include_locked,
         ),
     }
 }
@@ -364,6 +386,7 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     protocol: ShieldedProtocol,
     to_received_note: F,
     note_request: NoteRequest,
+    include_locked: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -407,9 +430,11 @@ where
          AND ({})  -- the transaction is unexpired
          AND rn.id NOT IN rarray(:exclude)  -- the note is not excluded
          AND rn.id NOT IN ({})  -- the note is unspent
+         AND ({}) -- the note is not locked
          GROUP BY rn.id",
         tx_unexpired_condition("t"),
-        spent_notes_clause(table_prefix)
+        spent_notes_clause(table_prefix),
+        output_unlocked_condition("rn")
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -429,7 +454,8 @@ where
             ":account_uuid": account.0,
             ":target_height": &u32::from(target_height),
             ":exclude": &excluded_ptr,
-            ":min_value": u64::from(zip317::MARGINAL_FEE)
+            ":min_value": u64::from(zip317::MARGINAL_FEE),
+            ":include_locked": include_locked,
         ],
         |row| -> Result<_, SqliteClientError> {
             let result_note = to_received_note(params, row)?;
@@ -513,6 +539,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
+    include_locked: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
@@ -577,7 +604,8 @@ where
              AND scan_state.max_priority <= :scanned_priority
              AND t.block <= :anchor_height
              AND rn.id NOT IN rarray(:exclude)
-             AND rn.id NOT IN ({})
+             AND rn.id NOT IN ({}) -- the note is not spent
+             AND ({}) -- the note is not locked
              GROUP BY rn.id
          )
          SELECT id, txid, {output_index_col},
@@ -593,7 +621,8 @@ where
                 mined_height, trust_status,
                 max_shielding_input_height, min_shielding_input_trust
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
-        spent_notes_clause(table_prefix)
+        spent_notes_clause(table_prefix),
+        output_unlocked_condition("rn")
     ))?;
 
     let excluded: Vec<Value> = exclude
@@ -616,7 +645,8 @@ where
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
             ":scanned_priority": priority_code(&ScanPriority::Scanned),
-            ":min_value": u64::from(zip317::MARGINAL_FEE)
+            ":min_value": u64::from(zip317::MARGINAL_FEE),
+            ":include_locked": include_locked,
         ],
         |row| {
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
@@ -767,6 +797,7 @@ pub(crate) fn unspent_notes_meta(
     account: AccountUuid,
     filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
+    include_locked: bool,
 ) -> Result<Option<PoolMeta>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
@@ -800,14 +831,17 @@ pub(crate) fn unspent_notes_meta(
                  AND rn.value > :min_value
                  AND transactions.mined_height IS NOT NULL
                  AND rn.id NOT IN rarray(:exclude)
-                 AND rn.id NOT IN ({})",
-                spent_notes_clause(table_prefix)
+                 AND rn.id NOT IN ({}) -- the note is unspent
+                 AND ({}) -- the note is not locked",
+                spent_notes_clause(table_prefix),
+                output_unlocked_condition("rn")
             ),
             named_params![
                 ":account_uuid": account.0,
                 ":min_value": u64::from(min_value),
                 ":exclude": &excluded_ptr,
-                ":target_height": u32::from(target_height)
+                ":target_height": u32::from(target_height),
+                ":include_locked": include_locked,
             ],
             |row| {
                 Ok((

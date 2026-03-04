@@ -12,6 +12,7 @@ use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
+use zcash_client_backend::wallet::OutputRef;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::BalanceError};
@@ -429,5 +430,32 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
 impl ErrUnsupportedPool for SqliteClientError {
     fn unsupported_pool_type(pool_type: PoolType) -> Self {
         SqliteClientError::UnsupportedPoolType(pool_type)
+    }
+}
+
+/// A local LockError type for which we can write a From<rusqlite::Error> impl.
+pub(crate) enum LockError {
+    /// Wrapper for storage errors.
+    Storage(rusqlite::Error),
+    /// The wrapped output reference was not found, or the output it refers to was already locked.
+    LockFailure(OutputRef),
+}
+
+impl From<rusqlite::Error> for LockError {
+    fn from(value: rusqlite::Error) -> Self {
+        LockError::Storage(value)
+    }
+}
+
+impl From<LockError> for zcash_client_backend::data_api::error::LockError<SqliteClientError> {
+    fn from(value: LockError) -> Self {
+        match value {
+            LockError::Storage(error) => zcash_client_backend::data_api::error::LockError::Storage(
+                SqliteClientError::from(error),
+            ),
+            LockError::LockFailure(output) => {
+                zcash_client_backend::data_api::error::LockError::LockFailure(output)
+            }
+        }
     }
 }

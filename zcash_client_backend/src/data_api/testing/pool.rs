@@ -52,7 +52,7 @@ use crate::{
         standard::{self, SingleOutputChangeStrategy},
     },
     scanning::ScanError,
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
+    wallet::{Note, NoteId, OutputRef, OvkPolicy, ReceivedNote},
 };
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
@@ -75,7 +75,6 @@ use {
     zcash_protocol::{TxId, value::ZatBalance},
 };
 
-#[cfg(feature = "orchard")]
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
@@ -2761,6 +2760,181 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     );
 }
 
+pub fn explicit_note_locking<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Find the received note and construct an OutputRef for it
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 1);
+    let note = &notes[0];
+    let output_ref = OutputRef::new(
+        *note.txid(),
+        PoolType::Shielded(note.note().protocol()),
+        u32::from(note.output_index()),
+    );
+
+    // Balance is available before locking
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+
+    // Lock the note with a far-future expiry so it's active during the test
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .unwrap(),
+        1
+    );
+
+    // Total balance is unchanged, but spendable is zero and locked equals the full value
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO
+    );
+
+    // Proposal should fail because there are no spendable notes
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+    assert_matches!(
+        st.propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            ConfirmationsPolicy::MIN,
+            &to,
+            Zatoshis::const_from_u64(15000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        ),
+        Err(data_api::error::Error::InsufficientFunds { .. })
+    );
+
+    // Unlock the note
+    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+
+    // Balance should be restored: spendable equals the full value, locked is zero
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+
+    // Proposal should now succeed
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            ConfirmationsPolicy::MIN,
+            &to,
+            Zatoshis::const_from_u64(15000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        ),
+        Ok(txids) if txids.len() == 1
+    );
+}
+
+pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+
+    // Create a proposal with lock_for_blocks: Some(100) using propose_transfer
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
+
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(15000),
+    )])
+    .unwrap();
+
+    let network = *st.network();
+    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account_id,
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        Some(100), // lock_for_blocks
+        #[cfg(feature = "unstable")]
+        None,
+    )
+    .unwrap();
+
+    // Notes should now be locked; a second proposal should fail
+    assert_matches!(
+        st.propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            ConfirmationsPolicy::MIN,
+            &to,
+            Zatoshis::const_from_u64(2000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        ),
+        Err(data_api::error::Error::InsufficientFunds { .. })
+    );
+
+    // Execute the proposal; this should unlock the notes (they become spent)
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        ),
+        Ok(txids) if txids.len() == 1
+    );
+
+    // All notes should now be unlocked (spent via spends table, lock cleared)
+    let locked = st.wallet().get_locked_outputs(account_id).unwrap();
+    assert!(
+        locked.is_empty(),
+        "all notes should be unlocked after create_proposed_transactions"
+    );
+}
+
 pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
@@ -4705,7 +4879,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     let test_meta = |st: &TestState<TC, Dsf::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
-            .get_account_metadata(account.id(), &query, target_height, &[])
+            .get_account_metadata(account.id(), &query, target_height, &[], true)
             .unwrap();
 
         assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
@@ -5152,6 +5326,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 &t_addr,
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
+                false,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -5170,7 +5345,12 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     let target_height = TargetHeight::from(latest_height + 1);
     let spendable_utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&t_addr, target_height, ConfirmationsPolicy::default())
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            false,
+        )
         .unwrap();
     assert!(
         !spendable_utxos.is_empty(),

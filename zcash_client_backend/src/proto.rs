@@ -742,6 +742,7 @@ impl proposal::Proposal {
                                                     .get_unspent_transparent_output(
                                                         &outpoint,
                                                         target_height,
+                                                        false,
                                                     )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
@@ -762,6 +763,7 @@ impl proposal::Proposal {
                                                 protocol,
                                                 out.index,
                                                 target_height,
+                                                false,
                                             )
                                             .map_err(ProposalDecodingError::InputRetrieval)
                                             .and_then(|opt| {

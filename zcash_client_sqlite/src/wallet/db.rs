@@ -345,6 +345,7 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -428,6 +429,7 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -508,6 +510,7 @@ CREATE TABLE "transparent_received_outputs" (
     max_observed_unspent_height INTEGER,
     address_id INTEGER NOT NULL
         REFERENCES addresses(id) ON DELETE CASCADE,
+    lock_expiry_height INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT: &str = r#"
