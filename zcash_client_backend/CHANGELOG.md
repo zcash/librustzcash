@@ -33,6 +33,9 @@ workspace.
   - `impl From<orchard::Note> for Note`
 
 ### Changed
+- `zcash_client_backend::data_api::error::Error::MemoForbidden` has been replaced
+  by `Error::Payment(zip321::PaymentError)`, which can represent both memo-to-transparent
+  and zero-valued-transparent-output errors.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
   an additional `proposed_version: Option<TxVersion>` parameter under the `unstable`
   feature flag, allowing callers to request a specific transaction version.
