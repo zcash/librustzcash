@@ -856,6 +856,17 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
         )));
     }
 
+    // Do not import script types which do not have a supported spend flow.
+    if !matches!(
+        zcash_script::solver::standard(&redeem_script),
+        Some(zcash_script::solver::ScriptKind::MultiSig { .. })
+            | Some(zcash_script::solver::ScriptKind::PubKeyHash { .. })
+    ) {
+        return Err(SqliteClientError::BadAccountData(
+            "Redeem script is not a supported P2SH script kind".to_owned(),
+        ));
+    }
+
     let script_pubkey = sh(&redeem_script);
     // `sh()` always produces a valid P2SH scriptPubKey, so `from_script_pubkey`
     // should always succeed here. This is a defensive check.

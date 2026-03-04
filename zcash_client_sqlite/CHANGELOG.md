@@ -33,6 +33,8 @@ workspace.
 - `zcash_client_sqlite::error::SqliteClientError` has added variant `GapAddresses`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
+- P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a
+  precomputed input size for accurate ZIP 317 fee estimation.
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.

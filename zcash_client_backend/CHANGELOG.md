@@ -38,6 +38,7 @@ workspace.
   - `zcash_client_backend::wallet::TransparentAddressSource::redeem_script()`
   - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_script()`
   - `zcash_client_backend::wallet::TransparentAddressMetadata::redeem_script()`
+- `zcash_client_backend::wallet::WalletTransparentOutput::with_known_input_size`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -109,6 +110,12 @@ workspace.
   to `zcash_client_backend::wallet::TransparentAddressSource::StandalonePubkey`
 - Renamed `zcash_client_backend::wallet::TransparentAddressMetadata::standalone()`
   to `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_p2pkh()`
+- `zcash_client_backend::data_api::wallet::SpendingKeys::new` now takes
+  `HashMap<TransparentAddress, Vec<secp256k1::SecretKey>>` instead of
+  `HashMap<TransparentAddress, secp256k1::SecretKey>` for standalone transparent
+  keys, to support multi-key P2SH addresses.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  supports spending from standalone P2SH (multisig) transparent addresses.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use
