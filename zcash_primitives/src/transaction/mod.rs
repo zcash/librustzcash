@@ -9,6 +9,9 @@ pub mod sighash_v5;
 pub mod sighash_v6;
 
 pub mod txid;
+
+#[cfg(zcash_unstable = "nu7")]
+pub mod v6ext;
 pub mod util;
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -46,7 +49,9 @@ use zcash_protocol::constants::{
 };
 
 #[cfg(zcash_unstable = "nu7")]
-use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+use zcash_protocol::constants::{
+    V6EXT_TX_VERSION, V6EXT_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
+};
 
 #[cfg(zcash_unstable = "zfuture")]
 use {
@@ -84,6 +89,11 @@ pub enum TxVersion {
     /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
     #[cfg(zcash_unstable = "nu7")]
     V6,
+    /// Extensible transaction format (V6Ext), specified in the draft extensible
+    /// transaction format ZIP. This uses the same version number as V6 but a
+    /// different version group ID and encoding.
+    #[cfg(zcash_unstable = "nu7")]
+    V6Ext,
     /// This version is used exclusively for in-development transaction
     /// serialization, and will never be active under the consensus rules.
     /// When new consensus transaction versions are added, all call sites
@@ -106,6 +116,8 @@ impl TxVersion {
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
                 #[cfg(zcash_unstable = "nu7")]
                 (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
+                #[cfg(zcash_unstable = "nu7")]
+                (V6EXT_TX_VERSION, V6EXT_VERSION_GROUP_ID) => Ok(TxVersion::V6Ext),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -138,6 +150,8 @@ impl TxVersion {
                 TxVersion::V5 => V5_TX_VERSION,
                 #[cfg(zcash_unstable = "nu7")]
                 TxVersion::V6 => V6_TX_VERSION,
+                #[cfg(zcash_unstable = "nu7")]
+                TxVersion::V6Ext => V6EXT_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -151,6 +165,8 @@ impl TxVersion {
             TxVersion::V5 => V5_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => V6_VERSION_GROUP_ID,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => V6EXT_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -172,6 +188,8 @@ impl TxVersion {
             TxVersion::V5 => false,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => false,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => false,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
         }
@@ -189,6 +207,8 @@ impl TxVersion {
             TxVersion::V5 => true,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -201,6 +221,8 @@ impl TxVersion {
             TxVersion::V5 => true,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -215,6 +237,8 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -719,6 +743,8 @@ impl Transaction {
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => Ok(Self::from_data_v6ext(data)),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v6(data)),
         }
@@ -756,6 +782,25 @@ impl Transaction {
         Transaction { txid, data }
     }
 
+    #[cfg(zcash_unstable = "nu7")]
+    fn from_data_v6ext(data: TransactionData<Authorized>) -> Self {
+        use txid::to_v6ext_txid;
+
+        let txid = to_v6ext_txid(
+            data.version,
+            data.consensus_branch_id,
+            data.lock_time,
+            data.expiry_height,
+            data.transparent_bundle.as_ref(),
+            data.sapling_bundle.as_ref(),
+            data.orchard_bundle.as_ref(),
+            #[cfg(feature = "zip-233")]
+            &data.zip233_amount,
+        );
+
+        Transaction { txid, data }
+    }
+
     pub fn into_data(self) -> TransactionData<Authorized> {
         self.data
     }
@@ -775,6 +820,8 @@ impl Transaction {
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => Self::read_v6ext(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
         }
@@ -953,6 +1000,363 @@ impl Transaction {
         Ok(Self::from_data_v5(data))
     }
 
+    /// Read a transaction in the extensible V6 format.
+    ///
+    /// The extensible format has the following structure:
+    /// - Header: version, version_group_id, consensus_branch_id, lock_time, expiry_height
+    /// - mValuePoolDeltas: map of (bundle_type, asset_class, asset_uuid) -> value
+    /// - mEffectBundles: map of bundle_type -> effecting data
+    /// - mAuthBundles: map of bundle_type -> authorizing data
+    ///
+    /// Note: Unlike V6, the V6Ext header does NOT include the ZIP 233 amount.
+    /// The ZIP 233 amount is encoded as a value pool delta with bundle type 5 instead.
+    #[cfg(zcash_unstable = "nu7")]
+    fn read_v6ext<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
+        use v6ext::V6ExtMaps;
+        #[cfg(feature = "zip-233")]
+        use v6ext::BundleType;
+
+        // Read header (V6Ext header does NOT include ZIP 233 amount)
+        let (consensus_branch_id, lock_time, expiry_height) =
+            Self::read_header_fragment(&mut reader)?;
+
+        // Read the three maps
+        let maps = V6ExtMaps::read(&mut reader)?;
+
+        // Extract ZIP 233 amount from value pool deltas (bundle type 5)
+        #[cfg(feature = "zip-233")]
+        let zip233_amount = {
+            let nsm_delta = maps.get_zec_delta(BundleType::Zip233Nsm as u64);
+            // ZIP 233 NSM is stored as a negative value (consumes from pool)
+            let amount = nsm_delta.map(|v| -v).unwrap_or(0);
+            Zatoshis::from_u64(amount as u64).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "ZIP 233 amount out of range")
+            })?
+        };
+
+        // Parse known bundle types from effect and auth bundles
+        let transparent_bundle =
+            Self::parse_v6ext_transparent(&maps)?;
+        let sapling_bundle =
+            Self::parse_v6ext_sapling(&maps)?;
+        let orchard_bundle =
+            Self::parse_v6ext_orchard(&maps)?;
+
+        let data = TransactionData {
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(feature = "zip-233")]
+            zip233_amount,
+            transparent_bundle,
+            sprout_bundle: None,
+            sapling_bundle,
+            orchard_bundle,
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_bundle: None,
+        };
+
+        Ok(Self::from_data_v6ext(data))
+    }
+
+    /// Parse a transparent bundle from V6Ext effect and auth data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn parse_v6ext_transparent(
+        maps: &v6ext::V6ExtMaps,
+    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
+        use alloc::vec::Vec;
+        use core::convert::TryInto;
+        use v6ext::BundleType;
+
+        let effect_data = match maps.get_effect_bundle(BundleType::Transparent as u64) {
+            Some(data) => data,
+            None => return Ok(None),
+        };
+
+        let auth_data = maps.get_auth_bundle(BundleType::Transparent as u64);
+
+        // Parse effecting data
+        let mut effect_reader: &[u8] = effect_data;
+        let n_inputs: usize = CompactSize::read(&mut effect_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "n_inputs too large"))?;
+        let mut vin_parts: Vec<(OutPoint, u32)> = Vec::with_capacity(n_inputs);
+
+        for _ in 0..n_inputs {
+            // Read prevout
+            let prevout = OutPoint::read(&mut effect_reader)?;
+
+            // Read sequence
+            let mut seq_bytes = [0u8; 4];
+            effect_reader.read_exact(&mut seq_bytes)?;
+            let sequence = u32::from_le_bytes(seq_bytes);
+
+            // We'll fill in script_sig from auth data later
+            vin_parts.push((prevout, sequence));
+        }
+
+        let n_outputs: usize = CompactSize::read(&mut effect_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "n_outputs too large"))?;
+        let mut vout: Vec<TxOut> = Vec::with_capacity(n_outputs);
+
+        for _ in 0..n_outputs {
+            let txout = TxOut::read(&mut effect_reader)?;
+            vout.push(txout);
+        }
+
+        // Parse authorizing data (scriptSigs)
+        let script_sigs: Vec<::transparent::address::Script> = if let Some(auth) = auth_data {
+            let mut auth_reader: &[u8] = auth;
+            let mut sigs = Vec::with_capacity(n_inputs);
+            for _ in 0..n_inputs {
+                let script = ::transparent::address::Script::read(&mut auth_reader)?;
+                sigs.push(script);
+            }
+            sigs
+        } else {
+            // No auth data means empty scriptSigs
+            alloc::vec![::transparent::address::Script::default(); n_inputs]
+        };
+
+        // Combine effect and auth into TxIns
+        let vin: Vec<TxIn<transparent::Authorized>> = vin_parts
+            .into_iter()
+            .zip(script_sigs)
+            .map(|((prevout, sequence), script_sig)| {
+                TxIn::from_parts(prevout, script_sig, sequence)
+            })
+            .collect();
+
+        if vin.is_empty() && vout.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(transparent::Bundle {
+                vin,
+                vout,
+                authorization: transparent::Authorized,
+            }))
+        }
+    }
+
+    /// Parse a Sapling bundle from V6Ext effect and auth data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn parse_v6ext_sapling(
+        maps: &v6ext::V6ExtMaps,
+    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>> {
+        use alloc::vec::Vec;
+        use core::convert::TryInto;
+        use v6ext::BundleType;
+
+        let effect_data = match maps.get_effect_bundle(BundleType::Sapling as u64) {
+            Some(data) => data,
+            None => return Ok(None),
+        };
+
+        let auth_data = maps.get_auth_bundle(BundleType::Sapling as u64);
+
+        // Get value balance from value pool deltas
+        let value_balance = maps
+            .get_zec_delta(BundleType::Sapling as u64)
+            .map(ZatBalance::from_i64)
+            .transpose()
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "Sapling value balance out of range")
+            })?
+            .unwrap_or_else(ZatBalance::zero);
+
+        // Parse effecting data
+        let mut effect_reader: &[u8] = effect_data;
+
+        // Read spends (effecting only: cv, nullifier, rk - no anchor per spend)
+        let n_spends: usize = CompactSize::read(&mut effect_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "n_spends too large"))?;
+        let mut spend_effects = Vec::with_capacity(n_spends);
+
+        for _ in 0..n_spends {
+            let spend = sapling_serialization::read_v6ext_spend(&mut effect_reader)?;
+            spend_effects.push(spend);
+        }
+
+        // Read outputs
+        let n_outputs: usize = CompactSize::read(&mut effect_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "n_outputs too large"))?;
+        let mut output_effects = Vec::with_capacity(n_outputs);
+
+        for _ in 0..n_outputs {
+            let output = sapling_serialization::read_v6ext_output(&mut effect_reader)?;
+            output_effects.push(output);
+        }
+
+        // Read anchor (present if n_spends > 0)
+        let anchor = if n_spends > 0 {
+            Some(sapling_serialization::read_base(&mut effect_reader, "anchor")?)
+        } else {
+            None
+        };
+
+        // Parse authorizing data
+        let (spend_proofs, spend_auth_sigs, output_proofs, binding_sig) = if let Some(auth) = auth_data {
+            let mut auth_reader: &[u8] = auth;
+
+            // Read spend proofs
+            let spend_proofs: Vec<_> = (0..n_spends)
+                .map(|_| sapling_serialization::read_zkproof(&mut auth_reader))
+                .collect::<io::Result<_>>()?;
+
+            // Read spend auth sigs
+            let spend_auth_sigs: Vec<_> = (0..n_spends)
+                .map(|_| {
+                    let mut sig = [0u8; 64];
+                    auth_reader.read_exact(&mut sig)?;
+                    Ok(redjubjub::Signature::from(sig))
+                })
+                .collect::<io::Result<_>>()?;
+
+            // Read output proofs
+            let output_proofs: Vec<_> = (0..n_outputs)
+                .map(|_| sapling_serialization::read_zkproof(&mut auth_reader))
+                .collect::<io::Result<_>>()?;
+
+            // Read binding sig (present if n_spends + n_outputs > 0)
+            let binding_sig = if n_spends > 0 || n_outputs > 0 {
+                let mut sig = [0u8; 64];
+                auth_reader.read_exact(&mut sig)?;
+                Some(redjubjub::Signature::from(sig))
+            } else {
+                None
+            };
+
+            (spend_proofs, spend_auth_sigs, output_proofs, binding_sig)
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Sapling effect bundle present but auth bundle missing",
+            ));
+        };
+
+        // Combine into SpendDescriptions
+        let shielded_spends: Vec<_> = spend_effects
+            .into_iter()
+            .zip(spend_proofs.into_iter().zip(spend_auth_sigs))
+            .map(|(effect, (zkproof, spend_auth_sig))| {
+                effect.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
+            })
+            .collect();
+
+        // Combine into OutputDescriptions
+        let shielded_outputs: Vec<_> = output_effects
+            .into_iter()
+            .zip(output_proofs)
+            .map(|(effect, zkproof)| effect.into_output_description(zkproof))
+            .collect();
+
+        Ok(binding_sig.and_then(|binding_sig| {
+            sapling::Bundle::from_parts(
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                sapling::bundle::Authorized { binding_sig },
+            )
+        }))
+    }
+
+    /// Parse an Orchard bundle from V6Ext effect and auth data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn parse_v6ext_orchard(
+        maps: &v6ext::V6ExtMaps,
+    ) -> io::Result<Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>>> {
+        use alloc::vec::Vec;
+        use core::convert::TryInto;
+        use v6ext::BundleType;
+
+        let effect_data = match maps.get_effect_bundle(BundleType::Orchard as u64) {
+            Some(data) => data,
+            None => return Ok(None),
+        };
+
+        let auth_data = maps.get_auth_bundle(BundleType::Orchard as u64);
+
+        // Get value balance from value pool deltas
+        let value_balance = maps
+            .get_zec_delta(BundleType::Orchard as u64)
+            .map(ZatBalance::from_i64)
+            .transpose()
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "Orchard value balance out of range")
+            })?
+            .unwrap_or_else(ZatBalance::zero);
+
+        // Parse effecting data
+        let mut effect_reader: &[u8] = effect_data;
+
+        // Read actions (without auth sigs)
+        let n_actions: usize = CompactSize::read(&mut effect_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "n_actions too large"))?;
+        if n_actions == 0 {
+            return Ok(None);
+        }
+
+        let mut actions_without_auth = Vec::with_capacity(n_actions);
+        for _ in 0..n_actions {
+            let action = orchard_serialization::read_action_without_auth(&mut effect_reader)?;
+            actions_without_auth.push(action);
+        }
+
+        // Read flags
+        let flags = orchard_serialization::read_flags(&mut effect_reader)?;
+
+        // Read anchor
+        let anchor = orchard_serialization::read_anchor(&mut effect_reader)?;
+
+        // Parse authorizing data
+        if auth_data.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Orchard effect bundle present but auth bundle missing",
+            ));
+        }
+        let mut auth_reader: &[u8] = auth_data.unwrap();
+
+        // Read proof size and proof bytes
+        let proof_size: usize = CompactSize::read(&mut auth_reader)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "proof_size too large"))?;
+        let mut proof_bytes = alloc::vec![0u8; proof_size];
+        auth_reader.read_exact(&mut proof_bytes)?;
+
+        // Read spend auth sigs and attach to actions
+        let actions = nonempty::NonEmpty::from_vec(
+            actions_without_auth
+                .into_iter()
+                .map(|act| {
+                    act.try_map(|_| orchard_serialization::read_signature::<_, orchard::primitives::redpallas::SpendAuth>(&mut auth_reader))
+                })
+                .collect::<io::Result<Vec<_>>>()?,
+        )
+        .expect("non-empty actions");
+
+        // Read binding signature
+        let binding_signature = orchard_serialization::read_signature::<_, orchard::primitives::redpallas::Binding>(&mut auth_reader)?;
+
+        let authorization = orchard::bundle::Authorized::from_parts(
+            orchard::Proof::new(proof_bytes),
+            binding_signature,
+        );
+
+        Ok(Some(orchard::bundle::Bundle::from_parts(
+            actions,
+            flags,
+            value_balance,
+            anchor,
+            authorization,
+        )))
+    }
+
     /// Utility function for reading header data common to v5 and v6 transactions.
     fn read_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
@@ -1025,6 +1429,8 @@ impl Transaction {
             TxVersion::V5 => self.write_v5(writer),
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => self.write_v6(writer),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6Ext => self.write_v6ext(writer),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v6(writer),
         }
@@ -1114,6 +1520,250 @@ impl Transaction {
 
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
+        Ok(())
+    }
+
+    /// Write a transaction in the extensible V6 format.
+    ///
+    /// Note: The V6Ext header does NOT include the ZIP 233 amount - it's encoded
+    /// as a value pool delta with bundle type 5 instead.
+    #[cfg(zcash_unstable = "nu7")]
+    pub fn write_v6ext<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        use alloc::vec::Vec;
+        use v6ext::{BundleType, V6ExtMaps};
+
+        if self.sprout_bundle.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Sprout components cannot be present when serializing to the V6Ext transaction format.",
+            ));
+        }
+
+        // Write header (V6Ext header does NOT include ZIP 233 amount)
+        self.write_v6ext_header(&mut writer)?;
+
+        // Build the V6Ext maps from TransactionData
+        let mut maps = V6ExtMaps::new();
+
+        // Build value pool deltas
+        if let Some(_bundle) = &self.transparent_bundle {
+            // Transparent value balance is computed, not stored directly
+            // For now we skip it since it requires the prevout values
+        }
+
+        if let Some(bundle) = &self.sapling_bundle {
+            if let Some(value) = V6ExtMaps::balance_to_delta(*bundle.value_balance()) {
+                maps.insert_zec_delta(BundleType::Sapling as u64, value);
+            }
+        }
+
+        if let Some(bundle) = &self.orchard_bundle {
+            if let Some(value) = V6ExtMaps::balance_to_delta(*bundle.value_balance()) {
+                maps.insert_zec_delta(BundleType::Orchard as u64, value);
+            }
+        }
+
+        // ZIP 233 amount (stored as negative, as it consumes from pool)
+        #[cfg(feature = "zip-233")]
+        if self.zip233_amount != Zatoshis::ZERO {
+            let nsm_value: i64 = -i64::try_from(u64::from(self.zip233_amount))
+                .expect("zatoshis should fit in i64");
+            maps.insert_zec_delta(BundleType::Zip233Nsm as u64, nsm_value);
+        }
+
+        // Build effect bundles
+        if let Some(bundle) = &self.transparent_bundle {
+            let mut effect_data: Vec<u8> = Vec::new();
+            self.write_transparent_effect(&mut effect_data, bundle)?;
+            maps.insert_effect_bundle(BundleType::Transparent as u64, effect_data);
+        }
+
+        if let Some(bundle) = &self.sapling_bundle {
+            let mut effect_data: Vec<u8> = Vec::new();
+            Self::write_sapling_effect(&mut effect_data, bundle)?;
+            maps.insert_effect_bundle(BundleType::Sapling as u64, effect_data);
+        }
+
+        if let Some(bundle) = &self.orchard_bundle {
+            let mut effect_data: Vec<u8> = Vec::new();
+            Self::write_orchard_effect(&mut effect_data, bundle)?;
+            maps.insert_effect_bundle(BundleType::Orchard as u64, effect_data);
+        }
+
+        // Build auth bundles
+        if let Some(bundle) = &self.transparent_bundle {
+            let mut auth_data: Vec<u8> = Vec::new();
+            Self::write_transparent_auth(&mut auth_data, bundle)?;
+            maps.insert_auth_bundle(BundleType::Transparent as u64, auth_data);
+        }
+
+        if let Some(bundle) = &self.sapling_bundle {
+            let mut auth_data: Vec<u8> = Vec::new();
+            Self::write_sapling_auth(&mut auth_data, bundle)?;
+            maps.insert_auth_bundle(BundleType::Sapling as u64, auth_data);
+        }
+
+        if let Some(bundle) = &self.orchard_bundle {
+            let mut auth_data: Vec<u8> = Vec::new();
+            Self::write_orchard_auth(&mut auth_data, bundle)?;
+            maps.insert_auth_bundle(BundleType::Orchard as u64, auth_data);
+        }
+
+        // Write the maps (BTreeMap maintains sorted order automatically)
+        maps.write(&mut writer)?;
+
+        Ok(())
+    }
+
+    /// Write V6Ext header (without ZIP 233 amount).
+    #[cfg(zcash_unstable = "nu7")]
+    pub fn write_v6ext_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.version.write(&mut writer)?;
+        writer.write_u32_le(u32::from(self.consensus_branch_id))?;
+        writer.write_u32_le(self.lock_time)?;
+        writer.write_u32_le(u32::from(self.expiry_height))?;
+        Ok(())
+    }
+
+    /// Write transparent effecting data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_transparent_effect<W: Write>(
+        &self,
+        mut writer: W,
+        bundle: &transparent::Bundle<transparent::Authorized>,
+    ) -> io::Result<()> {
+        // Write inputs (prevout + sequence only)
+        CompactSize::write(&mut writer, bundle.vin.len())?;
+        for txin in &bundle.vin {
+            txin.prevout().write(&mut writer)?;
+            writer.write_u32_le(txin.sequence())?;
+        }
+
+        // Write outputs
+        CompactSize::write(&mut writer, bundle.vout.len())?;
+        for txout in &bundle.vout {
+            txout.write(&mut writer)?;
+        }
+
+        Ok(())
+    }
+
+    /// Write transparent authorizing data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_transparent_auth<W: Write>(
+        mut writer: W,
+        bundle: &transparent::Bundle<transparent::Authorized>,
+    ) -> io::Result<()> {
+        // Write scriptSigs
+        for txin in &bundle.vin {
+            txin.script_sig().write(&mut writer)?;
+        }
+        Ok(())
+    }
+
+    /// Write Sapling effecting data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_sapling_effect<W: Write>(
+        mut writer: W,
+        bundle: &sapling::Bundle<sapling::bundle::Authorized, ZatBalance>,
+    ) -> io::Result<()> {
+        use ff::PrimeField;
+
+        // Write spends (cv, nullifier, rk)
+        CompactSize::write(&mut writer, bundle.shielded_spends().len())?;
+        for spend in bundle.shielded_spends() {
+            writer.write_all(&spend.cv().to_bytes())?;
+            writer.write_all(&spend.nullifier().0)?;
+            writer.write_all(&<[u8; 32]>::from(*spend.rk()))?;
+        }
+
+        // Write outputs
+        CompactSize::write(&mut writer, bundle.shielded_outputs().len())?;
+        for output in bundle.shielded_outputs() {
+            writer.write_all(&output.cv().to_bytes())?;
+            writer.write_all(output.cmu().to_bytes().as_ref())?;
+            writer.write_all(output.ephemeral_key().as_ref())?;
+            writer.write_all(output.enc_ciphertext())?;
+            writer.write_all(output.out_ciphertext())?;
+        }
+
+        // Write anchor (if there are spends)
+        if !bundle.shielded_spends().is_empty() {
+            writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
+        }
+
+        Ok(())
+    }
+
+    /// Write Sapling authorizing data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_sapling_auth<W: Write>(
+        mut writer: W,
+        bundle: &sapling::Bundle<sapling::bundle::Authorized, ZatBalance>,
+    ) -> io::Result<()> {
+        // Write spend proofs
+        for spend in bundle.shielded_spends() {
+            writer.write_all(spend.zkproof())?;
+        }
+
+        // Write spend auth sigs
+        for spend in bundle.shielded_spends() {
+            writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))?;
+        }
+
+        // Write output proofs
+        for output in bundle.shielded_outputs() {
+            writer.write_all(output.zkproof())?;
+        }
+
+        // Write binding sig (if there are spends or outputs)
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+        }
+
+        Ok(())
+    }
+
+    /// Write Orchard effecting data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_orchard_effect<W: Write>(
+        mut writer: W,
+        bundle: &orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+    ) -> io::Result<()> {
+        // Write actions (without auth sigs)
+        CompactSize::write(&mut writer, bundle.actions().len())?;
+        for action in bundle.actions().iter() {
+            orchard_serialization::write_action_without_auth(&mut writer, action)?;
+        }
+
+        // Write flags
+        writer.write_all(&[bundle.flags().to_byte()])?;
+
+        // Write anchor
+        writer.write_all(&bundle.anchor().to_bytes())?;
+
+        Ok(())
+    }
+
+    /// Write Orchard authorizing data.
+    #[cfg(zcash_unstable = "nu7")]
+    fn write_orchard_auth<W: Write>(
+        mut writer: W,
+        bundle: &orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+    ) -> io::Result<()> {
+        // Write proof size and proof
+        let proof = bundle.authorization().proof();
+        CompactSize::write(&mut writer, proof.as_ref().len())?;
+        writer.write_all(proof.as_ref())?;
+
+        // Write spend auth sigs
+        for action in bundle.actions().iter() {
+            writer.write_all(&<[u8; 64]>::from(action.authorization()))?;
+        }
+
+        // Write binding signature
+        writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_signature()))?;
+
         Ok(())
     }
 
@@ -1287,7 +1937,10 @@ pub mod testing {
             BranchId::Nu6 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6_1 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => Just(TxVersion::V6).boxed(),
+            BranchId::Nu7 => prop_oneof![
+                Just(TxVersion::V6),
+                Just(TxVersion::V6Ext),
+            ].boxed(),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }
