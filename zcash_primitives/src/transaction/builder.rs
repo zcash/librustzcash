@@ -647,9 +647,6 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 
     /// Adds a transparent P2SH coin to be spent in this transaction.
-    ///
-    /// This is only for use with [`Self::build_for_pczt`]. It is unsupported with
-    /// [`Self::build`], which will return an error.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_p2sh_input(
         &mut self,

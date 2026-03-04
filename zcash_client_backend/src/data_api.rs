@@ -3017,6 +3017,11 @@ pub trait WalletWrite: WalletRead {
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    ///
+    /// # Spending limitations
+    ///
+    /// P2PKH-in-P2SH scripts are unsupported by PCZT at this time, so the only way to spend
+    /// from such an address is to use the [`create_proposed_transactions`] signing path.
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,

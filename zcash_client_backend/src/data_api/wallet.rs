@@ -96,6 +96,9 @@ use {
     std::collections::HashMap,
 };
 
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script::{self as zs_script, Evaluable};
+
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
@@ -853,7 +856,7 @@ struct StepResult<AccountId> {
 pub struct SpendingKeys {
     usk: UnifiedSpendingKey,
     #[cfg(feature = "transparent-key-import")]
-    standalone_transparent_keys: HashMap<TransparentAddress, secp256k1::SecretKey>,
+    standalone_transparent_keys: HashMap<TransparentAddress, Vec<secp256k1::SecretKey>>,
 }
 
 impl SpendingKeys {
@@ -862,7 +865,7 @@ impl SpendingKeys {
         usk: UnifiedSpendingKey,
         #[cfg(feature = "transparent-key-import")] standalone_transparent_keys: HashMap<
             TransparentAddress,
-            secp256k1::SecretKey,
+            Vec<secp256k1::SecretKey>,
         >,
     ) -> Self {
         Self {
@@ -1320,38 +1323,47 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_p2pkh_input =
+        let mut add_transparent_input =
             |builder: &mut Builder<_, _>,
              utxos_spent: &mut Vec<_>,
              recipient_address: &TransparentAddress,
              outpoint: OutPoint,
              txout: TxOut|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                let pubkey = match metadata_from_address(recipient_address)?.source() {
+                let metadata = metadata_from_address(recipient_address)?;
+                match metadata.source() {
                     TransparentAddressSource::Derived {
                         scope,
                         address_index,
-                    } => ufvk
-                        .transparent()
-                        .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                        .derive_address_pubkey(*scope, *address_index)
-                        .expect("spending key derivation should not fail"),
-                    #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::StandalonePubkey(pubkey) => *pubkey,
-                    #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::StandaloneScript(_) => {
-                        return Err(Error::ProposalNotSupported);
+                    } => {
+                        let pubkey = ufvk
+                            .transparent()
+                            .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
+                            .derive_address_pubkey(*scope, *address_index)
+                            .expect("spending key derivation should not fail");
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
                     }
-                };
-
-                utxos_spent.push(outpoint.clone());
-                builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
+                    #[cfg(feature = "transparent-key-import")]
+                    TransparentAddressSource::StandalonePubkey(pubkey) => {
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2pkh_input(*pubkey, outpoint, txout)?;
+                    }
+                    #[cfg(feature = "transparent-key-import")]
+                    TransparentAddressSource::StandaloneScript(redeem_script) => {
+                        let from_chain =
+                            zs_script::FromChain::parse(&zs_script::Code(redeem_script.to_bytes()))
+                                .map_err(|_| ::transparent::builder::Error::UnsupportedScript)?;
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2sh_input(from_chain, outpoint, txout)?;
+                    }
+                }
 
                 Ok(())
             };
 
         for utxo in proposal_step.transparent_inputs() {
-            add_transparent_p2pkh_input(
+            add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
                 utxo.recipient_address(),
@@ -1374,7 +1386,7 @@ where
                 .ok_or(ProposalError::ReferenceError(*input_ref))?
                 .vout[outpoint.n() as usize];
 
-            add_transparent_p2pkh_input(
+            add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
                 &address,
@@ -1696,25 +1708,31 @@ where
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
     for (_address, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(match address_metadata.source() {
+        match address_metadata.source() {
             TransparentAddressSource::Derived {
                 scope,
                 address_index,
-            } => spending_keys
-                .usk
-                .transparent()
-                .derive_secret_key(*scope, *address_index)
-                .expect("spending key derivation should not fail"),
-            #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandalonePubkey(_) => *spending_keys
-                .standalone_transparent_keys
-                .get(&_address)
-                .ok_or(Error::AddressNotRecognized(_address))?,
-            #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::StandaloneScript(_) => {
-                return Err(Error::ProposalNotSupported);
+            } => {
+                transparent_signing_set.add_key(
+                    spending_keys
+                        .usk
+                        .transparent()
+                        .derive_secret_key(*scope, *address_index)
+                        .expect("spending key derivation should not fail"),
+                );
             }
-        });
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandalonePubkey(_)
+            | TransparentAddressSource::StandaloneScript(_) => {
+                let keys = spending_keys
+                    .standalone_transparent_keys
+                    .get(&_address)
+                    .ok_or(Error::AddressNotRecognized(_address))?;
+                for key in keys {
+                    transparent_signing_set.add_key(*key);
+                }
+            }
+        }
     }
     let sapling_extsks = &[
         spending_keys.usk.sapling().clone(),
