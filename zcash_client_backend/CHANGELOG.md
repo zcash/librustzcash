@@ -12,6 +12,19 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `FindAccountForAddressError` — error type returned by `WalletRead::find_account_for_address`,
+    with variants `Backend(E)` for storage errors and `UnifiedAddressConflict` when receivers
+    of a Unified Address map to different accounts.
+  - `WalletRead::find_account_for_address` — required trait method that resolves the wallet
+    account controlling a given address. For Unified Addresses it detects cross-account
+    receiver conflicts and returns `FindAccountForAddressError::UnifiedAddressConflict` in
+    that case.
+  - `defaults` module — reference implementations of selected `WalletRead`/`WalletWrite` trait
+    methods that backend authors without an indexed implementation can delegate to:
+    - `defaults::find_account_for_address` — linear-scan reference implementation of
+      `WalletRead::find_account_for_address`.
+    - `defaults::address_receiver_matches_ua` — helper that tests whether an `Address`
+      shares any receiver with a given `UnifiedAddress`.
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module

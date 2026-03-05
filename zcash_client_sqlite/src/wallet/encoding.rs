@@ -231,6 +231,9 @@ bitflags! {
         const SAPLING = 0b00000100;
         /// The associated address can receive Orchard outputs.
         const ORCHARD = 0b00001000;
+
+        /// The union of all shielded receiver flags.
+        const SHIELDED = Self::SAPLING.bits() | Self::ORCHARD.bits();
     }
 }
 

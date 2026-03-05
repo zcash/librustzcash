@@ -89,10 +89,11 @@ use zcash_client_backend::{
     DecryptedOutput,
     data_api::{
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
-        SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
-        TransactionStatus, WalletSummary, Zip32Derivation,
+        AddressSource, BlockMetadata, FindAccountForAddressError, Progress, Ratio,
+        ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput,
+        TransactionDataRequest, TransactionStatus, WalletSummary, Zip32Derivation,
         chain::ChainState,
+        defaults::address_receiver_matches_ua,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -1150,6 +1151,180 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
     }
 
     Ok(addrs)
+}
+
+/// Returns the wallet account that controls the given address, if any.
+///
+/// This is the SQLite-optimized implementation of
+/// [`zcash_client_backend::data_api::WalletRead::find_account_for_address`].
+/// It issues a single SQL query instead of the double for loop required by the default
+/// implementation, using `receiver_flags` and the `cached_transparent_receiver_address`
+/// column to narrow candidates before performing Rust-level receiver verification.
+///
+/// For non-Unified addresses an exact match on the `address` column (or the
+/// `cached_transparent_receiver_address` column for transparent receivers of stored UAs) is
+/// tried first; if that misses, shielded address types fall back to scanning stored UAs whose
+/// `receiver_flags` indicate a matching receiver.
+/// For Unified Addresses the query fetches every stored address that could share
+/// at least one receiver with the unified address (via transparent cache or shielded-receiver
+/// flags), then [`address_receiver_matches_ua`] confirms the actual overlap.
+pub(crate) fn find_account_for_address<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    address: &Address,
+) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
+    let addr_str = address.encode(params);
+
+    if let Address::Unified(unified_address) = address {
+        find_account_for_unified_address(conn, params, &addr_str, unified_address)
+    } else {
+        find_account_for_non_unified_address(conn, params, address, &addr_str)
+    }
+}
+
+fn find_account_for_non_unified_address<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    address: &Address,
+    addr_str: &str,
+) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
+    use FindAccountForAddressError as E;
+
+    // For non-UA addresses, first try an exact match (also covers transparent receivers
+    // cached in `cached_transparent_receiver_address`).
+    let exact_match = conn
+        .query_row(
+            "SELECT accounts.uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE exposed_at_height IS NOT NULL
+             AND (address = :addr_str OR cached_transparent_receiver_address = :addr_str)
+             LIMIT 1",
+            named_params![":addr_str": addr_str],
+            |row| row.get::<_, Uuid>(0),
+        )
+        .optional()
+        .map(|opt| opt.map(AccountUuid::from_uuid))
+        .map_err(|e| E::Backend(e.into()))?;
+
+    if exact_match.is_some() {
+        return Ok(exact_match);
+    }
+
+    // For shielded address types, the address may be a receiver embedded in a stored UA.
+    // Query candidate UAs via `receiver_flags` and verify at the Rust level.
+    //
+    // Transparent inputs do not need a `receiver_flags` fallback here: the exact-match query
+    // above already covers transparent receivers of stored UAs. That relies on the invariant
+    // (enforced by the `transparent_index_consistency` CHECK constraint and by every INSERT
+    // path into the `addresses` table) that any stored UA with a transparent receiver also
+    // has `cached_transparent_receiver_address` populated. When the `transparent-inputs`
+    // feature is disabled the wallet cannot receive transparent funds, so a transparent
+    // address lookup correctly resolves to no account.
+    let shielded_flag: ReceiverFlags = match address {
+        Address::Sapling(_) => ReceiverFlags::SAPLING,
+        _ => return Ok(None),
+    };
+
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT accounts.uuid, addresses.address
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE exposed_at_height IS NOT NULL
+             AND (receiver_flags & :shielded_flag) != 0",
+        )
+        .map_err(|e| E::Backend(e.into()))?;
+
+    let mut rows = stmt
+        .query(named_params![":shielded_flag": shielded_flag.bits()])
+        .map_err(|e| E::Backend(e.into()))?;
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| E::Backend(SqliteClientError::from(e)))?
+    {
+        let row_uuid: Uuid = row.get(0).map_err(|e| E::Backend(e.into()))?;
+        let stored_addr_str: String = row.get(1).map_err(|e| E::Backend(e.into()))?;
+        let stored = Address::decode(params, &stored_addr_str).ok_or_else(|| {
+            E::Backend(SqliteClientError::CorruptedData(
+                "Not a valid Zcash recipient address".to_owned(),
+            ))
+        })?;
+        if let Address::Unified(stored_ua) = stored {
+            if address_receiver_matches_ua(address, &stored_ua, params) {
+                return Ok(Some(AccountUuid::from_uuid(row_uuid)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn find_account_for_unified_address<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    addr_str: &str,
+    unified_address: &UnifiedAddress,
+) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
+    use FindAccountForAddressError as E;
+
+    // NULL when the unified_address has no transparent component
+    let taddr_str = unified_address
+        .transparent()
+        .map(|t| Address::Transparent(*t).encode(params));
+
+    // Only the shielded receiver bits are relevant here; the transparent receiver is
+    // matched separately via `cached_transparent_receiver_address`.
+    let shielded_flags = ReceiverFlags::from(unified_address) & ReceiverFlags::SHIELDED;
+
+    let mut base_query = conn
+        .prepare_cached(
+            "SELECT accounts.uuid, addresses.address
+                 FROM addresses
+                 JOIN accounts ON accounts.id = addresses.account_id
+                 WHERE exposed_at_height IS NOT NULL
+                 AND (
+                    address = :ua_str
+                    OR cached_transparent_receiver_address = :taddr_str
+                    OR ((:shielded_flags & receiver_flags) != 0)
+                 )",
+        )
+        .map_err(|e| E::Backend(e.into()))?;
+    let mut rows = base_query
+        .query(named_params![
+            ":ua_str": addr_str,
+            ":taddr_str": taddr_str,
+            ":shielded_flags": shielded_flags.bits(),
+        ])
+        .map_err(|e| E::Backend(e.into()))?;
+
+    let mut found_account_uuid: Option<AccountUuid> = None;
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| E::Backend(SqliteClientError::from(e)))?
+    {
+        let row_account_uuid: Uuid = row.get(0).map_err(|e| E::Backend(e.into()))?;
+        let row_addr_str: String = row.get(1).map_err(|e| E::Backend(e.into()))?;
+
+        let row_address = Address::decode(params, &row_addr_str).ok_or_else(|| {
+            E::Backend(SqliteClientError::CorruptedData(
+                "Not a valid Zcash recipient address".to_owned(),
+            ))
+        })?;
+
+        if address_receiver_matches_ua(&row_address, unified_address, params) {
+            let row_account_uuid = AccountUuid::from_uuid(row_account_uuid);
+            match found_account_uuid {
+                None => found_account_uuid = Some(row_account_uuid),
+                Some(prev) if prev == row_account_uuid => {}
+                Some(_) => return Err(E::UnifiedAddressConflict),
+            }
+        }
+    }
+
+    Ok(found_account_uuid)
 }
 
 pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(

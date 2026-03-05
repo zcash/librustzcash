@@ -160,6 +160,7 @@ rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 tempfile = "3.5.0"
 tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }
@@ -253,6 +254,7 @@ test-dependencies = [
     "dep:jubjub",
     "dep:rand",
     "dep:rand_chacha",
+    "transparent/test-dependencies",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",

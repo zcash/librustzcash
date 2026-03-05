@@ -621,6 +621,13 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
         },
     )?;
 
+    // When `transparent-key-import` is disabled, `TransparentAddressSource` has only the
+    // `Derived` variant, so the `if let` below is irrefutable; silence that conditional
+    // lint rather than restructuring the match.
+    #[cfg_attr(
+        not(feature = "transparent-key-import"),
+        allow(irrefutable_let_patterns)
+    )]
     Ok(addresses_to_reserve
         .into_iter()
         .map(|(id, addr, meta)| {
