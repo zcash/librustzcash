@@ -11,6 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb` now overrides `WalletRead::find_account_for_address` with a single SQL query,
+  replacing the `O(accounts × addresses)` scan that the default trait implementation would
+  require.
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`
   - `tx_mined_height`
