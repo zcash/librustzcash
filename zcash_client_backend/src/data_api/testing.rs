@@ -2704,10 +2704,10 @@ impl WalletRead for MockWalletDb {
 
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
         Ok(self
-           .addresses_by_account
-           .get(&account)
-           .cloned()
-           .unwrap_or_default())
+            .addresses_by_account
+            .get(&account)
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn get_last_generated_address_matching(
