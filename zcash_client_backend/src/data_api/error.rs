@@ -72,8 +72,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// An error occurred building a new transaction.
     Builder(builder::Error<FeeError>),
 
-    /// It is forbidden to provide a memo when constructing a transparent output.
-    MemoForbidden,
+    /// An error occurred constructing a payment for the transaction.
+    Payment(zip321::PaymentError),
 
     /// Attempted to send change to an unsupported pool.
     ///
@@ -211,10 +211,7 @@ where
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
-            Error::MemoForbidden => write!(
-                f,
-                "It is not possible to send a memo to a transparent address."
-            ),
+            Error::Payment(e) => write!(f, "An error occurred constructing a payment: {e}"),
             Error::UnsupportedChangeType(t) => write!(
                 f,
                 "Attempted to send change to an unsupported pool type: {t}"

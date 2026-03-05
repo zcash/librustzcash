@@ -471,7 +471,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             payment.message().cloned(),
                             payment.other_params().to_vec(),
                         )
-                        .expect("cannot fail because memo is None"),
+                        .expect("cannot fail because memo is None and amount is nonzero"),
                     );
                     total_ephemeral = (total_ephemeral + payment_amount)
                         .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
@@ -924,11 +924,7 @@ where
         None,
         vec![],
     )
-    .ok_or_else(|| {
-        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
-            0,
-        )))
-    })?;
+    .map_err(|e| InputSelectorError::Proposal(ProposalError::Zip321(e.with_index(0))))?;
 
     let transaction_request =
         TransactionRequest::new(vec![payment.clone()]).map_err(|payment_error| {
