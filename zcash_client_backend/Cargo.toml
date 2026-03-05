@@ -2,10 +2,7 @@
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
 version = "0.21.1"
-authors = [
-    "Jack Grigg <jack@z.cash>",
-    "Kris Nuttycombe <kris@electriccoin.co>"
-]
+authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@electriccoin.co>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
 readme = "README.md"
@@ -160,6 +157,7 @@ rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 tempfile = "3.5.0"
 tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }
@@ -173,7 +171,10 @@ default = ["time/default"]
 lightwalletd-tonic = ["dep:tonic", "dep:tonic-prost", "hyper-util?/tokio"]
 
 ## Enables the `tls-webpki-roots` feature of `tonic`.
-lightwalletd-tonic-tls-webpki-roots = ["lightwalletd-tonic", "tonic?/tls-webpki-roots"]
+lightwalletd-tonic-tls-webpki-roots = [
+    "lightwalletd-tonic",
+    "tonic?/tls-webpki-roots",
+]
 
 ## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
 lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
@@ -201,24 +202,20 @@ zcashd-compat = ["zcash_keys/zcashd-compat"]
 
 ## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
 pczt = [
-  "orchard",
-  "transparent-inputs",
-  "pczt/zcp-builder",
-  "pczt/io-finalizer",
-  "pczt/prover",
-  "pczt/signer",
-  "pczt/spend-finalizer",
-  "pczt/tx-extractor",
-  "dep:postcard",
-  "dep:serde",
+    "orchard",
+    "transparent-inputs",
+    "pczt/zcp-builder",
+    "pczt/io-finalizer",
+    "pczt/prover",
+    "pczt/signer",
+    "pczt/spend-finalizer",
+    "pczt/tx-extractor",
+    "dep:postcard",
+    "dep:serde",
 ]
 
 ## Exposes a wallet synchronization function that implements the necessary state machine.
-sync = [
-    "lightwalletd-tonic",
-    "dep:async-trait",
-    "dep:futures-util",
-]
+sync = ["lightwalletd-tonic", "dep:async-trait", "dep:futures-util"]
 
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
 ## operations.
@@ -253,6 +250,7 @@ test-dependencies = [
     "dep:jubjub",
     "dep:rand",
     "dep:rand_chacha",
+    "transparent/test-dependencies",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",

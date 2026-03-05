@@ -654,6 +654,7 @@ impl AddressSource {
 }
 
 /// Information about an address in the wallet.
+#[derive(Clone)]
 pub struct AddressInfo {
     address: Address,
     source: AddressSource,
@@ -1557,6 +1558,59 @@ pub trait InputSource {
     }
 }
 
+/// Errors that may occur when resolving the account controlling an address.
+#[derive(Debug)]
+pub enum FindAccountForAddressError<E> {
+    /// Error returned by the underlying wallet backend.
+    Backend(E),
+
+    /// A Unified Address whose receivers map to different accounts.
+    UnifiedAddressConflict,
+}
+
+impl<E> From<E> for FindAccountForAddressError<E> {
+    fn from(err: E) -> Self {
+        Self::Backend(err)
+    }
+}
+
+/// Returns `true` if `address` contains any receiver that matches the given `ua`'s
+/// receivers.
+pub fn address_receiver_matches_ua(address: &Address, ua: &UnifiedAddress) -> bool {
+    match address {
+        Address::Transparent(t) => ua.transparent().map(|nt| nt == t).unwrap_or(false),
+        Address::Sapling(s) => ua.sapling().map(|ns| ns == s).unwrap_or(false),
+        Address::Unified(ua2) => {
+            let matches_transparent = ua
+                .transparent()
+                .zip(ua2.transparent())
+                .map(|(a, b)| a == b)
+                .unwrap_or(false);
+            let matches_sapling = ua
+                .sapling()
+                .zip(ua2.sapling())
+                .map(|(a, b)| a == b)
+                .unwrap_or(false);
+            let matches_orchard = {
+                #[cfg(feature = "orchard")]
+                {
+                    ua.orchard()
+                        .zip(ua2.orchard())
+                        .map(|(a, b)| a == b)
+                        .unwrap_or(false)
+                }
+                #[cfg(not(feature = "orchard"))]
+                {
+                    false
+                }
+            };
+            matches_transparent || matches_sapling || matches_orchard
+        }
+        // TEX addresses can never appear as a receiver inside a UnifiedAddress
+        _ => false,
+    }
+}
+
 /// Read-only operations required for light wallet functions.
 ///
 /// This trait defines the read-only portion of the storage interface atop which
@@ -1626,6 +1680,64 @@ pub trait WalletRead {
 
     /// Returns information about every address tracked for this account.
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error>;
+
+    /// Returns the wallet account that controls the given address, if any.
+    ///
+    /// This method is intended to support efficient "address -> account" lookups.
+    /// Wallet backends are encouraged to override this method with a more efficient
+    /// implementation (e.g. an indexed database lookup). The default implementation
+    /// performs a linear scan over all accounts and their tracked addresses.
+    ///
+    /// # Unified Addresses
+    ///
+    /// For Unified Addresses, each receiver component (transparent, Sapling, Orchard) is
+    /// matched individually against the wallet's tracked addresses. All matched receivers
+    /// must resolve to the **same** account; if any two receivers map to different accounts,
+    /// this is considered an inconsistent wallet state and `Err` is returned rather than
+    /// arbitrarily selecting one account.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(account_id))` if the address (or, for Unified Addresses, all matched
+    ///   receiver components) is controlled by a single account known to this wallet.
+    /// - `Ok(None)` if no receiver of the address is recognized as belonging to any account.
+    /// - `Err(FindAccountForAddressError::BackendError(_))` if the lookup fails due to a
+    ///   backend error.
+    /// - `Err(FindAccountForAddressError::UnifiedAddressConflict)` if the provided address
+    ///   is a Unified Address whose receiver components map to different accounts.
+    fn find_account_for_address(
+        &self,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
+        let mut baseline_acc_id: Option<Self::AccountId> = None;
+
+        if let Address::Unified(ua) = address {
+            for acc_id in self.get_account_ids()? {
+                for addr_info in self.list_addresses(acc_id)? {
+                    let stored = addr_info.address();
+                    if address_receiver_matches_ua(stored, ua) {
+                        match baseline_acc_id {
+                            None => baseline_acc_id = Some(acc_id),
+                            Some(prev) if prev == acc_id => {}
+                            Some(_) => {
+                                return Err(FindAccountForAddressError::UnifiedAddressConflict);
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            for acc_id in self.get_account_ids()? {
+                for addr_info in self.list_addresses(acc_id)? {
+                    if addr_info.address() == address {
+                        return Ok(Some(acc_id));
+                    }
+                }
+            }
+        }
+
+        Ok(baseline_acc_id)
+    }
 
     /// Returns the most recently generated unified address for the specified account that conforms
     /// to the specified address filter, if the account identifier specified refers to a valid
@@ -3251,4 +3363,383 @@ pub trait WalletCommitmentTrees {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "orchard")]
+    use crate::data_api::testing::orchard::OrchardPoolTester;
+    use std::{collections::HashMap, convert::Infallible};
+
+    use crate::data_api::testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester};
+
+    use transparent::address::TransparentAddress;
+    use zcash_keys::{
+        address::{Address, UnifiedAddress},
+        keys::UnifiedIncomingViewingKey,
+    };
+    use zip32::DiversifierIndex;
+
+    type TestAccountId = u32;
+    type TestAccount = (TestAccountId, UnifiedIncomingViewingKey);
+
+    #[derive(Default)]
+    struct TestWalletDb {
+        account_ids: Vec<TestAccountId>,
+        addresses_by_account: HashMap<TestAccountId, Vec<AddressInfo>>,
+    }
+
+    impl TestWalletDb {
+        fn new(entries: impl IntoIterator<Item = (TestAccountId, Vec<AddressInfo>)>) -> Self {
+            let mut addresses_by_account = HashMap::new();
+            let mut account_ids = vec![];
+
+            for (account_id, addrs) in entries {
+                account_ids.push(account_id);
+                addresses_by_account.insert(account_id, addrs);
+            }
+
+            account_ids.sort_unstable();
+
+            Self {
+                account_ids,
+                addresses_by_account,
+            }
+        }
+    }
+
+    fn derived_source() -> AddressSource {
+        AddressSource::Derived {
+            diversifier_index: DiversifierIndex::default(),
+            #[cfg(feature = "transparent-inputs")]
+            transparent_key_scope: None,
+        }
+    }
+
+    fn address_info_of(address: Address) -> AddressInfo {
+        AddressInfo::from_parts(address, derived_source())
+            .expect("test address metadata must be valid")
+    }
+
+    fn transparent_address_for_tag(tag: u8) -> TransparentAddress {
+        TransparentAddress::PublicKeyHash([tag; 20])
+    }
+
+    fn sapling_address_for_tag(tag: u8) -> sapling::PaymentAddress {
+        match SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&[tag; 32])) {
+            Address::Sapling(pa) => pa,
+            other => panic!("expected Sapling address, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_address(tag: u8) -> orchard::Address {
+        match OrchardPoolTester::sk_default_address(&OrchardPoolTester::sk(&[tag; 32])) {
+            Address::Unified(ua) => ua
+                .orchard()
+                .copied()
+                .expect("orchard receiver must be present"),
+            other => panic!("expected Orchard UA, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "orchard")]
+    fn unified_account_with(
+        transparent: Option<TransparentAddress>,
+        sapling: Option<sapling::PaymentAddress>,
+        orchard: Option<orchard::Address>,
+    ) -> Address {
+        UnifiedAddress::from_receivers(
+            Some(orchard).flatten(),
+            Some(sapling).flatten(),
+            transparent,
+        )
+        .expect("test UA must be valid")
+        .into()
+    }
+
+    impl WalletRead for TestWalletDb {
+        type Error = Infallible;
+        type AccountId = TestAccountId;
+        type Account = TestAccount;
+
+        fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
+            Ok(self.account_ids.clone())
+        }
+
+        fn list_addresses(
+            &self,
+            account: Self::AccountId,
+        ) -> Result<Vec<AddressInfo>, Self::Error> {
+            Ok(self
+                .addresses_by_account
+                .get(&account)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn get_account(
+            &self,
+            _account_id: Self::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_derived_account(
+            &self,
+            _derivation: &Zip32Derivation,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn validate_seed(
+            &self,
+            _account_id: Self::AccountId,
+            _seed: &secrecy::SecretVec<u8>,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        fn seed_relevance_to_derived_accounts(
+            &self,
+            _seed: &secrecy::SecretVec<u8>,
+        ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+            Ok(SeedRelevance::NoAccounts)
+        }
+
+        fn get_account_for_ufvk(
+            &self,
+            _ufvk: &zcash_keys::keys::UnifiedFullViewingKey,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_last_generated_address_matching(
+            &self,
+            _account: Self::AccountId,
+            _address_filter: zcash_keys::keys::UnifiedAddressRequest,
+        ) -> Result<Option<UnifiedAddress>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_account_birthday(
+            &self,
+            _account: Self::AccountId,
+        ) -> Result<zcash_protocol::consensus::BlockHeight, Self::Error> {
+            unreachable!("not used by these tests")
+        }
+
+        fn get_wallet_birthday(
+            &self,
+        ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_wallet_summary(
+            &self,
+            _confirmations_policy: wallet::ConfirmationsPolicy,
+        ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn chain_height(
+            &self,
+        ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_block_hash(
+            &self,
+            _block_height: zcash_protocol::consensus::BlockHeight,
+        ) -> Result<Option<zcash_primitives::block::BlockHash>, Self::Error> {
+            Ok(None)
+        }
+
+        fn block_metadata(
+            &self,
+            _height: zcash_protocol::consensus::BlockHeight,
+        ) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_max_height_hash(
+            &self,
+        ) -> Result<
+            Option<(
+                zcash_protocol::consensus::BlockHeight,
+                zcash_primitives::block::BlockHash,
+            )>,
+            Self::Error,
+        > {
+            Ok(None)
+        }
+
+        fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn suggest_scan_ranges(&self) -> Result<Vec<scanning::ScanRange>, Self::Error> {
+            Ok(vec![])
+        }
+
+        fn get_target_and_anchor_heights(
+            &self,
+            _min_confirmations: std::num::NonZeroU32,
+        ) -> Result<
+            Option<(wallet::TargetHeight, zcash_protocol::consensus::BlockHeight)>,
+            Self::Error,
+        > {
+            Ok(None)
+        }
+
+        fn get_tx_height(
+            &self,
+            _txid: zcash_protocol::TxId,
+        ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_unified_full_viewing_keys(
+            &self,
+        ) -> Result<HashMap<Self::AccountId, zcash_keys::keys::UnifiedFullViewingKey>, Self::Error>
+        {
+            Ok(HashMap::new())
+        }
+
+        fn get_memo(
+            &self,
+            _note_id: crate::wallet::NoteId,
+        ) -> Result<Option<zcash_protocol::memo::Memo>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_transaction(
+            &self,
+            _txid: zcash_protocol::TxId,
+        ) -> Result<Option<zcash_primitives::transaction::Transaction>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_sapling_nullifiers(
+            &self,
+            _query: NullifierQuery,
+        ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
+            Ok(vec![])
+        }
+
+        #[cfg(feature = "orchard")]
+        fn get_orchard_nullifiers(
+            &self,
+            _query: NullifierQuery,
+        ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+            Ok(vec![])
+        }
+
+        fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
+            Ok(vec![])
+        }
+
+        fn get_received_outputs(
+            &self,
+            _txid: zcash_protocol::TxId,
+            _target_height: wallet::TargetHeight,
+            _confirmations_policy: wallet::ConfirmationsPolicy,
+        ) -> Result<Vec<ReceivedTransactionOutput>, Self::Error> {
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn find_account_for_transparent_address_returns_matching_account() {
+        let wallet = TestWalletDb::new([
+            (1, vec![address_info_of(Address::Transparent(transparent_address_for_tag(1)))]),
+            (2, vec![address_info_of(Address::Transparent(transparent_address_for_tag(2)))]),
+        ]);
+        let result = wallet.find_account_for_address(&Address::Transparent(transparent_address_for_tag(1)));
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_when_simple_address_is_unknown() {
+        let address = Address::Transparent(transparent_address_for_tag(1));
+        let wallet = TestWalletDb::new([(1, vec![address_info_of(address)])]);
+
+        let other_address = Address::Transparent(transparent_address_for_tag(9));
+        let result = wallet.find_account_for_address(&other_address);
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_unified_address_returns_account_when_receivers_map_to_same_account() {
+        let transparent_address = transparent_address_for_tag(7);
+        let sapling_address = sapling_address_for_tag(11);
+        let orchard_address = orchard_address(13);
+
+        let wallet = TestWalletDb::new([(
+            1,
+            vec![
+                address_info_of(Address::Transparent(transparent_address)),
+                address_info_of(Address::Sapling(sapling_address)),
+                address_info_of(unified_account_with(None, None, Some(orchard_address))),
+            ],
+        )]);
+
+        let ua_with_all_addresses = unified_account_with(Some(transparent_address), Some(sapling_address), Some(orchard_address));
+
+        let result = wallet.find_account_for_address(&ua_with_all_addresses);
+
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_unified_address_returns_none_when_no_receiver_matches() {
+        let wallet = TestWalletDb::new([(
+            1,
+            vec![
+                address_info_of(Address::Transparent(transparent_address_for_tag(1))),
+                address_info_of(Address::Sapling(sapling_address_for_tag(2))),
+                address_info_of(unified_account_with(None, None, Some(orchard_address(3)))),
+            ],
+        )]);
+
+        let ua_with_different_receivers = unified_account_with(
+            Some(transparent_address_for_tag(10)),
+            Some(sapling_address_for_tag(11)),
+            Some(orchard_address(12)),
+        );
+
+        let result = wallet.find_account_for_address(&ua_with_different_receivers);
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_unified_address_errors_when_receivers_map_to_different_accounts() {
+        let transparent_address = transparent_address_for_tag(21);
+        let sapling_address = sapling_address_for_tag(22);
+
+        let wallet = TestWalletDb::new([
+            (1, vec![address_info_of(Address::Transparent(transparent_address))]),
+            (2, vec![address_info_of(Address::Sapling(sapling_address))]),
+        ]);
+
+        let invalid_unified_address = unified_account_with(Some(transparent_address), Some(sapling_address), None);
+
+        let result = wallet.find_account_for_address(&invalid_unified_address);
+
+        assert!(matches!(
+            result,
+            Err(FindAccountForAddressError::UnifiedAddressConflict)
+        ));
+    }
 }
