@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The minimum supported input length for `f4jumble` / `f4jumble_inv` has been
+  reduced from 48 to 38 bytes, to support transparent-only Revision 1 Unified
+  Viewing Keys as specified in ZIP 316.
+
 ## [0.1.1] - 2024-12-13
 ### Added
 - `alloc` feature flag as a mid-point between full `no-std` support and the
