@@ -11,6 +11,16 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_protocol::address` module.
+- `zcash_protocol::address::Revision`
+- `zcash_protocol::consensus::NetworkConstants`:
+  - `fn hrp_unified_address_r2`
+  - `fn hrp_unified_address_r2_ti`
+  - `fn hrp_unified_fvk_r2`
+  - `fn hrp_unified_ivk_r2`
+- HRP constants for ZIP 316 Revision 2 unified encodings added to
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
+  for transparent-including UAs have the `TI` suffix.
 - Experimental NuTachyon support behind `zcash_unstable="nutachyon"`, including
   its network upgrade, consensus branch ID, local-consensus activation parameter,
   and V7 transaction format constants.
