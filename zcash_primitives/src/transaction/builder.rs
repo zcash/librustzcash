@@ -2,7 +2,8 @@
 
 use core::cmp::Ordering;
 use core::fmt;
-use rand::{CryptoRng, RngCore};
+
+use rand_core::{CryptoRng, RngCore};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
 use ::transparent::{
@@ -1319,8 +1320,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
 
 #[cfg(all(any(test, feature = "test-dependencies"), feature = "circuits"))]
 mod testing {
-    use rand::RngCore;
-    use rand_core::CryptoRng;
+    use rand_core::{CryptoRng, RngCore};
 
     use ::sapling::prover::mock::{MockOutputProver, MockSpendProver};
     use ::transparent::builder::TransparentSigningSet;

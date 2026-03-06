@@ -20,16 +20,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 equihash.workspace = true
-zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 zcash_script.workspace = true
-zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - CSPRNG
-rand.workspace = true
 rand_core.workspace = true
 
 # - Digests (output types exposed)
@@ -38,19 +35,13 @@ sha2.workspace = true
 
 # - Logging and metrics
 memuse.workspace = true
-tracing = { workspace = true, default-features = false }
-
-# - Secret management
-subtle.workspace = true
 
 # - Shielded protocols
 ff.workspace = true
-group.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
 sapling.workspace = true
-zcash_spec.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
@@ -62,8 +53,6 @@ proptest = { workspace = true, optional = true }
 transparent.workspace = true
 
 # - Transparent inputs
-#   - `Error` type exposed
-bip32.workspace = true
 block-buffer.workspace = true # remove after edition2024 upgrade
 crypto-common.workspace = true # remove after edition2024 upgrade
 #   - `SecretKey` and `PublicKey` types exposed
@@ -71,24 +60,14 @@ secp256k1 = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
-# - Boilerplate
-getset.workspace = true
-
 # - Documentation
 document-features = { workspace = true, optional = true }
 
 # - Encodings
-bs58.workspace = true
 hex.workspace = true
 
 # - Shielded protocols
 redjubjub.workspace = true
-
-# - Transparent protocol
-ripemd.workspace = true
-
-# - ZIP 32
-fpe.workspace = true
 
 # No-std support
 core2.workspace = true
@@ -108,6 +87,7 @@ transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+zip32.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
@@ -132,7 +112,6 @@ multicore = ["orchard/multicore", "sapling/multicore"]
 ## Enables spending transparent notes with the transaction builder.
 transparent-inputs = [
     "transparent/transparent-inputs",
-    "bip32/secp256k1-ffi",
     "dep:secp256k1",
 ]
 

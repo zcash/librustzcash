@@ -497,6 +497,16 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  readme-graph:
+    name: Readme dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check consistency
+        run: python3 .github/helpers/check-dep-graph.py
+
   protobuf:
     name: protobuf consistency
     runs-on: ubuntu-latest
