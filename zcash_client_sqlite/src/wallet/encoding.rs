@@ -22,7 +22,7 @@ use crate::error::SqliteClientError;
 #[cfg(feature = "transparent-inputs")]
 use {
     super::transparent::SchedulingError, std::time::SystemTime,
-    transparent::keys::TransparentKeyScope,
+    transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::TransparentKeyOrigin,
 };
 
 #[cfg(feature = "zcashd-compat")]
@@ -161,6 +161,19 @@ impl KeyScope {
             KeyScope::Zip32(scope) => Some(TransparentKeyScope::from(*scope)),
             KeyScope::Ephemeral => Some(TransparentKeyScope::custom(2).expect("valid scope")),
             KeyScope::Foreign => None,
+        }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn as_key_origin(&self) -> TransparentKeyOrigin {
+        match self {
+            KeyScope::Zip32(scope) => TransparentKeyOrigin::Derived {
+                scope: TransparentKeyScope::from(*scope),
+            },
+            KeyScope::Ephemeral => TransparentKeyOrigin::Derived {
+                scope: TransparentKeyScope::custom(2).expect("valid scope"),
+            },
+            KeyScope::Foreign => TransparentKeyOrigin::Imported,
         }
     }
 }

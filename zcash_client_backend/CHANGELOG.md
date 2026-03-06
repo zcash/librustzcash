@@ -12,6 +12,7 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module
   - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
   - `DecryptableTransaction`
@@ -69,6 +70,9 @@ workspace.
     key that will be used to encrypt any wallet-internal change outputs
     that would otherwise only be recoverable using the wallet's internal
     IVK.
+- `zcash_client_backend::data_api::WalletRead::get_transparent_balances` now returns
+  `TransparentBalances` (using `Option<TransparentKeyScope>`) to support standalone
+  transparent addresses that have no key scope.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
