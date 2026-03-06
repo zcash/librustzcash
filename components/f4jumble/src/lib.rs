@@ -70,8 +70,12 @@ mod test_vectors_long;
 
 /// Length of F4Jumbled message must lie in the range VALID_LENGTH.
 ///
-/// VALID_LENGTH = 48..=4194368
-pub const VALID_LENGTH: RangeInclusive<usize> = 48..=4194368;
+/// VALID_LENGTH = 38..=4194368
+///
+/// The minimum of 38 bytes supports the encoding of a transparent-only Revision 2 Unified Address
+/// (`tu` prefix) (1-byte typecode + 1-byte length + 20-byte data + 16-byte padding = 38 bytes) as
+/// specified in ZIP 316.
+pub const VALID_LENGTH: RangeInclusive<usize> = 38..=4194368;
 
 /// Errors produced by F4Jumble.
 #[derive(Debug)]
@@ -315,6 +319,26 @@ mod common_tests {
     fn g_pers() {
         assert_eq!(&G_PERS!(7, 13), b"UA_F4Jumble_G\x07\x0d\x00");
         assert_eq!(&G_PERS!(7, 65535), b"UA_F4Jumble_G\x07\xff\xff");
+    }
+
+    #[test]
+    fn f4jumble_roundtrip_38_bytes() {
+        let mut message = [0u8; 38];
+        for (i, b) in message.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        let original = message;
+        f4jumble_mut(&mut message).unwrap();
+        // Jumbled output should differ from input.
+        assert_ne!(&message[..], &original[..]);
+        f4jumble_inv_mut(&mut message).unwrap();
+        assert_eq!(&message[..], &original[..]);
+    }
+
+    #[test]
+    fn f4jumble_rejects_37_bytes() {
+        let mut message = [0u8; 37];
+        assert!(f4jumble_mut(&mut message).is_err());
     }
 
     #[test]
