@@ -10,6 +10,32 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::unified::DataTypecode`
+- `zcash_address::unified::MetadataTypecode`
+- `zcash_address::unified::MetadataItem`
+- `zcash_address::unified::Uitem`
+- `zcash_address::unified::Revision` (re-exported from `zcash_protocol`)
+- ZIP 316 Revision 2 support:
+  - Metadata item parsing and serialization (expiry height, expiry time).
+  - Revision-aware encoding/decoding with distinct HRPs for R0 and R2.
+  - MUST-understand metadata typecodes (0xE0-0xFC) enforced per revision.
+  - R2 Unified Addresses use two HRP prefixes per updated ZIP 316:
+    `zu` for shielded-only addresses and `tu` for transparent-including
+    addresses. Transparent receivers are permitted in R2 `unified::Address`
+    containers.
+  - R2 Unified Viewing Keys allow transparent-only configurations.
+
+### Changed
+- `zcash_address::unified::Typecode` now distinguishes data and metadata items
+  via `Typecode::Data(DataTypecode)` and `Typecode::Metadata(MetadataTypecode)`.
+- `zcash_address::unified::Encoding::try_from_items` now takes a `Revision`
+  parameter.
+- `zcash_address::unified::Encoding::decode` now returns a 3-tuple
+  `(NetworkType, Revision, Self)`.
+- `zcash_address::unified::Container::items_as_parsed` now returns
+  `&[Uitem<Self::Item>]` to represent both data and metadata items.
+
 ## [0.13.0] - 2026-07-09
 
 ### Changed
