@@ -5,6 +5,7 @@ use crate::testing::{MemBlockCache, TestMemDbFactory};
 fn put_received_transparent_utxo() {
     zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
         TestMemDbFactory::new(),
+        zcash_client_backend::data_api::testing::transparent::TransparentAccountType::Derived,
     );
 }
 

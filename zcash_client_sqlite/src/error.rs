@@ -31,6 +31,9 @@ use {
     },
 };
 
+#[cfg(feature = "zip-48")]
+use transparent::zip48;
+
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
 pub enum SqliteClientError {
@@ -175,6 +178,14 @@ pub enum SqliteClientError {
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
     PubkeyImportConflict(Uuid),
+
+    /// The requested operation is not supported for ZIP 48 multisig accounts.
+    #[cfg(feature = "zip-48")]
+    Zip48UnsupportedOperation,
+
+    /// An error occurred parsing or deriving a ZIP 48 full viewing key.
+    #[cfg(feature = "zip-48")]
+    Zip48Fvk(zip48::FullViewingKeyError),
 }
 
 impl error::Error for SqliteClientError {
@@ -340,6 +351,12 @@ impl fmt::Display for SqliteClientError {
                     "The given transparent pubkey is already managed by account {uuid}"
                 )
             }
+            #[cfg(feature = "zip-48")]
+            SqliteClientError::Zip48UnsupportedOperation => {
+                write!(f, "Operation not supported for ZIP 48 multisig accounts.")
+            }
+            #[cfg(feature = "zip-48")]
+            SqliteClientError::Zip48Fvk(e) => write!(f, "ZIP 48 FVK error: {e:?}"),
         }
     }
 }
@@ -409,6 +426,13 @@ impl From<AddressGenerationError> for SqliteClientError {
 impl From<SchedulingError> for SqliteClientError {
     fn from(value: SchedulingError) -> Self {
         SqliteClientError::Scheduling(value)
+    }
+}
+
+#[cfg(feature = "zip-48")]
+impl From<::transparent::zip48::FullViewingKeyError> for SqliteClientError {
+    fn from(e: ::transparent::zip48::FullViewingKeyError) -> Self {
+        SqliteClientError::Zip48Fvk(e)
     }
 }
 

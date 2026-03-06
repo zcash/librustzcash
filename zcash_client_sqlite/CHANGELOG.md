@@ -25,10 +25,14 @@ workspace.
 - `impl zcash_keys::keys::transparent::gap_limits::AddressStore for WalletDb`
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
+- `impl zcash_client_backend::data_api::WalletWrite::import_account_zip48_multisig()`
+- `impl zcash_client_backend::data_api::WalletWrite::get_next_zip48_multisig_address()`
+- `impl zcash_client_backend::data_api::WalletWrite::get_zip48_multisig_address_for_index()`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - `zcash_client_sqlite::error::SqliteClientError` has added variant `GapAddresses`.
+- Allow UIVK to be NULL iff have ZIP 48 FVK in `zcash_client_sqlite::wallet::db::TABLE_ACCOUNTS`
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.

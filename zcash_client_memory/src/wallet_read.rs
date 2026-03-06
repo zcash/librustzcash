@@ -81,6 +81,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                     }
                 }
                 AccountSource::Imported { purpose: _, .. } => None,
+                #[cfg(feature = "zip-48")]
+                AccountSource::Zip48 => None,
             }))
     }
 
