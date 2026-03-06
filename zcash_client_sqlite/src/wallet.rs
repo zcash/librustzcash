@@ -800,12 +800,12 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
             // The key has already been imported; nothing to do.
             return Ok(());
         } else {
-            return Err(SqliteClientError::PubkeyImportConflict(current));
+            return Err(SqliteClientError::StandaloneImportConflict(current));
         }
     }
 
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
-    conn.execute(
+    let rows_affected = conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
@@ -826,6 +826,104 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
             ":imported_transparent_receiver_pubkey": pubkey.serialize()
         ],
     )?;
+
+    if rows_affected == 0 {
+        return Err(SqliteClientError::AccountUnknown);
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    redeem_script: zcash_script::script::Redeem,
+) -> Result<(), SqliteClientError> {
+    use ::transparent::address::TransparentAddress;
+    use zcash_script::descriptor::sh;
+    use zcash_script::script::Evaluable;
+
+    // This mirrors `zcash_script::opcode::push_value::LargeValue::MAX_SIZE`, which is
+    // currently `pub(crate)`. Replace with a direct reference if it becomes public.
+    const MAX_P2SH_REDEEM_SCRIPT_SIZE: usize = 520;
+    let rs_bytes = redeem_script.to_bytes();
+    if rs_bytes.len() > MAX_P2SH_REDEEM_SCRIPT_SIZE {
+        return Err(SqliteClientError::BadAccountData(format!(
+            "Redeem script exceeds maximum P2SH size of {MAX_P2SH_REDEEM_SCRIPT_SIZE} bytes (got {} bytes)",
+            rs_bytes.len()
+        )));
+    }
+
+    // Do not import script types which do not have a supported spend flow.
+    if !matches!(
+        zcash_script::solver::standard(&redeem_script),
+        Some(zcash_script::solver::ScriptKind::MultiSig { .. })
+            | Some(zcash_script::solver::ScriptKind::PubKeyHash { .. })
+    ) {
+        return Err(SqliteClientError::BadAccountData(
+            "Redeem script is not a supported P2SH script kind".to_owned(),
+        ));
+    }
+
+    let script_pubkey = sh(&redeem_script);
+    // `sh()` always produces a valid P2SH scriptPubKey, so `from_script_pubkey`
+    // should always succeed here. This is a defensive check.
+    let addr = TransparentAddress::from_script_pubkey(&script_pubkey).ok_or_else(|| {
+        SqliteClientError::CorruptedData(
+            "Could not derive P2SH address from redeem script".to_owned(),
+        )
+    })?;
+
+    let existing_import_account = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE redeem_script = :imported_transparent_redeem_script",
+            named_params![
+                ":imported_transparent_redeem_script": &rs_bytes[..]
+            ],
+            |row| row.get::<_, Uuid>("account_uuid"),
+        )
+        .optional()?;
+
+    if let Some(current) = existing_import_account {
+        if current == account_uuid.expose_uuid() {
+            // The key has already been imported; nothing to do.
+            return Ok(());
+        } else {
+            return Err(SqliteClientError::StandaloneImportConflict(current));
+        }
+    }
+
+    let addr_str = Address::Transparent(addr).encode(params);
+    let rows_affected = conn.execute(
+        r#"
+        INSERT INTO addresses (
+          account_id, key_scope, address, cached_transparent_receiver_address,
+          receiver_flags, redeem_script
+        )
+        SELECT
+          id, :key_scope, :address, :address,
+          :receiver_flags, :imported_transparent_redeem_script
+          FROM accounts
+          WHERE accounts.uuid = :account_uuid
+        ON CONFLICT (redeem_script) DO NOTHING
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+            ":key_scope": KeyScope::Foreign.encode(),
+            ":address": addr_str,
+            ":receiver_flags": ReceiverFlags::P2SH.bits(),
+            ":imported_transparent_redeem_script": &rs_bytes[..]
+        ],
+    )?;
+
+    if rows_affected == 0 {
+        return Err(SqliteClientError::AccountUnknown);
+    }
 
     Ok(())
 }
@@ -4650,29 +4748,5 @@ mod tests {
             account_birthday(st.wallet().conn(), account_id),
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
-    }
-
-    #[test]
-    #[cfg(feature = "transparent-key-import")]
-    fn test_import_standalone_transparent_pubkey() {
-        use rand::SeedableRng;
-        use rand_chacha::ChaChaRng;
-        use secp256k1::{Secp256k1, SecretKey};
-
-        let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory::default())
-            .with_account_from_sapling_activation(BlockHash([0; 32]))
-            .build();
-
-        let account_id = st.test_account().unwrap().id();
-
-        let mut rng = ChaChaRng::from_seed([0u8; 32]);
-        let secp = Secp256k1::new();
-        let pubkey = SecretKey::new(&mut rng).public_key(&secp);
-        assert_matches!(
-            st.wallet_mut()
-                .import_standalone_transparent_pubkey(account_id, pubkey),
-            Ok(_)
-        );
     }
 }

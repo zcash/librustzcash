@@ -6,6 +6,8 @@ use std::{
 use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::TransparentBalances;
 use zcash_client_backend::data_api::{
     AddressInfo, BlockMetadata, NullifierQuery, ReceivedTransactionOutput, WalletRead,
     WalletSummary, Zip32Derivation,
@@ -34,10 +36,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    transparent::{
-        address::TransparentAddress,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
 };
@@ -692,7 +691,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         tracing::debug!("get_transparent_balances");
 
         let mut balances = HashMap::new();
@@ -710,7 +709,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 let address = txo.address;
                 let entry = balances
                     .entry(address)
-                    .or_insert((txo.key_scope, Balance::ZERO));
+                    .or_insert((Some(txo.key_scope), Balance::ZERO));
 
                 entry.1.add_spendable_value(txo.txout.value())?;
             }

@@ -41,6 +41,8 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
 
@@ -74,9 +76,12 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
-    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
-    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    super::{
+        TransactionsInvolvingAddress, TransparentBalances,
+        wallet::input_selection::ShieldingSelector,
+    },
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::address::TransparentAddress,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -2776,7 +2781,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2855,6 +2860,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: Self::AccountId,
         _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: script::Redeem,
     ) -> Result<(), Self::Error> {
         todo!()
     }
