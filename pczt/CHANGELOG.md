@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `pczt::orchard::Spend::spend_auth_sig` getter (via `getset`).
+- `pczt::roles::signer::Signer::shielded_sighash` getter.
+
 ## [0.4.1, 0.5.1] - 2026-02-26
 
 ### Fixed
