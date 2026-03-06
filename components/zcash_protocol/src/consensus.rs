@@ -287,6 +287,34 @@ pub trait NetworkConstants: private::Sealed + Clone {
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
     fn hrp_unified_ivk(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded shielded-only Revision 2 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address_r2(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded transparent-including Revision 2 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address_r2_ti(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded Revision 2 Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_fvk_r2(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded Revision 2 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_ivk_r2(&self) -> &'static str;
 }
 
 impl private::Sealed for NetworkType {}
@@ -387,6 +415,38 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
         }
     }
+
+    fn hrp_unified_address_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2,
+        }
+    }
+
+    fn hrp_unified_address_r2_ti(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS_R2_TI,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS_R2_TI,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS_R2_TI,
+        }
+    }
+
+    fn hrp_unified_fvk_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_FVK_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_FVK_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK_R2,
+        }
+    }
+
+    fn hrp_unified_ivk_r2(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_IVK_R2,
+            NetworkType::Test => testnet::HRP_UNIFIED_IVK_R2,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK_R2,
+        }
+    }
 }
 
 /// Zcash consensus parameters.
@@ -464,6 +524,22 @@ impl<P: Parameters> NetworkConstants for P {
 
     fn hrp_unified_ivk(&self) -> &'static str {
         self.network_type().hrp_unified_ivk()
+    }
+
+    fn hrp_unified_address_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_address_r2()
+    }
+
+    fn hrp_unified_address_r2_ti(&self) -> &'static str {
+        self.network_type().hrp_unified_address_r2_ti()
+    }
+
+    fn hrp_unified_fvk_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_fvk_r2()
+    }
+
+    fn hrp_unified_ivk_r2(&self) -> &'static str {
+        self.network_type().hrp_unified_ivk_r2()
     }
 }
 
