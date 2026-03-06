@@ -95,6 +95,11 @@ impl Signer {
         })
     }
 
+    /// Returns the cached shielded (Orchard + Sapling) sighash.
+    pub fn shielded_sighash(&self) -> [u8; 32] {
+        self.shielded_sighash
+    }
+
     /// Signs the transparent spend at the given index with the given spending key.
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
