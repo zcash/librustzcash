@@ -11,6 +11,14 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_protocol::address` module.
+- `zcash_protocol::address::Revision`
+- `zcash_protocol::consensus::NetworkConstants`:
+  - `fn hrp_unified_address_r1`
+  - `fn hrp_unified_fvk_r1`
+  - `fn hrp_unified_ivk_r1`
+- HRP constants for ZIP 316 Revision 1 unified encodings in
+  `constants::{mainnet, testnet, regtest}`.
 - `zcash_protocol::consensus::TxIndex`
 - `zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS`
 - `zcash_protocol::consensus::BranchId::{has_sprout, has_sapling, has_orchard}`
