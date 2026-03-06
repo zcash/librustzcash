@@ -6,9 +6,12 @@ use alloc::vec::Vec;
 use transparent::address::TransparentAddress;
 use zcash_address::{
     ConversionError, ToAddress, TryFromAddress, ZcashAddress,
-    unified::{self, Container, Encoding, Typecode},
+    unified::{self, Container, DataTypecode, Encoding, Typecode, Uitem},
 };
-use zcash_protocol::consensus::{self, NetworkType};
+use zcash_protocol::{
+    address::Revision,
+    consensus::{self, NetworkType},
+};
 
 #[cfg(feature = "sapling")]
 use sapling::PaymentAddress;
@@ -41,44 +44,49 @@ impl TryFrom<unified::Address> for UnifiedAddress {
         // receivers we support from the unknown receivers.
         for item in ua.items_as_parsed() {
             match item {
-                unified::Receiver::Orchard(data) => {
-                    #[cfg(feature = "orchard")]
-                    {
-                        orchard = Some(
-                            Option::from(orchard::Address::from_raw_address_bytes(data))
-                                .ok_or("Invalid Orchard receiver in Unified Address")?,
-                        );
+                Uitem::Data(receiver) => match receiver {
+                    unified::Receiver::Orchard(data) => {
+                        #[cfg(feature = "orchard")]
+                        {
+                            orchard = Some(
+                                Option::from(orchard::Address::from_raw_address_bytes(data))
+                                    .ok_or("Invalid Orchard receiver in Unified Address")?,
+                            );
+                        }
+                        #[cfg(not(feature = "orchard"))]
+                        {
+                            unknown.push((u32::from(Typecode::ORCHARD), data.to_vec()));
+                        }
                     }
-                    #[cfg(not(feature = "orchard"))]
-                    {
-                        unknown.push((unified::Typecode::Orchard.into(), data.to_vec()));
+
+                    unified::Receiver::Sapling(data) => {
+                        #[cfg(feature = "sapling")]
+                        {
+                            sapling = Some(
+                                PaymentAddress::from_bytes(data)
+                                    .ok_or("Invalid Sapling receiver in Unified Address")?,
+                            );
+                        }
+                        #[cfg(not(feature = "sapling"))]
+                        {
+                            unknown.push((u32::from(Typecode::SAPLING), data.to_vec()));
+                        }
                     }
-                }
 
-                unified::Receiver::Sapling(data) => {
-                    #[cfg(feature = "sapling")]
-                    {
-                        sapling = Some(
-                            PaymentAddress::from_bytes(data)
-                                .ok_or("Invalid Sapling receiver in Unified Address")?,
-                        );
+                    unified::Receiver::P2pkh(data) => {
+                        transparent = Some(TransparentAddress::PublicKeyHash(*data));
                     }
-                    #[cfg(not(feature = "sapling"))]
-                    {
-                        unknown.push((unified::Typecode::Sapling.into(), data.to_vec()));
+
+                    unified::Receiver::P2sh(data) => {
+                        transparent = Some(TransparentAddress::ScriptHash(*data));
                     }
-                }
 
-                unified::Receiver::P2pkh(data) => {
-                    transparent = Some(TransparentAddress::PublicKeyHash(*data));
-                }
-
-                unified::Receiver::P2sh(data) => {
-                    transparent = Some(TransparentAddress::ScriptHash(*data));
-                }
-
-                unified::Receiver::Unknown { typecode, data } => {
-                    unknown.push((*typecode, data.clone()));
+                    unified::Receiver::Unknown { typecode, data } => {
+                        unknown.push((*typecode, data.clone()));
+                    }
+                },
+                Uitem::Metadata(_) => {
+                    // Metadata items are currently ignored during conversion.
                 }
             }
         }
@@ -178,20 +186,19 @@ impl UnifiedAddress {
 
     /// Serializes this [`UnifiedAddress`] as a [`ZcashAddress`] for the given network.
     pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
-        let items = self
-            .unknown
-            .iter()
-            .map(|(typecode, data)| unified::Receiver::Unknown {
+        let items = self.unknown.iter().map(|(typecode, data)| {
+            Uitem::Data(unified::Receiver::Unknown {
                 typecode: *typecode,
                 data: data.clone(),
-            });
+            })
+        });
 
         #[cfg(feature = "orchard")]
         let items = items.chain(
             self.orchard
                 .as_ref()
                 .map(|addr| addr.to_raw_address_bytes())
-                .map(unified::Receiver::Orchard),
+                .map(|data| Uitem::Data(unified::Receiver::Orchard(data))),
         );
 
         #[cfg(feature = "sapling")]
@@ -199,15 +206,15 @@ impl UnifiedAddress {
             self.sapling
                 .as_ref()
                 .map(|pa| pa.to_bytes())
-                .map(unified::Receiver::Sapling),
+                .map(|data| Uitem::Data(unified::Receiver::Sapling(data))),
         );
 
         let items = items.chain(self.transparent.as_ref().map(|taddr| match taddr {
-            TransparentAddress::PublicKeyHash(data) => unified::Receiver::P2pkh(*data),
-            TransparentAddress::ScriptHash(data) => unified::Receiver::P2sh(*data),
+            TransparentAddress::PublicKeyHash(data) => Uitem::Data(unified::Receiver::P2pkh(*data)),
+            TransparentAddress::ScriptHash(data) => Uitem::Data(unified::Receiver::P2sh(*data)),
         }));
 
-        let ua = unified::Address::try_from_items(items.collect())
+        let ua = unified::Address::try_from_items(Revision::R2, items.collect())
             .expect("UnifiedAddress should only be constructed safely");
         ZcashAddress::from_unified(net, ua)
     }
@@ -221,17 +228,17 @@ impl UnifiedAddress {
     pub fn receiver_types(&self) -> Vec<Typecode> {
         let result = core::iter::empty();
         #[cfg(feature = "orchard")]
-        let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
+        let result = result.chain(self.orchard.map(|_| Typecode::ORCHARD));
         #[cfg(feature = "sapling")]
-        let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
+        let result = result.chain(self.sapling.map(|_| Typecode::SAPLING));
         let result = result.chain(self.transparent.map(|taddr| match taddr {
-            TransparentAddress::PublicKeyHash(_) => Typecode::P2pkh,
-            TransparentAddress::ScriptHash(_) => Typecode::P2sh,
+            TransparentAddress::PublicKeyHash(_) => Typecode::P2PKH,
+            TransparentAddress::ScriptHash(_) => Typecode::P2SH,
         }));
         let result = result.chain(
             self.unknown()
                 .iter()
-                .map(|(typecode, _)| Typecode::Unknown(*typecode)),
+                .map(|(typecode, _)| Typecode::Data(DataTypecode::Unknown(*typecode))),
         );
         result.collect()
     }
@@ -271,8 +278,8 @@ impl Receiver {
         match self {
             #[cfg(feature = "orchard")]
             Receiver::Orchard(addr) => {
-                let receiver = unified::Receiver::Orchard(addr.to_raw_address_bytes());
-                let ua = unified::Address::try_from_items(vec![receiver])
+                let receiver = Uitem::Data(unified::Receiver::Orchard(addr.to_raw_address_bytes()));
+                let ua = unified::Address::try_from_items(Revision::R2, vec![receiver])
                     .expect("A unified address may contain a single Orchard receiver.");
                 ZcashAddress::from_unified(net, ua)
             }

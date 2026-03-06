@@ -183,7 +183,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
     fn decode(params: &P, address: &str) -> Result<Self, String> {
         unified::Address::decode(address)
             .map_err(|e| format!("{e}"))
-            .and_then(|(network, addr)| {
+            .and_then(|(network, _revision, addr)| {
                 if params.network_type() == network {
                     UnifiedAddress::try_from(addr).map_err(|e| e.to_owned())
                 } else {
