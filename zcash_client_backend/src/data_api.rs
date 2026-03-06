@@ -132,6 +132,10 @@ pub mod wallet;
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing;
 
+/// A mapping from transparent addresses to their key scope and balance.
+#[cfg(feature = "transparent-inputs")]
+pub type TransparentBalances = HashMap<TransparentAddress, (Option<TransparentKeyScope>, Balance)>;
+
 /// The height of subtree roots in the Sapling note commitment tree.
 ///
 /// This conforms to the structure of subtree data returned by
@@ -1834,7 +1838,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         unimplemented!(
             "WalletRead::get_transparent_balances must be overridden for wallets to use the `transparent-inputs` feature"
         )

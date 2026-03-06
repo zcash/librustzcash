@@ -115,7 +115,7 @@ use {
     std::{collections::HashSet, time::SystemTime},
     zcash_client_backend::{
         data_api::{
-            Balance, TransactionsInvolvingAddress, WalletUtxo,
+            TransactionsInvolvingAddress, TransparentBalances, WalletUtxo,
             ll::wallet::generate_transparent_gap_addresses,
         },
         wallet::TransparentAddressMetadata,
@@ -900,7 +900,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,

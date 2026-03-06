@@ -23,7 +23,7 @@ use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, WalletUtxo,
+        TransactionStatusFilter, TransparentBalances, WalletUtxo,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{
@@ -1165,7 +1165,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, SqliteClientError> {
+) -> Result<TransparentBalances, SqliteClientError> {
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
     let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
@@ -1203,14 +1203,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
         let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
         let key_scope_code: i64 = row.get("key_scope")?;
-        let key_scope = KeyScope::decode(key_scope_code)?
-            .as_transparent()
-            .ok_or_else(|| {
-                SqliteClientError::CorruptedData(format!(
-                    "Invalid key scope code for transparent received output: {}",
-                    key_scope_code
-                ))
-            })?;
+        let key_scope = KeyScope::decode(key_scope_code)?.as_transparent();
 
         let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
         if value <= zip317::MARGINAL_FEE {
@@ -1262,14 +1255,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
             let taddr = TransparentAddress::decode(params, &taddr_str)?;
             let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
             let key_scope_code: i64 = row.get("key_scope")?;
-            let key_scope = KeyScope::decode(key_scope_code)?
-                .as_transparent()
-                .ok_or_else(|| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Invalid key scope code for transparent received output: {}",
-                        key_scope_code
-                    ))
-                })?;
+            let key_scope = KeyScope::decode(key_scope_code)?.as_transparent();
 
             let entry = result.entry(taddr).or_insert((key_scope, Balance::ZERO));
             if value <= zip317::MARGINAL_FEE {

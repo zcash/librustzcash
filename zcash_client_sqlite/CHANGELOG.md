@@ -35,6 +35,9 @@ workspace.
 - `zcash_client_sqlite::UtxoId` contents are now private.
 
 ### Fixed
+- `get_transparent_balances` no longer fails for standalone transparent addresses
+  that have no `TransparentKeyScope`. Previously, it would error when encountering
+  a `KeyScope` that could not be converted to a `TransparentKeyScope`.
 - Notes are now consistently treated as having "uneconomic value" if their value is less
   than **or equal to** the marginal fee. Previously, some call sites only considered
   note uneconomic if their value was less than the marginal fee.
