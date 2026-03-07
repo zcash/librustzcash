@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 use zcash_protocol::address::Revision;
 use zcash_protocol::constants;
 
@@ -47,31 +47,34 @@ pub enum Ivk {
     },
 }
 
-impl TryFrom<(u32, &[u8])> for Ivk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedItem for Ivk {
+    fn parse(typecode: Typecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
+        match typecode {
             Typecode::Data(DataTypecode::P2pkh) => data.try_into().map(Ivk::P2pkh),
             Typecode::Data(DataTypecode::P2sh) => Err(data),
             Typecode::Data(DataTypecode::Sapling) => data.try_into().map(Ivk::Sapling),
             Typecode::Data(DataTypecode::Orchard) => data.try_into().map(Ivk::Orchard),
-            Typecode::Data(DataTypecode::Unknown(_)) => Ok(Ivk::Unknown { typecode, data }),
+            Typecode::Data(DataTypecode::Unknown(tc)) => Ok(Ivk::Unknown {
+                typecode: tc,
+                data,
+            }),
             Typecode::Metadata(_) => {
                 return Err(ParseError::InvalidEncoding(format!(
                     "Unexpected metadata typecode {} in data item position",
-                    typecode
+                    u32::from(typecode)
                 )))
             }
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!(
+                "Invalid ivk for typecode {}: {:?}",
+                u32::from(typecode),
+                e,
+            ))
         })
     }
-}
 
-impl SealedItem for Ivk {
     fn typecode(&self) -> Typecode {
         match self {
             Ivk::P2pkh(_) => Typecode::Data(DataTypecode::P2pkh),

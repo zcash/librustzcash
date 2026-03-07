@@ -33,9 +33,13 @@ workspace.
   `(NetworkType, Revision, Self)`.
 - `zcash_address::unified::Container::items_as_parsed` now returns
   `&[Uitem<Self::Item>]` to represent both data and metadata items.
+- The `zcash_address::unified::private::SealedItem` trait no longer requires
+  `TryFrom<(u32, &[u8])>`. It now has a `parse(Typecode, &[u8])` method instead.
 
 ### Removed
-
+- `impl TryFrom<(u32, &[u8])>` for `zcash_address::unified::Receiver`,
+  `zcash_address::unified::Fvk`, and `zcash_address::unified::Ivk`. These
+  types are now parsed via the `SealedItem::parse` trait method instead.
 - Removed deprecated `zcash_address::Network`, use `zcash_protocol::consensus::Network` instead.
 
 ## [0.10.1] - 2025-10-18

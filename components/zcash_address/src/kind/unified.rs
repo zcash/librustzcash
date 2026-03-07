@@ -356,7 +356,8 @@ pub(crate) mod private {
     use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key (data item).
-    pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
+    pub trait SealedItem: Clone {
+        fn parse(typecode: Typecode, data: &[u8]) -> Result<Self, ParseError>;
         fn typecode(&self) -> Typecode;
         fn data(&self) -> &[u8];
 
@@ -563,7 +564,7 @@ pub(crate) mod private {
                     let typecode = Typecode::try_from(tc_val)?;
                     match typecode {
                         Typecode::Data(_) => {
-                            let data_item = Self::Item::try_from((tc_val, &data[..]))?;
+                            let data_item = Self::Item::parse(typecode, &data)?;
                             result.push(Uitem::Data(data_item));
                         }
                         Typecode::Metadata(_) => {

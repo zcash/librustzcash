@@ -6,7 +6,7 @@ use super::{
 };
 
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -18,19 +18,16 @@ pub enum Receiver {
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
-impl TryFrom<(u32, &[u8])> for Receiver {
-    type Error = ParseError;
-
-    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
-        let tc: Typecode = typecode.try_into()?;
-        match tc {
+impl SealedItem for Receiver {
+    fn parse(typecode: Typecode, addr: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
             Typecode::Data(DataTypecode::P2pkh) => addr
                 .try_into()
                 .map(Receiver::P2pkh)
                 .map_err(|e| {
                     ParseError::InvalidEncoding(format!(
                         "Invalid address for typecode {}: {}",
-                        typecode, e
+                        u32::from(typecode), e
                     ))
                 }),
             Typecode::Data(DataTypecode::P2sh) => addr
@@ -39,7 +36,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
                 .map_err(|e| {
                     ParseError::InvalidEncoding(format!(
                         "Invalid address for typecode {}: {}",
-                        typecode, e
+                        u32::from(typecode), e
                     ))
                 }),
             Typecode::Data(DataTypecode::Sapling) => addr
@@ -48,7 +45,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
                 .map_err(|e| {
                     ParseError::InvalidEncoding(format!(
                         "Invalid address for typecode {}: {}",
-                        typecode, e
+                        u32::from(typecode), e
                     ))
                 }),
             Typecode::Data(DataTypecode::Orchard) => addr
@@ -57,22 +54,20 @@ impl TryFrom<(u32, &[u8])> for Receiver {
                 .map_err(|e| {
                     ParseError::InvalidEncoding(format!(
                         "Invalid address for typecode {}: {}",
-                        typecode, e
+                        u32::from(typecode), e
                     ))
                 }),
-            Typecode::Data(DataTypecode::Unknown(_)) => Ok(Receiver::Unknown {
-                typecode,
+            Typecode::Data(DataTypecode::Unknown(tc)) => Ok(Receiver::Unknown {
+                typecode: tc,
                 data: addr.to_vec(),
             }),
             Typecode::Metadata(_) => Err(ParseError::InvalidEncoding(format!(
                 "Unexpected metadata typecode {} in data item position",
-                typecode
+                u32::from(typecode)
             ))),
         }
     }
-}
 
-impl SealedItem for Receiver {
     fn typecode(&self) -> Typecode {
         match self {
             Receiver::P2pkh(_) => Typecode::Data(DataTypecode::P2pkh),
