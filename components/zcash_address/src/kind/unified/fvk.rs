@@ -115,7 +115,7 @@ impl Container for Ufvk {
     /// Returns the FVKs contained within this UFVK, in the order they were
     /// parsed from the string encoding.
     ///
-    /// This API is for advanced usage; in most cases you should use `Ufvk::receivers`.
+    /// This API is for advanced usage; in most cases you should use `Ufvk::items`.
     fn items_as_parsed(&self) -> &[Fvk] {
         &self.0
     }
