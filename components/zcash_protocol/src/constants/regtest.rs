@@ -77,3 +77,24 @@ pub const HRP_UNIFIED_FVK: &str = "uviewregtest";
 
 /// The HRP for a Bech32m-encoded regtest Unified IVK.
 pub const HRP_UNIFIED_IVK: &str = "uivkregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified Address.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_ADDRESS_R1: &str = "urregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified FVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_FVK_R1: &str = "urviewregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified IVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_IVK_R1: &str = "urivkregtest";

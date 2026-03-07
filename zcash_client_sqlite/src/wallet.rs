@@ -853,7 +853,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         {
             return Err(SqliteClientError::AddressGeneration(
                 AddressGenerationError::ReceiverTypeNotSupported(
-                    zcash_address::unified::Typecode::P2pkh,
+                    zcash_address::unified::Typecode::P2PKH,
                 ),
             ));
         }

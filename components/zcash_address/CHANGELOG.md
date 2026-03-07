@@ -12,9 +12,34 @@ workspace.
 
 ### Added
 - `zcash_address::ZcashAddress::is_transparent_only`
+- `zcash_address::unified::DataTypecode`
+- `zcash_address::unified::MetadataTypecode`
+- `zcash_address::unified::MetadataItem`
+- `zcash_address::unified::Uitem`
+- `zcash_address::unified::Revision` (re-exported from `zcash_protocol`)
+- ZIP 316 Revision 1 support:
+  - Metadata item parsing and serialization (expiry height, expiry time).
+  - Revision-aware encoding/decoding with distinct HRPs for R0 and R1.
+  - MUST-understand metadata typecodes (0xE0-0xFC) enforced per revision.
+  - R1 Unified Addresses reject transparent receivers.
+  - R1 Unified Viewing Keys allow transparent-only configurations.
+
+### Changed
+- `zcash_address::unified::Typecode` now distinguishes data and metadata items
+  via `Typecode::Data(DataTypecode)` and `Typecode::Metadata(MetadataTypecode)`.
+- `zcash_address::unified::Encoding::try_from_items` now takes a `Revision`
+  parameter.
+- `zcash_address::unified::Encoding::decode` now returns a 3-tuple
+  `(NetworkType, Revision, Self)`.
+- `zcash_address::unified::Container::items_as_parsed` now returns
+  `&[Uitem<Self::Item>]` to represent both data and metadata items.
+- The `zcash_address::unified::private::SealedItem` trait no longer requires
+  `TryFrom<(u32, &[u8])>`. It now has a `parse(Typecode, &[u8])` method instead.
 
 ### Removed
-
+- `impl TryFrom<(u32, &[u8])>` for `zcash_address::unified::Receiver`,
+  `zcash_address::unified::Fvk`, and `zcash_address::unified::Ivk`. These
+  types are now parsed via the `SealedItem::parse` trait method instead.
 - Removed deprecated `zcash_address::Network`, use `zcash_protocol::consensus::Network` instead.
 
 ## [0.10.1] - 2025-10-18

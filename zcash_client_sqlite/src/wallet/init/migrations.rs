@@ -385,7 +385,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
         let mut rows = fvks_stmt.query([])?;
         while let Some(row) = rows.next()? {
             let ufvk_str = row.get::<_, String>(0)?;
-            let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
+            let (network, _, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!("Unable to parse UFVK: {e}"))
             })?;
 
