@@ -48,8 +48,31 @@ pub enum DataTypecode {
 }
 
 impl DataTypecode {
-    fn is_transparent(&self) -> bool {
+    pub fn is_transparent(&self) -> bool {
         matches!(self, DataTypecode::P2pkh | DataTypecode::P2sh)
+    }
+
+    pub fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
+        use DataTypecode::*;
+        match (a, b) {
+            (Orchard, Orchard) | (Sapling, Sapling) | (P2sh, P2sh) | (P2pkh, P2pkh) => {
+                cmp::Ordering::Equal
+            }
+
+            (Unknown(a), Unknown(b)) => b.cmp(a),
+
+            (Orchard, _) => cmp::Ordering::Less,
+            (_, Orchard) => cmp::Ordering::Greater,
+
+            (Sapling, _) => cmp::Ordering::Less,
+            (_, Sapling) => cmp::Ordering::Greater,
+
+            (P2sh, _) => cmp::Ordering::Less,
+            (_, P2sh) => cmp::Ordering::Greater,
+
+            (P2pkh, _) => cmp::Ordering::Less,
+            (_, P2pkh) => cmp::Ordering::Greater,
+        }
     }
 }
 
@@ -379,27 +402,28 @@ pub(crate) mod private {
     use corez::io::Write;
 
     use super::{
-        METADATA_TYPECODE_MAX, METADATA_TYPECODE_MIN, MUST_UNDERSTAND_METADATA_MIN, MetadataItem,
-        PADDING_LEN, ParseError, Typecode, Uitem,
+        MUST_UNDERSTAND_METADATA_MIN, MetadataItem, MetadataTypecode, PADDING_LEN, ParseError,
+        Typecode, Uitem,
     };
     use zcash_encoding::CompactSize;
     use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key (data item).
-    pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
-        fn typecode(&self) -> Typecode;
+    pub trait SealedItem: Clone {
+        fn parse(typecode: super::DataTypecode, data: &[u8]) -> Result<Self, ParseError>;
+        fn typecode(&self) -> super::DataTypecode;
         fn data(&self) -> &[u8];
 
         fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::preference_order(&a.typecode(), &b.typecode()) {
+            match super::DataTypecode::preference_order(&a.typecode(), &b.typecode()) {
                 cmp::Ordering::Equal => a.data().cmp(b.data()),
                 res => res,
             }
         }
 
         fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::encoding_order(&a.typecode(), &b.typecode()) {
+            match u32::from(a.typecode()).cmp(&u32::from(b.typecode())) {
                 cmp::Ordering::Equal => a.data().cmp(b.data()),
                 res => res,
             }
@@ -597,40 +621,12 @@ pub(crate) mod private {
             while cursor.position() < encoded.len().try_into().unwrap() {
                 let (tc_val, data) = read_raw_item(&mut cursor)?;
 
-                // Classify by typecode range.
-                if (METADATA_TYPECODE_MIN..=METADATA_TYPECODE_MAX).contains(&tc_val) {
-                    // Metadata typecode range (0xC0..=0xFC).
-                    if tc_val >= MUST_UNDERSTAND_METADATA_MIN {
-                        // MUST-understand metadata (0xE0..=0xFC).
-                        match revision {
-                            Revision::R0 => {
-                                // R0 containers must not contain MUST-understand metadata.
-                                return Err(ParseError::NotUnderstood(tc_val));
-                            }
-                            Revision::R2 => {
-                                // Parse known MUST-understand typecodes.
-                                let meta = parse_must_understand_metadata(tc_val, &data)?;
-                                result.push(Uitem::Metadata(meta));
-                            }
-                        }
-                    } else {
-                        // SHOULD-understand (unknown) metadata: valid in both R0 and R2.
-                        result.push(Uitem::Metadata(MetadataItem::Unknown {
-                            typecode: tc_val,
-                            data,
-                        }));
+                match Typecode::try_from(tc_val)? {
+                    Typecode::Data(dtc) => {
+                        result.push(Uitem::Data(Self::Item::parse(dtc, &data)?));
                     }
-                } else {
-                    // Data typecode (0x00..=0xBF or 0xFD+).
-                    let typecode = Typecode::try_from(tc_val)?;
-                    match typecode {
-                        Typecode::Data(_) => {
-                            let data_item = Self::Item::try_from((tc_val, &data[..]))?;
-                            result.push(Uitem::Data(data_item));
-                        }
-                        Typecode::Metadata(_) => {
-                            unreachable!("metadata typecodes handled above")
-                        }
+                    Typecode::Metadata(mtc) => {
+                        result.push(Uitem::Metadata(parse_metadata_item(revision, mtc, data)?));
                     }
                 }
             }
@@ -652,7 +648,7 @@ pub(crate) mod private {
             let mut prev_code: Option<u32> = None;
             for item in &items {
                 let t = match item {
-                    Uitem::Data(d) => d.typecode(),
+                    Uitem::Data(d) => Typecode::Data(d.typecode()),
                     Uitem::Metadata(m) => m.combined_typecode(),
                 };
                 let t_code = Some(t.typecode_value());
@@ -666,7 +662,9 @@ pub(crate) mod private {
                 if let Uitem::Data(d) = item {
                     has_data_item = true;
                     let dt = d.typecode();
-                    if dt == Typecode::P2SH && prev_code == Some(u32::from(Typecode::P2PKH)) {
+                    if dt == super::DataTypecode::P2sh
+                        && prev_code == Some(u32::from(super::DataTypecode::P2pkh))
+                    {
                         return Err(ParseError::BothP2phkAndP2sh);
                     }
 
@@ -728,37 +726,48 @@ pub(crate) mod private {
         }
     }
 
-    /// Parse a MUST-understand metadata item (typecode 0xE0..=0xFC).
-    fn parse_must_understand_metadata(tc: u32, data: &[u8]) -> Result<MetadataItem, ParseError> {
-        match tc {
-            0xE0 => {
-                // ExpiryHeight: exactly 4 bytes, little-endian.
-                if data.len() != 4 {
-                    return Err(ParseError::InvalidMetadataLength {
-                        typecode: tc,
-                        expected: 4,
-                        actual: data.len(),
-                    });
-                }
-                let height = u32::from_le_bytes(data.try_into().unwrap());
-                Ok(MetadataItem::ExpiryHeight(height))
+    /// Parses a metadata item, enforcing the MUST-understand rules for the container's
+    /// revision.
+    fn parse_metadata_item(
+        revision: Revision,
+        typecode: MetadataTypecode,
+        data: Vec<u8>,
+    ) -> Result<MetadataItem, ParseError> {
+        let tc_val = u32::from(typecode);
+        // A Revision 0 container must not contain any metadata item in the
+        // MUST-understand range.
+        if revision == Revision::R0 && tc_val >= MUST_UNDERSTAND_METADATA_MIN {
+            return Err(ParseError::NotUnderstood(tc_val));
+        }
+        match typecode {
+            MetadataTypecode::ExpiryHeight => {
+                let data: [u8; 4] =
+                    data.as_slice()
+                        .try_into()
+                        .map_err(|_| ParseError::InvalidMetadataLength {
+                            typecode: tc_val,
+                            expected: 4,
+                            actual: data.len(),
+                        })?;
+                Ok(MetadataItem::ExpiryHeight(u32::from_le_bytes(data)))
             }
-            0xE1 => {
-                // ExpiryTime: exactly 8 bytes, little-endian.
-                if data.len() != 8 {
-                    return Err(ParseError::InvalidMetadataLength {
-                        typecode: tc,
-                        expected: 8,
-                        actual: data.len(),
-                    });
-                }
-                let time = u64::from_le_bytes(data.try_into().unwrap());
-                Ok(MetadataItem::ExpiryTime(time))
+            MetadataTypecode::ExpiryTime => {
+                let data: [u8; 8] =
+                    data.as_slice()
+                        .try_into()
+                        .map_err(|_| ParseError::InvalidMetadataLength {
+                            typecode: tc_val,
+                            expected: 8,
+                            actual: data.len(),
+                        })?;
+                Ok(MetadataItem::ExpiryTime(u64::from_le_bytes(data)))
             }
-            _ => {
-                // Unknown MUST-understand: reject.
+            MetadataTypecode::Unknown(tc) if tc >= MUST_UNDERSTAND_METADATA_MIN => {
+                // An item in the MUST-understand range that this implementation does not
+                // recognize renders the whole container unsupported.
                 Err(ParseError::NotUnderstood(tc))
             }
+            MetadataTypecode::Unknown(tc) => Ok(MetadataItem::Unknown { typecode: tc, data }),
         }
     }
 }
@@ -791,17 +800,7 @@ pub trait Encoding: private::SealedContainer {
         revision: Revision,
         mut items: Vec<Uitem<Self::Item>>,
     ) -> Result<Self, ParseError> {
-        items.sort_unstable_by(|a, b| {
-            let tc_a = match a {
-                Uitem::Data(d) => d.typecode().typecode_value(),
-                Uitem::Metadata(m) => m.combined_typecode().typecode_value(),
-            };
-            let tc_b = match b {
-                Uitem::Data(d) => d.typecode().typecode_value(),
-                Uitem::Metadata(m) => m.combined_typecode().typecode_value(),
-            };
-            tc_a.cmp(&tc_b)
-        });
+        items.sort_unstable_by(Uitem::encoding_order);
         Self::try_from_items_internal(revision, items)
     }
 
