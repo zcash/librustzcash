@@ -4,7 +4,7 @@ use zcash_protocol::{constants, PoolType};
 use super::{private::SealedItem, DataTypecode, ParseError, Typecode, Uitem};
 
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -16,64 +16,34 @@ pub enum Receiver {
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
-impl TryFrom<(u32, &[u8])> for Receiver {
-    type Error = ParseError;
-
-    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
-        let tc: Typecode = typecode.try_into()?;
-        match tc {
-            Typecode::Data(DataTypecode::P2pkh) => {
-                addr.try_into().map(Receiver::P2pkh).map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Invalid address for typecode {}: {}",
-                        typecode, e
-                    ))
-                })
-            }
-            Typecode::Data(DataTypecode::P2sh) => {
-                addr.try_into().map(Receiver::P2sh).map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Invalid address for typecode {}: {}",
-                        typecode, e
-                    ))
-                })
-            }
-            Typecode::Data(DataTypecode::Sapling) => {
-                addr.try_into().map(Receiver::Sapling).map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Invalid address for typecode {}: {}",
-                        typecode, e
-                    ))
-                })
-            }
-            Typecode::Data(DataTypecode::Orchard) => {
-                addr.try_into().map(Receiver::Orchard).map_err(|e| {
-                    ParseError::InvalidEncoding(format!(
-                        "Invalid address for typecode {}: {}",
-                        typecode, e
-                    ))
-                })
-            }
-            Typecode::Data(DataTypecode::Unknown(_)) => Ok(Receiver::Unknown {
-                typecode,
+impl SealedItem for Receiver {
+    fn parse(typecode: DataTypecode, addr: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
+            DataTypecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
+            DataTypecode::P2sh => addr.try_into().map(Receiver::P2sh),
+            DataTypecode::Sapling => addr.try_into().map(Receiver::Sapling),
+            DataTypecode::Orchard => addr.try_into().map(Receiver::Orchard),
+            DataTypecode::Unknown(tc) => Ok(Receiver::Unknown {
+                typecode: tc,
                 data: addr.to_vec(),
             }),
-            Typecode::Metadata(_) => Err(ParseError::InvalidEncoding(format!(
-                "Unexpected metadata typecode {} in data item position",
-                typecode
-            ))),
         }
+        .map_err(|e| {
+            ParseError::InvalidEncoding(format!(
+                "Invalid address for typecode {}: {}",
+                u32::from(typecode),
+                e
+            ))
+        })
     }
-}
 
-impl SealedItem for Receiver {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Receiver::P2pkh(_) => Typecode::Data(DataTypecode::P2pkh),
-            Receiver::P2sh(_) => Typecode::Data(DataTypecode::P2sh),
-            Receiver::Sapling(_) => Typecode::Data(DataTypecode::Sapling),
-            Receiver::Orchard(_) => Typecode::Data(DataTypecode::Orchard),
-            Receiver::Unknown { typecode, .. } => Typecode::Data(DataTypecode::Unknown(*typecode)),
+            Receiver::P2pkh(_) => DataTypecode::P2pkh,
+            Receiver::P2sh(_) => DataTypecode::P2sh,
+            Receiver::Sapling(_) => DataTypecode::Sapling,
+            Receiver::Orchard(_) => DataTypecode::Orchard,
+            Receiver::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -402,7 +372,8 @@ mod tests {
 
     use proptest::{prelude::*, sample::select};
 
-    use super::{Address, ParseError, Receiver, Typecode};
+    use super::{Address, ParseError, Receiver};
+    use crate::unified::Typecode;
 
     proptest! {
         #[test]

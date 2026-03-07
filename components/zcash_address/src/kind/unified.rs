@@ -44,8 +44,31 @@ pub enum DataTypecode {
 }
 
 impl DataTypecode {
-    fn is_transparent(&self) -> bool {
+    pub fn is_transparent(&self) -> bool {
         matches!(self, DataTypecode::P2pkh | DataTypecode::P2sh)
+    }
+
+    pub fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
+        use DataTypecode::*;
+        match (a, b) {
+            (Orchard, Orchard) | (Sapling, Sapling) | (P2sh, P2sh) | (P2pkh, P2pkh) => {
+                cmp::Ordering::Equal
+            }
+
+            (Unknown(a), Unknown(b)) => b.cmp(a),
+
+            (Orchard, _) => cmp::Ordering::Less,
+            (_, Orchard) => cmp::Ordering::Greater,
+
+            (Sapling, _) => cmp::Ordering::Less,
+            (_, Sapling) => cmp::Ordering::Greater,
+
+            (P2sh, _) => cmp::Ordering::Less,
+            (_, P2sh) => cmp::Ordering::Greater,
+
+            (P2pkh, _) => cmp::Ordering::Less,
+            (_, P2pkh) => cmp::Ordering::Greater,
+        }
     }
 }
 
@@ -362,19 +385,20 @@ pub(crate) mod private {
     use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key (data item).
-    pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
-        fn typecode(&self) -> Typecode;
+    pub trait SealedItem: Clone {
+        fn parse(typecode: super::DataTypecode, data: &[u8]) -> Result<Self, ParseError>;
+        fn typecode(&self) -> super::DataTypecode;
         fn data(&self) -> &[u8];
 
         fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::preference_order(&a.typecode(), &b.typecode()) {
+            match super::DataTypecode::preference_order(&a.typecode(), &b.typecode()) {
                 cmp::Ordering::Equal => a.data().cmp(b.data()),
                 res => res,
             }
         }
 
         fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::encoding_order(&a.typecode(), &b.typecode()) {
+            match u32::from(a.typecode()).cmp(&u32::from(b.typecode())) {
                 cmp::Ordering::Equal => a.data().cmp(b.data()),
                 res => res,
             }
@@ -601,10 +625,9 @@ pub(crate) mod private {
                     }
                 } else {
                     // Data typecode (0x00..=0xBF or 0xFD+).
-                    let typecode = Typecode::try_from(tc_val)?;
-                    match typecode {
-                        Typecode::Data(_) => {
-                            let data_item = Self::Item::try_from((tc_val, &data[..]))?;
+                    match Typecode::try_from(tc_val)? {
+                        Typecode::Data(dtc) => {
+                            let data_item = Self::Item::parse(dtc, &data)?;
                             result.push(Uitem::Data(data_item));
                         }
                         Typecode::Metadata(_) => {
@@ -631,7 +654,7 @@ pub(crate) mod private {
             let mut prev_code: Option<u32> = None;
             for item in &items {
                 let t = match item {
-                    Uitem::Data(d) => d.typecode(),
+                    Uitem::Data(d) => Typecode::Data(d.typecode()),
                     Uitem::Metadata(m) => m.combined_typecode(),
                 };
                 let t_code = Some(t.typecode_value());
@@ -645,7 +668,9 @@ pub(crate) mod private {
                 if let Uitem::Data(d) = item {
                     has_data_item = true;
                     let dt = d.typecode();
-                    if dt == Typecode::P2SH && prev_code == Some(u32::from(Typecode::P2PKH)) {
+                    if dt == super::DataTypecode::P2sh
+                        && prev_code == Some(u32::from(super::DataTypecode::P2pkh))
+                    {
                         return Err(ParseError::BothP2phkAndP2sh);
                     }
 
@@ -704,8 +729,8 @@ pub(crate) mod private {
                     // zu: must have at least one shielded receiver
                     let has_shielded = result.items_as_parsed().iter().any(|item| {
                         matches!(item, Uitem::Data(d) if matches!(d.typecode(),
-                            Typecode::Data(super::DataTypecode::Sapling)
-                            | Typecode::Data(super::DataTypecode::Orchard)))
+                            super::DataTypecode::Sapling
+                            | super::DataTypecode::Orchard))
                     });
                     if !has_shielded {
                         return Err(ParseError::OnlyTransparent);
@@ -783,11 +808,11 @@ pub trait Encoding: private::SealedContainer {
     ) -> Result<Self, ParseError> {
         items.sort_unstable_by(|a, b| {
             let tc_a = match a {
-                Uitem::Data(d) => d.typecode().typecode_value(),
+                Uitem::Data(d) => u32::from(d.typecode()),
                 Uitem::Metadata(m) => m.combined_typecode().typecode_value(),
             };
             let tc_b = match b {
-                Uitem::Data(d) => d.typecode().typecode_value(),
+                Uitem::Data(d) => u32::from(d.typecode()),
                 Uitem::Metadata(m) => m.combined_typecode().typecode_value(),
             };
             tc_a.cmp(&tc_b)

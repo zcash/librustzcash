@@ -1,14 +1,11 @@
 use alloc::vec::Vec;
-use core::{
-    convert::{TryFrom, TryInto},
-    fmt,
-};
+use core::{convert::TryInto, fmt};
 use zcash_protocol::address::Revision;
 use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
-    Container, DataTypecode, Encoding, ParseError, Typecode, Uitem,
+    Container, DataTypecode, Encoding, ParseError, Uitem,
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -60,37 +57,31 @@ impl fmt::Debug for Fvk {
     }
 }
 
-impl TryFrom<(u32, &[u8])> for Fvk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedItem for Fvk {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
-            Typecode::Data(DataTypecode::P2pkh) => data.try_into().map(Fvk::P2pkh),
-            Typecode::Data(DataTypecode::P2sh) => Err(data),
-            Typecode::Data(DataTypecode::Sapling) => data.try_into().map(Fvk::Sapling),
-            Typecode::Data(DataTypecode::Orchard) => data.try_into().map(Fvk::Orchard),
-            Typecode::Data(DataTypecode::Unknown(_)) => Ok(Fvk::Unknown { typecode, data }),
-            Typecode::Metadata(_) => {
-                return Err(ParseError::InvalidEncoding(format!(
-                    "Unexpected metadata typecode {} in data item position",
-                    typecode
-                )))
-            }
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Fvk::P2pkh),
+            DataTypecode::P2sh => Err(data),
+            DataTypecode::Sapling => data.try_into().map(Fvk::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Fvk::Orchard),
+            DataTypecode::Unknown(tc) => Ok(Fvk::Unknown { typecode: tc, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!(
+                "Invalid fvk for typecode {}: {:?}",
+                u32::from(typecode),
+                e,
+            ))
         })
     }
-}
 
-impl SealedItem for Fvk {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Fvk::P2pkh(_) => Typecode::Data(DataTypecode::P2pkh),
-            Fvk::Sapling(_) => Typecode::Data(DataTypecode::Sapling),
-            Fvk::Orchard(_) => Typecode::Data(DataTypecode::Orchard),
-            Fvk::Unknown { typecode, .. } => Typecode::Data(DataTypecode::Unknown(*typecode)),
+            Fvk::P2pkh(_) => DataTypecode::P2pkh,
+            Fvk::Sapling(_) => DataTypecode::Sapling,
+            Fvk::Orchard(_) => DataTypecode::Orchard,
+            Fvk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -183,10 +174,10 @@ mod tests {
 
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
-    use super::{Fvk, ParseError, Typecode, Ufvk};
+    use super::{Fvk, ParseError, Ufvk};
     use crate::kind::unified::{
         private::{SealedContainer, SealedItem},
-        Container, DataTypecode, Encoding, MetadataItem, Revision, Uitem,
+        Container, DataTypecode, Encoding, MetadataItem, Revision, Typecode, Uitem,
     };
     use zcash_protocol::consensus::NetworkType;
 
