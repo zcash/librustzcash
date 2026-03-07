@@ -87,7 +87,7 @@ use {
 #[cfg(not(feature = "orchard"))]
 use zcash_address::{
     ZcashAddress,
-    unified::{self, Encoding as _, Receiver},
+    unified::{self, Encoding as _, Receiver, Revision, Uitem},
 };
 
 // `ProposalError` also reaches this module through the `transparent-inputs` group below,
@@ -1260,10 +1260,13 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
         Address::Sapling(addr) => addr.to_bytes(),
         _ => panic!("expected a Sapling address"),
     };
-    let ua = unified::Address::try_from_items(vec![
-        Receiver::Sapling(sapling_receiver),
-        Receiver::Orchard([0xab; 43]),
-    ])
+    let ua = unified::Address::try_from_items(
+        Revision::R0,
+        vec![
+            Uitem::Data(Receiver::Sapling(sapling_receiver)),
+            Uitem::Data(Receiver::Orchard([0xab; 43])),
+        ],
+    )
     .unwrap();
     let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
@@ -1317,7 +1320,11 @@ pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
 
     // Without the `orchard` feature, the Orchard receiver's contents are not parsed,
     // so arbitrary receiver bytes suffice.
-    let ua = unified::Address::try_from_items(vec![Receiver::Orchard([0xab; 43])]).unwrap();
+    let ua = unified::Address::try_from_items(
+        Revision::R0,
+        vec![Uitem::Data(Receiver::Orchard([0xab; 43]))],
+    )
+    .unwrap();
     let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;

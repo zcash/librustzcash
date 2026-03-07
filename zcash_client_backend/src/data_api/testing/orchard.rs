@@ -79,6 +79,8 @@ impl ShieldedPoolTester for OrchardPoolTester {
             Some(fvk.address_at(0u32, zip32::Scope::External)),
             None,
             None,
+            None,
+            None,
         )
         .unwrap()
         .into()
@@ -198,7 +200,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                             note,
                             pool: orchard::ValuePool::Orchard,
                         },
-                        UnifiedAddress::from_receivers(Some(addr), None, None)
+                        UnifiedAddress::from_receivers(Some(addr), None, None, None, None)
                             .unwrap()
                             .into(),
                         MemoBytes::from_bytes(&memo).expect("correct length"),

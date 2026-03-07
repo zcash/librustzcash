@@ -2033,7 +2033,7 @@ mod tests {
     ) -> Result<Step<u32>, ProposalError> {
         let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
         let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
-        let ua = UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap();
+        let ua = UnifiedAddress::from_receivers(Some(recipient), None, None, None, None).unwrap();
         let to = Address::Unified(ua).to_zcash_address(&Network::TestNetwork);
 
         let request = TransactionRequest::new(vec![

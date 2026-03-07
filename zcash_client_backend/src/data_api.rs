@@ -4963,6 +4963,8 @@ mod tests {
             Some(orchard).flatten(),
             Some(sapling).flatten(),
             transparent,
+            None,
+            None,
         )
         .expect("test UA must be valid")
         .into()
@@ -5174,6 +5176,8 @@ mod tests {
         let frankenstein = UnifiedAddress::from_receivers(
             Some(ua2.orchard().copied().expect("orchard receiver")),
             Some(ua1.sapling().copied().expect("sapling receiver")),
+            None,
+            None,
             None,
         )
         .expect("sapling+orchard UA must be valid");
