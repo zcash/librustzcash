@@ -185,7 +185,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
             .map_err(|e| format!("{e}"))
             .and_then(|(network, _revision, addr)| {
                 if params.network_type() == network {
-                    UnifiedAddress::try_from(addr).map_err(|e| e.to_owned())
+                    UnifiedAddress::try_from(addr).map_err(|e: &str| e.to_owned())
                 } else {
                     Err(format!(
                         "Address {address} is for a different network: {network:?}"

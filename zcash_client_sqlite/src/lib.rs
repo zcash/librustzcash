@@ -3063,6 +3063,10 @@ mod tests {
             full_uivk.sapling().clone(),
             #[cfg(feature = "orchard")]
             None,
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK as an IVK-only account.
@@ -3177,6 +3181,10 @@ mod tests {
             None,
             full_uivk.sapling().clone(),
             None, // no Orchard
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK.
