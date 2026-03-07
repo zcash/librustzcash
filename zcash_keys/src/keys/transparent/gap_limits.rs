@@ -166,7 +166,7 @@ fn generate_external_address(
     let transparent_address = uivk
         .transparent()
         .as_ref()
-        .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
+        .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH))?
         .derive_address(index)
         .map_err(|_| {
             AddressGenerationError::InvalidTransparentChildIndex(DiversifierIndex::from(index))
@@ -211,7 +211,7 @@ pub fn generate_address_list(
         TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL
     ) && require_key
     {
-        return Err(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh));
+        return Err(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH));
     } else {
         // No addresses to generate
         return Ok(vec![]);
