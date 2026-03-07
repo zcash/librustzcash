@@ -70,6 +70,8 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
                 None,
                 Some(*pa),
                 None,
+                None,
+                None,
             );
             synthesized_ua.as_ref()
         }

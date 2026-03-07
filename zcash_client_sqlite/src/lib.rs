@@ -4540,6 +4540,10 @@ mod tests {
             full_uivk.sapling().clone(),
             #[cfg(feature = "orchard")]
             None,
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK as an IVK-only account.
@@ -4652,6 +4656,10 @@ mod tests {
             None,
             full_uivk.sapling().clone(),
             None, // no Orchard
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         // Import the sapling-only IVK.
@@ -4972,8 +4980,14 @@ mod tests {
             .cloned()
             .expect("orchard receiver must be present");
         let address = Address::Unified(
-            UnifiedAddress::from_receivers(Some(o_external), None, Some(transparent_address))
-                .expect("orchard+transparent UA must be valid"),
+            UnifiedAddress::from_receivers(
+                Some(o_external),
+                None,
+                Some(transparent_address),
+                None,
+                None,
+            )
+            .expect("orchard+transparent UA must be valid"),
         );
 
         // Asserts that the unique possible account is found anyways, based on the transparent address,
@@ -5017,12 +5031,12 @@ mod tests {
             {
                 #[cfg(feature = "orchard")]
                 {
-                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None, None, None)
                 }
 
                 #[cfg(not(feature = "orchard"))]
                 {
-                    UnifiedAddress::from_receivers(Some(sapling_receiver), None)
+                    UnifiedAddress::from_receivers(Some(sapling_receiver), None, None, None)
                 }
             }
             .expect("sapling-only UA must be valid"),
@@ -5067,7 +5081,7 @@ mod tests {
             .expect("UA must have orchard receiver");
 
         let address = Address::Unified(
-            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None)
+            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None, None, None)
                 .expect("orchard-only UA must be valid"),
         );
 
@@ -5121,6 +5135,8 @@ mod tests {
             UnifiedAddress::from_receivers(
                 Some(orchard_receiver_2),
                 Some(sapling_receiver_1),
+                None,
+                None,
                 None,
             )
             .expect("sapling+orchard UA must be valid"),
