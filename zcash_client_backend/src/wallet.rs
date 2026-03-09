@@ -9,7 +9,7 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use zcash_address::ZcashAddress;
-use zcash_keys::keys::OutgoingViewingKey;
+use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
@@ -368,7 +368,29 @@ pub enum Note {
     Orchard(orchard::Note),
 }
 
+impl From<sapling::Note> for Note {
+    fn from(note: sapling::Note) -> Self {
+        Note::Sapling(note)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl From<orchard::Note> for Note {
+    fn from(note: orchard::Note) -> Self {
+        Note::Orchard(note)
+    }
+}
+
 impl Note {
+    /// Returns the receiver of this note.
+    pub fn receiver(&self) -> Receiver {
+        match self {
+            Note::Sapling(n) => Receiver::Sapling(n.recipient()),
+            #[cfg(feature = "orchard")]
+            Note::Orchard(n) => Receiver::Orchard(n.recipient()),
+        }
+    }
+
     pub fn value(&self) -> Zatoshis {
         match self {
             Note::Sapling(n) => n.value().inner().try_into().expect(

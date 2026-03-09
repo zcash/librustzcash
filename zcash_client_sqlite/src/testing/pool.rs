@@ -305,6 +305,13 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn truncate_to_chain_state<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::truncate_to_chain_state::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),

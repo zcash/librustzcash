@@ -2,7 +2,7 @@
 
 use snafu::prelude::*;
 
-use crate::Value;
+use crate::parse::Value;
 
 /// Errors discovered during parsing.
 #[derive(Debug, Snafu)]
@@ -60,8 +60,8 @@ pub enum ParseError<'a> {
     #[snafu(display("Invalid parameter key '{key}'."))]
     InvalidParameterKey { key: String },
 
-    /// Unexpected leftover parsing input.
-    #[snafu(display("Unexpected leftover parsing input '{input}'"))]
+    /// Unexpected leftover input after parsing.
+    #[snafu(display("Unexpected leftover input: {input}"))]
     UnexpectedLeftoverInput { input: &'a str },
 }
 
@@ -151,4 +151,128 @@ pub enum ValidationError {
     Erc55Validation {
         reason: Erc55ValidationFailureReason,
     },
+}
+
+/// Errors encountered while converting [`RawTransactionRequest`] into
+/// [`Erc20Request`].
+///
+/// [`RawTransactionRequest`]: crate::parse::RawTransactionRequest
+/// [`Erc20Request`]: crate::Erc20Request
+#[derive(Debug, Snafu)]
+#[non_exhaustive]
+#[snafu(visibility(pub(crate)))]
+pub enum Erc20Error {
+    #[snafu(display("Transaction is missing the function name"))]
+    MissingFn,
+
+    #[snafu(display("Expected function name to be 'transfer', saw '{seen}'"))]
+    FnName { seen: String },
+
+    #[snafu(display("Incorrect number of ABI parameters, expected 2, saw '{seen}'"))]
+    AbiParameterLen { seen: usize },
+
+    #[snafu(display(
+        r#"Incorrect ABI parameter names, \
+        expected "address" and "uint256" - saw "{param1}" and "{param2}""#
+    ))]
+    AbiParameterName { param1: String, param2: String },
+
+    #[snafu(display("The 'address' parameter value is not an address"))]
+    AbiParameterAddressIsNotAnAddress,
+
+    #[snafu(display("The 'uint256' parameter is not a number"))]
+    AbiParameterUint256,
+
+    #[snafu(display("The 'uint256' parameter could not be converted: {source}"))]
+    AbiParameterUint256Conversion { source: std::num::TryFromIntError },
+}
+
+/// Errors encountered while converting [`RawTransactionRequest`] into [`NativeRequest`].
+///
+/// [`RawTransactionRequest`]: crate::parse::RawTransactionRequest
+/// [`NativeRequest`]: crate::NativeRequest
+#[derive(Debug, Snafu)]
+#[non_exhaustive]
+#[snafu(visibility(pub(crate)))]
+pub enum NativeTransferError {
+    #[snafu(display("Has a function name"))]
+    HasFunctionName,
+
+    #[snafu(display("Request has ABI parameters"))]
+    HasAbiParameters,
+
+    #[snafu(display("Parameter '{key}' is not a number"))]
+    ParameterNotNumber { key: String },
+
+    #[snafu(display("Parameter '{key}' value is invalid: {source}"))]
+    ParameterInvalid {
+        key: String,
+        source: ValidationError,
+    },
+
+    #[snafu(display("Invalid chain ID: {source}"))]
+    ChainIdInvalid { source: ValidationError },
+
+    #[snafu(display("Invalid recipient address: {source}"))]
+    RecipientAddressInvalid { source: ValidationError },
+}
+
+/// Top-level errors for the transaction request API.
+#[derive(Debug, Snafu)]
+#[snafu(visibility(pub(crate)))]
+#[non_exhaustive]
+pub enum Error {
+    /// An error occurred during parsing.
+    #[snafu(display("Parsing error: {message}"))]
+    Parse { message: String },
+
+    /// An error occurred during validation.
+    #[snafu(display("Validation error: {source}"))]
+    Validation { source: ValidationError },
+
+    /// The provided address string is not a valid Ethereum address.
+    #[snafu(display("Invalid Ethereum address: {address}"))]
+    InvalidAddress { address: String },
+
+    /// The request is not a valid ERC-20 transfer.
+    #[snafu(display("Not an ERC-20 transfer request: {source}"))]
+    NotErc20Transfer { source: Erc20Error },
+
+    /// The request is not a valid native transfer.
+    #[snafu(display("Not a native transfer request: {source}"))]
+    NotNativeTransfer { source: NativeTransferError },
+}
+
+impl From<ValidationError> for Error {
+    fn from(source: ValidationError) -> Self {
+        Error::Validation { source }
+    }
+}
+
+impl From<Erc20Error> for Error {
+    fn from(source: Erc20Error) -> Self {
+        Error::NotErc20Transfer { source }
+    }
+}
+
+impl From<NativeTransferError> for Error {
+    fn from(source: NativeTransferError) -> Self {
+        Error::NotNativeTransfer { source }
+    }
+}
+
+impl From<ParseError<'_>> for Error {
+    fn from(value: ParseError<'_>) -> Self {
+        Error::Parse {
+            message: value.to_string(),
+        }
+    }
+}
+
+impl<'a> From<nom::Err<ParseError<'a>>> for Error {
+    fn from(value: nom::Err<ParseError<'a>>) -> Self {
+        Error::Parse {
+            message: value.to_string(),
+        }
+    }
 }

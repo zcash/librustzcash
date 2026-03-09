@@ -3,9 +3,9 @@
 //!
 //! [`BIP 44`]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 
+use alloc::vec::Vec;
 use core::hash::Hash;
 use core::ops::Range;
-use std::vec::Vec;
 
 use crate::{
     address::Address,

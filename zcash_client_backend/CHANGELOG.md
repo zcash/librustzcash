@@ -11,8 +11,11 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::ReceivedTransactionOutput`
-- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::confirmations_until_spendable`
+- `zcash_client_backend::data_api`:
+  - `ll` module
+  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
+  - `DecryptableTransaction`
+  - `ReceivedTransactionOutput`
 - in `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
   - Added types `CompactTxIn`, `TxOut`
@@ -23,9 +26,24 @@ workspace.
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `impl From<zcash_client_backend::proposal::ProposalError> for zcash_client_backend::data_api::wallet::input_selection::InputSelectorError<...>`
 - `zcash_client_backend::fees::MetaSource`
-- `zcash_client_backend::data_api::ll`
+- `zcash_client_backend::wallet`:
+  - `transparent` module, behind the `transparent-inputs` feature flag.
+  - `Note::receiver`
+  - `impl From<sapling_crypto::Note> for Note`
+  - `impl From<orchard::Note> for Note`
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
+  an additional `proposed_version: Option<TxVersion>` parameter under the `unstable`
+  feature flag, allowing callers to request a specific transaction version.
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `propose_standard_transfer_to_address` now take an additional
+  `proposed_version: Option<TxVersion>` parameter under the `unstable` feature
+  flag. When set, input selection avoids pools incompatible with the requested
+  transaction version.
+- `InputSelector::propose_transaction` trait method takes an additional
+  `proposed_version: Option<TxVersion>` parameter under the `unstable` feature
+  flag.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
 - Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
   changes:
@@ -52,7 +70,9 @@ workspace.
     that would otherwise only be recoverable using the wallet's internal
     IVK.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
-- `zcash_client_backend::proposal::ProposalError` has added variant `PaymentAmountMissing`
+- `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
+  and `IncompatibleTxVersion`
+- `zcash_client_backend::data_api::WalletWrite` has added method `truncate_to_chain_state`.
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
   `zcash_client_backend::data_api::InputSource`.
@@ -69,10 +89,21 @@ workspace.
 - Type parameters to `zcash_client_backend::data_api::DecryptedTransaction`
   have been modified. It now abstracts over the transaction type, to permit
   use with partial or compact transaction data instead of full transactions.
+- The semantics of `zcash_client_backend::data_api::NoteFilter::ExceedsMinValue`
+  have changed; this filter now selects notes having value strictly greater
+  than the provided minimum value, instead of notes having value greater
+  than or equal to the provided minimum value. This fixes an inconsistency
+  in the various tests related to notes having no economic value in
+  `zcash_client_sqlite`.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use
   `zcash_keys::keys::transparent::GapLimits` instead.
+
+## [0.20.1, 0.21.1] - 2026-02-26
+
+### Fixed
+- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
 
 ## [0.21.0] - 2025-11-05
 

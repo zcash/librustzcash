@@ -250,7 +250,7 @@ impl Balance {
         Ok(())
     }
 
-    /// Returns the value in the account of notes that have value less than the marginal
+    /// Returns the value in the account of notes that have value less than or equal to the marginal
     /// fee, and consequently cannot be spent except as a grace input.
     pub fn uneconomic_value(&self) -> Zatoshis {
         self.uneconomic_value
@@ -1401,7 +1401,7 @@ impl<const MAX: u8> From<BoundedU8<MAX>> for usize {
 /// contexts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoteFilter {
-    /// Selects notes having value greater than or equal to the provided value.
+    /// Selects notes having value strictly greater than the provided value.
     ExceedsMinValue(Zatoshis),
     /// Selects notes having value greater than or equal to approximately the n'th percentile of
     /// previously sent notes in the account, irrespective of pool. The wrapped value must be in
@@ -2338,28 +2338,39 @@ impl<A> ScannedBlock<A> {
     }
 }
 
+/// A trait representing a decryptable transaction.
+pub trait DecryptableTransaction<AccountId> {
+    type DecryptedSaplingOutput;
+    #[cfg(feature = "orchard")]
+    type DecryptedOrchardOutput;
+}
+
+impl<AccountId> DecryptableTransaction<AccountId> for Transaction {
+    type DecryptedSaplingOutput = DecryptedOutput<sapling::Note, AccountId>;
+    #[cfg(feature = "orchard")]
+    type DecryptedOrchardOutput = DecryptedOutput<orchard::Note, AccountId>;
+}
+
 /// A transaction that was detected during scanning of the blockchain,
 /// including its decrypted Sapling and/or Orchard outputs.
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct DecryptedTransaction<'a, Tx, AccountId> {
+pub struct DecryptedTransaction<'a, Tx: DecryptableTransaction<AccountId>, AccountId> {
     mined_height: Option<BlockHeight>,
     tx: &'a Tx,
-    sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
+    sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
     #[cfg(feature = "orchard")]
-    orchard_outputs: Vec<DecryptedOutput<orchard::note::Note, AccountId>>,
+    orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
 }
 
-impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
+impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
         mined_height: Option<BlockHeight>,
         tx: &'a Tx,
-        sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
-        #[cfg(feature = "orchard")] orchard_outputs: Vec<
-            DecryptedOutput<orchard::note::Note, AccountId>,
-        >,
+        sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
+        #[cfg(feature = "orchard")] orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
     ) -> Self {
         Self {
             mined_height,
@@ -2379,12 +2390,12 @@ impl<'a, Tx, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
         self.tx
     }
     /// Returns the Sapling outputs that were decrypted from the transaction.
-    pub fn sapling_outputs(&self) -> &[DecryptedOutput<sapling::Note, AccountId>] {
+    pub fn sapling_outputs(&self) -> &[Tx::DecryptedSaplingOutput] {
         &self.sapling_outputs
     }
     /// Returns the Orchard outputs that were decrypted from the transaction.
     #[cfg(feature = "orchard")]
-    pub fn orchard_outputs(&self) -> &[DecryptedOutput<orchard::note::Note, AccountId>] {
+    pub fn orchard_outputs(&self) -> &[Tx::DecryptedOrchardOutput] {
         &self.orchard_outputs
     }
 
@@ -3095,6 +3106,15 @@ pub trait WalletWrite: WalletRead {
     /// will only be possible to truncate to heights at which is is possible to create a witness
     /// given the current state of the wallet's note commitment tree.
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
+
+    /// Truncates the wallet database to the specified chain state.
+    ///
+    /// In contrast to [`truncate_to_height`], this method allows the caller to truncate the wallet
+    /// database to a precise height by providing additional chain state information needed for
+    /// note commitment tree maintenance after the truncation.
+    ///
+    /// [`truncate_to_height`]: WalletWrite::truncate_to_height
+    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error>;
 
     /// Reserves the next `n` available ephemeral addresses for the given account.
     /// This cannot be undone, so as far as possible, errors associated with transaction

@@ -86,8 +86,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pczt]]
-version = "0.5.0"
-when = "2025-11-05"
+version = "0.5.1"
+when = "2026-02-27"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -114,8 +114,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.shardtree]]
-version = "0.6.1"
-when = "2025-01-31"
+version = "0.6.2"
+when = "2026-02-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -442,18 +442,18 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.21.0"
-when = "2025-11-05"
+version = "0.21.1"
+when = "2026-02-27"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.19.2"
-when = "2026-02-02"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.19.4"
+when = "2026-02-27"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_encoding]]
 version = "0.3.0"
@@ -917,6 +917,12 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.1.1"
 notes = "small crate, only defines macro-rules!, nicely documented as well"
+
+[[audits.bytecode-alliance.audits.pem-rfc7468]]
+who = "Chris Fallin <chris@cfallin.org>"
+criteria = "safe-to-deploy"
+version = "0.7.0"
+notes = "Only `unsafe` around a `from_utf8_unchecked`, and no IO."
 
 [[audits.bytecode-alliance.audits.percent-encoding]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -2912,6 +2918,22 @@ version = "0.2.15"
 notes = "All code written or reviewed by Josh Stone."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.objc2-core-foundation]]
+who = "Andy Leiserson <aleiserson@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.3.2"
+notes = """
+Contains substantial unsafe code, as is typical for FFI.
+
+The (non-published) `header-translator` crate that produces generated bindings
+in this crate was also reviewed, in lieu of a full review of the generated
+bindings.
+
+Users of this crate should be aware of the information in
+https://github.com/madsmtm/objc2/blob/main/crates/objc2/src/topics/frameworks_soundness.md.
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.option-ext]]
 who = "Nika Layzell <nika@thelayzells.com>"
 criteria = "safe-to-deploy"
@@ -2950,6 +2972,20 @@ notes = """
 A tiny bit of unsafe code to implement functionality that isn't in stable rust
 yet, but it's all valid. Otherwise it's a pretty simple crate.
 """
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.proc-macro-error-attr2]]
+who = "Kagami Sascha Rosylight <saschanaz@outlook.com>"
+criteria = "safe-to-deploy"
+version = "2.0.0"
+notes = "No unsafe block."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.proc-macro-error2]]
+who = "Kagami Sascha Rosylight <saschanaz@outlook.com>"
+criteria = "safe-to-deploy"
+version = "2.0.1"
+notes = "No unsafe block with a lovely `#![forbid(unsafe_code)]`."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.rand_distr]]

@@ -105,7 +105,7 @@ transparent-inputs = [
 
 ## Enables use of zcashd-derived secp256k1 secret key encodings.
 transparent-key-encoding = [
-    "transparent-inputs",
+    "dep:bip32",
     "dep:secp256k1",
     "dep:zeroize",
 ]

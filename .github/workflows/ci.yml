@@ -21,6 +21,8 @@ jobs:
           - Linux
         state:
           - transparent
+          - transparent-inputs-only
+          - transparent-key-encoding-only
           - Sapling-only
           - Orchard
           - all-pools
@@ -29,10 +31,14 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
           - state: transparent
             transparent-pool: true
+          - state: transparent-inputs-only
+            extra_flags: transparent-inputs
+          - state: transparent-key-encoding-only
+            extra_flags: transparent-key-encoding
           - state: Orchard
             orchard-pool: true
           - state: all-pools
@@ -59,15 +65,10 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
         run: >
           cargo test
@@ -97,7 +98,7 @@ jobs:
           - target: macOS
             os: macOS-latest
           - target: Windows
-            os: windows-latest-8cores
+            os: ${{ vars.WINDOWS_LARGE_RUNNER || 'windows-latest' }}
 
           - state: transparent
             transparent-pool: true
@@ -133,15 +134,10 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
         run: >
           cargo test
@@ -167,7 +163,7 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
           - state: transparent
             transparent-pool: true
@@ -195,15 +191,10 @@ jobs:
           all-pools: false
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: "false"
       - name: Run slow tests
         run: >
           cargo test
@@ -254,15 +245,10 @@ jobs:
         with:
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: msrv
+          save-if: "false"
       - name: Run check
         run: >
           cargo check
@@ -285,15 +271,9 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-latest
+          shared-key: latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set "${TOOLCHAIN}"
@@ -478,41 +458,6 @@ jobs:
             --all-targets
           args: >
             -W clippy::all
-
-  codecov:
-    name: Code coverage
-    runs-on: ubuntu-latest
-    container:
-      image: xd009642/tarpaulin:develop-nightly
-      options: --security-opt seccomp=unconfined
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - id: prepare
-        uses: ./.github/actions/prepare
-      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Generate coverage report
-        run: >
-          cargo tarpaulin
-          --engine llvm
-          ${{ steps.prepare.outputs.feature-flags }}
-          --release
-          --timeout 600
-          --out xml
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
   # docs.rs and in `.github/workflows/book.yml` as closely as possible.

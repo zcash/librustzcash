@@ -34,6 +34,21 @@ workspace.
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
 - `zcash_client_sqlite::UtxoId` contents are now private.
 
+### Fixed
+- Notes are now consistently treated as having "uneconomic value" if their value is less
+  than **or equal to** the marginal fee. Previously, some call sites only considered
+  note uneconomic if their value was less than the marginal fee.
+
+## [0.18.12, 0.19.4] - 2026-02-26
+
+### Fixed
+- Updated to `shardtree 0.6.2` to fix a note commitment tree corruption bug.
+
+## [0.19.3] - 2026-02-19
+
+### Fixed
+- Migration no longer crashes in regtest mode.
+
 ## [0.18.11, 0.19.2] - 2026-01-30
 
 ### Fixed

@@ -82,7 +82,7 @@ pub mod sapling {
     }
 }
 
-#[cfg(feature = "transparent-key-encoding")]
+#[cfg(any(feature = "transparent-key-encoding", feature = "transparent-inputs"))]
 pub mod transparent;
 
 #[cfg(feature = "zcashd-compat")]
@@ -1686,13 +1686,17 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{address::Address, encoding::AddressCodec},
+        crate::encoding::AddressCodec,
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         alloc::string::ToString,
         alloc::vec::Vec,
-        zcash_address::test_vectors,
-        zip32::DiversifierIndex,
     };
+
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
+    use {crate::address::Address, zcash_address::test_vectors, zip32::DiversifierIndex};
 
     #[cfg(feature = "unstable")]
     use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
@@ -1851,7 +1855,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
     fn ufvk_derivation() {
         use crate::keys::UnifiedAddressRequest;
 
@@ -2033,7 +2040,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
     fn uivk_derivation() {
         use crate::keys::UnifiedAddressRequest;
 

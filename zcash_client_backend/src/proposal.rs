@@ -16,6 +16,9 @@ use crate::{
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
 };
 
+#[cfg(feature = "unstable")]
+use zcash_protocol::consensus::BranchId;
+
 /// Errors that can occur in construction of a [`Step`].
 #[derive(Debug, Clone)]
 pub enum ProposalError {
@@ -67,6 +70,10 @@ pub enum ProposalError {
     /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
+    /// The transaction version requested is not compatible with the consensus branch for which the
+    /// transaction is intended.
+    #[cfg(feature = "unstable")]
+    IncompatibleTxVersion(BranchId),
 }
 
 impl Display for ProposalError {
@@ -143,6 +150,11 @@ impl Display for ProposalError {
             ProposalError::EphemeralAddressLinkability => write!(
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
+            ),
+            #[cfg(feature = "unstable")]
+            ProposalError::IncompatibleTxVersion(branch_id) => write!(
+                f,
+                "The requested transaction version is incompatible with consensus branch {branch_id:?}"
             ),
         }
     }

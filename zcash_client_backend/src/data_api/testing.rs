@@ -337,6 +337,11 @@ impl CachedBlock {
         }
     }
 
+    /// Returns the chain state as of the end of this block.
+    pub fn chain_state(&self) -> &ChainState {
+        &self.chain_state
+    }
+
     /// Returns the height of this block.
     pub fn height(&self) -> BlockHeight {
         self.chain_state.block_height()
@@ -957,6 +962,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )?;
 
         create_proposed_transactions(
@@ -967,6 +974,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -996,6 +1005,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -1064,6 +1075,8 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            #[cfg(feature = "unstable")]
+            None,
         );
 
         if let Ok(proposal) = &result {
@@ -1131,6 +1144,8 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
+            #[cfg(feature = "unstable")]
+            None,
         )
     }
 
@@ -2896,6 +2911,10 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _block_height: BlockHeight,
     ) -> Result<BlockHeight, Self::Error> {
+        Err(())
+    }
+
+    fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
         Err(())
     }
 

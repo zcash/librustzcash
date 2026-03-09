@@ -797,7 +797,7 @@ pub(crate) fn unspent_notes_meta(
                  INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
                  WHERE a.uuid = :account_uuid
                  AND a.ufvk IS NOT NULL
-                 AND rn.value >= :min_value
+                 AND rn.value > :min_value
                  AND transactions.mined_height IS NOT NULL
                  AND rn.id NOT IN rarray(:exclude)
                  AND rn.id NOT IN ({})",
