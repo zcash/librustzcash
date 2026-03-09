@@ -65,7 +65,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     convert::TryFrom,
     io::{self, Cursor},
     num::NonZeroU32,
@@ -74,28 +74,29 @@ use std::{
 };
 
 use encoding::{
-    account_kind_code, decode_diversifier_index_be, encode_diversifier_index_be, memo_repr,
-    pool_code, KeyScope, ReceiverFlags,
+    KeyScope, ReceiverFlags, account_kind_code, decode_diversifier_index_be,
+    encode_diversifier_index_be, memo_repr, parse_pool_code, pool_code,
 };
 use incrementalmerkletree::{Marking, Retention};
-use rusqlite::{self, named_params, params, Connection, OptionalExtension};
+use rusqlite::{self, Connection, OptionalExtension, named_params, params};
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use tracing::{debug, info, warn};
+use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
 use zcash_client_backend::{
+    DecryptedOutput,
     data_api::{
+        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
+        AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
+        TransactionStatus, WalletSummary, Zip32Derivation,
+        chain::ChainState,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
-        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
-        SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
-        Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     wallet::{Note, NoteId, Recipient, WalletTx},
-    DecryptedOutput,
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -108,29 +109,29 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::read_commitment_tree,
-    transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317, Transaction, TransactionData},
+    transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
-    memo::{Memo, MemoBytes},
-    value::{BalanceError, ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol, TxId,
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters, TxIndex},
+    memo::{Memo, MemoBytes},
+    value::{ZatBalance, Zatoshis},
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use self::{
-    common::{table_constants, TableConstants},
+    common::{TableConstants, table_constants},
     scanning::{parse_priority_code, priority_code, replace_queue_entries},
 };
 use crate::{
+    AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
+    WalletCommitmentTrees, WalletDb,
     error::SqliteClientError,
     util::Clock,
     wallet::{
-        commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
+        commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
         encoding::LEGACY_ADDRESS_INDEX_NULL,
     },
-    AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
-    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -140,9 +141,8 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::collections::BTreeMap,
-    transparent::get_wallet_transparent_output,
-    zcash_client_backend::wallet::WalletTransparentOutput,
+    std::collections::HashSet,
+    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
 };
 
 #[cfg(feature = "orchard")]
@@ -672,15 +672,105 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         transparent::generate_gap_addresses(
             conn,
             params,
+            gap_limits,
             account_id,
             key_scope,
-            gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             false,
         )?;
     }
 
     Ok(account)
+}
+
+pub(crate) fn delete_account(
+    conn: &rusqlite::Transaction,
+    account_uuid: AccountUuid,
+) -> Result<(), SqliteClientError> {
+    // Update all `sent_notes` records where `to_account_id` refers to the account to be deleted to
+    // have the `to_address` field set instead to the address at which the output was received.
+    let mut to_account_tx = conn.prepare(
+        r#"
+        SELECT
+            sn.id AS sent_note_id,
+            COALESCE(addresses.address, addresses.cached_transparent_receiver_address) AS to_address
+        FROM sent_notes sn
+        JOIN v_received_outputs ro ON ro.sent_note_id = sn.id
+        JOIN addresses ON addresses.id = ro.address_id
+        JOIN accounts ta ON ta.id = sn.to_account_id
+        WHERE ta.uuid = :account_uuid
+        "#,
+    )?;
+
+    let mut update_sent_note = conn.prepare(
+        r#"
+        UPDATE sent_notes
+        SET to_address = :to_address, to_account_id = NULL
+        WHERE id = :sent_note_id
+        "#,
+    )?;
+
+    let mut rows = to_account_tx.query(named_params![
+        ":account_uuid": account_uuid.0,
+    ])?;
+
+    while let Some(row) = rows.next()? {
+        if let Some(address) = row.get::<_, Option<String>>("to_address")? {
+            update_sent_note.execute(named_params![
+                ":sent_note_id": row.get::<_, i64>("sent_note_id")?,
+                ":address": address
+            ])?;
+        }
+    }
+
+    // Delete all transaction information that is solely linked to this account. This
+    // effectively reverts the wallet state for this account to the time before its
+    // viewing keys and transparent addresses had been used to scan for information.
+    conn.execute(
+        r#"
+        WITH account_transactions AS (
+            SELECT ro.transaction_id
+            FROM v_received_outputs ro
+            JOIN accounts a ON a.id = ro.account_id
+            WHERE a.uuid = :account_uuid
+            UNION
+            SELECT ros.transaction_id
+            FROM v_received_output_spends ros
+            JOIN accounts sa ON sa.id = ros.account_id
+            WHERE sa.uuid = :account_uuid
+        ),
+        non_account_transactions AS (
+            SELECT ro.transaction_id
+            FROM v_received_outputs ro
+            JOIN accounts a ON a.id = ro.account_id
+            WHERE a.uuid != :account_uuid
+            UNION
+            SELECT ros.transaction_id
+            FROM v_received_output_spends ros
+            JOIN accounts sa ON sa.id = ros.account_id
+            WHERE sa.uuid != :account_uuid
+        )
+        DELETE FROM transactions WHERE id_tx IN (
+            SELECT transaction_id FROM account_transactions
+            EXCEPT
+            SELECT transaction_id FROM non_account_transactions
+        )
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+        ],
+    )?;
+
+    // At this point, the only information remaining about the account is its entry in the
+    // accounts table and its addresses; delete them.
+    conn.execute(
+        "DELETE FROM accounts WHERE uuid = :account_uuid",
+        named_params![
+            ":account_uuid": account_uuid.0,
+        ],
+    )?;
+
+    Ok(())
 }
 
 #[cfg(feature = "transparent-key-import")]
@@ -777,9 +867,9 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
             transparent::generate_gap_addresses(
                 conn,
                 params,
+                gap_limits,
                 account.internal_id(),
                 TransparentKeyScope::EXTERNAL,
-                gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 true,
             )?;
@@ -1139,13 +1229,14 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
 pub(crate) fn involved_accounts(
     conn: &rusqlite::Connection,
     tx_refs: impl IntoIterator<Item = TxRef>,
-) -> Result<Vec<(AccountRef, KeyScope)>, SqliteClientError> {
+) -> Result<HashSet<(AccountRef, AccountUuid, Option<TransparentKeyScope>)>, SqliteClientError> {
     use rusqlite::types::Value;
     use std::rc::Rc;
 
     let mut stmt = conn.prepare_cached(
-        "SELECT account_id, key_scope
+        "SELECT account_id, accounts.uuid, key_scope
          FROM v_address_uses
+         JOIN accounts ON accounts.id = v_address_uses.account_id
          WHERE transaction_id IN rarray(:tx_refs_ptr)",
     )?;
 
@@ -1158,12 +1249,13 @@ pub(crate) fn involved_accounts(
             },
             |row| {
                 Ok::<_, SqliteClientError>((
-                    row.get(0).map(AccountRef)?,
-                    KeyScope::decode(row.get(1)?)?,
+                    row.get("account_id").map(AccountRef)?,
+                    AccountUuid(row.get("uuid")?),
+                    KeyScope::decode(row.get("key_scope")?)?.as_transparent(),
                 ))
             },
         )?
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<HashSet<_>, _>>()?;
 
     Ok(result)
 }
@@ -2054,8 +2146,6 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
-        let untrusted_height =
-            target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
 
         let any_spendable =
             anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
@@ -2063,11 +2153,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
-                    t.block AS mined_height,
-                    MAX(tt.block) AS max_shielding_input_height
+                    t.mined_height,
+                    IFNULL(t.trust_status, 0) AS trust_status,
+                    MAX(tt.mined_height) AS max_shielding_input_height,
+                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
-             INNER JOIN transactions t ON t.id_tx = rn.tx
+             INNER JOIN transactions t ON t.id_tx = rn.transaction_id
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON rn.commitment_tree_position >= scan_state.start_position
                 AND rn.commitment_tree_position < scan_state.end_position_exclusive
@@ -2078,21 +2170,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 AND tro.account_id = accounts.id
              LEFT OUTER JOIN transactions tt
                 ON tt.id_tx = tro.transaction_id
-             WHERE (
-                t.block IS NOT NULL -- the receiving tx is mined
-                OR t.expiry_height IS NULL -- the receiving tx will not expire
-                OR t.expiry_height >= :target_height -- the receiving tx is unexpired
-             )
-             -- and the received note is unspent
-             AND rn.id NOT IN (
-               SELECT {table_prefix}_received_note_id
-               FROM {table_prefix}_received_note_spends rns
-               JOIN transactions stx ON stx.id_tx = rns.transaction_id
-               WHERE stx.block IS NOT NULL -- the spending transaction is mined
-               OR stx.expiry_height IS NULL -- the spending tx will not expire
-               OR stx.expiry_height >= :target_height -- the spending tx is unexpired
-             )
-             GROUP BY rn.id"
+             WHERE ({}) -- the transaction is unexpired
+             AND rn.id NOT IN ({}) -- and the received note is unspent
+             GROUP BY rn.id",
+            common::tx_unexpired_condition("t"),
+            common::spent_notes_clause(table_prefix)
         ))?;
 
         let mut rows =
@@ -2133,25 +2215,28 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .get::<_, Option<u32>>("mined_height")?
                 .map(BlockHeight::from);
 
+            let tx_trusted = row.get::<_, bool>("trust_status")?;
+
             let max_shielding_input_height = row
                 .get::<_, Option<u32>>("max_shielding_input_height")?
                 .map(BlockHeight::from);
+
+            let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
             // A note is spendable if we have enough chain tip information to construct witnesses,
             // the shard that its witness resides in is sufficiently scanned that we can construct
             // the witness for the note, and the note has enough confirmations to be spent.
             let is_spendable = any_spendable
                 && max_priority <= ScanPriority::Scanned
-                && match recipient_key_scope {
-                    Some(KeyScope::INTERNAL) => {
-                        // The note was has at least `trusted` confirmations.
-                        received_height.iter().any(|h| h <= &trusted_height) &&
-                        // And, if the note was the output of a shielding transaction, its
-                        // transparent inputs have at least `untrusted` confirmations.
-                        max_shielding_input_height.iter().all(|h| h <= &untrusted_height)
-                    }
-                    _ => received_height.iter().any(|h| h <= &untrusted_height),
-                };
+                && confirmations_policy.confirmations_until_spendable(
+                    target_height,
+                    PoolType::Shielded(protocol),
+                    recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                    received_height,
+                    tx_trusted,
+                    max_shielding_input_height,
+                    tx_shielding_inputs_trusted,
+                ) == 0;
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
@@ -2316,7 +2401,7 @@ pub(crate) fn get_received_memo(
         .query_row(
             &format!(
                 "SELECT memo FROM {table_prefix}_received_notes
-                JOIN transactions ON {table_prefix}_received_notes.tx = transactions.id_tx
+                JOIN transactions ON transactions.id_tx = {table_prefix}_received_notes.transaction_id
                 WHERE transactions.txid = :txid
                 AND {table_prefix}_received_notes.{output_index_col} = :output_index"
             ),
@@ -2409,53 +2494,15 @@ pub(crate) fn get_transaction<P: Parameters>(
             let h: Option<u32> = row.get(1)?;
             let expiry: Option<u32> = row.get(2)?;
             Ok((
-                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, Option<Vec<u8>>>(0)?,
                 h.map(BlockHeight::from),
                 expiry.map(BlockHeight::from),
             ))
         },
     )
     .optional()?
-    .map(|(t, b, e)| parse_tx(params, &t, b, e))
+    .and_then(|(t_opt, b, e)| t_opt.as_ref().map(|t| parse_tx(params, t, b, e)))
     .transpose()
-}
-
-pub(crate) fn get_funding_accounts(
-    conn: &rusqlite::Connection,
-    tx: &Transaction,
-) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
-    let mut funding_accounts = HashSet::new();
-    #[cfg(feature = "transparent-inputs")]
-    funding_accounts.extend(transparent::detect_spending_accounts(
-        conn,
-        tx.transparent_bundle()
-            .iter()
-            .flat_map(|bundle| bundle.vin.iter().map(|txin| txin.prevout())),
-    )?);
-
-    funding_accounts.extend(sapling::detect_spending_accounts(
-        conn,
-        tx.sapling_bundle().iter().flat_map(|bundle| {
-            bundle
-                .shielded_spends()
-                .iter()
-                .map(|spend| spend.nullifier())
-        }),
-    )?);
-
-    #[cfg(feature = "orchard")]
-    funding_accounts.extend(orchard::detect_spending_accounts(
-        conn,
-        tx.orchard_bundle().iter().flat_map(|bundle| {
-            bundle
-                .as_vanilla_bundle()
-                .actions()
-                .iter()
-                .map(|action| action.nullifier())
-        }),
-    )?);
-
-    Ok(funding_accounts)
 }
 
 /// Returns the memo for a sent note, if the sent note is known to the wallet.
@@ -2466,7 +2513,7 @@ pub(crate) fn get_sent_memo(
     let memo_bytes: Option<Vec<_>> = conn
         .query_row(
             "SELECT memo FROM sent_notes
-            JOIN transactions ON sent_notes.tx = transactions.id_tx
+            JOIN transactions ON transactions.id_tx = sent_notes.transaction_id
             WHERE transactions.txid = :txid
             AND sent_notes.output_pool = :pool_code
             AND sent_notes.output_index = :output_index",
@@ -2580,7 +2627,7 @@ pub(crate) fn get_account_ref(
     .ok_or(SqliteClientError::AccountUnknown)
 }
 
-/// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
+/// Returns the maximum height of blocks in the chain which may be scanned.
 pub(crate) fn chain_tip_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
@@ -2591,6 +2638,12 @@ pub(crate) fn chain_tip_height(
         // height of the last known chain tip;
         Ok(max_height.map(|h| BlockHeight::from(h.saturating_sub(1))))
     })
+}
+
+pub(crate) fn mempool_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<TargetHeight>, rusqlite::Error> {
+    Ok(chain_tip_height(conn)?.map(|h| TargetHeight::from(h + 1)))
 }
 
 pub(crate) fn get_anchor_height(
@@ -2627,9 +2680,8 @@ pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(TargetHeight, BlockHeight)>, SqliteClientError> {
-    match chain_tip_height(conn)? {
-        Some(chain_tip_height) => {
-            let target_height = TargetHeight::from(chain_tip_height + 1);
+    match mempool_height(conn)? {
+        Some(target_height) => {
             let anchor_height = get_anchor_height(conn, target_height, min_confirmations)?;
 
             Ok(anchor_height.map(|h| (target_height, h)))
@@ -2856,6 +2908,7 @@ pub(crate) fn get_max_height_hash(
 pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
@@ -2864,6 +2917,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
         Some(sent_tx.target_height()),
+        sent_tx.target_height().into(),
     )?;
 
     let mut detectable_via_scanning = false;
@@ -2905,11 +2959,47 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
 
         match output.recipient() {
             Recipient::External {
-                recipient_address: _addr,
+                recipient_address: _zaddr,
                 output_pool: _pool,
-                ..
             } => {
-                // Nothing to do for external recipients.
+                // In the case that a transaction sends to a transparent address belonging to the
+                // wallet (such as is the case for gap limit management transactions) then we need
+                // to add the received transparent output to our wallet. For shielded outputs sent
+                // back to our own addresses, we can expect to detect those by normal scanning so
+                // it's not necessary to add them here, and we don't have the note information
+                // needed to do so.
+                #[cfg(feature = "transparent-inputs")]
+                if _pool == &PoolType::Transparent {
+                    let address = Address::try_from_zcash_address(params, _zaddr.clone())
+                        .expect("recipient is an understood Zcash address.");
+                    if let Some(taddr) = address.to_transparent_address() {
+                        if transparent::find_account_uuid_for_transparent_address(
+                            conn, params, &taddr,
+                        )?
+                        .is_some()
+                        {
+                            transparent::put_transparent_output(
+                                conn,
+                                params,
+                                gap_limits,
+                                &WalletTransparentOutput::from_parts(
+                                    OutPoint::new(
+                                        sent_tx.tx().txid().into(),
+                                        u32::try_from(output.output_index())
+                                            .expect("output index fits into a u32")
+                                    ),
+                                    TxOut::new(output.value(), taddr.script().into()),
+                                    None,
+                                )
+                                .expect(
+                                    "can extract a recipient address from an internal address script",
+                                ),
+                                sent_tx.target_height().into(),
+                                true,
+                            )?;
+                        }
+                    }
+                }
             }
             Recipient::InternalAccount {
                 receiving_account,
@@ -2966,13 +3056,15 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
 
                 transparent::put_transparent_output(
                     conn,
-                    &params,
+                    params,
+                    gap_limits,
                     &WalletTransparentOutput::from_parts(
                         outpoint.clone(),
                         TxOut::new(output.value(), ephemeral_address.script().into()),
                         None,
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
+                    sent_tx.target_height().into(),
                     true,
                 )?;
             }
@@ -2989,11 +3081,15 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     Ok(())
 }
 
-pub(crate) fn set_transaction_status(
+pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
+    _params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     txid: TxId,
     status: TransactionStatus,
 ) -> Result<(), SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+
     // It is safe to unconditionally delete the request from `tx_retrieval_queue` below (both in
     // the expired case and the case where it has been mined), because we already have all the data
     // we need about this transaction:
@@ -3012,19 +3108,16 @@ pub(crate) fn set_transaction_status(
     // is whether that transaction ends up being mined or expires.
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
-            // Remove the txid from the retrieval queue unless an unexpired transaction having that
-            // txid exists in the transactions table.
-            if let Some(chain_tip) = chain_tip_height(conn)? {
-                conn.execute(
-                    "DELETE FROM tx_retrieval_queue
-                     WHERE txid = :txid
-                     AND request_expiry <= :chain_tip",
-                    named_params![
-                        ":txid": txid.as_ref(),
-                        ":chain_tip": u32::from(chain_tip)
-                    ],
-                )?;
-            }
+            conn.execute(
+                "UPDATE transactions
+                 SET confirmed_unmined_at_height = :chain_tip
+                 WHERE txid = :txid
+                 AND mined_height IS NULL",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":chain_tip": u32::from(chain_tip)
+                ],
+            )?;
         }
         TransactionStatus::Mined(height) => {
             // The transaction has been mined, so we can set its mined height, associate it with
@@ -3036,7 +3129,13 @@ pub(crate) fn set_transaction_status(
 
             conn.execute(
                 "UPDATE transactions
-                 SET mined_height = :height
+                 SET mined_height = :height,
+                     min_observed_height = MIN(
+                        min_observed_height,
+                        IFNULL(mined_height, :height),
+                        :height
+                     ),
+                     confirmed_unmined_at_height = NULL
                  WHERE txid = :txid",
                 sql_args,
             )?;
@@ -3050,11 +3149,77 @@ pub(crate) fn set_transaction_status(
                 sql_args,
             )?;
 
-            notify_tx_retrieved(conn, txid)?;
+            #[cfg(feature = "transparent-inputs")]
+            transparent::update_gap_limits(conn, _params, gap_limits, txid, height)?;
         }
     }
 
+    delete_retrieval_queue_entries(conn, txid)?;
+
     Ok(())
+}
+
+/// Find the minimum checkpoint height for each tree and take the maximum of those minima.
+///
+/// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
+/// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
+/// this correctly returns only the sapling minimum in that case.
+fn min_shared_checkpoint_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT MAX(m) FROM (
+                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+                 UNION ALL
+                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+             )",
+            [],
+            |row| row.get::<_, Option<u32>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(BlockHeight::from))
+}
+
+/// Determine an existing checkpoint height to which we can rewind, if any.
+///
+/// If no checkpoint exists at the requested height, this will return the maximum height at which a
+/// checkpoint exists for all active pools that is less than or equal to the requested height, where
+/// "active" is defined according to the features enabled on this crate.
+///
+/// This will return the height that has a checkpoint in every tree that contains data. The orchard
+/// table exists unconditionally but is empty when the orchard feature is not active.
+fn select_truncation_height(
+    conn: &rusqlite::Transaction,
+    requested_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    conn.query_row(
+        r#"
+            SELECT MAX(height) FROM blocks
+            WHERE height <= :requested_height
+            AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+            AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            "#,
+        named_params! {":requested_height": u32::from(requested_height)},
+        |row| row.get::<_, Option<u32>>(0),
+    )
+    .optional()?
+    .flatten()
+    .map_or_else(
+        || {
+            // If we don't have a checkpoint at a height less than or equal to the requested
+            // truncation height, query for the minimum height to which it's possible for us to
+            // truncate so that we can report it to the caller. We take the maximum of the per-tree
+            // minimums, since that is the earliest height at which all trees have a checkpoint.
+            Err(SqliteClientError::RequestedRewindInvalid {
+                safe_rewind_height: min_shared_checkpoint_height(conn)?,
+                requested_height,
+            })
+        },
+        |h| Ok(BlockHeight::from(h)),
+    )
 }
 
 /// Truncates the database to at most the given height.
@@ -3071,60 +3236,22 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
-    // Determine a checkpoint to which we can rewind, if any.
-    #[cfg(not(feature = "orchard"))]
-    let truncation_height_query = r#"
-        SELECT MAX(height) FROM blocks
-        JOIN sapling_tree_checkpoints ON checkpoint_id = blocks.height
-        WHERE blocks.height <= :block_height
-    "#;
+    let truncation_height = select_truncation_height(conn, max_height)?;
+    truncate_to_height_internal(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        truncation_height,
+    )
+}
 
-    #[cfg(feature = "orchard")]
-    let truncation_height_query = r#"
-        SELECT MAX(height) FROM blocks
-        JOIN sapling_tree_checkpoints sc ON sc.checkpoint_id = blocks.height
-        JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = blocks.height
-        WHERE blocks.height <= :block_height
-    "#;
-
-    let truncation_height = conn
-        .query_row(
-            truncation_height_query,
-            named_params! {":block_height": u32::from(max_height)},
-            |row| row.get::<_, Option<u32>>(0),
-        )
-        .optional()?
-        .flatten()
-        .map_or_else(
-            || {
-                // If we don't have a checkpoint at a height less than or equal to the requested
-                // truncation height, query for the minimum height to which it's possible for us to
-                // truncate so that we can report it to the caller.
-                #[cfg(not(feature = "orchard"))]
-                let min_checkpoint_height_query =
-                    "SELECT MIN(checkpoint_id) FROM sapling_tree_checkpoints";
-                #[cfg(feature = "orchard")]
-                let min_checkpoint_height_query = "SELECT MIN(sc.checkpoint_id)
-                     FROM sapling_tree_checkpoints sc
-                     JOIN orchard_tree_checkpoints oc
-                     ON oc.checkpoint_id = sc.checkpoint_id";
-
-                let min_truncation_height = conn
-                    .query_row(min_checkpoint_height_query, [], |row| {
-                        row.get::<_, Option<u32>>(0)
-                    })
-                    .optional()?
-                    .flatten()
-                    .map(BlockHeight::from);
-
-                Err(SqliteClientError::RequestedRewindInvalid {
-                    safe_rewind_height: min_truncation_height,
-                    requested_height: max_height,
-                })
-            },
-            |h| Ok(BlockHeight::from(h)),
-        )?;
-
+pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+    truncation_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
         let h = row.get::<_, Option<u32>>(0)?;
 
@@ -3162,7 +3289,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // spends in the transaction.
     conn.execute(
         "UPDATE transparent_received_outputs
-         SET max_observed_unspent_height = CASE WHEN tx.mined_height <= :height THEN :height ELSE NULL END
+         SET max_observed_unspent_height = CASE
+            WHEN tx.mined_height <= :height THEN :height
+            ELSE NULL
+         END
          FROM transactions tx
          WHERE tx.id_tx = transaction_id
          AND max_observed_unspent_height > :height",
@@ -3173,7 +3303,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // transaction entries may be created as a consequence of receiving transparent TXOs.
     conn.execute(
         "UPDATE transactions
-         SET block = NULL, mined_height = NULL, tx_index = NULL
+         SET block = NULL, mined_height = NULL, tx_index = NULL, confirmed_unmined_at_height = NULL
          WHERE mined_height > :height",
         named_params![":height": u32::from(truncation_height)],
     )?;
@@ -3223,6 +3353,110 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     }
 
     Ok(truncation_height)
+}
+
+/// Truncates the wallet database to a precise block height using note commitment tree frontiers
+/// from the provided `ChainState`.
+///
+/// This function enables precise truncation even when the target height's checkpoint has been
+/// pruned from the note commitment tree. It works in two cases:
+///
+/// - If a checkpoint exists at or below the target height, it delegates to
+///   [`truncate_to_height`] directly.
+/// - If the target height is below the oldest available checkpoint, it first truncates to the
+///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
+///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
+///   target height, and finally truncates to that new checkpoint.
+pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
+    chain_state: ChainState,
+) -> Result<(), SqliteClientError> {
+    let target_height = chain_state.block_height();
+
+    // Try the simple case first: if a checkpoint exists at or below the target height,
+    // truncate_to_height will succeed directly.
+    match select_truncation_height(wdb.conn.0, target_height) {
+        Ok(h) => {
+            if h == target_height {
+                // There is a checkpoint for the requested height, we can just truncate to it and
+                // return.
+                return truncate_to_height_internal(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    h,
+                )
+                .map(|_| ());
+            } else {
+                // The returned height corresponds to a checkpoint that is below the requested
+                // height. Inserting a checkpoint at a height *greater* than this returned height
+                // may cause an older checkpoint to be deleted, but that's fine, so we just fall
+                // through here.
+            }
+        }
+        Err(SqliteClientError::RequestedRewindInvalid {
+            safe_rewind_height, ..
+        }) => {
+            // The safe rewind height is at a position greater than the requested height, so we
+            // truncate to that height first to clear out checkpoints that would otherwise cause
+            // the checkpoint we're about to insert to be immediately pruned, then, we fall through
+            // to insertion of the frontier.
+            if let Some(min_checkpoint_height) = safe_rewind_height {
+                truncate_to_height(
+                    wdb.conn.0,
+                    &wdb.params,
+                    #[cfg(feature = "transparent-inputs")]
+                    &wdb.gap_limits,
+                    min_checkpoint_height,
+                )?;
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    // If there are checkpoints, truncate to the earliest common one first. If there are no
+    // checkpoints at all, we can skip this step and proceed directly to inserting the frontier.
+
+    // Insert the frontier from the chain state, creating a checkpoint at the target height.
+    // Because we just truncated down to a single checkpoint, there is room for this new one.
+    wdb.with_sapling_tree_mut(|tree| {
+        tree.insert_frontier(
+            chain_state.final_sapling_tree().clone(),
+            Retention::Checkpoint {
+                id: target_height,
+                marking: Marking::None,
+            },
+        )?;
+        Ok::<_, SqliteClientError>(())
+    })?;
+
+    #[cfg(feature = "orchard")]
+    wdb.with_orchard_tree_mut(|tree| {
+        tree.insert_frontier(
+            chain_state.final_orchard_tree().clone(),
+            Retention::Checkpoint {
+                id: target_height,
+                marking: Marking::None,
+            },
+        )?;
+        Ok::<_, SqliteClientError>(())
+    })?;
+
+    // Now truncate to the target height checkpoint we just created.
+    let truncated_height = truncate_to_height(
+        wdb.conn.0,
+        &wdb.params,
+        #[cfg(feature = "transparent-inputs")]
+        &wdb.gap_limits,
+        target_height,
+    )?;
+
+    assert_eq!(truncated_height, target_height);
+
+    Ok(())
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.
@@ -3342,542 +3576,13 @@ pub(crate) fn put_block(
     Ok(())
 }
 
-struct TransparentSentOutput {
-    from_account_uuid: AccountUuid,
-    output_index: usize,
-    recipient: Recipient<AccountUuid>,
-    value: Zatoshis,
-}
-
-struct WalletTransparentOutputs {
-    #[cfg(feature = "transparent-inputs")]
-    received: Vec<(WalletTransparentOutput, KeyScope)>,
-    sent: Vec<TransparentSentOutput>,
-}
-
-impl WalletTransparentOutputs {
-    fn empty() -> Self {
-        Self {
-            #[cfg(feature = "transparent-inputs")]
-            received: vec![],
-            sent: vec![],
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        #[cfg(feature = "transparent-inputs")]
-        let has_received = !self.received.is_empty();
-        #[cfg(not(feature = "transparent-inputs"))]
-        let has_received = false;
-
-        let has_sent = !self.sent.is_empty();
-
-        !(has_received || has_sent)
-    }
-}
-
-fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
-    #[cfg(feature = "transparent-inputs")] conn: &rusqlite::Transaction,
+pub(crate) fn get_txs_spending_transparent_outputs_of<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
     params: &P,
-    d_tx: &DecryptedTransaction<AccountUuid>,
-    funding_account: Option<AccountUuid>,
-) -> Result<WalletTransparentOutputs, SqliteClientError> {
-    // This `if` is just an optimization for cases where we would do nothing in the loop.
-    if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
-        let mut result = WalletTransparentOutputs::empty();
-        for (output_index, txout) in d_tx
-            .tx()
-            .transparent_bundle()
-            .iter()
-            .flat_map(|b| b.vout.iter())
-            .enumerate()
-        {
-            if let Some(address) = txout.recipient_address() {
-                debug!(
-                    "{:?} output {} has recipient {}",
-                    d_tx.tx().txid(),
-                    output_index,
-                    address.encode(params)
-                );
-
-                // If the output belongs to the wallet, add it to `transparent_received_outputs`.
-                #[cfg(feature = "transparent-inputs")]
-                if let Some((account_uuid, key_scope)) =
-                    transparent::find_account_uuid_for_transparent_address(conn, params, &address)?
-                {
-                    debug!(
-                        "{:?} output {} belongs to account {:?}",
-                        d_tx.tx().txid(),
-                        output_index,
-                        account_uuid
-                    );
-                    result.received.push((
-                        WalletTransparentOutput::from_parts(
-                            OutPoint::new(
-                                d_tx.tx().txid().into(),
-                                u32::try_from(output_index).unwrap(),
-                            ),
-                            txout.clone(),
-                            d_tx.mined_height(),
-                        )
-                        .expect("txout.recipient_address extraction previously checked"),
-                        key_scope,
-                    ));
-                } else {
-                    debug!(
-                        "Address {} is not recognized as belonging to any of our accounts.",
-                        address.encode(params)
-                    );
-                }
-
-                // If a transaction we observe contains spends from our wallet, we will
-                // store its transparent outputs in the same way they would be stored by
-                // create_spend_to_address.
-                if let Some(account_uuid) = funding_account {
-                    let receiver = Receiver::Transparent(address);
-
-                    #[cfg(feature = "transparent-inputs")]
-                    let recipient_address =
-                        select_receiving_address(params, conn, account_uuid, &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    let recipient_address = receiver.to_zcash_address(params.network_type());
-
-                    let recipient = Recipient::External {
-                        recipient_address,
-                        output_pool: PoolType::TRANSPARENT,
-                    };
-
-                    result.sent.push(TransparentSentOutput {
-                        from_account_uuid: account_uuid,
-                        output_index,
-                        recipient,
-                        value: txout.value(),
-                    });
-                }
-            } else {
-                warn!(
-                    "Unable to determine recipient address for tx {} output {}",
-                    d_tx.tx().txid(),
-                    output_index
-                );
-            }
-        }
-
-        Ok(result)
-    } else {
-        Ok(WalletTransparentOutputs::empty())
-    }
-}
-
-fn determine_fee(
-    _conn: &rusqlite::Connection,
-    tx: &Transaction,
-) -> Result<Option<Zatoshis>, SqliteClientError> {
-    let value_balance: ZatBalance = tx
-        .sapling_bundle()
-        .map_or(ZatBalance::zero(), |s_bundle| *s_bundle.value_balance());
-
-    let value_balance = tx.orchard_bundle().map_or(Ok(value_balance), |o_bundle| {
-        (value_balance + *o_bundle.value_balance()).ok_or(BalanceError::Overflow)
-    })?;
-
-    match tx.transparent_bundle() {
-        Some(t_bundle) => {
-            let t_out_total = t_bundle
-                .vout
-                .iter()
-                .map(|o| o.value())
-                .sum::<Option<Zatoshis>>()
-                .ok_or(BalanceError::Overflow)?;
-            let value_balance = (value_balance - t_out_total).ok_or(BalanceError::Underflow)?;
-
-            if t_bundle.vin.is_empty() {
-                Zatoshis::try_from(value_balance)
-                    .map(Some)
-                    .map_err(SqliteClientError::from)
-            } else {
-                #[cfg(feature = "transparent-inputs")]
-                let mut result = Some(value_balance);
-
-                #[cfg(feature = "transparent-inputs")]
-                for t_in in &t_bundle.vin {
-                    match (
-                        result,
-                        get_wallet_transparent_output(_conn, t_in.prevout(), true)?,
-                    ) {
-                        (Some(b), Some(out)) => {
-                            result = Some((b + out.txout().value()).ok_or(BalanceError::Overflow)?)
-                        }
-                        _ => {
-                            result = None;
-                            break;
-                        }
-                    }
-                }
-
-                #[cfg(not(feature = "transparent-inputs"))]
-                let result: Option<ZatBalance> = None;
-
-                Ok(result.map(Zatoshis::try_from).transpose()?)
-            }
-        }
-        None => {
-            // The sum of the value balances represents the total value of inputs not consumed by
-            // outputs. Without transparent outputs to consume any leftover value, the total is
-            // available for and treated as fee.
-            Ok(Some(
-                value_balance
-                    .try_into()
-                    .map_err(|_| BalanceError::Underflow)?,
-            ))
-        }
-    }
-}
-
-pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
-    conn: &rusqlite::Transaction,
-    params: &P,
-    d_tx: DecryptedTransaction<AccountUuid>,
-    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
-) -> Result<(), SqliteClientError> {
-    let funding_accounts = get_funding_accounts(conn, d_tx.tx())?;
-
-    // TODO(#1305): Correctly track accounts that fund each transaction output.
-    let funding_account = funding_accounts.iter().next().copied();
-    if funding_accounts.len() > 1 {
-        warn!(
-            "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
-            d_tx.tx().txid(),
-            funding_account.unwrap()
-        )
-    }
-
-    let wallet_transparent_outputs = detect_wallet_transparent_outputs(
-        #[cfg(feature = "transparent-inputs")]
-        conn,
-        params,
-        &d_tx,
-        funding_account,
-    )?;
-
-    // If there is no wallet involvement, we don't need to store the transaction, so just return
-    // here.
-    if funding_account.is_none()
-        && wallet_transparent_outputs.is_empty()
-        && !d_tx.has_decrypted_outputs()
-    {
-        return Ok(());
-    }
-
-    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
-
-    // If the transaction is fully shielded, or all transparent inputs are available, set the
-    // fee value.
-    let fee = determine_fee(conn, d_tx.tx())?;
-
-    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None)?;
-    if let Some(height) = d_tx.mined_height() {
-        set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
-    }
-
-    // A flag used to determine whether it is necessary to query for transactions that
-    // provided transparent inputs to this transaction, in order to be able to correctly
-    // recover transparent transaction history.
-    #[cfg(feature = "transparent-inputs")]
-    let mut tx_has_wallet_outputs = false;
-
-    #[cfg(feature = "transparent-inputs")]
-    let mut receiving_accounts = BTreeMap::new();
-
-    for output in d_tx.sapling_outputs() {
-        #[cfg(feature = "transparent-inputs")]
-        {
-            tx_has_wallet_outputs = true;
-        }
-        match output.transfer_type() {
-            TransferType::Outgoing => {
-                let recipient = {
-                    let receiver = Receiver::Sapling(output.note().recipient());
-                    let recipient_address =
-                        select_receiving_address(params, conn, *output.account(), &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-                    Recipient::External {
-                        recipient_address,
-                        output_pool: PoolType::SAPLING,
-                    }
-                };
-
-                put_sent_output(
-                    conn,
-                    params,
-                    *output.account(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    output.note_value(),
-                    Some(output.memo()),
-                )?;
-            }
-            TransferType::WalletInternal => {
-                sapling::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
-
-                let recipient = Recipient::InternalAccount {
-                    receiving_account: *output.account(),
-                    external_address: None,
-                    note: Box::new(Note::Sapling(output.note().clone())),
-                };
-
-                put_sent_output(
-                    conn,
-                    params,
-                    *output.account(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    output.note_value(),
-                    Some(output.memo()),
-                )?;
-            }
-            TransferType::Incoming => {
-                let _account_id = sapling::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
-
-                #[cfg(feature = "transparent-inputs")]
-                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
-
-                if let Some(account_id) = funding_account {
-                    let recipient = Recipient::InternalAccount {
-                        receiving_account: *output.account(),
-                        external_address: {
-                            let receiver = Receiver::Sapling(output.note().recipient());
-                            Some(
-                                select_receiving_address(
-                                    params,
-                                    conn,
-                                    *output.account(),
-                                    &receiver,
-                                )?
-                                .unwrap_or_else(|| {
-                                    receiver.to_zcash_address(params.network_type())
-                                }),
-                            )
-                        },
-                        note: Box::new(Note::Sapling(output.note().clone())),
-                    };
-
-                    put_sent_output(
-                        conn,
-                        params,
-                        account_id,
-                        tx_ref,
-                        output.index(),
-                        &recipient,
-                        output.note_value(),
-                        Some(output.memo()),
-                    )?;
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "orchard")]
-    for output in d_tx.orchard_outputs() {
-        #[cfg(feature = "transparent-inputs")]
-        {
-            tx_has_wallet_outputs = true;
-        }
-        match output.transfer_type() {
-            TransferType::Outgoing => {
-                let recipient = {
-                    let receiver = Receiver::Orchard(output.note().recipient());
-                    let recipient_address =
-                        select_receiving_address(params, conn, *output.account(), &receiver)?
-                            .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-                    Recipient::External {
-                        recipient_address,
-                        output_pool: PoolType::ORCHARD,
-                    }
-                };
-
-                put_sent_output(
-                    conn,
-                    params,
-                    *output.account(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    output.note_value(),
-                    Some(output.memo()),
-                )?;
-            }
-            TransferType::WalletInternal => {
-                orchard::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
-
-                let recipient = Recipient::InternalAccount {
-                    receiving_account: *output.account(),
-                    external_address: None,
-                    note: Box::new(Note::Orchard(*output.note())),
-                };
-
-                put_sent_output(
-                    conn,
-                    params,
-                    *output.account(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    output.note_value(),
-                    Some(output.memo()),
-                )?;
-            }
-            TransferType::Incoming => {
-                let _account_id = orchard::put_received_note(
-                    conn,
-                    params,
-                    output,
-                    tx_ref,
-                    d_tx.mined_height(),
-                    None,
-                )?;
-
-                #[cfg(feature = "transparent-inputs")]
-                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
-
-                if let Some(account_id) = funding_account {
-                    // Even if the recipient address is external, record the send as internal.
-                    let recipient = Recipient::InternalAccount {
-                        receiving_account: *output.account(),
-                        external_address: {
-                            let receiver = Receiver::Orchard(output.note().recipient());
-                            Some(
-                                select_receiving_address(
-                                    params,
-                                    conn,
-                                    *output.account(),
-                                    &receiver,
-                                )?
-                                .unwrap_or_else(|| {
-                                    receiver.to_zcash_address(params.network_type())
-                                }),
-                            )
-                        },
-                        note: Box::new(Note::Orchard(*output.note())),
-                    };
-
-                    put_sent_output(
-                        conn,
-                        params,
-                        account_id,
-                        tx_ref,
-                        output.index(),
-                        &recipient,
-                        output.note_value(),
-                        Some(output.memo()),
-                    )?;
-                }
-            }
-        }
-    }
-
-    // If any of the utxos spent in the transaction are ours, mark them as spent.
-    #[cfg(feature = "transparent-inputs")]
-    for txin in d_tx
-        .tx()
-        .transparent_bundle()
-        .iter()
-        .flat_map(|b| b.vin.iter())
-    {
-        transparent::mark_transparent_utxo_spent(conn, tx_ref, txin.prevout())?;
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    for (received_t_output, key_scope) in &wallet_transparent_outputs.received {
-        let (account_id, _, _) =
-            transparent::put_transparent_output(conn, params, received_t_output, false)?;
-
-        receiving_accounts.insert(account_id, *key_scope);
-
-        // Since the wallet created the transparent output, we need to ensure
-        // that any transparent inputs belonging to the wallet will be
-        // discovered.
-        tx_has_wallet_outputs = true;
-
-        // When we receive transparent funds (particularly as ephemeral outputs
-        // in transaction pairs sending to a ZIP 320 address) it becomes
-        // possible that the spend of these outputs is not then later detected
-        // if the transaction that spends them is purely transparent. This is
-        // especially a problem in wallet recovery.
-        transparent::queue_transparent_spend_detection(
-            conn,
-            params,
-            *received_t_output.recipient_address(),
-            tx_ref,
-            received_t_output.outpoint().n(),
-        )?;
-    }
-
-    for sent_t_output in &wallet_transparent_outputs.sent {
-        put_sent_output(
-            conn,
-            params,
-            sent_t_output.from_account_uuid,
-            tx_ref,
-            sent_t_output.output_index,
-            &sent_t_output.recipient,
-            sent_t_output.value,
-            None,
-        )?;
-
-        // Even though we know the funding account, we don't know that we have
-        // information for all of the transparent inputs to the transaction.
-        #[cfg(feature = "transparent-inputs")]
-        {
-            tx_has_wallet_outputs = true;
-        }
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    for (account_id, key_scope) in receiving_accounts {
-        if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
-            use ReceiverRequirement::*;
-            transparent::generate_gap_addresses(
-                conn,
-                params,
-                account_id,
-                t_key_scope,
-                gap_limits,
-                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                false,
-            )?;
-        }
-    }
-
+    tx_ref: TxRef,
+) -> Result<Vec<(TxRef, Transaction)>, SqliteClientError> {
     // For each transaction that spends a transparent output of this transaction and does not
-    // already have a known fee value, set the fee if possible.
+    // already have a known fee value.
     let mut spending_txs_stmt = conn.prepare(
         "SELECT DISTINCT t.id_tx, t.raw, t.mined_height, t.expiry_height
          FROM transactions t
@@ -3892,51 +3597,57 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
          AND ts.transaction_id IS NOT NULL",
     )?;
 
-    let mut spending_txs_rows = spending_txs_stmt.query(named_params! {
-        ":transaction_id": tx_ref.0
-    })?;
+    spending_txs_stmt
+        .query_and_then(named_params![":transaction_id": tx_ref.0], |row| {
+            let spending_tx_ref = row.get(0).map(TxRef)?;
+            let tx_bytes: Vec<u8> = row.get(1)?;
+            let block: Option<u32> = row.get(2)?;
+            let expiry: Option<u32> = row.get(3)?;
 
-    while let Some(row) = spending_txs_rows.next()? {
-        let spending_tx_ref = row.get(0).map(TxRef)?;
-        let tx_bytes: Vec<u8> = row.get(1)?;
-        let block: Option<u32> = row.get(2)?;
-        let expiry: Option<u32> = row.get(3)?;
-
-        let (_, spending_tx) = parse_tx(
-            params,
-            &tx_bytes,
-            block.map(BlockHeight::from),
-            expiry.map(BlockHeight::from),
-        )?;
-
-        if let Some(fee) = determine_fee(conn, &spending_tx)? {
-            conn.execute(
-                "UPDATE transactions
-                 SET fee = :fee
-                 WHERE id_tx = :transaction_id",
-                named_params! {
-                    ":transaction_id": spending_tx_ref.0,
-                    ":fee": u64::from(fee)
-                },
+            let (_, spending_tx) = parse_tx(
+                params,
+                &tx_bytes,
+                block.map(BlockHeight::from),
+                expiry.map(BlockHeight::from),
             )?;
-        }
-    }
 
-    // If the transaction has outputs that belong to the wallet as well as transparent
-    // inputs, we may need to download the transactions corresponding to the transparent
-    // prevout references to determine whether the transaction was created (at least in
-    // part) by this wallet.
-    #[cfg(feature = "transparent-inputs")]
-    if tx_has_wallet_outputs {
-        queue_transparent_input_retrieval(conn, tx_ref, &d_tx)?
-    }
+            Ok((spending_tx_ref, spending_tx))
+        })?
+        .collect()
+}
 
-    notify_tx_retrieved(conn, d_tx.tx().txid())?;
+pub(crate) fn update_tx_fee(
+    conn: &rusqlite::Transaction<'_>,
+    tx_ref: TxRef,
+    fee: zcash_protocol::value::Zatoshis,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE transactions
+         SET fee = :fee
+         WHERE id_tx = :transaction_id",
+        named_params! {
+            ":transaction_id": tx_ref.0,
+            ":fee": u64::from(fee)
+        },
+    )?;
 
-    // If the decrypted transaction is unmined and has no shielded components, add it to
-    // the queue for status retrieval.
-    #[cfg(feature = "transparent-inputs")]
-    queue_unmined_tx_retrieval(conn, &d_tx)?;
+    Ok(())
+}
+
+pub(crate) fn set_tx_trust(
+    conn: &rusqlite::Transaction,
+    txid: TxId,
+    trusted: bool,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE transactions
+         SET trust_status = :trust_status
+         WHERE txid = :txid",
+        named_params! {
+           ":txid": &txid.as_ref()[..],
+           ":trust_status": trusted
+        },
+    )?;
 
     Ok(())
 }
@@ -3950,12 +3661,14 @@ pub(crate) fn put_tx_meta(
 ) -> Result<TxRef, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
-        "INSERT INTO transactions (txid, block, mined_height, tx_index)
-        VALUES (:txid, :block, :block, :tx_index)
+        "INSERT INTO transactions (txid, block, mined_height, tx_index, min_observed_height)
+        VALUES (:txid, :block, :block, :tx_index, :block)
         ON CONFLICT (txid) DO UPDATE
         SET block = :block,
             mined_height = :block,
-            tx_index = :tx_index
+            tx_index = :tx_index,
+            min_observed_height = MIN(min_observed_height, :block),
+            confirmed_unmined_at_height = NULL
         RETURNING id_tx",
     )?;
 
@@ -3963,7 +3676,7 @@ pub(crate) fn put_tx_meta(
     let tx_params = named_params![
         ":txid": &txid_bytes.as_ref()[..],
         ":block": u32::from(height),
-        ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
+        ":tx_index": u16::from(tx.block_index()),
     ];
 
     stmt_upsert_tx_meta
@@ -3974,8 +3687,8 @@ pub(crate) fn put_tx_meta(
 /// Returns the most likely wallet address that corresponds to the protocol-level receiver of a
 /// note or UTXO.
 pub(crate) fn select_receiving_address<P: consensus::Parameters>(
-    _params: &P,
     conn: &rusqlite::Connection,
+    _params: &P,
     account: AccountUuid,
     receiver: &Receiver,
 ) -> Result<Option<ZcashAddress>, SqliteClientError> {
@@ -4028,14 +3741,20 @@ pub(crate) fn put_tx_data(
     fee: Option<Zatoshis>,
     created_at: Option<time::OffsetDateTime>,
     target_height: Option<TargetHeight>,
+    observed_height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
-        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
-        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height)
+        "INSERT INTO transactions (txid, tx_index, created, expiry_height, raw, fee, target_height, min_observed_height)
+        VALUES (:txid, :tx_index, :created_at, :expiry_height, :raw, :fee, :target_height, :observed_height)
         ON CONFLICT (txid) DO UPDATE
         SET expiry_height = :expiry_height,
             raw = :raw,
-            fee = IFNULL(:fee, fee)
+            fee = IFNULL(:fee, fee),
+            tx_index = IFNULL(tx_index, :tx_index),
+            min_observed_height = MIN(
+                min_observed_height,
+                :observed_height
+            )
         RETURNING id_tx",
     )?;
 
@@ -4043,13 +3762,19 @@ pub(crate) fn put_tx_data(
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
+    let tx_index = tx
+        .transparent_bundle()
+        .and_then(|bundle| bundle.is_coinbase().then_some(0i64));
+
     let tx_params = named_params![
         ":txid": &txid.as_ref()[..],
+        ":tx_index": tx_index,
         ":created_at": created_at,
         ":expiry_height": u32::from(tx.expiry_height()),
         ":raw": raw_tx,
         ":fee": fee.map(u64::from),
         ":target_height": target_height.map(u32::from),
+        ":observed_height": u32::from(observed_height)
     ];
 
     stmt_upsert_tx_data
@@ -4084,7 +3809,7 @@ impl TxQueryType {
 pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     conn: &rusqlite::Transaction<'_>,
     tx_ref: TxRef,
-    d_tx: &DecryptedTransaction<'_, AccountId>,
+    d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
     if let Some(b) = d_tx.tx().transparent_bundle() {
         if !b.is_coinbase() {
@@ -4100,38 +3825,14 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     Ok(())
 }
 
-#[cfg(feature = "transparent-inputs")]
-pub(crate) fn queue_unmined_tx_retrieval<AccountId>(
-    conn: &rusqlite::Transaction<'_>,
-    d_tx: &DecryptedTransaction<'_, AccountId>,
-) -> Result<(), SqliteClientError> {
-    let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-    #[cfg(feature = "orchard")]
-    let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-    if d_tx.mined_height().is_none() && !detectable_via_scanning {
-        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?
-    }
-
-    Ok(())
-}
-
 pub(crate) fn queue_tx_retrieval(
     conn: &rusqlite::Transaction<'_>,
     txids: impl Iterator<Item = TxId>,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
-    let chain_tip = chain_tip_height(conn)?;
-
-    let mut q_tx_expiry = conn.prepare_cached(
-        "SELECT expiry_height
-         FROM transactions
-         WHERE txid = :txid",
-    )?;
-
     // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
-        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id, request_expiry)
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
          SELECT
             :txid,
             IIF(
@@ -4139,8 +3840,7 @@ pub(crate) fn queue_tx_retrieval(
                 :status_type,
                 :enhancement_type
             ),
-            :dependent_transaction_id,
-            :request_expiry
+            :dependent_transaction_id
         ON CONFLICT (txid) DO UPDATE
         SET query_type =
             IIF(
@@ -4148,30 +3848,15 @@ pub(crate) fn queue_tx_retrieval(
                 :status_type,
                 :enhancement_type
             ),
-            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id),
-            request_expiry = :request_expiry",
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
     )?;
 
     for txid in txids {
-        let request_expiry = q_tx_expiry
-            .query_row(
-                named_params! {
-                    ":txid": txid.as_ref(),
-                },
-                |row| row.get::<_, Option<u32>>(0),
-            )
-            .optional()?
-            .flatten();
-
         stmt_insert_tx.execute(named_params! {
             ":txid": txid.as_ref(),
             ":status_type": TxQueryType::Status.code(),
             ":enhancement_type": TxQueryType::Enhancement.code(),
             ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
-            ":request_expiry": request_expiry.map_or_else(
-                || chain_tip.map(|h| u32::from(h) + DEFAULT_TX_EXPIRY_DELTA),
-                Some
-            )
         })?;
     }
 
@@ -4183,35 +3868,69 @@ pub(crate) fn queue_tx_retrieval(
 pub(crate) fn transaction_data_requests(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    let mut tx_retrieval_stmt =
-        conn.prepare_cached("SELECT txid, query_type FROM tx_retrieval_queue")?;
+    // We will return both explicitly constructed status requests, and a status request for each
+    // transaction that is known to the wallet for which we don't have the mined height,
+    // and for which we have no positive confirmation that the transaction expired unmined.
+    //
+    // For transactions with a known expiry height of 0, we will continue to query indefinitely.
+    // Such transactions should be rebroadcast by the wallet until they are either mined or
+    // conflict with another mined transaction.
+    let mut tx_retrieval_stmt = conn.prepare_cached(
+        "SELECT txid, query_type FROM tx_retrieval_queue
+         UNION
+         SELECT txid, :status_type
+         FROM transactions
+         WHERE mined_height IS NULL
+         AND (
+            -- we have no confirmation of expiry
+            confirmed_unmined_at_height IS NULL
+            -- a nonzero expiry height is known, and we have confirmation that the transaction was
+            -- not unmined as of a height greater than or equal to that expiry height
+            OR (
+                expiry_height > 0
+                AND confirmed_unmined_at_height < expiry_height
+            )
+            -- the expiry height is unknown and the default expiry height for it is not yet in the
+            -- stable block range according to the PRUNING_DEPTH
+            OR (
+                expiry_height IS NULL
+                AND confirmed_unmined_at_height < min_observed_height + :certainty_depth
+            )
+        )",
+    )?;
 
     let result = tx_retrieval_stmt
-        .query_and_then([], |row| {
-            let txid = row.get(0).map(TxId::from_bytes)?;
-            let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
-                SqliteClientError::CorruptedData(
-                    "Unrecognized transaction data request type.".to_owned(),
-                )
-            })?;
+        .query_and_then(
+            named_params![
+                ":status_type": TxQueryType::Status.code(),
+                ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA
+            ],
+            |row| {
+                let txid = row.get(0).map(TxId::from_bytes)?;
+                let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
+                    SqliteClientError::CorruptedData(
+                        "Unrecognized transaction data request type.".to_owned(),
+                    )
+                })?;
 
-            Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
-                TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
-                TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
-            })
-        })?
+                Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
+                    TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
+                    TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
+                })
+            },
+        )?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(result)
 }
 
-pub(crate) fn notify_tx_retrieved(
+pub(crate) fn delete_retrieval_queue_entries(
     conn: &rusqlite::Transaction<'_>,
     txid: TxId,
 ) -> Result<(), SqliteClientError> {
     conn.execute(
         "DELETE FROM tx_retrieval_queue WHERE txid = :txid",
-        named_params![":txid": &txid.as_ref()[..]],
+        named_params![":txid": txid.as_ref()],
     )?;
 
     Ok(())
@@ -4278,13 +3997,13 @@ fn flag_previously_received_change(
                 "UPDATE {table_prefix}_received_notes
                  SET is_change = 1
                  FROM sent_notes sn
-                 WHERE sn.tx = {table_prefix}_received_notes.tx
-                 AND sn.tx = :tx
+                 WHERE sn.transaction_id = {table_prefix}_received_notes.transaction_id
+                 AND sn.transaction_id = :transaction_id
                  AND sn.from_account_id = {table_prefix}_received_notes.account_id
                  AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
             ),
             named_params! {
-                ":tx": tx_ref.0,
+                ":transaction_id": tx_ref.0,
                 ":internal_scope": KeyScope::INTERNAL.encode()
             },
         )
@@ -4308,17 +4027,17 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_insert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account_id,
+            transaction_id, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
          VALUES (
-            :tx, :output_pool, :output_index, :from_account_id,
+            :transaction_id, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)",
     )?;
 
     let (from_account_id, to_address, to_account_id, pool_type) =
         recipient_params(conn, params, from_account_uuid, output.recipient())?;
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
         ":from_account_id": from_account_id.0,
@@ -4343,8 +4062,8 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 ///   the transaction.
 /// - If `recipient` is a transparent address, `output_index` is an index into the transparent
 ///   outputs of the transaction.
-/// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
-///   the transaction.
+/// - If `recipient` is an internal account, `output_index` is an index into the outputs of
+///   the transaction in the transaction bundle corresponding to the recipient pool.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -4358,12 +4077,12 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account_id,
+            transaction_id, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
         VALUES (
-            :tx, :output_pool, :output_index, :from_account_id,
+            :transaction_id, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)
-        ON CONFLICT (tx, output_pool, output_index) DO UPDATE
+        ON CONFLICT (transaction_id, output_pool, output_index) DO UPDATE
         SET from_account_id = :from_account_id,
             to_address = IFNULL(to_address, :to_address),
             to_account_id = IFNULL(to_account_id, :to_account_id),
@@ -4374,7 +4093,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     let (from_account_id, to_address, to_account_id, pool_type) =
         recipient_params(conn, params, from_account_uuid, recipient)?;
     let sql_args = named_params![
-        ":tx": tx_ref.0,
+        ":transaction_id": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
         ":from_account_id": from_account_id.0,
@@ -4399,7 +4118,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
     spend_pool: ShieldedProtocol,
-    new_entries: &[(TxId, u16, Vec<N>)],
+    new_entries: &[(TxIndex, TxId, Vec<N>)],
 ) -> Result<(), SqliteClientError> {
     let mut stmt_select_tx_locators = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
@@ -4420,10 +4139,10 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
             tx_index = :tx_index",
     )?;
 
-    for (txid, tx_index, nullifiers) in new_entries {
+    for (tx_index, txid, nullifiers) in new_entries {
         let tx_args = named_params![
             ":block_height": u32::from(block_height),
-            ":tx_index": tx_index,
+            ":tx_index": u16::from(*tx_index),
             ":txid": txid.as_ref(),
         ];
 
@@ -4441,7 +4160,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
             .query_map(tx_args, |row| {
                 Ok((
                     BlockHeight::from_u32(row.get(0)?),
-                    row.get::<_, u16>(1)?,
+                    TxIndex::from(row.get::<_, u16>(1)?),
                     TxId::from_bytes(row.get(2)?),
                 ))
             })?
@@ -4474,7 +4193,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
                 ":spend_pool": pool_code(PoolType::Shielded(spend_pool)),
                 ":nf": nf.as_ref(),
                 ":block_height": u32::from(block_height),
-                ":tx_index": tx_index,
+                ":tx_index": u16::from(*tx_index),
             ];
             stmt_insert_nullifier_mapping.execute(nf_args)?;
         }
@@ -4507,7 +4226,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
         .query_row(sql_args, |row| {
             Ok((
                 BlockHeight::from_u32(row.get(0)?),
-                row.get(1)?,
+                TxIndex::from(row.get::<_, u16>(1)?),
                 TxId::from_bytes(row.get(2)?),
             ))
         })
@@ -4605,19 +4324,91 @@ pub(crate) fn get_block_range(
     .map_err(SqliteClientError::from)
 }
 
+pub(crate) fn get_received_outputs(
+    conn: &rusqlite::Connection,
+    txid: TxId,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<Vec<ReceivedTransactionOutput>, SqliteClientError> {
+    let mut stmt_received_outputs = conn.prepare_cached(
+        "SELECT
+             vto.output_pool,
+             vto.output_index,
+             vto.recipient_key_scope,
+             vto.value,
+             vto.tx_mined_height,
+             IFNULL(vto.tx_trust_status, 0) AS tx_trust_status,
+             MAX(tt.mined_height) AS max_shielding_input_height,
+             MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
+         FROM v_tx_outputs vto
+         LEFT OUTER JOIN transparent_received_output_spends ros
+            ON ros.transaction_id = vto.transaction_id
+         LEFT OUTER JOIN transparent_received_outputs tro
+            ON tro.id = ros.transparent_received_output_id
+         LEFT OUTER JOIN transactions tt
+            ON tt.id_tx = tro.transaction_id
+         WHERE vto.txid = :txid
+         GROUP BY vto.output_pool, vto.output_index",
+    )?;
+
+    let results = stmt_received_outputs
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![":txid": txid.as_ref()],
+            |row| {
+                let pool_type = parse_pool_code(row.get("output_pool")?)?;
+                let output_index = row.get("output_index")?;
+                let value = Zatoshis::from_nonnegative_i64(row.get("value")?)?;
+                let mined_height = row
+                    .get::<_, Option<u32>>("tx_mined_height")?
+                    .map(BlockHeight::from);
+                let max_shielding_input_height = row
+                    .get::<_, Option<u32>>("max_shielding_input_height")?
+                    .map(BlockHeight::from);
+                let tx_shielding_inputs_trusted =
+                    row.get::<_, bool>("min_shielding_input_trust")?;
+                let key_scope = row
+                    .get::<_, Option<i64>>("recipient_key_scope")?
+                    .map(KeyScope::decode)
+                    .transpose()?;
+                let tx_trusted = row.get::<_, bool>("tx_trust_status")?;
+
+                let confirmations_until_spendable = confirmations_policy
+                    .confirmations_until_spendable(
+                        target_height,
+                        pool_type,
+                        key_scope.and_then(|s| zip32::Scope::try_from(s).ok()),
+                        mined_height,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    );
+
+                Ok(ReceivedTransactionOutput::from_parts(
+                    pool_type,
+                    output_index,
+                    value,
+                    confirmations_until_spendable,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(results)
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use incrementalmerkletree::Position;
     use zcash_client_backend::data_api::testing::TransactionSummary;
     use zcash_primitives::transaction::TxId;
     use zcash_protocol::{
+        ShieldedProtocol,
         consensus::BlockHeight,
         value::{ZatBalance, Zatoshis},
-        ShieldedProtocol,
     };
 
-    use super::common::{table_constants, TableConstants};
-    use crate::{error::SqliteClientError, AccountUuid};
+    use super::common::{TableConstants, table_constants};
+    use crate::{AccountUuid, error::SqliteClientError};
 
     pub(crate) fn get_tx_history(
         conn: &rusqlite::Connection,
@@ -4692,18 +4483,18 @@ mod tests {
     use secrecy::{ExposeSecret, SecretVec};
     use uuid::Uuid;
     use zcash_client_backend::data_api::{
+        Account as _, AccountSource, WalletRead, WalletWrite,
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         wallet::ConfirmationsPolicy,
-        Account as _, AccountSource, WalletRead, WalletWrite,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::value::Zatoshis;
 
     use crate::{
-        error::SqliteClientError,
-        testing::{db::TestDbFactory, BlockCache},
         AccountUuid,
+        error::SqliteClientError,
+        testing::{BlockCache, db::TestDbFactory},
     };
 
     use super::account_birthday;

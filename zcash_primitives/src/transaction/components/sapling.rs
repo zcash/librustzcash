@@ -3,6 +3,7 @@ use core2::io::{self, Read, Write};
 use ff::PrimeField;
 
 use ::sapling::{
+    Nullifier,
     bundle::{
         Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
         SpendDescription, SpendDescriptionV5,
@@ -10,7 +11,6 @@ use ::sapling::{
     note::ExtractedNoteCommitment,
     note_encryption::Zip212Enforcement,
     value::ValueCommitment,
-    Nullifier,
 };
 use redjubjub::SpendAuth;
 use sapling::note_encryption::ENC_CIPHERTEXT_SIZE;
@@ -642,8 +642,8 @@ pub mod testing {
     use proptest::prelude::*;
 
     use crate::transaction::TxVersion;
-    use ::sapling::bundle::{testing as t_sap, Authorized, Bundle};
-    use zcash_protocol::value::{testing::arb_zat_balance, ZatBalance};
+    use ::sapling::bundle::{Authorized, Bundle, testing as t_sap};
+    use zcash_protocol::value::{ZatBalance, testing::arb_zat_balance};
 
     prop_compose! {
         fn arb_bundle()(

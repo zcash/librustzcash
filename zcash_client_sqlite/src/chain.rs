@@ -7,7 +7,7 @@ use zcash_protocol::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{error::SqliteClientError, BlockDb};
+use crate::{BlockDb, error::SqliteClientError};
 
 #[cfg(feature = "unstable")]
 use {
@@ -360,6 +360,17 @@ mod tests {
     #[cfg(feature = "orchard")]
     fn data_db_truncation_orchard() {
         testing::pool::data_db_truncation::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn truncate_to_chain_state_sapling() {
+        testing::pool::truncate_to_chain_state::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_to_chain_state_orchard() {
+        testing::pool::truncate_to_chain_state::<OrchardPoolTester>()
     }
 
     #[test]

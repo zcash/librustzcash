@@ -3,6 +3,7 @@
 use core::cmp::{Ord, Ordering};
 use core::convert::TryFrom;
 use core::fmt;
+use core::num::TryFromIntError;
 use core::ops::{Add, Bound, RangeBounds, Sub};
 
 #[cfg(feature = "std")]
@@ -12,8 +13,8 @@ use crate::constants::{mainnet, regtest, testnet};
 
 /// A wrapper type representing blockchain heights.
 ///
-/// Safe conversion from various integer types, as well as addition and subtraction, are
-/// provided.
+/// Safe conversion from various integer types, as well as addition and subtraction, are provided.
+/// Subtraction of block heights, and of deltas to block heights, are always saturating.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
@@ -125,6 +126,64 @@ impl Sub<BlockHeight> for BlockHeight {
         self.0.saturating_sub(other.0)
     }
 }
+
+/// A wrapper type the index of a transaction within a block.
+///
+/// Safe conversion from various integer types are provided.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TxIndex(u16);
+
+impl From<TxIndex> for u16 {
+    fn from(value: TxIndex) -> Self {
+        value.0
+    }
+}
+
+impl From<TxIndex> for u32 {
+    fn from(value: TxIndex) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<TxIndex> for u64 {
+    fn from(value: TxIndex) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<u16> for TxIndex {
+    fn from(value: u16) -> Self {
+        TxIndex(value)
+    }
+}
+
+impl TryFrom<u32> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+impl TryFrom<u64> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+impl TryFrom<usize> for TxIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(TxIndex(u16::try_from(value)?))
+    }
+}
+
+#[cfg(feature = "std")]
+memuse::impl_no_dynamic_usage!(TxIndex);
 
 /// The enumeration of known Zcash network types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -432,7 +491,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             NetworkUpgrade::Nu6 => Some(BlockHeight(2_726_400)),
-            NetworkUpgrade::Nu6_1 => None,
+            NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_146_400)),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
             #[cfg(zcash_unstable = "zfuture")]
@@ -653,6 +712,15 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
 /// [ZIP 212]: https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes
 pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 
+/// The number of blocks after which a coinbase output is considered mature and spendable.
+///
+/// From [§ 7.1.2 of the Zcash Protocol Specification][txnconsensus]:
+/// > A transaction MUST NOT spend a transparent output of a coinbase transaction from a
+/// > block less than 100 blocks prior to the spend.
+///
+/// [txnconsensus]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub const COINBASE_MATURITY_BLOCKS: u32 = 100;
+
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.
 ///
 /// Each branch ID in this enum corresponds to one of the epochs between a pair of Zcash
@@ -831,6 +899,46 @@ impl BranchId {
     pub fn sprout_uses_groth_proofs(&self) -> bool {
         !matches!(self, BranchId::Sprout | BranchId::Overwinter)
     }
+
+    // Returns `true` for consensus branches that support the Sprout protocol, `false` otherwise..
+    pub fn has_sprout(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => {
+                true
+            }
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => false,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => false,
+        }
+    }
+
+    // Returns `true` for consensus branches that support the Sapling protocol, `false` otherwise..
+    pub fn has_sapling(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter => false,
+            Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => true,
+        }
+    }
+
+    // Returns `true` for consensus branches that support the Orchard protocol, `false` otherwise.
+    pub fn has_orchard(&self) -> bool {
+        use BranchId::*;
+        match self {
+            Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
+            Nu5 | Nu6 | Nu6_1 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => true,
+            #[cfg(zcash_unstable = "zfuture")]
+            BranchId::ZFuture => true,
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -953,8 +1061,12 @@ mod tests {
             BranchId::Nu6,
         );
         assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(3_146_400)),
+            BranchId::Nu6_1,
+        );
+        assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Nu6,
+            BranchId::Nu6_1,
         );
     }
 }

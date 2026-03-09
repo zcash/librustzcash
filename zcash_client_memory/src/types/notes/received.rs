@@ -8,7 +8,7 @@ use std::{
 use zip32::Scope;
 
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::{memo::Memo, PoolType, ShieldedProtocol::Sapling};
+use zcash_protocol::{PoolType, ShieldedProtocol::Sapling, memo::Memo};
 
 use zcash_client_backend::{
     data_api::{ReceivedNotes, SentTransactionOutput},
@@ -22,7 +22,7 @@ use {
     zcash_client_backend::wallet::WalletOrchardOutput, zcash_protocol::ShieldedProtocol::Orchard,
 };
 
-use crate::{error::Error, Nullifier};
+use crate::{Nullifier, error::Error};
 
 /// Keeps track of notes that are spent in which transaction
 #[derive(Debug, Clone, PartialEq)]

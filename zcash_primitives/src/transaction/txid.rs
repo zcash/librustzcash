@@ -20,8 +20,8 @@ use zcash_protocol::value::Zatoshis;
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::{
-    components::tze::{self, TzeIn, TzeOut},
     TzeDigests,
+    components::tze::{self, TzeIn, TzeOut},
 };
 use crate::sighash_versioning::orchard_sighash_kind_to_info;
 use crate::transaction::OrchardBundle::OrchardVanilla;

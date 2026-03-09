@@ -11,7 +11,7 @@ use super::utxos_to_txos;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{error::SqliteClientError, AccountRef, GapLimits},
+    crate::{AccountRef, GapLimits, error::SqliteClientError},
     rusqlite::named_params,
     transparent::keys::NonHardenedChildIndex,
     zcash_keys::{

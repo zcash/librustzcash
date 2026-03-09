@@ -6,14 +6,20 @@
 
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
 pub mod address;
 pub mod builder;
 pub mod bundle;
+pub mod coinbase;
 pub mod keys;
 pub mod pczt;
 pub mod sighash;
+#[cfg(feature = "transparent-inputs")]
+pub mod zip48;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "transparent-inputs"))]
 mod test_vectors;
 
 #[macro_use]

@@ -9,6 +9,29 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::OutgoingViewingKey`
+- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
+- `zcash_keys::keys::transparent::gap_limits` module (behind the
+  `transparent-inputs` feature flag), containing:
+  - `GapLimits` type (moved from `zcash_client_backend::wallet::transparent`).
+  - `GapLimits::limit_for`
+  - `AddressStore` trait
+  - `generate_gap_addresses`
+  - `generate_address_list`
+  - `GapAddressesError`
+
+### Changed
+- MSRV is now 1.85.1.
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- The `std` feature flag now enables the equivalent flag on the dependencies
+  `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.
+
+## [0.12.0] - 2025-10-13
+
+### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zcash_transparent 0.6`
+
 ## [0.11.0] - 2025-09-25
 
 ### Added

@@ -8,8 +8,8 @@ use zcash_address::ConversionError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_primitives::transaction::builder;
 use zcash_protocol::{
-    value::{BalanceError, Zatoshis},
     PoolType,
+    value::{BalanceError, Zatoshis},
 };
 
 use crate::{
@@ -43,6 +43,7 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// * spend a prior shielded output;
     /// * pay to an output pool for which the corresponding feature is not enabled;
     /// * pay to a TEX address if the "transparent-inputs" feature is not enabled.
+    /// * a proposal step has no inputs
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided ID.
@@ -99,11 +100,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
-
-    /// The wallet tried to pay to an ephemeral transparent address as a normal
-    /// output.
-    #[cfg(feature = "transparent-inputs")]
-    PaysEphemeralTransparentAddress(String),
 
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
@@ -254,13 +250,6 @@ where
                 write!(
                     f,
                     "The specified transparent address was not recognized as belonging to the wallet."
-                )
-            }
-            #[cfg(feature = "transparent-inputs")]
-            Error::PaysEphemeralTransparentAddress(addr) => {
-                write!(
-                    f,
-                    "The wallet tried to pay to an ephemeral transparent address as a normal output: {addr}"
                 )
             }
             #[cfg(feature = "pczt")]

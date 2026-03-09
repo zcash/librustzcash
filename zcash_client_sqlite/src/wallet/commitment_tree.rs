@@ -1,4 +1,4 @@
-use rusqlite::{self, named_params, OptionalExtension};
+use rusqlite::{self, OptionalExtension, named_params};
 use std::{
     collections::BTreeSet,
     error, fmt,
@@ -11,9 +11,9 @@ use std::{
 
 use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
+    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
     error::{QueryError, ShardTreeError},
     store::{Checkpoint, ShardStore, TreeState},
-    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
 
 use zcash_client_backend::{
@@ -21,14 +21,14 @@ use zcash_client_backend::{
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
-use zcash_protocol::{consensus::BlockHeight, ShieldedProtocol};
+use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
 
 use crate::{error::SqliteClientError, sapling_tree};
 
 #[cfg(feature = "orchard")]
 use crate::orchard_tree;
 
-use super::common::{table_constants, TableConstants};
+use super::common::{TableConstants, table_constants};
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -1087,12 +1087,11 @@ pub(crate) fn put_shard_roots<
 
 pub(crate) fn check_witnesses(
     conn: &rusqlite::Transaction<'_>,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
-    let chain_tip_height =
-        super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
     let wallet_birthday = super::wallet_birthday(conn)?.ok_or(SqliteClientError::AccountUnknown)?;
     let unspent_sapling_note_meta =
-        super::sapling::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+        super::sapling::select_unspent_note_meta(conn, wallet_birthday, anchor_height)?;
 
     let mut scan_ranges = vec![];
     let mut sapling_incomplete = vec![];
@@ -1117,7 +1116,7 @@ pub(crate) fn check_witnesses(
     #[cfg(feature = "orchard")]
     {
         let unspent_orchard_note_meta =
-            super::orchard::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+            super::orchard::select_unspent_note_meta(conn, wallet_birthday, anchor_height)?;
         let mut orchard_incomplete = vec![];
         let orchard_tree = orchard_tree(conn)?;
         for m in unspent_orchard_note_meta.iter() {
@@ -1159,12 +1158,12 @@ mod tests {
 
     use super::SqliteShardStore;
     use crate::{
+        WalletDb,
         testing::{
             db::{test_clock, test_rng},
             pool::ShieldedPoolPersistence,
         },
         wallet::init::WalletMigrator,
-        WalletDb,
     };
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(

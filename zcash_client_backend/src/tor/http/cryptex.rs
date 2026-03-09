@@ -11,11 +11,14 @@ use crate::tor::{Client, Error};
 use super::Retry;
 
 mod binance;
+mod coin_ex;
 mod coinbase;
-mod gate_io;
+mod digi_finex;
 mod gemini;
+mod kraken;
 mod ku_coin;
 mod mexc;
+mod xt;
 
 /// Maximum number of retries for exchange queries implemented in this crate.
 const RETRY_LIMIT: u8 = 1;
@@ -53,16 +56,19 @@ fn retry_filter(res: Result<StatusCode, &Error>) -> Option<Retry> {
 /// Queries to these exchanges will be retried a single time on error.
 pub mod exchanges {
     pub use super::binance::Binance;
+    pub use super::coin_ex::CoinEx;
     pub use super::coinbase::Coinbase;
-    pub use super::gate_io::GateIo;
+    pub use super::digi_finex::DigiFinex;
     pub use super::gemini::Gemini;
+    pub use super::kraken::Kraken;
     pub use super::ku_coin::KuCoin;
     pub use super::mexc::Mexc;
+    pub use super::xt::Xt;
 }
 
 /// An exchange that can be queried for ZEC data.
 #[trait_variant::make(Exchange: Send)]
-#[dynosaur::dynosaur(DynExchange = dyn Exchange)]
+#[dynosaur::dynosaur(DynExchange = dyn(box) Exchange)]
 pub trait LocalExchange {
     /// Queries data about the USD/ZEC pair.
     ///
@@ -103,10 +109,13 @@ impl Exchanges {
     pub fn unauthenticated_known_with_gemini_trusted() -> Self {
         Self::builder(exchanges::Gemini::unauthenticated())
             .with(exchanges::Binance::unauthenticated())
+            .with(exchanges::CoinEx::unauthenticated())
             .with(exchanges::Coinbase::unauthenticated())
-            .with(exchanges::GateIo::unauthenticated())
+            .with(exchanges::DigiFinex::unauthenticated())
+            .with(exchanges::Kraken::unauthenticated())
             .with(exchanges::KuCoin::unauthenticated())
             .with(exchanges::Mexc::unauthenticated())
+            .with(exchanges::Xt::unauthenticated())
             .build()
     }
 
@@ -143,14 +152,14 @@ impl ExchangesBuilder {
     /// obtained via Tor (i.e. no transient failures).
     pub fn new(trusted: impl Exchange + 'static) -> Self {
         Self(Exchanges {
-            trusted: DynExchange::boxed(trusted),
+            trusted: DynExchange::new_box(trusted),
             others: vec![],
         })
     }
 
     /// Adds another [`Exchange`] as a data source.
     pub fn with(mut self, other: impl Exchange + 'static) -> Self {
-        self.0.others.push(DynExchange::boxed(other));
+        self.0.others.push(DynExchange::new_box(other));
         self
     }
 
@@ -174,8 +183,13 @@ impl Client {
 
         // Fetch the data in parallel.
         let res = join!(
-            exchanges.trusted.query_zec_to_usd(self),
-            join_all(exchanges.others.iter().map(|e| e.query_zec_to_usd(self)))
+            DynExchange::query_zec_to_usd(&exchanges.trusted, self),
+            join_all(
+                exchanges
+                    .others
+                    .iter()
+                    .map(|e| DynExchange::query_zec_to_usd(e, self))
+            )
         );
         trace!(?res, "Data results");
         let (trusted_res, other_res) = res;

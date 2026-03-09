@@ -15,6 +15,11 @@ fn main() -> io::Result<()> {
     // - We check for the existence of protoc in the same way as prost_build, so that
     //   people building from source do not need to have protoc installed. If they make
     //   changes to the proto files, the discrepancy will be caught by CI.
+    // - We don't build on Windows because the protobufs are symlinks to the actual files,
+    //   which don't resolve by default in Windows clones of the git repository. This can
+    //   be worked around with `git config core.symlinks true` but that's additional
+    //   hassle, and it's easier to just make any protobuf updates on *nix dev machines.
+    #[cfg(not(windows))]
     if Path::new(COMPACT_FORMATS_PROTO).exists()
         && env::var_os("PROTOC")
             .map(PathBuf::from)
@@ -33,7 +38,7 @@ fn build() -> io::Result<()> {
         .into();
 
     // Build the compact format types.
-    tonic_build::compile_protos(COMPACT_FORMATS_PROTO)?;
+    tonic_prost_build::compile_protos(COMPACT_FORMATS_PROTO)?;
 
     // Copy the generated types into the source tree so changes can be committed.
     fs::copy(
@@ -42,7 +47,7 @@ fn build() -> io::Result<()> {
     )?;
 
     // Build the gRPC types and client.
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(false)
         .client_mod_attribute(
             "cash.z.wallet.sdk.rpc",
@@ -61,6 +66,14 @@ fn build() -> io::Result<()> {
             "crate::proto::compact_formats::CompactTx",
         )
         .extern_path(
+            ".cash.z.wallet.sdk.rpc.CompactTxIn",
+            "crate::proto::compact_formats::CompactTxIn",
+        )
+        .extern_path(
+            ".cash.z.wallet.sdk.rpc.TxOut",
+            "crate::proto::compact_formats::TxOut",
+        )
+        .extern_path(
             ".cash.z.wallet.sdk.rpc.CompactSaplingSpend",
             "crate::proto::compact_formats::CompactSaplingSpend",
         )
@@ -75,7 +88,7 @@ fn build() -> io::Result<()> {
         .compile_protos(&[SERVICE_PROTO], &["proto/"])?;
 
     // Build the proposal types.
-    tonic_build::compile_protos(PROPOSAL_PROTO)?;
+    tonic_prost_build::compile_protos(PROPOSAL_PROTO)?;
 
     // Copy the generated types into the source tree so changes can be committed.
     fs::copy(

@@ -6,17 +6,17 @@ use arti_client::TorClient;
 use futures_util::task::SpawnExt;
 use http_body_util::{BodyExt, Empty};
 use hyper::{
+    Request, Response, StatusCode, Uri,
     body::{Body, Buf, Bytes, Incoming},
     client::conn,
     http::{request::Builder, uri::Scheme},
-    Request, Response, StatusCode, Uri,
 };
 use hyper_util::rt::TokioIo;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{
-    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
+    rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
 use tor_rtcompat::PreferredRuntime;
 use tracing::{debug, error};
@@ -409,8 +409,8 @@ mod live_network_tests {
     use hyper::body::Buf;
 
     use crate::tor::{
-        http::{HttpError, Retry},
         Client,
+        http::{HttpError, Retry},
     };
 
     #[test]
@@ -443,13 +443,15 @@ mod live_network_tests {
                     .and_then(|v| v.as_str()),
                 Some("httpbin.org"),
             );
-            assert!(get_response
-                .body()
-                .get("args")
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .is_empty());
+            assert!(
+                get_response
+                    .body()
+                    .get("args")
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .is_empty()
+            );
 
             // Test HTTP POST
             let post_body = "Some body";
@@ -473,13 +475,15 @@ mod live_network_tests {
                 )
                 .await
                 .unwrap();
-            assert!(post_response
-                .body()
-                .get("args")
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .is_empty());
+            assert!(
+                post_response
+                    .body()
+                    .get("args")
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .is_empty()
+            );
             assert_eq!(
                 post_response.body().get("data").and_then(|v| v.as_str()),
                 Some(post_body),

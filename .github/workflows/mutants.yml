@@ -1,0 +1,109 @@
+name: Mutation testing
+
+env:
+  CARGO_TERM_COLOR: always
+
+on:
+  # Run weekly on Sundays at 2 AM UTC
+  schedule:
+    - cron: "0 2 * * 0"
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to test (select 'all' for all packages)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - eip681
+          - equihash
+          - f4jumble
+          - pczt
+          - zcash_address
+          - zcash_client_backend
+          - zcash_client_sqlite
+          - zcash_encoding
+          - zcash_extensions
+          - zcash_history
+          - zcash_keys
+          - zcash_primitives
+          - zcash_proofs
+          - zcash_protocol
+          - zcash_transparent
+          - zip321
+
+permissions:
+  contents: read
+
+# Only run one mutation test at a time
+concurrency:
+  group: mutation-testing
+  cancel-in-progress: false
+
+jobs:
+  mutants:
+    name: Mutation testing of ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - eip681
+          - equihash
+          - f4jumble
+          - pczt
+          - zcash_address
+          - zcash_client_backend
+          - zcash_client_sqlite
+          - zcash_encoding
+          - zcash_extensions
+          - zcash_history
+          - zcash_keys
+          - zcash_primitives
+          - zcash_proofs
+          - zcash_protocol
+          - zcash_transparent
+          - zip321
+        # Only filter if a specific package was requested via workflow_dispatch
+        # For push/pull_request events, inputs.package is undefined, so default to 'all'
+        exclude:
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'eip681',               'eip681',               'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'equihash',             'equihash',             'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'f4jumble',             'f4jumble',             'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'pczt',                 'pczt',                 'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_address',        'zcash_address',        'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_client_backend', 'zcash_client_backend', 'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_client_sqlite',  'zcash_client_sqlite',  'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_encoding',       'zcash_encoding',       'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_extensions',     'zcash_extensions',     'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_history',        'zcash_history',        'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_keys',           'zcash_keys',           'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_primitives',     'zcash_primitives',     'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_proofs',         'zcash_proofs',         'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_protocol',       'zcash_protocol',       'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_transparent',    'zcash_transparent',    'NONE') }}
+          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zip321',               'zip321',               'NONE') }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      - uses: taiki-e/install-action@7f491e26f71f4ec2e6902c7c95c73043f209ab79 # v2.68.9
+        with:
+          tool: cargo-mutants
+      - run: cargo mutants --package "${{ matrix.package }}" --all-features -vV --in-place
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: mutants-${{ matrix.package }}
+          path: |
+            mutants.out/
+          retention-days: 30

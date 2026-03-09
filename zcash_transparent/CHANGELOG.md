@@ -8,7 +8,87 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.7.0] - PENDING
+
+### Added
+- `zcash_transparent::pczt`:
+  - `Input::with_signable_input`
+  - `Input::append_signature`
+- `impl core::error::Error` for:
+  -` zcash_transparent::builder::Error`
+  - `zcash_transparent::coinbase::Error`
+- `zcash_transparent::builder::SpendInfo`
+- `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
+- `zcash_transparent::builder::Builder::add_p2pkh_input`
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
+
+### Changed
+- MSRV is now 1.85.1.
+- `zcash_transparent::pczt`:
+  - `SignerError` has added variants:
+    - `InvalidExternalSignature`
+    - `MissingPreimage`
+    - `UnsupportedPubkey`
+- `zcash_transparent::builder::Builder::add_input` now takes a `TransparentInputInfo`
+  instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
+  previous API.
+
+## [0.6.3] - 2025-12-17
+
+### Added
+- `zcash_transparent::zip48`:
+  - `FullViewingKey::derive_matching_account_priv_key`
+
+### Changed
+- Enabling the `std` feature now enables `zcash_address/std`, `zcash_script/std`,
+  and `secp256k1?/std`. This change is intended to improve the ergonomics for
+  downstream users of this crate, to eliminate the need for users to manually
+  enable the `std` feature of those dependencies.
+
+## [0.6.2] - 2025-12-12
+
+### Added
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
+    - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error` when the `std` feature is enabled.
+  - `bundle`:
+    - `Outpoint::NULL`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
+
+## [0.6.1] - 2025-10-27
+
+### Added
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`
+- `zcash_transparent::pczt`:
+  - `Bip32Derivation::extract_zip_48_fields`
+- `zcash_transparent::zip48` module, behind the `transparent-inputs` feature flag.
+
+## [0.6.0] - 2025-10-02
+
+### Added
+- `zcash_transparent::builder`:
+  - `TransparentBuilder::add_p2sh_input` (only for use in combination with
+    `TransparentBuilder::build_for_pczt`).
+  - `TransparentInputInfo::serialized_len`
+
+### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`
+- `zcash_transparent::pczt`:
+  - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
+    signing key is not involved with the input in any way we can detect.
+  - `Bundle::finalize_spends` can now finalize P2MS inputs.
+  - `SpendFinalizerError` has added variants:
+    - `MissingRedeemScript`
+    - `RedeemScriptTooLong`
+    - `InvalidSignature`
+    - `UncompressedPubkeyInScript`
+    - `UnsupportedRedeemScript`
 
 ## [0.5.0] - 2025-09-25
 
@@ -75,7 +155,7 @@ workspace.
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
-  return `Ok(None)` when this is the case. 
+  return `Ok(None)` when this is the case.
 
 ### Removed
 - Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;

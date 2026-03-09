@@ -7,23 +7,26 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use sapling::zip32::ExtendedSpendingKey;
-use zcash_keys::{address::Address, keys::UnifiedAddressRequest};
+use zcash_keys::{
+    address::Address,
+    keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+};
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
 use super::TestAccount;
 use crate::{
     data_api::{
+        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
         wallet::{
-            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
-            ConfirmationsPolicy, TargetHeight,
+            ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
+            input_selection::GreedyInputSelector,
         },
-        Account as _, Balance, InputSource, WalletRead, WalletWrite,
     },
-    fees::{standard, DustOutputPolicy, StandardFeeRule},
+    fees::{DustOutputPolicy, StandardFeeRule, standard},
     wallet::WalletTransparentOutput,
 };
 
@@ -59,7 +62,7 @@ fn check_balance<DSF>(
             .unwrap()
             .get(taddr)
             .cloned()
-            .map_or(Zatoshis::ZERO, |b| b.spendable_value()),
+            .map_or(Zatoshis::ZERO, |(_, b)| b.spendable_value()),
         expected.total(),
     );
     assert_eq!(
@@ -116,18 +119,21 @@ where
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
     assert_matches!(res0, Ok(_));
 
+    let target_height = TargetHeight::from(height_1 + 1);
     // Confirm that we see the output unspent as of `height_1`.
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
             taddr,
-            TargetHeight::from(height_1 + 1),
+            target_height,
             ConfirmationsPolicy::MIN
         ).as_deref(),
-        Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
+        Ok([ret])
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint()),
-        Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
+        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height),
+        Ok(Some(ret))
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
 
     // Change the mined height of the UTXO and upsert; we should get back
@@ -141,19 +147,16 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(
-                taddr,
-                TargetHeight::from(height_1 + 1),
-                ConfirmationsPolicy::MIN
-            )
+            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok(&[])
     );
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint()),
-        Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
+        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height),
+        Ok(Some(ret))
+        if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
 
     // If we include `height_2` then the output is returned.
@@ -170,7 +173,7 @@ where
             TargetHeight::from(height_2 + 1),
             ConfirmationsPolicy::MIN
         ),
-        Ok(h) if h.get(taddr).map(|b| b.spendable_value()) == Some(value)
+        Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
 }
 
@@ -413,35 +416,6 @@ where
     );
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct GapLimits {
-    external: u32,
-    internal: u32,
-    ephemeral: u32,
-}
-
-impl GapLimits {
-    pub fn new(external: u32, internal: u32, ephemeral: u32) -> Self {
-        Self {
-            external,
-            internal,
-            ephemeral,
-        }
-    }
-
-    pub fn external(&self) -> u32 {
-        self.external
-    }
-
-    pub fn internal(&self) -> u32 {
-        self.internal
-    }
-
-    pub fn ephemeral(&self) -> u32 {
-        self.ephemeral
-    }
-}
-
 pub fn gap_limits<DSF>(ds_factory: DSF, cache: impl TestCache, gap_limits: GapLimits)
 where
     DSF: DataStoreFactory,
@@ -450,6 +424,7 @@ where
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
+        .with_gap_limits(gap_limits)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -506,7 +481,7 @@ where
     // Pick an address half way through the set of external taddrs
     let external_taddrs_sorted = external_taddrs
         .into_iter()
-        .filter_map(|(addr, meta)| meta.and_then(|m| m.address_index().map(|i| (i, addr))))
+        .filter_map(|(addr, meta)| meta.address_index().map(|i| (i, addr)))
         .collect::<BTreeMap<_, _>>();
     let to = Address::from(
         *external_taddrs_sorted

@@ -3,34 +3,38 @@
 mod serialization;
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     num::NonZeroU32,
     ops::{Range, RangeInclusive},
 };
 
 use ::transparent::bundle::OutPoint;
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::keys::NonHardenedChildIndex;
 use incrementalmerkletree::{Address, Level, Marking, Position, Retention};
 use scanning::ScanQueue;
 use shardtree::{
-    store::{memory::MemoryShardStore, ShardStore},
     ShardTree,
+    store::{ShardStore, memory::MemoryShardStore},
 };
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::wallet::TransparentAddressMetadata;
 use zcash_client_backend::{
     data_api::{
+        Account as _, AccountBirthday, AccountSource, InputSource, Ratio, SAPLING_SHARD_HEIGHT,
+        TransactionStatus, WalletRead,
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
-        Account as _, AccountBirthday, AccountSource, InputSource, Ratio, TransactionStatus,
-        WalletRead, SAPLING_SHARD_HEIGHT,
     },
     wallet::{NoteId, WalletSaplingOutput},
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
     ShieldedProtocol, TxId,
+    consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
-use zip32::{fingerprint::SeedFingerprint, Scope};
+use zip32::{Scope, fingerprint::SeedFingerprint};
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
@@ -555,14 +559,14 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     pub(crate) fn insert_sapling_nullifier_map(
         &mut self,
         block_height: BlockHeight,
-        new_entries: &[(TxId, u16, Vec<sapling::Nullifier>)],
+        new_entries: &[(TxIndex, TxId, Vec<sapling::Nullifier>)],
     ) -> Result<(), Error> {
-        for (txid, tx_index, nullifiers) in new_entries {
+        for (tx_index, txid, nullifiers) in new_entries {
             for nf in nullifiers.iter() {
                 self.nullifiers
-                    .insert(block_height, *tx_index as u32, Nullifier::Sapling(*nf));
+                    .insert(block_height, u32::from(*tx_index), Nullifier::Sapling(*nf));
             }
-            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+            match self.tx_locator.entry((block_height, u32::from(*tx_index))) {
                 Entry::Occupied(x) => {
                     if txid == x.get() {
                         // This is a duplicate entry
@@ -583,14 +587,14 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     pub(crate) fn insert_orchard_nullifier_map(
         &mut self,
         block_height: BlockHeight,
-        new_entries: &[(TxId, u16, Vec<orchard::note::Nullifier>)],
+        new_entries: &[(TxIndex, TxId, Vec<orchard::note::Nullifier>)],
     ) -> Result<(), Error> {
-        for (txid, tx_index, nullifiers) in new_entries {
+        for (tx_index, txid, nullifiers) in new_entries {
             for nf in nullifiers.iter() {
                 self.nullifiers
-                    .insert(block_height, *tx_index as u32, Nullifier::Orchard(*nf));
+                    .insert(block_height, u32::from(*tx_index), Nullifier::Orchard(*nf));
             }
-            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+            match self.tx_locator.entry((block_height, u32::from(*tx_index))) {
                 Entry::Occupied(x) => {
                     if txid == x.get() {
                         // This is a duplicate entry
@@ -1036,6 +1040,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     }
 
     #[cfg(feature = "transparent-inputs")]
+    #[allow(unreachable_code, unused_variables)] //FIXME: need address key scope detection
     pub(crate) fn put_transparent_output(
         &mut self,
         output: &WalletTransparentOutput,
@@ -1086,6 +1091,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         };
 
         // insert into transparent_received_outputs table. Update if it exists
+        #[allow(clippy::diverging_sub_expression)] // FIXME
         match self
             .transparent_received_outputs
             .entry(output.outpoint().clone())
@@ -1101,6 +1107,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                     txid,
                     *receiving_account,
                     *address,
+                    todo!("look up the key scope for the address"),
                     output.txout().clone(),
                     max_observed_unspent.unwrap_or(BlockHeight::from(0)),
                 ));
@@ -1117,5 +1124,25 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         }
 
         Ok(output.outpoint().clone())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn get_known_ephemeral_addresses(
+        &self,
+        account_id: AccountId,
+        index_range: Option<Range<NonHardenedChildIndex>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Error> {
+        Ok(self
+            .accounts
+            .get(account_id)
+            .map(Account::ephemeral_addresses)
+            .unwrap_or_else(|| Ok(vec![]))?
+            .into_iter()
+            .filter(|(_addr, meta)| {
+                index_range
+                    .as_ref()
+                    .is_none_or(|range| meta.address_index().is_some_and(|i| range.contains(&i)))
+            })
+            .collect::<Vec<_>>())
     }
 }

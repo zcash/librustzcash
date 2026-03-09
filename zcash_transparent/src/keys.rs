@@ -1,5 +1,7 @@
 //! Transparent key components.
 
+use core::fmt;
+
 use bip32::ChildNumber;
 use subtle::{Choice, ConstantTimeEq};
 use zip32::DiversifierIndex;
@@ -20,7 +22,7 @@ use {
 ///
 /// This type can represent [`zip32`] internal and external scopes, as well as custom scopes that
 /// may be used in non-hardened derivation at the `change` level of the BIP 44 key path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {
@@ -49,6 +51,17 @@ impl TransparentKeyScope {
     pub const EPHEMERAL: Self = TransparentKeyScope(2);
 }
 
+impl fmt::Debug for TransparentKeyScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::EXTERNAL => f.write_str("TransparentKeyScope::EXTERNAL"),
+            Self::INTERNAL => f.write_str("TransparentKeyScope::INTERNAL"),
+            Self::EPHEMERAL => f.write_str("TransparentKeyScope::EPHEMERAL"),
+            TransparentKeyScope(other) => f.write_str(&format!("TransparentKeyScope({other})")),
+        }
+    }
+}
+
 impl From<zip32::Scope> for TransparentKeyScope {
     fn from(value: zip32::Scope) -> Self {
         match value {
@@ -67,8 +80,14 @@ impl From<TransparentKeyScope> for ChildNumber {
 /// A child index for a derived transparent address.
 ///
 /// Only NON-hardened derivation is supported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NonHardenedChildIndex(u32);
+
+impl core::fmt::Debug for NonHardenedChildIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&format!("NonHardenedChildIndex({})", self.0))
+    }
+}
 
 impl ConstantTimeEq for NonHardenedChildIndex {
     fn ct_eq(&self, other: &Self) -> Choice {
@@ -612,19 +631,21 @@ impl ExternalOvk {
 mod tests {
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
-    use zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK};
 
-    use super::AccountPubKey;
-    use super::NonHardenedChildIndex;
-    #[allow(deprecated)]
-    use crate::{
-        address::TransparentAddress,
-        keys::{AccountPrivKey, IncomingViewingKey, TransparentKeyScope},
-        test_vectors,
+    use crate::keys::NonHardenedChildIndex;
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::{
+            address::TransparentAddress,
+            keys::{AccountPrivKey, AccountPubKey, IncomingViewingKey, TransparentKeyScope},
+            test_vectors,
+        },
+        zcash_protocol::consensus::{MAIN_NETWORK, NetworkConstants},
     };
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
     fn address_derivation() {
         let seed = [
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
@@ -643,7 +664,6 @@ mod tests {
             let address_pubkey = account_pubkey
                 .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
                 .unwrap();
-            #[cfg(feature = "transparent-inputs")]
             assert_eq!(TransparentAddress::from_pubkey(&address_pubkey), address);
 
             let expected_path = [
@@ -689,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
     fn bip_32_test_vectors() {
         let seed = [
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
@@ -727,6 +747,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn check_ovk_test_vectors() {
         for tv in test_vectors::transparent_ovk() {
             let mut key_bytes = [0u8; 65];
@@ -761,10 +782,12 @@ mod tests {
     #[test]
     fn nonhardened_index_next() {
         assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
-        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
-            .unwrap()
-            .next()
-            .is_none());
+        assert!(
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .next()
+                .is_none()
+        );
     }
 
     #[test]

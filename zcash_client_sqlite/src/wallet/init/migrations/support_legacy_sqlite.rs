@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use crate::wallet::init::{migrations::tx_retrieval_queue, WalletMigrationError};
+use crate::wallet::init::{WalletMigrationError, migrations::tx_retrieval_queue};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x156d8c8f_2173_4b59_89b6_75697d5a2103);
 

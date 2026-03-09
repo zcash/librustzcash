@@ -1,20 +1,17 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{BTreeMap, btree_map::Entry},
     ops::Deref,
 };
 
 use zcash_client_backend::{
-    data_api::{wallet::TargetHeight, TransactionStatus},
+    data_api::{TransactionStatus, wallet::TargetHeight},
     wallet::WalletTx,
 };
-use zcash_primitives::{
-    consensus::BlockHeight,
-    transaction::{Transaction, TxId},
-};
-use zcash_protocol::value::Zatoshis;
+use zcash_primitives::transaction::{Transaction, TxId};
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
-use crate::error::Error;
 use crate::AccountId;
+use crate::error::Error;
 
 /// Maps a block height and transaction index to a transaction ID.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +47,7 @@ impl TransactionEntry {
     pub fn new_from_tx_meta(tx_meta: WalletTx<AccountId>, height: BlockHeight) -> Self {
         Self {
             tx_status: TransactionStatus::Mined(height),
-            tx_index: Some(tx_meta.block_index() as u32),
+            tx_index: Some(u32::from(tx_meta.block_index())),
             block: Some(height),
             expiry_height: None,
             raw: None,
@@ -125,7 +122,7 @@ impl TransactionTable {
     pub(crate) fn put_tx_meta(&mut self, tx_meta: WalletTx<AccountId>, height: BlockHeight) {
         match self.0.entry(tx_meta.txid()) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().tx_index = Some(tx_meta.block_index() as u32);
+                entry.get_mut().tx_index = Some(u32::from(tx_meta.block_index()));
                 entry.get_mut().tx_status = TransactionStatus::Mined(height);
             }
             Entry::Vacant(entry) => {

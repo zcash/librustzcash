@@ -10,6 +10,23 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::ZcashAddress::is_transparent_only`
+
+### Removed
+
+- Removed deprecated `zcash_address::Network`, use `zcash_protocol::consensus::Network` instead.
+
+## [0.10.1] - 2025-10-18
+
+### Fixed
+- Adjusted doc features to fix builds on docs.rs after nightly Rust update.
+
+## [0.10.0] - 2025-10-02
+
+### Changed
+- Migrated to `zcash_protocol 0.7`
+
 ## [0.9.0] - 2025-07-31
 ### Changed
 - Migrated to `zcash_protocol 0.6`

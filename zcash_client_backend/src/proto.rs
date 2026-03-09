@@ -2,7 +2,6 @@
 
 use incrementalmerkletree::frontier::CommitmentTree;
 use nonempty::NonEmpty;
-use sapling::{self, note::ExtractedNoteCommitment, note_encryption::COMPACT_NOTE_SIZE, Node};
 use std::{
     array::TryFromSliceError,
     collections::BTreeMap,
@@ -10,6 +9,8 @@ use std::{
     io,
 };
 use zcash_address::unified::{self, Encoding};
+
+use sapling::{self, Node, note::ExtractedNoteCommitment, note_encryption::COMPACT_NOTE_SIZE};
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
@@ -17,15 +18,15 @@ use zcash_primitives::{
     transaction::TxId,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkType},
     memo::{self, MemoBytes},
     value::Zatoshis,
-    PoolType, ShieldedProtocol,
 };
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::{chain::ChainState, InputSource},
+    data_api::{InputSource, chain::ChainState, wallet::TargetHeight},
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
 };
@@ -45,16 +46,19 @@ use zcash_note_encryption::note_bytes::{NoteBytes, NoteBytesData};
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod compact_formats;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod proposal;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[allow(clippy::doc_overindented_list_items)]
 pub mod service;
 
 impl compact_formats::CompactBlock {
@@ -62,11 +66,8 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.header`] is not set and
-    /// [`CompactBlock.hash`] is not exactly 32 bytes.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
-    /// [`CompactBlock.hash`]: #structfield.hash
+    /// This function will panic if [`field@Self::header`] is not set and
+    /// [`field@Self::hash`] is not exactly 32 bytes.
     pub fn hash(&self) -> BlockHash {
         if let Some(header) = self.header() {
             header.hash()
@@ -79,11 +80,8 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.header`] is not set and
-    /// [`CompactBlock.prevHash`] is not exactly 32 bytes.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
-    /// [`CompactBlock.prevHash`]: #structfield.prevHash
+    /// This function will panic if [`field@Self::header`] is not set and
+    /// [`field@Self::prev_hash`] is not exactly 32 bytes.
     pub fn prev_hash(&self) -> BlockHash {
         if let Some(header) = self.header() {
             header.prev_block
@@ -96,17 +94,15 @@ impl compact_formats::CompactBlock {
     ///
     /// # Panics
     ///
-    /// This function will panic if [`CompactBlock.height`] is not
-    /// representable within a u32.
+    /// This function will panic if [`field@Self::height`] is not representable within a
+    /// `u32`.
     pub fn height(&self) -> BlockHeight {
         self.height.try_into().unwrap()
     }
 
     /// Returns the [`BlockHeader`] for this block if present.
     ///
-    /// A convenience method that parses [`CompactBlock.header`] if present.
-    ///
-    /// [`CompactBlock.header`]: #structfield.header
+    /// A convenience method that parses [`field@Self::header`] if present.
     pub fn header(&self) -> Option<BlockHeader> {
         if self.header.is_empty() {
             None
@@ -119,18 +115,16 @@ impl compact_formats::CompactBlock {
 impl compact_formats::CompactTx {
     /// Returns the transaction Id
     pub fn txid(&self) -> TxId {
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&self.hash);
-        TxId::from_bytes(hash)
+        let mut txid_bytes = [0u8; 32];
+        txid_bytes.copy_from_slice(&self.txid);
+        TxId::from_bytes(txid_bytes)
     }
 }
 
 impl compact_formats::CompactSaplingOutput {
     /// Returns the note commitment for this output.
     ///
-    /// A convenience method that parses [`CompactOutput.cmu`].
-    ///
-    /// [`CompactOutput.cmu`]: #structfield.cmu
+    /// A convenience method that parses [`field@Self::cmu`].
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
         repr.copy_from_slice(&self.cmu[..]);
@@ -139,9 +133,7 @@ impl compact_formats::CompactSaplingOutput {
 
     /// Returns the ephemeral public key for this output.
     ///
-    /// A convenience method that parses [`CompactOutput.epk`].
-    ///
-    /// [`CompactOutput.epk`]: #structfield.epk
+    /// A convenience method that parses [`field@Self::ephemeral_key`].
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
         self.ephemeral_key[..]
             .try_into()
@@ -189,6 +181,9 @@ impl TryFrom<&compact_formats::CompactSaplingOutput>
 }
 
 impl compact_formats::CompactSaplingSpend {
+    /// Returns the nullifier for this spend.
+    ///
+    /// A convenience method that parses [`field@Self::nf`].
     pub fn nf(&self) -> Result<sapling::Nullifier, ()> {
         sapling::Nullifier::from_slice(&self.nf).map_err(|_| ())
     }
@@ -216,9 +211,7 @@ impl TryFrom<&compact_formats::CompactOrchardAction>
 impl compact_formats::CompactOrchardAction {
     /// Returns the note commitment for the output of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.cmx`].
-    ///
-    /// [`CompactOrchardAction.cmx`]: #structfield.cmx
+    /// A convenience method that parses [`field@Self::cmx`].
     pub fn cmx(&self) -> Result<orchard::note::ExtractedNoteCommitment, ()> {
         Option::from(orchard::note::ExtractedNoteCommitment::from_bytes(
             &self.cmx[..].try_into().map_err(|_| ())?,
@@ -228,9 +221,7 @@ impl compact_formats::CompactOrchardAction {
 
     /// Returns the nullifier for the spend of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.nullifier`].
-    ///
-    /// [`CompactOrchardAction.nullifier`]: #structfield.nullifier
+    /// A convenience method that parses [`field@Self::nullifier`].
     pub fn nf(&self) -> Result<orchard::note::Nullifier, ()> {
         let nf_bytes: [u8; 32] = self.nullifier[..].try_into().map_err(|_| ())?;
         Option::from(orchard::note::Nullifier::from_bytes(&nf_bytes)).ok_or(())
@@ -238,9 +229,7 @@ impl compact_formats::CompactOrchardAction {
 
     /// Returns the ephemeral public key for the output of this action.
     ///
-    /// A convenience method that parses [`CompactOrchardAction.ephemeral_key`].
-    ///
-    /// [`CompactOrchardAction.ephemeral_key`]: #structfield.ephemeral_key
+    /// A convenience method that parses [`field@Self::ephemeral_key`].
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
         self.ephemeral_key[..]
             .try_into()
@@ -290,7 +279,7 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.sapling_activation_height` is not
+    /// This function will panic if [`field@Self::sapling_activation_height`] is not
     /// representable within a `u32`.
     pub fn sapling_activation_height(&self) -> BlockHeight {
         self.sapling_activation_height
@@ -314,8 +303,8 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.block_height` is not representable within
-    /// a `u32`.
+    /// This function will panic if [`field@Self::block_height`] is not representable
+    /// within a `u32`.
     pub fn block_height(&self) -> BlockHeight {
         self.block_height
             .try_into()
@@ -329,7 +318,7 @@ impl service::LightdInfo {
     ///
     /// # Panics
     ///
-    /// This function will panic if `LightdInfo.estimated_height` is not representable
+    /// This function will panic if [`field@Self::estimated_height`] is not representable
     /// within a `u32`.
     pub fn estimated_height(&self) -> BlockHeight {
         self.estimated_height
@@ -717,6 +706,8 @@ impl proposal::Proposal {
                     }
                 };
 
+                let target_height = TargetHeight::from(self.min_target_height);
+
                 let mut steps = Vec::with_capacity(self.steps.len());
                 for step in &self.steps {
                     let transaction_request =
@@ -761,7 +752,10 @@ impl proposal::Proposal {
                                             let outpoint = OutPoint::new(txid.into(), out.index);
                                             transparent_inputs.push(
                                                 wallet_db
-                                                    .get_unspent_transparent_output(&outpoint)
+                                                    .get_unspent_transparent_output(
+                                                        &outpoint,
+                                                        target_height,
+                                                    )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
                                                         ProposalDecodingError::InputNotFound(
@@ -769,13 +763,19 @@ impl proposal::Proposal {
                                                             PoolType::TRANSPARENT,
                                                             out.index,
                                                         )
-                                                    })?,
+                                                    })?
+                                                    .into_wallet_output(),
                                             );
                                         }
                                     }
                                     PoolType::Shielded(protocol) => received_notes.push(
                                         wallet_db
-                                            .get_spendable_note(&txid, protocol, out.index)
+                                            .get_spendable_note(
+                                                &txid,
+                                                protocol,
+                                                out.index,
+                                                target_height,
+                                            )
                                             .map_err(ProposalDecodingError::InputRetrieval)
                                             .and_then(|opt| {
                                                 opt.ok_or({
@@ -888,7 +888,7 @@ impl proposal::Proposal {
 
                 Proposal::multi_step(
                     fee_rule,
-                    BlockHeight::from_u32(self.min_target_height).into(),
+                    target_height,
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
                 .map_err(ProposalDecodingError::ProposalInvalid)

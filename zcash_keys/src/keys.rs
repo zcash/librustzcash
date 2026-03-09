@@ -4,9 +4,10 @@ use ::transparent::keys::TransparentKeyScope;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
+use nonempty::NonEmpty;
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
-use zcash_protocol::consensus;
+use zcash_protocol::{PoolType, consensus};
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
@@ -81,7 +82,7 @@ pub mod sapling {
     }
 }
 
-#[cfg(feature = "transparent-key-encoding")]
+#[cfg(any(feature = "transparent-key-encoding", feature = "transparent-inputs"))]
 pub mod transparent;
 
 #[cfg(feature = "zcashd-compat")]
@@ -758,6 +759,51 @@ impl From<bip32::Error> for DerivationError {
     }
 }
 
+/// A key that provides the capability to recover outgoing transaction information from
+/// the block chain.
+#[derive(Debug, Clone, Copy)]
+pub struct OutgoingViewingKey([u8; 32]);
+
+impl From<[u8; 32]> for OutgoingViewingKey {
+    fn from(ovk: [u8; 32]) -> Self {
+        OutgoingViewingKey(ovk)
+    }
+}
+
+#[cfg(feature = "sapling")]
+impl From<OutgoingViewingKey> for ::sapling::keys::OutgoingViewingKey {
+    fn from(value: OutgoingViewingKey) -> Self {
+        ::sapling::keys::OutgoingViewingKey(value.0)
+    }
+}
+
+#[cfg(feature = "sapling")]
+impl From<::sapling::keys::OutgoingViewingKey> for OutgoingViewingKey {
+    fn from(value: ::sapling::keys::OutgoingViewingKey) -> Self {
+        OutgoingViewingKey(value.0)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl From<OutgoingViewingKey> for ::orchard::keys::OutgoingViewingKey {
+    fn from(value: OutgoingViewingKey) -> Self {
+        ::orchard::keys::OutgoingViewingKey::from(value.0)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl From<::orchard::keys::OutgoingViewingKey> for OutgoingViewingKey {
+    fn from(value: ::orchard::keys::OutgoingViewingKey) -> Self {
+        OutgoingViewingKey(*value.as_ref())
+    }
+}
+
+impl AsRef<[u8; 32]> for OutgoingViewingKey {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified full viewing key.
 #[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
@@ -1079,6 +1125,63 @@ impl UnifiedFullViewingKey {
                 .expect("ability to derive the external IVK was checked at construction")
                 .default_address()
         })
+    }
+
+    /// Selects an outgoing viewing key for a transaction's outputs based upon the type(s) of
+    /// inputs spent in the transaction.
+    ///
+    /// This method selects the OVK of the highest-preference item in [ZIP 316] preference order
+    /// from among the item types represented by the provided input types. It will return `None` in
+    /// the case that this FVK does not contain any items corresponding to the provided input
+    /// sources; this should ordinarily never occur because in order to spend an input, a spending
+    /// key of the appropriate type must be available and that spending key should be represented
+    /// among this UFVK's items.
+    pub fn select_ovk(
+        &self,
+        scope: zip32::Scope,
+        input_sources: &NonEmpty<PoolType>,
+    ) -> Option<OutgoingViewingKey> {
+        #[cfg(feature = "orchard")]
+        if let Some(ovk) = input_sources
+            .contains(&PoolType::ORCHARD)
+            .then(|| {
+                self.orchard()
+                    .map(|k| OutgoingViewingKey::from(k.to_ovk(scope)))
+            })
+            .flatten()
+        {
+            return Some(ovk);
+        };
+
+        #[cfg(feature = "sapling")]
+        if let Some(ovk) = input_sources
+            .contains(&PoolType::SAPLING)
+            .then(|| {
+                self.sapling()
+                    .map(|k| OutgoingViewingKey::from(k.to_ovk(scope)))
+            })
+            .flatten()
+        {
+            return Some(ovk);
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        if let Some(ovk) = input_sources
+            .contains(&PoolType::Transparent)
+            .then(|| {
+                self.transparent().map(|k| {
+                    OutgoingViewingKey(match scope {
+                        zip32::Scope::External => k.external_ovk().as_bytes(),
+                        zip32::Scope::Internal => k.internal_ovk().as_bytes(),
+                    })
+                })
+            })
+            .flatten()
+        {
+            return Some(ovk);
+        }
+
+        None
     }
 }
 
@@ -1583,16 +1686,20 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{address::Address, encoding::AddressCodec},
+        crate::encoding::AddressCodec,
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         alloc::string::ToString,
         alloc::vec::Vec,
-        zcash_address::test_vectors,
-        zip32::DiversifierIndex,
     };
 
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
+    use {crate::address::Address, zcash_address::test_vectors, zip32::DiversifierIndex};
+
     #[cfg(feature = "unstable")]
-    use super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey};
+    use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
     use subtle::ConstantTimeEq;
@@ -1748,7 +1855,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
     fn ufvk_derivation() {
         use crate::keys::UnifiedAddressRequest;
 
@@ -1930,7 +2040,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
     fn uivk_derivation() {
         use crate::keys::UnifiedAddressRequest;
 

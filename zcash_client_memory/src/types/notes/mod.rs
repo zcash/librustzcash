@@ -2,7 +2,7 @@ mod received;
 mod sent;
 
 pub(crate) use received::{
-    to_spendable_notes, ReceievedNoteSpends, ReceivedNote, ReceivedNoteTable,
+    ReceievedNoteSpends, ReceivedNote, ReceivedNoteTable, to_spendable_notes,
 };
 #[cfg(test)]
 pub(crate) use sent::SentNoteId;

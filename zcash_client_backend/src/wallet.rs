@@ -9,12 +9,13 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use zcash_address::ZcashAddress;
+use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
 use zcash_note_encryption::EphemeralKeyBytes;
-use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
+use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
-    consensus::BlockHeight,
-    value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
+    consensus::{BlockHeight, TxIndex},
+    value::{BalanceError, Zatoshis},
 };
 use zip32::Scope;
 
@@ -24,7 +25,10 @@ use crate::fees::sapling as sapling_fees;
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use {
+    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
+    std::time::SystemTime,
+};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -93,7 +97,7 @@ pub enum Recipient<AccountId> {
 #[derive(Clone)]
 pub struct WalletTx<AccountId> {
     txid: TxId,
-    block_index: usize,
+    block_index: TxIndex,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
     #[cfg(feature = "orchard")]
@@ -106,7 +110,7 @@ impl<AccountId> WalletTx<AccountId> {
     /// Constructs a new [`WalletTx`] from its constituent parts.
     pub fn new(
         txid: TxId,
-        block_index: usize,
+        block_index: TxIndex,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
         #[cfg(feature = "orchard")] orchard_spends: Vec<
@@ -134,7 +138,7 @@ impl<AccountId> WalletTx<AccountId> {
     }
 
     /// Returns the index of the transaction in the containing block.
-    pub fn block_index(&self) -> usize {
+    pub fn block_index(&self) -> TxIndex {
         self.block_index
     }
 
@@ -165,6 +169,7 @@ impl<AccountId> WalletTx<AccountId> {
     }
 }
 
+/// A transparent output controlled by the wallet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
@@ -174,6 +179,10 @@ pub struct WalletTransparentOutput {
 }
 
 impl WalletTransparentOutput {
+    /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
+    ///
+    /// Returns `None` if the recipient address for the provided [`TxOut`] cannot be
+    /// determined based on the set of output script patterns understood by this wallet.
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,
@@ -189,22 +198,27 @@ impl WalletTransparentOutput {
             })
     }
 
+    /// Returns the [`OutPoint`] corresponding to the output.
     pub fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }
 
+    /// Returns the transaction output itself.
     pub fn txout(&self) -> &TxOut {
         &self.txout
     }
 
+    /// Returns the height at which the UTXO was mined, if any.
     pub fn mined_height(&self) -> Option<BlockHeight> {
         self.mined_height
     }
 
+    /// Returns the wallet address that received the UTXO.
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
     }
 
+    /// Returns the value of the UTXO
     pub fn value(&self) -> Zatoshis {
         self.txout.value()
     }
@@ -354,7 +368,29 @@ pub enum Note {
     Orchard(orchard::Note),
 }
 
+impl From<sapling::Note> for Note {
+    fn from(note: sapling::Note) -> Self {
+        Note::Sapling(note)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl From<orchard::Note> for Note {
+    fn from(note: orchard::Note) -> Self {
+        Note::Orchard(note)
+    }
+}
+
 impl Note {
+    /// Returns the receiver of this note.
+    pub fn receiver(&self) -> Receiver {
+        match self {
+            Note::Sapling(n) => Receiver::Sapling(n.recipient()),
+            #[cfg(feature = "orchard")]
+            Note::Orchard(n) => Receiver::Orchard(n.recipient()),
+        }
+    }
+
     pub fn value(&self) -> Zatoshis {
         match self {
             Note::Sapling(n) => n.value().inner().try_into().expect(
@@ -587,12 +623,15 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 #[derive(Debug, Clone)]
 pub enum OvkPolicy {
-    /// Use the outgoing viewing key from the sender's [`UnifiedFullViewingKey`].
+    /// Use an outgoing viewing key produced from the sender's [`UnifiedFullViewingKey`],
+    /// selected via the policy documented in [`UnifiedFullViewingKey::select_ovk`].
     ///
-    /// Transaction outputs will be decryptable by the sender, in addition to the
-    /// recipients.
+    /// External transaction outputs will be decryptable by the sender, in addition to the
+    /// recipients. Wallet-internal transaction outputs will be decryptable only with the wallet's
+    /// internal-scoped incoming viewing key.
     ///
     /// [`UnifiedFullViewingKey`]: zcash_keys::keys::UnifiedFullViewingKey
+    /// [`UnifiedFullViewingKey::select_ovk`]: zcash_keys::keys::UnifiedFullViewingKey::select_ovk
     Sender,
 
     /// Use custom outgoing viewing keys. These might for instance be derived from a
@@ -601,9 +640,8 @@ pub enum OvkPolicy {
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
     /// the provided outgoing viewing keys.
     Custom {
-        sapling: sapling::keys::OutgoingViewingKey,
-        #[cfg(feature = "orchard")]
-        orchard: orchard::keys::OutgoingViewingKey,
+        external_ovk: OutgoingViewingKey,
+        internal_ovk: Option<OutgoingViewingKey>,
     },
     /// Use no outgoing viewing keys. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
@@ -611,23 +649,188 @@ pub enum OvkPolicy {
 }
 
 impl OvkPolicy {
-    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key.
+    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key with both the
+    /// external_ovk and internal_ovk components set to the same key.
     ///
-    /// Outputs of transactions created with this OVK policy will be recoverable using
-    /// this key irrespective of the output pool.
+    /// Outputs of transactions created with this OVK policy will be recoverable using this key
+    /// irrespective of whether they are external outputs or wallet-internal change outputs.
     pub fn custom_from_common_bytes(key: &[u8; 32]) -> Self {
+        let k = OutgoingViewingKey::from(*key);
         OvkPolicy::Custom {
-            sapling: sapling::keys::OutgoingViewingKey(*key),
-            #[cfg(feature = "orchard")]
-            orchard: orchard::keys::OutgoingViewingKey::from(*key),
+            external_ovk: k,
+            internal_ovk: Some(k),
         }
+    }
+}
+
+/// Metadata describing the gap limit position of a transparent address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub enum GapMetadata {
+    /// The address, or an address at a greater child index, has received transparent funds and
+    /// will be discovered by wallet recovery by exploration over the space of
+    /// [`NonHardenedChildIndex`]es using the provided gap limit.
+    GapRecoverable { gap_limit: u32 },
+    /// The address exists within an address gap of the given limit size, and will be discovered by
+    /// wallet recovery by exploration using the provided gap limit. In the view of the wallet, no
+    /// addresses at the given position or greater (up to the gap limit) have received funds. The
+    /// number of addresses remaining within the gap limit before no additional addresses can be
+    /// allocated is given by `gap_limit - (gap_position + 1)`.
+    InGap {
+        /// A zero-based index over the child indices in the gap.
+        gap_position: u32,
+        /// The maximum number of sequential child indices that can be allocated to addresses
+        /// without any of those addresses having received funds.
+        gap_limit: u32,
+    },
+    /// The wallet does not contain derivation information for the associated address, and so its
+    /// relationship to other addresses in the wallet cannot be determined.
+    DerivationUnknown,
+}
+
+/// Metadata describing whether and when a transparent address was exposed by the wallet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub enum Exposure {
+    /// The address has been exposed by the wallet.
+    Exposed {
+        /// The address was first exposed to the wider ecosystem at this height, to the best
+        /// of our knowledge.
+        ///
+        /// - For user-generated addresses, this is the chain tip height at the time that the
+        ///   address was generated by an explicit request by the user or reserved for use in
+        ///   a ZIP 320 transaction. These heights are not recoverable from chain.
+        /// - In the case of an address with its first use discovered in a transaction
+        ///   obtained by scanning the chain, this will be set to the mined height of that
+        ///   transaction. In recover from seed cases, this is what user-generated addresses
+        ///   will be assigned.
+        at_height: BlockHeight,
+        /// Transparent address gap metadata, as of the time the query that produced this exposure
+        /// metadata was executed.
+        gap_metadata: GapMetadata,
+    },
+    /// The address is not known to have been exposed to an external caller by the wallet.
+    ///
+    /// The wallet makes its determination based on observed chain data and inference from
+    /// standard wallet address generation patterns. In particular, this is the state that
+    /// an address is in when it has been generated by the advancement of the transparent
+    /// address gap. This judgement may be incorrect for restored wallets.
+    Unknown,
+    /// It is not possible for the wallet to determine whether the address has been exposed,
+    /// given the information the wallet has access to.
+    CannotKnow,
+}
+
+/// Information about a transparent address controlled by the wallet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub struct TransparentAddressMetadata {
+    source: TransparentAddressSource,
+    exposure: Exposure,
+    next_check_time: Option<SystemTime>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentAddressMetadata {
+    /// Constructs a new [`TransparentAddressMetadata`] value from its constituent parts.
+    pub fn new(
+        source: TransparentAddressSource,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source,
+            exposure,
+            next_check_time,
+        }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Derived`] source
+    /// information and the specified exposure height.
+    pub fn derived(
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source: TransparentAddressSource::Derived {
+                scope,
+                address_index,
+            },
+            exposure,
+            next_check_time,
+        }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
+    /// information and the specified exposure height.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn standalone(
+        pubkey: secp256k1::PublicKey,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source: TransparentAddressSource::Standalone(pubkey),
+            exposure,
+            next_check_time,
+        }
+    }
+
+    /// Returns the source metadata for the address.
+    pub fn source(&self) -> &TransparentAddressSource {
+        &self.source
+    }
+
+    /// Returns the exposure metadata for this transparent address.
+    pub fn exposure(&self) -> Exposure {
+        self.exposure
+    }
+
+    /// Returns a copy of this metadata, with its exposure metadata updated
+    pub fn with_exposure_at(
+        &self,
+        exposure_height: BlockHeight,
+        gap_metadata: GapMetadata,
+    ) -> Self {
+        Self {
+            source: self.source.clone(),
+            exposure: Exposure::Exposed {
+                at_height: exposure_height,
+                gap_metadata,
+            },
+            next_check_time: self.next_check_time,
+        }
+    }
+
+    /// Returns the timestamp of the earliest time that the light wallet server may be queried for
+    /// UTXOs associated with this address, or `None` if the wallet backend is not placing any
+    /// restrictions on when this address can be queried. Unless the wallet application is
+    /// requesting address information from a light wallet server that is trusted for privacy,
+    /// only one such query should be performed at a time, to avoid linking multiple transparent
+    /// addresses as belonging to the same wallet in the view of the light wallet server.
+    pub fn next_check_time(&self) -> Option<SystemTime> {
+        self.next_check_time
+    }
+
+    /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
+    /// if known. Returns `None` for standalone addresses in the wallet.
+    pub fn scope(&self) -> Option<TransparentKeyScope> {
+        self.source.scope()
+    }
+
+    /// Returns the BIP 44 [`NonHardenedChildIndex`] at which the address was derived, if known.
+    /// Returns `None` for standalone addresses in the wallet.
+    pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
+        self.source.address_index()
     }
 }
 
 /// Source information for a transparent address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
-pub enum TransparentAddressMetadata {
+pub enum TransparentAddressSource {
     /// BIP 44 path derivation information for the address below account pubkey level, i.e. the
     /// `change` and `index` elements of the path.
     Derived {
@@ -642,23 +845,14 @@ pub enum TransparentAddressMetadata {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentAddressMetadata {
-    /// Returns a `TransparentAddressMetadata` in the given scope for the
-    /// given address index.
-    pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
-        Self::Derived {
-            scope,
-            address_index,
-        }
-    }
-
+impl TransparentAddressSource {
     /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
     /// if known. Returns `None` for standalone addresses in the wallet.
     pub fn scope(&self) -> Option<TransparentKeyScope> {
         match self {
-            TransparentAddressMetadata::Derived { scope, .. } => Some(*scope),
+            TransparentAddressSource::Derived { scope, .. } => Some(*scope),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => None,
+            TransparentAddressSource::Standalone(_) => None,
         }
     }
 
@@ -666,9 +860,9 @@ impl TransparentAddressMetadata {
     /// Returns `None` for standalone addresses in the wallet.
     pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
         match self {
-            TransparentAddressMetadata::Derived { address_index, .. } => Some(*address_index),
+            TransparentAddressSource::Derived { address_index, .. } => Some(*address_index),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressMetadata::Standalone(_) => None,
+            TransparentAddressSource::Standalone(_) => None,
         }
     }
 }
