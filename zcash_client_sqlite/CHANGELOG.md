@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.19.5] - PLANNED
+## [0.19.5] - 2026-03-10
 
 ### Fixed
 - The following APIs no longer crash in certain regtest mode configurations with
