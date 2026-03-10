@@ -7332,6 +7332,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "orchard",
+ "pasta_curves",
  "pprof",
  "proptest",
  "rand 0.8.5",
@@ -7350,6 +7351,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
+ "zcash_tachyon",
  "zcash_transparent",
  "zip32",
 ]
@@ -7415,6 +7417,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded3f58b93486aa79b85acba1001f5298f27a46489859934954d262533ee2915"
 dependencies = [
  "blake2b_simd",
+]
+
+[[package]]
+name = "zcash_tachyon"
+version = "0.0.0"
+source = "git+https://github.com/tachyon-zcash/tachyon.git#0d5785925a7e4e8190609ae0b3d9797b0dd2512a"
+dependencies = [
+ "bitvec",
+ "blake2b_simd",
+ "ff",
+ "group",
+ "pasta_curves",
+ "proptest",
+ "rand 0.8.5",
+ "reddsa",
 ]
 
 [[package]]

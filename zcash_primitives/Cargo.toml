@@ -49,8 +49,10 @@ group.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
+pasta_curves.workspace = true
 sapling.workspace = true
 zcash_spec.workspace = true
+zcash_tachyon.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }

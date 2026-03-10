@@ -37,6 +37,9 @@ use self::{
     util::sha256d::{HashReader, HashWriter},
 };
 
+#[cfg(zcash_unstable = "nu7")]
+use self::components::tachyon as tachyon_serialization;
+
 #[cfg(feature = "circuits")]
 use ::sapling::builder as sapling_builder;
 
@@ -378,6 +381,8 @@ pub struct TransactionData<A: Authorization> {
     sprout_bundle: Option<sprout::Bundle>,
     sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+    #[cfg(zcash_unstable = "nu7")]
+    tachyon_bundle: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
@@ -414,6 +419,8 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: None,
         }
@@ -446,6 +453,8 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: None,
             tze_bundle,
         }
     }
@@ -492,6 +501,11 @@ impl<A: Authorization> TransactionData<A> {
         self.zip233_amount
     }
 
+    #[cfg(zcash_unstable = "nu7")]
+    pub fn tachyon_bundle(&self) -> Option<&zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>> {
+        self.tachyon_bundle.as_ref()
+    }
+
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
         self.tze_bundle.as_ref()
@@ -524,6 +538,11 @@ impl<A: Authorization> TransactionData<A> {
                     self.orchard_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
+                    #[cfg(zcash_unstable = "nu7")]
+                    self.tachyon_bundle.as_ref().map_or(
+                        ZatBalance::zero(),
+                        |b| ZatBalance::try_from(b.value_balance).unwrap_or(ZatBalance::zero()),
+                    ),
                     #[cfg(all(
                         any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
                         feature = "zip-233"
@@ -597,6 +616,8 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: f_sapling(self.sapling_bundle),
             orchard_bundle: f_orchard(self.orchard_bundle),
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: self.tachyon_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: f_tze(self.tze_bundle),
         }
@@ -641,6 +662,8 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: f_sapling(self.sapling_bundle)?,
             orchard_bundle: f_orchard(self.orchard_bundle)?,
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: self.tachyon_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: f_tze(self.tze_bundle)?,
         })
@@ -683,6 +706,8 @@ impl<A: Authorization> TransactionData<A> {
                     |f, a| f.map_authorization(a),
                 )
             }),
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: self.tachyon_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
         }
@@ -856,6 +881,8 @@ impl Transaction {
                     )
                 }),
                 orchard_bundle: None,
+                #[cfg(zcash_unstable = "nu7")]
+                tachyon_bundle: None,
                 #[cfg(zcash_unstable = "zfuture")]
                 tze_bundle: None,
             },
@@ -913,6 +940,8 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: None,
         };
@@ -927,6 +956,9 @@ impl Transaction {
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+
+        #[cfg(zcash_unstable = "nu7")]
+        let tachyon_bundle = tachyon_serialization::read_v6_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = version
@@ -946,6 +978,8 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -1111,6 +1145,9 @@ impl Transaction {
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+
+        #[cfg(zcash_unstable = "nu7")]
+        tachyon_serialization::write_v6_bundle(self.tachyon_bundle.as_ref(), &mut writer)?;
 
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
