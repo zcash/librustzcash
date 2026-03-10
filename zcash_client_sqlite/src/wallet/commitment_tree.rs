@@ -1140,6 +1140,161 @@ pub(crate) fn check_witnesses(
     Ok(scan_ranges)
 }
 
+/// Generate Orchard Merkle witnesses at a historical frontier.
+///
+/// Copies the wallet's Orchard shard data into an ephemeral in-memory database,
+/// inserts the provided frontier (from lightwalletd) as a checkpoint, and
+/// generates a witness for each of the given note positions.
+///
+/// The wallet DB is strictly read-only — shard data is copied, not modified.
+///
+/// This is used by governance voting: the wallet tree may have advanced past
+/// the snapshot height, but we need witnesses anchored at the snapshot frontier.
+#[cfg(feature = "orchard")]
+pub fn generate_orchard_witnesses_at_frontier(
+    conn: &rusqlite::Connection,
+    note_positions: &[Position],
+    frontier: incrementalmerkletree::frontier::NonEmptyFrontier<orchard::tree::MerkleHashOrchard>,
+    checkpoint_height: BlockHeight,
+) -> Result<
+    Vec<
+        incrementalmerkletree::MerklePath<
+            orchard::tree::MerkleHashOrchard,
+            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+        >,
+    >,
+    SqliteClientError,
+> {
+    use incrementalmerkletree::Marking;
+    use shardtree::ShardTree;
+    use shardtree::store::Checkpoint;
+    use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+
+    let frontier_position = frontier.position();
+
+    // Create in-memory DB and copy orchard tree tables
+    let mem_conn = rusqlite::Connection::open_in_memory().map_err(SqliteClientError::DbError)?;
+
+    mem_conn
+        .execute_batch(
+            "CREATE TABLE orchard_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER,
+                root_hash BLOB,
+                shard_data BLOB,
+                contains_marked INTEGER,
+                CONSTRAINT root_unique UNIQUE (root_hash)
+            );
+            CREATE TABLE orchard_tree_cap (
+                cap_id INTEGER PRIMARY KEY,
+                cap_data BLOB NOT NULL
+            );
+            CREATE TABLE orchard_tree_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY,
+                position INTEGER
+            );
+            CREATE TABLE orchard_tree_checkpoint_marks_removed (
+                checkpoint_id INTEGER NOT NULL,
+                mark_removed_position INTEGER NOT NULL,
+                FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
+                ON DELETE CASCADE,
+                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+            );",
+        )
+        .map_err(SqliteClientError::DbError)?;
+
+    // Attach wallet DB read-only and copy shard data
+    let wallet_path = conn.path().ok_or_else(|| {
+        SqliteClientError::CorruptedData("cannot determine wallet DB path".to_string())
+    })?;
+
+    mem_conn
+        .execute("ATTACH DATABASE ?1 AS wallet", [wallet_path])
+        .map_err(SqliteClientError::DbError)?;
+
+    for table in &[
+        "orchard_tree_shards",
+        "orchard_tree_cap",
+        "orchard_tree_checkpoints",
+        "orchard_tree_checkpoint_marks_removed",
+    ] {
+        mem_conn
+            .execute(
+                &format!("INSERT INTO main.{t} SELECT * FROM wallet.{t}", t = table),
+                [],
+            )
+            .map_err(SqliteClientError::DbError)?;
+    }
+
+    mem_conn
+        .execute("DETACH DATABASE wallet", [])
+        .map_err(SqliteClientError::DbError)?;
+
+    // Build ShardTree from in-memory store
+    let tx = mem_conn
+        .unchecked_transaction()
+        .map_err(SqliteClientError::DbError)?;
+
+    let store = SqliteShardStore::<
+        _,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >::from_connection(&tx, "orchard")
+    .map_err(SqliteClientError::DbError)?;
+
+    let mut tree =
+        ShardTree::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>::new(
+            store, 100,
+        );
+
+    // Insert frontier + checkpoint
+    tree.insert_frontier_nodes(
+        frontier,
+        Retention::Checkpoint {
+            id: checkpoint_height,
+            marking: Marking::None,
+        },
+    )
+    .map_err(|e| {
+        SqliteClientError::CorruptedData(format!("failed to insert frontier nodes: {}", e))
+    })?;
+
+    tree.store_mut()
+        .add_checkpoint(
+            checkpoint_height,
+            Checkpoint::at_position(frontier_position),
+        )
+        .map_err(|e| {
+            SqliteClientError::CorruptedData(format!("failed to add checkpoint: {}", e))
+        })?;
+
+    // Generate witness per note position
+    let mut witnesses = Vec::with_capacity(note_positions.len());
+    for &pos in note_positions {
+        let merkle_path = tree
+            .witness_at_checkpoint_id(pos, &checkpoint_height)
+            .map_err(|e| {
+                SqliteClientError::CorruptedData(format!(
+                    "failed to generate witness for position {}: {} \
+                     (wallet may need to sync through snapshot height)",
+                    u64::from(pos),
+                    e
+                ))
+            })?
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!(
+                    "no witness available for position {} \
+                     (wallet missing shard data — sync through snapshot height)",
+                    u64::from(pos)
+                ))
+            })?;
+
+        witnesses.push(merkle_path);
+    }
+
+    Ok(witnesses)
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;

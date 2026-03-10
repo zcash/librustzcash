@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb::get_orchard_notes_at_snapshot` returns Orchard notes received
+  and unspent as of a given height, for governance voting snapshots.
+- `WalletDb::generate_orchard_witnesses_at_frontier` generates Merkle
+  witnesses at a historical frontier using an ephemeral in-memory tree.
 
 ## [0.19.5] - 2026-03-10
 
