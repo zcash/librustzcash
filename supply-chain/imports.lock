@@ -2,8 +2,8 @@
 # cargo-vet imports lock
 
 [[unpublished.zcash_client_backend]]
-version = "0.21.1"
-audited_as = "0.21.0"
+version = "0.21.2"
+audited_as = "0.21.1"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -445,8 +445,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.21.0"
-when = "2025-11-05"
+version = "0.21.1"
+when = "2026-02-27"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"

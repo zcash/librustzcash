@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.21.2] - PLANNED
+## [0.21.2] - 2026-03-10
 - The following APIs no longer crash in certain regtest mode configurations with
   fewer NUs active:
   - `zcash_client_backend::decrypt_transaction`
