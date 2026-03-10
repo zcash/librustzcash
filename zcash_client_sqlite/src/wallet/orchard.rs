@@ -244,6 +244,55 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     )
 }
 
+/// Return all Orchard notes that were received at or before `snapshot_height`
+/// and unspent as of `snapshot_height`, for the given account.
+///
+/// This is a backward-looking query used for governance voting snapshots,
+/// unlike `select_spendable_notes` which is forward-looking (via tx expiry).
+pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    snapshot_height: BlockHeight,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT
+             rn.id AS id, t.txid, rn.action_index,
+             rn.diversifier, rn.value, rn.rho, rn.rseed, rn.commitment_tree_position,
+             accounts.ufvk AS ufvk, rn.recipient_key_scope,
+             t.block AS mined_height,
+             NULL AS max_shielding_input_height
+         FROM orchard_received_notes rn
+         INNER JOIN accounts ON accounts.id = rn.account_id
+         INNER JOIN transactions t ON t.id_tx = rn.transaction_id
+         WHERE accounts.uuid = :account_uuid
+           AND t.block IS NOT NULL
+           AND t.block <= :snapshot_height
+           AND rn.nf IS NOT NULL
+           AND rn.commitment_tree_position IS NOT NULL
+           AND rn.recipient_key_scope IN (0, 1)
+           AND accounts.ufvk IS NOT NULL
+           AND rn.id NOT IN (
+               SELECT rns.orchard_received_note_id
+               FROM orchard_received_note_spends rns
+               JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
+               WHERE t_spend.block IS NOT NULL
+                 AND t_spend.block <= :snapshot_height
+           )
+         ORDER BY rn.commitment_tree_position",
+    )?;
+
+    let rows = stmt.query_and_then(
+        named_params![
+            ":account_uuid": account.0,
+            ":snapshot_height": u32::from(snapshot_height),
+        ],
+        |row| to_received_note(params, row),
+    )?;
+
+    rows.filter_map(|r| r.transpose()).collect()
+}
+
 pub(crate) fn ensure_address<
     T: ReceivedOrchardOutput<AccountId = AccountUuid>,
     P: consensus::Parameters,
@@ -671,5 +720,74 @@ pub(crate) mod tests {
     #[test]
     fn receive_two_notes_with_same_value() {
         testing::pool::receive_two_notes_with_same_value::<OrchardPoolTester>();
+    }
+
+    #[test]
+    fn get_orchard_notes_at_snapshot_boundary_heights() {
+        use zcash_client_backend::data_api::Account;
+        use zcash_client_backend::data_api::testing::{
+            AddressType, TestBuilder, pool::ShieldedPoolTester,
+        };
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let dfvk = OrchardPoolTester::test_account_fvk(&st);
+
+        // Receive a note at h1
+        let value = Zatoshis::const_from_u64(50000);
+        let (h1, _, nf) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h1, 1);
+
+        // Spend that note at h2 (produces change back to us)
+        let not_our_key = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+        let to = OrchardPoolTester::fvk_default_address(&not_our_key);
+        let spend_value = Zatoshis::const_from_u64(20000);
+        let (h2, _) = st.generate_next_block_spending(&dfvk, (nf, value), to, spend_value);
+        st.scan_cached_blocks(h2, 1);
+
+        // Receive another note at h3
+        let value3 = Zatoshis::const_from_u64(70000);
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value3);
+        st.scan_cached_blocks(h3, 1);
+
+        let db = st.wallet().db();
+
+        // Before any notes: nothing (h1 - 1 is before the note was mined)
+        let notes = db
+            .get_orchard_notes_at_snapshot(account.id(), h1 - 1)
+            .unwrap();
+        assert_eq!(notes.len(), 0);
+
+        // Snapshot at h1: original note received and unspent
+        let notes = db.get_orchard_notes_at_snapshot(account.id(), h1).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].note_value().unwrap(), value);
+
+        // Snapshot at h2: original spent, only change note remains
+        let notes = db.get_orchard_notes_at_snapshot(account.id(), h2).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(
+            notes[0].note_value().unwrap(),
+            (value - spend_value).unwrap()
+        );
+
+        // Snapshot at h3: change note + new note
+        let notes = db.get_orchard_notes_at_snapshot(account.id(), h3).unwrap();
+        assert_eq!(notes.len(), 2);
+        let total: Zatoshis = notes
+            .iter()
+            .map(|n| n.note_value().unwrap())
+            .sum::<Option<Zatoshis>>()
+            .unwrap();
+        assert_eq!(total, ((value - spend_value).unwrap() + value3).unwrap());
     }
 }
