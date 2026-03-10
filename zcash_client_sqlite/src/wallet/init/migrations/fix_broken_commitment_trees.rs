@@ -161,8 +161,8 @@ fn truncate_to_height<P: consensus::Parameters>(
             || {
                 params
                     .activation_height(NetworkUpgrade::Sapling)
-                    .expect("Sapling activation height must be available.")
-                    - 1
+                    // Fall back to the genesis block in regtest mode.
+                    .map_or(BlockHeight::from_u32(0), |h| h - 1)
             },
             BlockHeight::from,
         ))

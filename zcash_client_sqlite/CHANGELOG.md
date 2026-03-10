@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.19.5] - PLANNED
+
+### Fixed
+- The following APIs no longer crash in certain regtest mode configurations with
+  fewer NUs active:
+  - `WalletDb::{create_account, import_account_hd, import_account_ufvk}`
+  - `WalletDb::get_wallet_summary`
+  - `WalletDb::truncate_to_height`
+
 ## [0.18.12, 0.19.4] - 2026-02-26
 
 ### Fixed
