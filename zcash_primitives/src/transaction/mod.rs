@@ -291,12 +291,14 @@ impl TxVersion {
             TxVersion::V6 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 => false,
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
             },
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
-                | Nu6_1 => false,
+                | Nu6_1 | Nu7 => false,
                 ZFuture => true,
             },
         }
@@ -363,6 +365,9 @@ impl Authorization for Coinbase {
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
         orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
+
+    #[cfg(zcash_unstable = "nu7")]
+    type IssueAuth = orchard::issuance::AwaitingSighash;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;
@@ -1575,9 +1580,9 @@ pub mod testing {
             lock_time in any::<u32>(),
             expiry_height in if version == TxVersion::V6 || version == TxVersion::ZFuture { Just(0u32).boxed() } else { any::<u32>().boxed() },
             zip233_amount in 0..=MAX_MONEY,
-            transparent_bundle in transparent::arb_bundle(),
-            sapling_bundle in sapling::arb_bundle_for_version(version),
-            orchard_bundle in orchard::arb_bundle_for_version(version),
+            transparent_bundle in transparent_testing::arb_bundle(),
+            sapling_bundle in sapling_testing::arb_bundle_for_version(version),
+            orchard_bundle in orchard_testing::arb_bundle_for_version(version),
             issue_bundle in issuance::testing::arb_bundle_for_version(version),
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)

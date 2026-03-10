@@ -10,9 +10,9 @@ use ::orchard::bundle::{self as orchard_bundle};
 use ::sapling::bundle::{OutputDescription, SpendDescription};
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
 use zcash_protocol::{
+    TxId,
     consensus::{BlockHeight, BranchId},
     value::ZatBalance,
-    TxId,
 };
 
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
@@ -32,9 +32,9 @@ use crate::transaction::{
 #[cfg(zcash_unstable = "nu7")]
 use {
     crate::sighash_versioning::issue_sighash_kind_to_info,
-    crate::transaction::components::sapling::SAPLING_SIGHASH_INFO_V0,
     crate::transaction::OrchardBundle::OrchardZSA,
     crate::transaction::TRANSPARENT_SIGHASH_INFO_V0,
+    crate::transaction::components::sapling::SAPLING_SIGHASH_INFO_V0,
     orchard::issuance::{IssueBundle, Signed},
     zcash_encoding::Vector,
 };

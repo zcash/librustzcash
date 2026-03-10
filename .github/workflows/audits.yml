@@ -21,7 +21,7 @@ jobs:
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
-      - run: cargo install cargo-vet --version 0.10.1 --locked
+      - run: cargo install cargo-vet --version ~0.10
       - run: cargo vet --locked
 
   cargo-deny:

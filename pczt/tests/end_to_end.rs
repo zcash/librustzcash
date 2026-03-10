@@ -253,7 +253,7 @@ fn transparent_p2sh_multisig_to_orchard() {
     let mut builder = Builder::new(
         params,
         10_000_000.into(),
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -266,6 +266,7 @@ fn transparent_p2sh_multisig_to_orchard() {
             Some(orchard_ovk),
             recipient,
             Zatoshis::const_from_u64(100_000),
+            AssetBase::zatoshi(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -274,11 +275,17 @@ fn transparent_p2sh_multisig_to_orchard() {
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
             Zatoshis::const_from_u64(880_000),
+            AssetBase::zatoshi(),
             MemoBytes::empty(),
         )
         .unwrap();
     let PcztResult { pczt_parts, .. } = builder
-        .build_for_pczt(rng, &zip317::FeeRule::standard())
+        .build_for_pczt(
+            rng,
+            &zip317::FeeRule::standard(),
+            #[cfg(zcash_unstable = "nu7")]
+            |_| false,
+        )
         .unwrap();
 
     // Create the base PCZT.

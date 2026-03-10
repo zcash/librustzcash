@@ -95,9 +95,13 @@ impl TxMeta for Transaction {
 
     #[cfg(feature = "orchard")]
     fn orchard_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier> {
-        self.orchard_bundle()
-            .into_iter()
-            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
+        self.orchard_bundle().into_iter().flat_map(|bundle| {
+            bundle
+                .as_vanilla_bundle()
+                .actions()
+                .iter()
+                .map(|action| action.nullifier())
+        })
     }
 
     fn fee_paid<E, F>(&self, get_prevout: F) -> Result<Option<Zatoshis>, E>

@@ -805,7 +805,7 @@ where
         .tx()
         .orchard_bundle()
         .iter()
-        .flat_map(|b| b.actions().iter())
+        .flat_map(|b| b.as_vanilla_bundle().actions().iter())
     {
         wallet_db.mark_orchard_note_spent(action.nullifier(), tx_ref)?;
     }

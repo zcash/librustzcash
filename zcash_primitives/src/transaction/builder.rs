@@ -67,7 +67,7 @@ use orchard::builder::BuildError::BundleTypeNotSatisfiable;
 #[cfg(zcash_unstable = "nu7")]
 use {
     orchard::{
-        bundle::Authorization,
+        bundle,
         flavor::OrchardZSA,
         issuance,
         issuance::auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
@@ -1003,6 +1003,68 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 }
 
+#[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+trait BuildInternalAuth:
+    Authorization<
+        SaplingAuth = sapling::builder::InProgress<
+            sapling::builder::Proven,
+            sapling::builder::Unsigned,
+        >,
+        OrchardAuth = orchard::builder::InProgress<
+            orchard::builder::Unproven,
+            orchard::builder::Unauthorized,
+        >,
+        IssueAuth = orchard::issuance::AwaitingSighash,
+    >
+{
+}
+
+#[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+impl<T> BuildInternalAuth for T where
+    T: Authorization<
+            SaplingAuth = sapling::builder::InProgress<
+                sapling::builder::Proven,
+                sapling::builder::Unsigned,
+            >,
+            OrchardAuth = orchard::builder::InProgress<
+                orchard::builder::Unproven,
+                orchard::builder::Unauthorized,
+            >,
+            IssueAuth = orchard::issuance::AwaitingSighash,
+        >
+{
+}
+
+#[cfg(all(feature = "circuits", not(zcash_unstable = "nu7")))]
+trait BuildInternalAuth:
+    Authorization<
+        SaplingAuth = sapling::builder::InProgress<
+            sapling::builder::Proven,
+            sapling::builder::Unsigned,
+        >,
+        OrchardAuth = orchard::builder::InProgress<
+            orchard::builder::Unproven,
+            orchard::builder::Unauthorized,
+        >,
+    >
+{
+}
+
+#[cfg(all(feature = "circuits", not(zcash_unstable = "nu7")))]
+impl<T> BuildInternalAuth for T where
+    T: Authorization<
+            SaplingAuth = sapling::builder::InProgress<
+                sapling::builder::Proven,
+                sapling::builder::Unsigned,
+            >,
+            OrchardAuth = orchard::builder::InProgress<
+                orchard::builder::Unproven,
+                orchard::builder::Unauthorized,
+            >,
+        >
+{
+}
+
 impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Builds a transaction from the configured spends and outputs.
     ///
@@ -1134,7 +1196,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                     None,
                 )
             }
-            BuildConfig::Standard { .. } => {
+            _ => {
                 let fee = self
                     .get_fee_zfuture(fee_rule, is_new_asset)
                     .map_err(Error::Fee)?;
@@ -1199,16 +1261,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         fee: Option<Zatoshis>,
     ) -> Result<BuildResult, Error<FE>>
     where
-        A: Authorization<
-                SaplingAuth = sapling::builder::InProgress<
-                    sapling::builder::Proven,
-                    sapling::builder::Unsigned,
-                >,
-                OrchardAuth = orchard::builder::InProgress<
-                    orchard::builder::Unproven,
-                    orchard::builder::Unauthorized,
-                >,
-            >,
+        A: BuildInternalAuth,
         A::TransparentAuth: transparent::sighash::TransparentAuthorizingContext,
         R: RngCore + CryptoRng,
         SP: SpendProver,
@@ -1536,8 +1589,7 @@ where
 /// Returns the first nullifier from the first transfer action in the Orchard bundle.
 /// Returns `None` if the bundle is not an OrchardZSA bundle with at least one action.
 #[cfg(zcash_unstable = "nu7")]
-#[cfg(feature = "circuits")]
-fn first_nullifier<A: Authorization>(
+fn first_nullifier<A: bundle::Authorization>(
     orchard_bundle: &Option<OrchardBundle<A>>,
 ) -> Option<&Nullifier> {
     match orchard_bundle {
@@ -1545,6 +1597,8 @@ fn first_nullifier<A: Authorization>(
         _ => None,
     }
 }
+
+#[cfg(feature = "circuits")]
 fn authorize_transparent(
     b: &transparent::bundle::Bundle<transparent::builder::Unauthorized>,
     unauthed_tx: &TransactionData<Unauthorized>,
@@ -2300,7 +2354,7 @@ mod tests {
             .add_orchard_output::<zip317::FeeRule>(
                 Some(fvk.to_ovk(Scope::External)),
                 recipient,
-                (OLD_NOTE_VALUE - EXPECTED_FEE).into(),
+                Zatoshis::from_u64(OLD_NOTE_VALUE - EXPECTED_FEE).unwrap(),
                 AssetBase::zatoshi(),
                 MemoBytes::empty(),
             )

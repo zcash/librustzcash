@@ -156,7 +156,7 @@ jobs:
           cargo test
           --package pczt
           --test end_to_end
-          --features "io-finalizer,prover,signer,tx-extractor,spend-finalizer,zcp-builder"
+          --features "io-finalizer,prover,signer,tx-extractor,spend-finalizer,zcp-builder,internal-tests"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
