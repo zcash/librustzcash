@@ -1377,6 +1377,8 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                #[cfg(zcash_unstable = "nu7")]
+                tachyon_bundle: None,
             }
         }
     }
@@ -1404,6 +1406,8 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                #[cfg(zcash_unstable = "nu7")]
+                tachyon_bundle: None,
             }
         }
     }
@@ -1430,6 +1434,8 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                #[cfg(zcash_unstable = "nu7")]
+                tachyon_bundle: None,
                 tze_bundle
             }
         }
@@ -1459,6 +1465,8 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                #[cfg(zcash_unstable = "nu7")]
+                tachyon_bundle: None,
                 tze_bundle
             }
         }
