@@ -25,10 +25,6 @@ zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
-# - Digests (output types exposed)
-blake2b_simd.workspace = true
-sha2.workspace = true
-
 # - Encodings
 core2.workspace = true
 
@@ -53,6 +49,9 @@ zcash_script = { workspace = true, features = ["descriptor"] }
 # - Boilerplate
 getset.workspace = true
 nonempty.workspace = true
+
+# - Digests
+sha2.workspace = true
 
 # - Documentation
 document-features = { workspace = true, optional = true }
