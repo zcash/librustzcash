@@ -39,6 +39,15 @@ workspace.
   than **or equal to** the marginal fee. Previously, some call sites only considered
   note uneconomic if their value was less than the marginal fee.
 
+## [0.19.5] - 2026-03-10
+
+### Fixed
+- The following APIs no longer crash in certain regtest mode configurations with
+  fewer NUs active:
+  - `WalletDb::{create_account, import_account_hd, import_account_ufvk}`
+  - `WalletDb::get_wallet_summary`
+  - `WalletDb::truncate_to_height`
+
 ## [0.18.12, 0.19.4] - 2026-02-26
 
 ### Fixed

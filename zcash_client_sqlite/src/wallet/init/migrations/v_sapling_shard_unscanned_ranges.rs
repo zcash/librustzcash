@@ -64,11 +64,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 )",
             SAPLING_SHARD_HEIGHT,
             SAPLING_SHARD_HEIGHT,
-            u32::from(
-                self.params
-                    .activation_height(NetworkUpgrade::Sapling)
-                    .unwrap()
-            ),
+            // Sapling might not be active in regtest mode.
+            self.params
+                .activation_height(NetworkUpgrade::Sapling)
+                .map(|h| u32::from(h).to_string())
+                .as_deref()
+                .unwrap_or("NULL"),
         ))?;
 
         transaction.execute_batch(&format!(

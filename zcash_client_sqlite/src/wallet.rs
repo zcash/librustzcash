@@ -597,7 +597,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // The ignored range always starts at Sapling activation
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height must be available.");
+        // Fall back to the genesis block in regtest mode.
+        .unwrap_or_else(|| BlockHeight::from(0));
 
     // Add the ignored range up to the birthday height.
     if sapling_activation_height < birthday.height() {
@@ -1971,13 +1972,16 @@ impl ProgressEstimator for SubtreeProgressEstimator {
         fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
     ) -> Result<Option<Progress>, SqliteClientError> {
+        let sapling_activation_height = match params.activation_height(NetworkUpgrade::Sapling) {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+
         subtree_scan_progress(
             conn,
             params,
             ShieldedProtocol::Sapling,
-            params
-                .activation_height(NetworkUpgrade::Sapling)
-                .expect("Sapling activation height must be available."),
+            sapling_activation_height,
             birthday_height,
             recover_until_height,
             fully_scanned_height,
@@ -1996,13 +2000,16 @@ impl ProgressEstimator for SubtreeProgressEstimator {
         fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
     ) -> Result<Option<Progress>, SqliteClientError> {
+        let nu5_activation_height = match params.activation_height(NetworkUpgrade::Nu5) {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+
         subtree_scan_progress(
             conn,
             params,
             ShieldedProtocol::Orchard,
-            params
-                .activation_height(NetworkUpgrade::Nu5)
-                .expect("NU5 activation height must be available."),
+            nu5_activation_height,
             birthday_height,
             recover_until_height,
             fully_scanned_height,
@@ -3260,8 +3267,8 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
             || {
                 params
                     .activation_height(NetworkUpgrade::Sapling)
-                    .expect("Sapling activation height must be available.")
-                    - 1
+                    // Fall back to the genesis block in regtest mode.
+                    .map_or(BlockHeight::from_u32(0), |h| h - 1)
             },
             BlockHeight::from,
         ))
