@@ -1191,6 +1191,12 @@ SELECT
 FROM unioned
 GROUP BY transaction_id, output_pool, output_index";
 
+/// Combines the Sapling tree shards and scan ranges.
+///
+/// Note that in regtest mode when the Sapling NU has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard. However, in this
+/// scenario there should never be any Sapling shards, so the view should be empty and
+/// this state should be unobservable.
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(
         "CREATE VIEW v_sapling_shard_scan_ranges AS
@@ -1215,7 +1221,12 @@ pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> Strin
                 shard.subtree_end_height IS NULL
             )
         )",
-        u32::from(params.activation_height(NetworkUpgrade::Sapling).unwrap()),
+        // Sapling might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Sapling)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
     )
 }
 
@@ -1260,6 +1271,12 @@ GROUP BY
     subtree_end_height,
     contains_marked";
 
+/// Combines the Orchard tree shards and scan ranges.
+///
+/// Note that in regtest mode when NU5 has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard. However, in this
+/// scenario there should never be any Orchard shards, so the view should be empty and
+/// this state should be unobservable.
 pub(super) fn view_orchard_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(
         "CREATE VIEW v_orchard_shard_scan_ranges AS
@@ -1284,7 +1301,12 @@ pub(super) fn view_orchard_shard_scan_ranges<P: Parameters>(params: &P) -> Strin
                 shard.subtree_end_height IS NULL
             )
         )",
-        u32::from(params.activation_height(NetworkUpgrade::Nu5).unwrap()),
+        // NU5 might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Nu5)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
     )
 }
 

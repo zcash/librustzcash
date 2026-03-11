@@ -58,11 +58,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             DROP TABLE accounts;
             ALTER TABLE accounts_new RENAME TO accounts;
             PRAGMA legacy_alter_table = OFF;",
-            u32::from(
-                self.params
-                    .activation_height(NetworkUpgrade::Sapling)
-                    .unwrap()
-            )
+            // Sapling might not be active in regtest mode, in which case we fall back to
+            // the genesis block.
+            self.params
+                .activation_height(NetworkUpgrade::Sapling)
+                .map(u32::from)
+                .unwrap_or(0),
         ))?;
 
         Ok(())
