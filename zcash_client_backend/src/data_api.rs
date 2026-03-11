@@ -132,6 +132,10 @@ pub mod wallet;
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing;
 
+/// A mapping from transparent addresses to their key scope and balance.
+#[cfg(feature = "transparent-inputs")]
+pub type TransparentBalances = HashMap<TransparentAddress, (Option<TransparentKeyScope>, Balance)>;
+
 /// The height of subtree roots in the Sapling note commitment tree.
 ///
 /// This conforms to the structure of subtree data returned by
@@ -1834,7 +1838,7 @@ pub trait WalletRead {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         unimplemented!(
             "WalletRead::get_transparent_balances must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -2774,11 +2778,12 @@ impl AccountBirthday {
 ///
 /// An account is treated as having a single root of spending authority that spans the shielded and
 /// transparent rules for the purpose of balance, transaction listing, and so forth. However,
-/// transparent keys imported via [`WalletWrite::import_standalone_transparent_pubkey`] break this
-/// abstraction slightly, so wallets using this API need to be cautious to enforce the invariant
-/// that the wallet either maintains access to the keys required to spend **ALL** outputs received
-/// by the account, or that it **DOES NOT** offer any spending capability for the account, i.e. the
-/// account is treated as view-only for all user-facing operations.
+/// transparent keys imported via [`WalletWrite::import_standalone_transparent_pubkey`] or
+/// [`WalletWrite::import_standalone_transparent_script`] break this abstraction slightly, so
+/// wallets using this API need to be cautious to enforce the invariant that the wallet either
+/// maintains access to the keys required to spend **ALL** outputs received by the account, or that
+/// it **DOES NOT** offer any spending capability for the account, i.e. the account is treated as
+/// view-only for all user-facing operations.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -2988,6 +2993,33 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<(), Self::Error> {
         unimplemented!(
             "WalletWrite::import_standalone_transparent_pubkey must be overridden for wallets to use the `transparent-key-import` feature"
+        )
+    }
+
+    /// Imports the given redeem script into the account without key derivation information, and
+    /// adds the associated transparent p2sh address.
+    ///
+    /// The imported address will contribute to the balance of the account (for UFVK-based
+    /// accounts), but spending funds held by this address requires the associated spending keys to
+    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
+    /// to [`propose_shielding`] must only include addresses for which the spending application
+    /// holds or can obtain the spending keys.
+    ///
+    /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
+    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    ///
+    /// # Spending limitations
+    ///
+    /// P2PKH-in-P2SH scripts are unsupported by PCZT at this time, so the only way to spend
+    /// from such an address is to use the [`create_proposed_transactions`] signing path.
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: zcash_script::script::Redeem,
+    ) -> Result<(), Self::Error> {
+        unimplemented!(
+            "WalletWrite::import_standalone_transparent_script must be overridden for wallets to use the `transparent-key-import` feature"
         )
     }
 
