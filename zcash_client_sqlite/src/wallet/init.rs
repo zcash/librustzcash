@@ -253,6 +253,12 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::PubkeyImportConflict(_) => {
             unreachable!("we do not import pubkeys in migrations")
         }
+        #[cfg(feature = "zip-48")]
+        SqliteClientError::Zip48UnsupportedOperation => {
+            unreachable!("we do not use ZIP 48 multisig specific methods in migrations")
+        }
+        #[cfg(feature = "zip-48")]
+        SqliteClientError::Zip48Fvk(e) => WalletMigrationError::CorruptedData(format!("{e:?}")),
     }
 }
 

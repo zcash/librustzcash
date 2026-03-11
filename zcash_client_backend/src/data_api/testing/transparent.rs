@@ -14,7 +14,6 @@ use zcash_keys::{
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
-use super::TestAccount;
 use crate::{
     data_api::{
         Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
@@ -30,11 +29,28 @@ use crate::{
     wallet::WalletTransparentOutput,
 };
 
-/// Checks whether the transparent balance of the given test `account` is as `expected`
+#[cfg(feature = "zip-48")]
+use {
+    crate::data_api::{AccountBirthday, AccountSource, chain::ChainState},
+    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
+    ::transparent::zip48::{AccountPrivKey, FullViewingKey},
+    zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters},
+    zip32::AccountId,
+};
+
+/// Which kind of account to test against.
+#[derive(Clone, Copy, Debug)]
+pub enum TransparentAccountType {
+    Derived,
+    #[cfg(feature = "zip-48")]
+    Zip48,
+}
+
+/// Checks whether the transparent balance of the given account is as `expected`
 /// considering the `confirmations_policy`.
 fn check_balance<DSF>(
     st: &TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
-    account: &TestAccount<<DSF as DataStoreFactory>::Account>,
+    account_id: &<DSF as DataStoreFactory>::AccountId,
     taddr: &TransparentAddress,
     confirmations_policy: ConfirmationsPolicy,
     expected: &Balance,
@@ -47,7 +63,7 @@ fn check_balance<DSF>(
         .get_wallet_summary(confirmations_policy)
         .unwrap()
         .unwrap();
-    let balance = summary.account_balances().get(&account.id()).unwrap();
+    let balance = summary.account_balances().get(account_id).unwrap();
 
     #[allow(deprecated)]
     let old_unshielded_value = balance.unshielded();
@@ -58,7 +74,7 @@ fn check_balance<DSF>(
     let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
     assert_eq!(
         st.wallet()
-            .get_transparent_balances(account.id(), target_height, confirmations_policy)
+            .get_transparent_balances(*account_id, target_height, confirmations_policy)
             .unwrap()
             .get(taddr)
             .cloned()
@@ -76,24 +92,92 @@ fn check_balance<DSF>(
     );
 }
 
-pub fn put_received_transparent_utxo<DSF>(dsf: DSF)
+/// Creates a ZIP 48 test account and returns its ID, transparent address, birthday height,
+/// and the full viewing key.
+#[cfg(feature = "zip-48")]
+fn create_zip48_test_account<Cache, DSF: DataStoreFactory>(
+    st: &mut TestState<Cache, DSF::DataStore, LocalNetwork>,
+) -> (
+    DSF::AccountId,
+    TransparentAddress,
+    BlockHeight,
+    FullViewingKey,
+)
+where
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+
+    // Create a 2-of-3 FVK from three deterministic seeds.
+    let account_id_zip32 = AccountId::ZERO;
+    let seeds: [&[u8; 32]; 3] = [&[1; 32], &[2; 32], &[3; 32]];
+    let pubkeys: Vec<_> = seeds
+        .iter()
+        .map(|seed| {
+            AccountPrivKey::from_seed(st.network(), *seed, account_id_zip32)
+                .unwrap()
+                .to_account_pubkey()
+        })
+        .collect();
+
+    let fvk = FullViewingKey::standard(2, pubkeys).unwrap();
+
+    let account = st
+        .wallet_mut()
+        .import_account_zip48_multisig("zip48-test", &fvk, &birthday)
+        .unwrap();
+
+    let account_id = account.id();
+    let (taddr, _redeem) = fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    let birthday_height = birthday.height();
+
+    (account_id, taddr, birthday_height, fvk)
+}
+
+pub fn put_received_transparent_utxo<DSF>(dsf: DSF, account_type: TransparentAccountType)
 where
     DSF: DataStoreFactory,
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
+    let (mut st, account_id, taddr, birthday) = match account_type {
+        TransparentAccountType::Derived => {
+            let st = TestBuilder::new()
+                .with_data_store_factory(dsf)
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
 
-    let birthday = st.test_account().unwrap().birthday().height();
-    let account_id = st.test_account().unwrap().id();
-    let uaddr = st
-        .wallet()
-        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
-        .unwrap()
-        .unwrap();
-    let taddr = uaddr.transparent().unwrap();
+            let birthday = st.test_account().unwrap().birthday().height();
+            let account_id = st.test_account().unwrap().id();
+            let uaddr = st
+                .wallet()
+                .get_last_generated_address_matching(
+                    account_id,
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap()
+                .unwrap();
+            let taddr = *uaddr.transparent().unwrap();
+
+            (st, account_id, taddr, birthday)
+        }
+        #[cfg(feature = "zip-48")]
+        TransparentAccountType::Zip48 => {
+            let mut st = TestBuilder::new().with_data_store_factory(dsf).build();
+
+            let (account_id, taddr, birthday, _fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+            (st, account_id, taddr, birthday)
+        }
+    };
 
     let height_1 = birthday + 12345;
     st.wallet_mut().update_chain_tip(height_1).unwrap();
@@ -123,7 +207,7 @@ where
     // Confirm that we see the output unspent as of `height_1`.
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
-            taddr,
+            &taddr,
             target_height,
             ConfirmationsPolicy::MIN
         ).as_deref(),
@@ -147,7 +231,7 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(&taddr, target_height, ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok(&[])
     );
@@ -162,7 +246,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(&taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -173,7 +257,7 @@ where
             TargetHeight::from(height_2 + 1),
             ConfirmationsPolicy::MIN
         ),
-        Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
+        Ok(h) if h.get(&taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
 }
 
@@ -208,7 +292,7 @@ where
     // The wallet starts out with zero balance.
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &Balance::ZERO,
@@ -233,7 +317,7 @@ where
 
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &zero_or_one_conf_value,
@@ -263,7 +347,7 @@ where
     // transaction can be mined.
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &Balance::ZERO,
@@ -276,7 +360,7 @@ where
     // The wallet should still have zero transparent balance.
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &Balance::ZERO,
@@ -291,7 +375,7 @@ where
     // The wallet should still have zero transparent balance.
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &Balance::ZERO,
@@ -308,7 +392,7 @@ where
 
     check_balance::<DSF>(
         &st,
-        &account,
+        &account.id(),
         taddr,
         ConfirmationsPolicy::MIN,
         &zero_or_one_conf_value,
@@ -318,23 +402,46 @@ where
 /// This test attempts to verify that transparent funds spendability is
 /// accounted for properly given the different minimum confirmations values
 /// that can be set when querying for balances.
-pub fn transparent_balance_spendability<DSF>(dsf: DSF, cache: impl TestCache)
-where
+pub fn transparent_balance_spendability<DSF>(
+    dsf: DSF,
+    cache: impl TestCache,
+    account_type: TransparentAccountType,
+) where
     DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(dsf)
-        .with_block_cache(cache)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
+    let (mut st, account_id, taddr) = match account_type {
+        TransparentAccountType::Derived => {
+            let st = TestBuilder::new()
+                .with_data_store_factory(dsf)
+                .with_block_cache(cache)
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
 
-    let account = st.test_account().cloned().unwrap();
-    let uaddr = st
-        .wallet()
-        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
-        .unwrap()
-        .unwrap();
-    let taddr = uaddr.transparent().unwrap();
+            let account = st.test_account().cloned().unwrap();
+            let uaddr = st
+                .wallet()
+                .get_last_generated_address_matching(
+                    account.id(),
+                    UnifiedAddressRequest::AllAvailableKeys,
+                )
+                .unwrap()
+                .unwrap();
+            let taddr = *uaddr.transparent().unwrap();
+
+            (st, account.id(), taddr)
+        }
+        #[cfg(feature = "zip-48")]
+        TransparentAccountType::Zip48 => {
+            let mut st = TestBuilder::new()
+                .with_data_store_factory(dsf)
+                .with_block_cache(cache)
+                .build();
+
+            let (account_id, taddr, _birthday, _fvk) = create_zip48_test_account::<_, DSF>(&mut st);
+            (st, account_id, taddr)
+        }
+    };
 
     // Initialize the wallet with chain data that has no shielded notes for us.
     let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
@@ -349,8 +456,8 @@ where
     // The wallet starts out with zero balance.
     check_balance::<DSF>(
         &st as &TestState<_, DSF::DataStore, _>,
-        &account,
-        taddr,
+        &account_id,
+        &taddr,
         ConfirmationsPolicy::MIN,
         &Balance::ZERO,
     );
@@ -374,8 +481,8 @@ where
 
     check_balance::<DSF>(
         &st,
-        &account,
-        taddr,
+        &account_id,
+        &taddr,
         ConfirmationsPolicy::MIN,
         &zero_or_one_conf_value,
     );
@@ -390,8 +497,8 @@ where
 
     check_balance::<DSF>(
         &st,
-        &account,
-        taddr,
+        &account_id,
+        &taddr,
         ConfirmationsPolicy::new_symmetrical_unchecked(2, false),
         &not_confirmed_yet_value,
     );
@@ -409,14 +516,14 @@ where
 
     check_balance::<DSF>(
         &st,
-        &account,
-        taddr,
+        &account_id,
+        &taddr,
         ConfirmationsPolicy::new_symmetrical_unchecked(2, true),
         &zero_or_one_conf_value,
     );
 }
 
-pub fn gap_limits<DSF>(ds_factory: DSF, cache: impl TestCache, gap_limits: GapLimits)
+pub fn zip32_gap_limits<DSF>(ds_factory: DSF, cache: impl TestCache, gap_limits: GapLimits)
 where
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
@@ -533,4 +640,222 @@ where
     // sent to any of the set of {addresses in the gap limit range | address prior to the gap}.
     let query_height = st.wallet().utxo_query_height(account_uuid).unwrap();
     assert_eq!(query_height, h0);
+}
+
+/// Tests that a ZIP 48 multisig account can be imported and its properties are correct.
+#[cfg(feature = "zip-48")]
+pub fn import_account_zip48_multisig<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new().with_data_store_factory(dsf).build();
+
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+
+    // Create a 2-of-3 FVK from three deterministic seeds.
+    let account_id_zip32 = AccountId::ZERO;
+    let seeds: [&[u8; 32]; 3] = [&[1; 32], &[2; 32], &[3; 32]];
+    let pubkeys: Vec<_> = seeds
+        .iter()
+        .map(|seed| {
+            AccountPrivKey::from_seed(st.network(), *seed, account_id_zip32)
+                .unwrap()
+                .to_account_pubkey()
+        })
+        .collect();
+
+    let fvk = FullViewingKey::standard(2, pubkeys).unwrap();
+
+    // Import succeeds.
+    let account = st
+        .wallet_mut()
+        .import_account_zip48_multisig("zip48-test", &fvk, &birthday)
+        .unwrap();
+
+    let account_id = account.id();
+
+    // Account source is Zip48.
+    assert_matches!(account.source(), AccountSource::Zip48);
+
+    // Derive the first external address from the FVK and verify it's a P2SH address.
+    let (expected_taddr, _redeem) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+
+    // Can receive UTXOs at the P2SH address.
+    let height = birthday.height() + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    let value = Zatoshis::const_from_u64(50000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, expected_taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height)).unwrap();
+    let res = st.wallet_mut().put_received_transparent_utxo(&utxo);
+    assert_matches!(res, Ok(_));
+
+    // Balance tracking works after UTXO receipt.
+    assert_matches!(
+        st.wallet().get_transparent_balances(
+            account_id,
+            TargetHeight::from(height + 1),
+            ConfirmationsPolicy::MIN
+        ),
+        Ok(h) if h.get(&expected_taddr).map(|(_, b)| b.spendable_value()) == Some(value)
+    );
+}
+
+/// Tests that `get_next_zip48_multisig_address` sequentially derives addresses and that
+/// calling it with a non-ZIP-48 account returns `Ok(None)`.
+#[cfg(feature = "zip-48")]
+pub fn get_next_zip48_multisig_address<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    // --- ZIP 48 account ---
+    let (zip48_account_id, _taddr, birthday_height, fvk) =
+        create_zip48_test_account::<_, DSF>(&mut st);
+
+    // Set the chain tip so that address exposure heights can be recorded.
+    let height = birthday_height + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // First call should derive index 0 (External).
+    let (addr0, meta0) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::External)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr0, _) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    assert_eq!(addr0, expected_addr0);
+    assert_eq!(meta0.scope(), Some(TransparentKeyScope::EXTERNAL));
+    assert_eq!(meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // Second call should derive index 1 (External).
+    let (addr1, meta1) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::External)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let index_one = NonHardenedChildIndex::from_index(1).unwrap();
+    let (expected_addr1, _) = fvk.derive_address(zip32::Scope::External, index_one);
+    assert_eq!(addr1, expected_addr1);
+    assert_eq!(meta1.address_index(), Some(index_one));
+
+    // Internal scope should also work, starting at index 0.
+    let (int_addr0, int_meta0) = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(zip48_account_id, zip32::Scope::Internal)
+        .unwrap()
+        .expect("ZIP 48 account should return an internal address");
+
+    let (expected_int_addr0, _) =
+        fvk.derive_address(zip32::Scope::Internal, NonHardenedChildIndex::ZERO);
+    assert_eq!(int_addr0, expected_int_addr0);
+    assert_eq!(int_meta0.scope(), Some(TransparentKeyScope::INTERNAL));
+    assert_eq!(int_meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // --- Non-ZIP-48 (Derived) account should return Ok(None) ---
+    let derived_account_id = st.test_account().unwrap().id();
+    let result = st
+        .wallet_mut()
+        .get_next_zip48_multisig_address(derived_account_id, zip32::Scope::External)
+        .unwrap();
+    assert!(result.is_none(), "Derived account should return None");
+}
+
+/// Tests that `get_zip48_multisig_address_for_index` derives the correct address at
+/// arbitrary indices and that calling it with a non-ZIP-48 account returns `Ok(None)`.
+#[cfg(feature = "zip-48")]
+pub fn get_zip48_multisig_address_for_index<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug + PartialEq,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    // --- ZIP 48 account ---
+    let (zip48_account_id, _taddr, birthday_height, fvk) =
+        create_zip48_test_account::<_, DSF>(&mut st);
+
+    // Set the chain tip so that address exposure heights can be recorded.
+    let height = birthday_height + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Derive at index 5.
+    let index_5 = NonHardenedChildIndex::from_index(5).unwrap();
+    let (addr5, meta5) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(zip48_account_id, zip32::Scope::External, index_5)
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr5, _) = fvk.derive_address(zip32::Scope::External, index_5);
+    assert_eq!(addr5, expected_addr5);
+    assert_eq!(meta5.scope(), Some(TransparentKeyScope::EXTERNAL));
+    assert_eq!(meta5.address_index(), Some(index_5));
+
+    // Derive at index 0.
+    let (addr0, meta0) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(
+            zip48_account_id,
+            zip32::Scope::External,
+            NonHardenedChildIndex::ZERO,
+        )
+        .unwrap()
+        .expect("ZIP 48 account should return an address");
+
+    let (expected_addr0, _) =
+        fvk.derive_address(zip32::Scope::External, NonHardenedChildIndex::ZERO);
+    assert_eq!(addr0, expected_addr0);
+    assert_eq!(meta0.address_index(), Some(NonHardenedChildIndex::ZERO));
+
+    // Internal scope at index 3.
+    let index_3 = NonHardenedChildIndex::from_index(3).unwrap();
+    let (int_addr3, int_meta3) = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(zip48_account_id, zip32::Scope::Internal, index_3)
+        .unwrap()
+        .expect("ZIP 48 account should return an internal address");
+
+    let (expected_int_addr3, _) = fvk.derive_address(zip32::Scope::Internal, index_3);
+    assert_eq!(int_addr3, expected_int_addr3);
+    assert_eq!(int_meta3.scope(), Some(TransparentKeyScope::INTERNAL));
+    assert_eq!(int_meta3.address_index(), Some(index_3));
+
+    // --- Non-ZIP-48 (Derived) account should return Ok(None) ---
+    let derived_account_id = st.test_account().unwrap().id();
+    let result = st
+        .wallet_mut()
+        .get_zip48_multisig_address_for_index(
+            derived_account_id,
+            zip32::Scope::External,
+            NonHardenedChildIndex::ZERO,
+        )
+        .unwrap();
+    assert!(result.is_none(), "Derived account should return None");
 }

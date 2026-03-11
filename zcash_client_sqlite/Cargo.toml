@@ -157,6 +157,12 @@ zcashd-compat = [
 ## Enables `serde` derives for certain types.
 serde = ["dep:serde", "uuid/serde"]
 
+## Enables support for ZIP 48 transparent multisig accounts.
+zip-48 = [
+  "transparent-inputs",
+  "zcash_client_backend/zip-48"
+]
+
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
