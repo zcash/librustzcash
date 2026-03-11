@@ -1,8 +1,11 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.21.1"
-authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@electriccoin.co>"]
+version = "0.21.2"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
 readme = "README.md"
