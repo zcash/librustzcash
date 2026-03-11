@@ -65,6 +65,50 @@ impl NoteId {
     }
 }
 
+/// A reference to a transaction output received by the wallet, across all pools.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OutputRef {
+    txid: TxId,
+    pool: PoolType,
+    output_index: u32,
+}
+
+impl OutputRef {
+    /// Constructs a new `OutputRef` from its parts.
+    pub fn new(txid: TxId, pool: PoolType, output_index: u32) -> Self {
+        Self {
+            txid,
+            pool,
+            output_index,
+        }
+    }
+
+    /// Returns the ID of the transaction containing this output.
+    pub fn txid(&self) -> &TxId {
+        &self.txid
+    }
+
+    /// Returns the pool type of this output.
+    pub fn pool(&self) -> PoolType {
+        self.pool
+    }
+
+    /// Returns the index of this output within its transaction.
+    pub fn output_index(&self) -> u32 {
+        self.output_index
+    }
+}
+
+impl From<NoteId> for OutputRef {
+    fn from(note_id: NoteId) -> Self {
+        Self {
+            txid: note_id.txid,
+            pool: PoolType::Shielded(note_id.protocol),
+            output_index: note_id.output_index.into(),
+        }
+    }
+}
+
 /// A type that represents the recipient of a transaction output:
 ///
 /// * a recipient address;

@@ -170,6 +170,20 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn explicit_note_locking<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::explicit_note_locking::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn proposal_level_note_locking<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::proposal_level_note_locking::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::ovk_policy_prevents_recovery_from_chain::<T, _>(
         TestDbFactory::default(),

@@ -23,6 +23,7 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod note_locking;
 mod nullifier_map;
 mod orchard_received_notes;
 mod orchard_shardtree;
@@ -133,6 +134,8 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                                                      |
     //                                           v_tx_outputs_key_scopes
+    //                                                      |
+    //                                                note_locking
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -219,6 +222,7 @@ pub(super) fn all_migrations<
         Box::new(add_transaction_trust_marker::Migration),
         Box::new(account_delete_cascade::Migration),
         Box::new(v_tx_outputs_key_scopes::Migration),
+        Box::new(note_locking::Migration),
     ]
 }
 
@@ -359,7 +363,7 @@ pub const V_0_18_5: &[Uuid] = &[
 pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
-pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[v_tx_outputs_key_scopes::MIGRATION_ID];
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[note_locking::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

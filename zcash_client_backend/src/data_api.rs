@@ -95,10 +95,13 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
-    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
+    data_api::{
+        error::LockError,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
-    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, OutputRef, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -187,6 +190,7 @@ pub enum MaxSpendMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     spendable_value: Zatoshis,
+    locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
     uneconomic_value: Zatoshis,
@@ -196,6 +200,7 @@ impl Balance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         spendable_value: Zatoshis::ZERO,
+        locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
@@ -203,6 +208,7 @@ impl Balance {
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
         (self.spendable_value
+            + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
             + value)
@@ -216,10 +222,25 @@ impl Balance {
         self.spendable_value
     }
 
+    /// Returns the value in the account that is currently "locked".
+    ///
+    /// The outputs that comprise this balance are seen by the wallet as being committed to be
+    /// spent by a transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        self.locked_value
+    }
+
     /// Adds the specified value to the spendable total, checking for overflow.
     pub fn add_spendable_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.spendable_value = (self.spendable_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Adds the specified value to the locked total, checking for overflow.
+    pub fn add_locked_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.locked_value = (self.locked_value + value).unwrap();
         Ok(())
     }
 
@@ -264,7 +285,10 @@ impl Balance {
 
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
-        (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
+        (self.spendable_value
+            + self.locked_value
+            + self.change_pending_confirmation
+            + self.value_pending_spendability)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -276,6 +300,7 @@ impl core::ops::Add<Balance> for Balance {
         let result = Balance {
             spendable_value: (self.spendable_value + rhs.spendable_value)
                 .ok_or(BalanceError::Overflow)?,
+            locked_value: (self.locked_value + rhs.locked_value).ok_or(BalanceError::Overflow)?,
             change_pending_confirmation: (self.change_pending_confirmation
                 + rhs.change_pending_confirmation)
                 .ok_or(BalanceError::Overflow)?,
@@ -396,6 +421,15 @@ impl AccountBalance {
     pub fn spendable_value(&self) -> Zatoshis {
         (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of notes and UTXOs that are locked, having been committed to
+    /// an in-flight transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        (self.sapling_balance.locked_value()
+            + self.orchard_balance.locked_value()
+            + self.unshielded_balance.locked_value())
+        .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
@@ -1470,18 +1504,21 @@ pub trait InputSource {
     /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
-    /// is not spendable as of the given height.
+    /// is not spendable as of the given height. When `include_locked` is `false`, locked
+    /// notes are also excluded.
     fn get_spendable_note(
         &self,
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
         target_height: TargetHeight,
+        include_locked: bool,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
-    /// be included.
+    /// be included. When `include_locked` is `false`, locked notes are excluded.
+    #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
@@ -1490,16 +1527,18 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
-    /// target height.
+    /// target height. When `include_locked` is `false`, locked notes are excluded.
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
         sources: &[ShieldedProtocol],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.
@@ -1508,6 +1547,7 @@ pub trait InputSource {
     /// - notes that are not considered spendable as of the given `target_height`
     /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
+    /// - when `include_locked` is `false`, locked notes.
     ///
     /// Implementations of this method may limit the complexity of supported queries. Such
     /// limitations should be clearly documented for the implementing type.
@@ -1517,6 +1557,7 @@ pub trait InputSource {
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        include_locked: bool,
     ) -> Result<AccountMeta, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
@@ -1524,11 +1565,13 @@ pub trait InputSource {
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or would not be
     /// spendable in a transaction mined in the block at the target height.
+    /// When `include_locked` is `false`, locked outputs are also excluded.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<Option<WalletUtxo>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1544,12 +1587,14 @@ pub trait InputSource {
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
+    /// When `include_locked` is `false`, locked outputs are also excluded.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
+        _include_locked: bool,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1918,6 +1963,15 @@ pub trait WalletRead {
 #[cfg(any(test, feature = "test-dependencies"))]
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletTest: InputSource + WalletRead {
+    /// Returns the set of currently locked outputs for the given account.
+    ///
+    /// Locked outputs are excluded from note selection, and are tallied separately in balance
+    /// computations.
+    fn get_locked_outputs(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error>;
+
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
@@ -3073,6 +3127,30 @@ pub trait WalletWrite: WalletRead {
     /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
 
+    /// Locks the specified outputs, preventing it from being selected for spending at any height
+    /// less than or equal to the given height.
+    ///
+    /// Returns the number of outputs locked by the operation on success, or a [`LockError`] on
+    /// failure, wrapping either an error from the underlying storage backend or the first output
+    /// that could not be locked.
+    ///
+    /// Implementations of this method must either succeed completely, successfully locking each
+    /// provided output on success, or fail completely leaving all lock state unmodified if any of
+    /// the outputs were already locked. Existing locks that have expired as of the chain tip
+    /// should be replaced with new locks.
+    fn lock_outputs(
+        &mut self,
+        outputs: impl Iterator<Item = OutputRef>,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>>;
+
+    /// Unlocks the specified output, making it once again available for spending and balance
+    /// computations.
+    ///
+    /// Returns `true` if the output was found and unlocked, `false` if no matching
+    /// output exists.
+    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error>;
+
     /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.
     ///
@@ -3080,6 +3158,11 @@ pub trait WalletWrite: WalletRead {
     ///
     /// Transactions that have been stored by this method should be retransmitted while it
     /// is still possible that they could be mined.
+    ///
+    /// Implementations must unlock any locked outputs that are recorded as spent by the
+    /// stored transactions. Once spend records exist, the outputs are protected from
+    /// double-selection by the spend tracking mechanism, so the explicit locks are no
+    /// longer needed.
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],

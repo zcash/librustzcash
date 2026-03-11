@@ -224,7 +224,7 @@ where
                 .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
         );
 
-        meta_source.get_account_metadata(account, &note_selector, target_height, exclude)
+        meta_source.get_account_metadata(account, &note_selector, target_height, exclude, false)
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(

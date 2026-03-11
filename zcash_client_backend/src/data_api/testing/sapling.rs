@@ -110,6 +110,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
+                false,
             )
             .map(|n| n.take_sapling())
     }
@@ -126,6 +127,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 &[ShieldedProtocol::Sapling],
                 target_height,
                 exclude,
+                false,
             )
             .map(|n| n.take_sapling())
     }
