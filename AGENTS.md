@@ -193,14 +193,19 @@ cargo doc --no-deps --workspace --all-features --document-private-items
 These feature flags are used consistently across crates in the repository:
 
 - `test-dependencies` — exposes proptest strategies and mock types for downstream testing
+- `transparent-inputs` — transparent transaction input support
+- `orchard` — Orchard shielded protocol support
+- `sapling` — Sapling shielded protocol support
+- `unstable` — unstable or in-development functionality
+- `multicore` — multi-threaded proving
+- `std` — standard library support (most crates are `no_std` by default)
 
 ### Key Crate-Specific Feature Flags
 
-- `transparent-inputs`, `transparent-key-import`, `transparent-key-encoding`
-- `orchard` — Orchard shielded protocol support
+- `transparent-key-import`, `transparent-key-encoding`
 - `bundled-prover`, `download-params` — Sapling proving
 - `lightwalletd-tonic`, `sync` — light client gRPC and sync
-- `unstable`, `unstable-serialization`, `unstable-spanning-tree`
+- `unstable-serialization`, `unstable-spanning-tree`
 - `expensive-tests` — computationally expensive test suite
 
 ### Unstable Cfg Flags
