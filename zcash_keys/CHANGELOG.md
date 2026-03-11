@@ -12,6 +12,14 @@ workspace.
 ### Added
 - `zcash_keys::keys::OutgoingViewingKey`
 - `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
+- `zcash_keys::keys::UnifiedFullViewingKey::has_sapling`
+- `zcash_keys::keys::UnifiedFullViewingKey::has_orchard`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedFullViewingKey::expiry_time`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_height`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::expiry_time`
+- `zcash_keys::address::UnifiedAddress::expiry_height`
+- `zcash_keys::address::UnifiedAddress::expiry_time`
 - `zcash_keys::keys::transparent::gap_limits` module (behind the
   `transparent-inputs` feature flag), containing:
   - `GapLimits` type (moved from `zcash_client_backend::wallet::transparent`).
@@ -20,9 +28,20 @@ workspace.
   - `generate_gap_addresses`
   - `generate_address_list`
   - `GapAddressesError`
+- ZIP 316 Revision 1 metadata support in `UnifiedFullViewingKey`,
+  `UnifiedIncomingViewingKey`, and `UnifiedAddress`:
+  - Address expiry height and expiry time metadata fields.
+  - Expiry metadata is propagated from UFVK → UIVK → UA per spec.
+  - Automatic R1 revision selection when metadata items are present.
 
 ### Changed
 - MSRV is now 1.85.1.
+- `zcash_keys::address::UnifiedAddress::from_receivers` now accepts optional
+  expiry height and expiry time parameters.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::new` (behind
+  `test-dependencies`) now accepts unknown data, expiry height, expiry time,
+  and unknown metadata parameters.
+- R1 Unified Addresses no longer include transparent receivers.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - The `std` feature flag now enables the equivalent flag on the dependencies
   `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.
