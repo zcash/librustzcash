@@ -25,6 +25,7 @@ workspace.
 ### Changed
 - MSRV is now 1.85.1.
 - `zcash_transparent::pczt`:
+  - `Bundle::extract` now takes its `self` argument by reference.
   - `SignerError` has added variants:
     - `InvalidExternalSignature`
     - `MissingPreimage`
