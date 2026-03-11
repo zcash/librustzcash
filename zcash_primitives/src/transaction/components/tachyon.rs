@@ -17,9 +17,7 @@ use zcash_tachyon::{
 };
 
 /// Reads a tachyon bundle from v6 transaction format.
-pub fn read_v6_bundle<R: Read>(
-    mut reader: R,
-) -> io::Result<Option<Bundle<Option<Stamp>>>> {
+pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle<Option<Stamp>>>> {
     let flag = reader.read_u8()?;
     match flag {
         0 => Ok(None),
@@ -120,8 +118,12 @@ fn write_value_commitment<W: Write>(mut writer: W, cv: &value::Commitment) -> io
 fn read_action_verification_key<R: Read>(mut reader: R) -> io::Result<ActionVerificationKey> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    ActionVerificationKey::try_from(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid tachyon verification key"))
+    ActionVerificationKey::try_from(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid tachyon verification key",
+        )
+    })
 }
 
 fn write_action_verification_key<W: Write>(
