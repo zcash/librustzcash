@@ -27,7 +27,7 @@ pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle<Option
 
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            let value_balance = i64::from_le_bytes(tmp)
+            let value_balance = i64::from_le_bytes(tmp);
 
 
             // Read binding signature (64 bytes)
