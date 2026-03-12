@@ -541,9 +541,10 @@ impl<A: Authorization> TransactionData<A> {
                     #[cfg(zcash_unstable = "nu7")]
                     self.tachyon_bundle
                         .as_ref()
-                        .map_or(ZatBalance::zero(), |b| {
-                            ZatBalance::try_from(b.value_balance).unwrap_or(ZatBalance::zero())
-                        }),
+                        .map_or_else(
+                            || Ok(ZatBalance::zero()),
+                            |b| ZatBalance::try_from(b.value_balance).map_err(|_| BalanceError::Overflow),
+                        )?,
                     #[cfg(all(
                         any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
                         feature = "zip-233"
@@ -578,6 +579,7 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_transparent(self.transparent_bundle.as_ref()),
             digester.digest_sapling(self.sapling_bundle.as_ref()),
             digester.digest_orchard(self.orchard_bundle.as_ref()),
+            // TODO: add Tachyon digest
             #[cfg(zcash_unstable = "zfuture")]
             digester.digest_tze(self.tze_bundle.as_ref()),
         )
@@ -670,6 +672,7 @@ impl<A: Authorization> TransactionData<A> {
         })
     }
 
+    // tachyon bundles are not processed here because they aren't parameterized with an Authorization
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
