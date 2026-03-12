@@ -25,8 +25,10 @@ pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle<Option
             // Read actions
             let actions = Vector::read(&mut reader, |r| read_action(r))?;
 
-            // Read value_balance (i64 LE)
-            let value_balance = reader.read_u64_le()? as i64;
+            let mut tmp = [0u8; 8];
+            reader.read_exact(&mut tmp)?;
+            let value_balance = i64::from_le_bytes(tmp)
+
 
             // Read binding signature (64 bytes)
             let binding_sig = read_bundle_signature(&mut reader)?;
