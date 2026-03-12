@@ -9,6 +9,7 @@ pub(crate) trait ReadBytesExt {
     fn read_u8(self) -> io::Result<u8>;
     fn read_u32_le(self) -> io::Result<u32>;
     fn read_i32_le(self) -> io::Result<i32>;
+    fn read_i64_le(self) -> io::Result<i64>;
     fn read_u64_le(self) -> io::Result<u64>;
 }
 
@@ -31,6 +32,12 @@ impl<R: Read> ReadBytesExt for &mut R {
         Ok(i32::from_le_bytes(repr))
     }
 
+    fn read_i64_le(self) -> io::Result<i64> {
+        let mut repr = [0u8; 8];
+        self.read_exact(&mut repr)?;
+        Ok(i64::from_le_bytes(repr))
+    }
+
     fn read_u64_le(self) -> io::Result<u64> {
         let mut repr = [0u8; 8];
         self.read_exact(&mut repr)?;
@@ -42,6 +49,7 @@ pub(crate) trait WriteBytesExt {
     fn write_u8(self, value: u8) -> io::Result<()>;
     fn write_u32_le(self, value: u32) -> io::Result<()>;
     fn write_i32_le(self, value: i32) -> io::Result<()>;
+    fn write_i64_le(self, value: i64) -> io::Result<()>;
     fn write_u64_le(self, value: u64) -> io::Result<()>;
 }
 
@@ -55,6 +63,10 @@ impl<W: Write> WriteBytesExt for &mut W {
     }
 
     fn write_u32_le(self, value: u32) -> io::Result<()> {
+        self.write_all(&value.to_le_bytes())
+    }
+
+    fn write_i64_le(self, value: i64) -> io::Result<()> {
         self.write_all(&value.to_le_bytes())
     }
 

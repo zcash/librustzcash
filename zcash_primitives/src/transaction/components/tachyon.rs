@@ -26,7 +26,7 @@ pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle<Option
             let actions = Vector::read(&mut reader, |r| read_action(r))?;
 
             // Read value_balance (i64 LE)
-            let value_balance = reader.read_u64_le()? as i64;
+            let value_balance = reader.read_i64_le()?;
 
             // Read binding signature (64 bytes)
             let binding_sig = read_bundle_signature(&mut reader)?;
@@ -64,7 +64,7 @@ pub fn write_v6_bundle<W: Write>(
             Vector::write(&mut writer, &bundle.actions, |w, a| write_action(w, a))?;
 
             // Write value_balance (i64 LE)
-            writer.write_u64_le(bundle.value_balance as u64)?;
+            writer.write_i64_le(bundle.value_balance)?;
 
             // Write binding signature (64 bytes)
             write_bundle_signature(&mut writer, &bundle.binding_sig)?;
