@@ -63,7 +63,8 @@ pub fn write_v6_bundle<W: Write>(
             // Write actions
             Vector::write(&mut writer, &bundle.actions, |w, a| write_action(w, a))?;
 
-            writer.write_all(&bundle.value_balance.to_le_bytes())?;
+            // Write value_balance (i64 LE)
+            writer.write_u64_le(bundle.value_balance as u64)?;
 
             // Write binding signature (64 bytes)
             write_bundle_signature(&mut writer, &bundle.binding_sig)?;
