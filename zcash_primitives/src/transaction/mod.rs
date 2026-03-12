@@ -539,12 +539,13 @@ impl<A: Authorization> TransactionData<A> {
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
                     #[cfg(zcash_unstable = "nu7")]
-                    self.tachyon_bundle
-                        .as_ref()
-                        .map_or_else(
-                            || Ok(ZatBalance::zero()),
-                            |b| ZatBalance::try_from(b.value_balance).map_err(|_| BalanceError::Overflow),
-                        )?,
+                    self.tachyon_bundle.as_ref().map_or_else(
+                        || Ok(ZatBalance::zero()),
+                        |b| {
+                            ZatBalance::try_from(b.value_balance)
+                                .map_err(|_| BalanceError::Overflow)
+                        },
+                    )?,
                     #[cfg(all(
                         any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
                         feature = "zip-233"
