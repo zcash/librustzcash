@@ -122,6 +122,7 @@ std = [
     "sapling/std",
     "orchard/std",
     "transparent/std",
+    "zcash_tachyon/std",
 ]
 zip-233 = []
 

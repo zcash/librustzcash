@@ -7422,15 +7422,14 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=0d5785925a7e4e8190609ae0b3d9797b0dd2512a#0d5785925a7e4e8190609ae0b3d9797b0dd2512a"
+source = "git+https://github.com/S1nus/tachyon.git?rev=25accfb85e6ae6d6ea9ed14c69fe7ea15d825881#25accfb85e6ae6d6ea9ed14c69fe7ea15d825881"
 dependencies = [
- "bitvec",
  "blake2b_simd",
  "ff",
  "group",
+ "lazy_static",
  "pasta_curves",
- "proptest",
- "rand 0.8.5",
+ "rand_core 0.6.4",
  "reddsa",
 ]
 
