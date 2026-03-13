@@ -3,9 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Transaction, TransactionData, TxDigests, TxIn, sighash::SignableInput,
-        sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, testing::arb_tx, transparent,
-        txid::TxIdDigester,
+        Authorization, Transaction, TransactionData, TxDigests, TxIn, TxVersion,
+        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
@@ -383,6 +383,59 @@ fn zip_0244() {
             v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
             tv.sighash_shielded
         );
+    }
+}
+
+#[cfg(zcash_unstable = "nu7")]
+#[test]
+fn tachyon_v6_test_vectors() {
+    use self::data::tachyon_vectors::*;
+
+    // Helper: deserialize, check version, roundtrip
+    let read_and_roundtrip = |data: &[u8]| -> Transaction {
+        let tx = Transaction::read(data, BranchId::Nu7).unwrap();
+        assert_eq!(tx.version, TxVersion::V6);
+
+        let mut encoded = Vec::with_capacity(data.len());
+        tx.write(&mut encoded).unwrap();
+        assert_eq!(data, &encoded[..]);
+
+        tx
+    };
+
+    // EMPTY_V6_TX: no tachyon bundle
+    {
+        let tx = read_and_roundtrip(&EMPTY_V6_TX);
+        assert!(tx.tachyon_bundle().is_none());
+    }
+
+    // V6_TX_TACHYON_NO_STAMP: 1 action, no stamp, value_balance = 0
+    {
+        let tx = read_and_roundtrip(&V6_TX_TACHYON_NO_STAMP);
+        let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
+        assert_eq!(bundle.actions.len(), 1);
+        assert!(bundle.stamp.is_none());
+        assert_eq!(bundle.value_balance, 0);
+    }
+
+    // V6_TX_TACHYON_WITH_STAMP: 1 action, stamp with 1 tachygram, value_balance = 100
+    {
+        let tx = read_and_roundtrip(&V6_TX_TACHYON_WITH_STAMP);
+        let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
+        assert_eq!(bundle.actions.len(), 1);
+        let stamp = bundle.stamp.as_ref().expect("expected stamp");
+        assert_eq!(stamp.tachygrams.len(), 1);
+        assert_eq!(bundle.value_balance, 100);
+    }
+
+    // V6_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300
+    {
+        let tx = read_and_roundtrip(&V6_TX_TACHYON_MULTI_ACTION);
+        let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
+        assert_eq!(bundle.actions.len(), 2);
+        let stamp = bundle.stamp.as_ref().expect("expected stamp");
+        assert_eq!(stamp.tachygrams.len(), 3);
+        assert_eq!(bundle.value_balance, 300);
     }
 }
 
