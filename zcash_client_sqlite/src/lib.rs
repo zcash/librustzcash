@@ -3188,7 +3188,17 @@ mod tests {
             .expect("UA must have sapling receiver");
 
         let address = Address::Unified(
-            UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+            {
+                #[cfg(feature = "orchard")]
+                {
+                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                {
+                    UnifiedAddress::from_receivers(Some(sapling_receiver), None)
+                }
+            }
                 .expect("sapling-only UA must be valid"),
         );
 
