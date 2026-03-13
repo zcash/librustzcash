@@ -244,6 +244,55 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     )
 }
 
+/// Return all Orchard notes that were received at or before `snapshot_height`
+/// and unspent as of `snapshot_height`, for the given account.
+///
+/// This is a backward-looking query used for governance voting snapshots,
+/// unlike `select_spendable_notes` which is forward-looking (via tx expiry).
+pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    snapshot_height: BlockHeight,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT
+             rn.id AS id, t.txid, rn.action_index,
+             rn.diversifier, rn.value, rn.rho, rn.rseed, rn.commitment_tree_position,
+             accounts.ufvk AS ufvk, rn.recipient_key_scope,
+             t.block AS mined_height,
+             NULL AS max_shielding_input_height
+         FROM orchard_received_notes rn
+         INNER JOIN accounts ON accounts.id = rn.account_id
+         INNER JOIN transactions t ON t.id_tx = rn.transaction_id
+         WHERE accounts.uuid = :account_uuid
+           AND t.block IS NOT NULL
+           AND t.block <= :snapshot_height
+           AND rn.nf IS NOT NULL
+           AND rn.commitment_tree_position IS NOT NULL
+           AND rn.recipient_key_scope IN (0, 1)
+           AND accounts.ufvk IS NOT NULL
+           AND rn.id NOT IN (
+               SELECT rns.orchard_received_note_id
+               FROM orchard_received_note_spends rns
+               JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
+               WHERE t_spend.block IS NOT NULL
+                 AND t_spend.block <= :snapshot_height
+           )
+         ORDER BY rn.commitment_tree_position",
+    )?;
+
+    let rows = stmt.query_and_then(
+        named_params![
+            ":account_uuid": account.0,
+            ":snapshot_height": u32::from(snapshot_height),
+        ],
+        |row| to_received_note(params, row),
+    )?;
+
+    rows.filter_map(|r| r.transpose()).collect()
+}
+
 pub(crate) fn ensure_address<
     T: ReceivedOrchardOutput<AccountId = AccountUuid>,
     P: consensus::Parameters,
