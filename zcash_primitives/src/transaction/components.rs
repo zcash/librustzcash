@@ -2,6 +2,8 @@
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;
+#[cfg(zcash_unstable = "nu7")]
+pub mod tachyon;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod tze;
 
