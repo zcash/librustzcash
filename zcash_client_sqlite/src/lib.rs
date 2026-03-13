@@ -741,7 +741,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     /// Overrides the default implementation with a single SQL query, avoiding the
     /// O(accounts × addresses) scan that `get_account_ids` + `list_addresses` would
-    /// require.  See [`wallet::find_account_for_address`] for the query design.
+    /// require.  See [`zcash_client_backend::data_api::WalletRead::find_account_for_address`]
+    /// for the query design.
     fn find_account_for_address(
         &self,
         address: &zcash_keys::address::Address,

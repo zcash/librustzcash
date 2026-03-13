@@ -1025,7 +1025,8 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 
 /// Returns the wallet account that controls the given address, if any.
 ///
-/// This is the SQLite-optimized implementation of [`WalletRead::find_account_for_address`].
+/// This is the SQLite-optimized implementation of
+/// [`zcash_client_backend::data_api::WalletRead::find_account_for_address`].
 /// It issues a single SQL query instead of the double for loop required by the default
 /// implementation, using `receiver_flags` and the `cached_transparent_receiver_address`
 /// column to narrow candidates before performing Rust-level receiver verification.
