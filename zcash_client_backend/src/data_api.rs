@@ -489,6 +489,10 @@ pub enum AccountSource {
         purpose: AccountPurpose,
         key_source: Option<String>,
     },
+
+    /// A ZIP 48 transparent multisig account.
+    #[cfg(feature = "zip-48")]
+    Zip48,
 }
 
 impl AccountSource {
@@ -500,6 +504,8 @@ impl AccountSource {
                 purpose: AccountPurpose::Spending { derivation },
                 ..
             } => derivation.as_ref(),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => None,
             _ => None,
         }
     }
@@ -509,6 +515,8 @@ impl AccountSource {
         match self {
             AccountSource::Derived { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
             AccountSource::Imported { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => None,
         }
     }
 }
@@ -549,6 +557,8 @@ pub trait Account {
                 derivation: Some(derivation.clone()),
             },
             AccountSource::Imported { purpose, .. } => purpose.clone(),
+            #[cfg(feature = "zip-48")]
+            AccountSource::Zip48 => AccountPurpose::ViewOnly,
         }
     }
 
@@ -2744,6 +2754,10 @@ impl AccountBirthday {
 /// - [`WalletWrite::create_account`]
 /// - [`WalletWrite::import_account_hd`]
 /// - [`WalletWrite::import_account_ufvk`]
+#[cfg_attr(
+    feature = "zip-48",
+    doc = "/// - [`WalletWrite::import_account_zip48_multisig`]"
+)]
 ///
 /// All of these methods take an [`AccountBirthday`]. The birthday height is defined as
 /// the minimum block height that will be scanned for funds belonging to the wallet. If
@@ -2950,6 +2964,29 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
+    /// Imports a ZIP 48 transparent multisig wallet for tracking.
+    ///
+    /// This creates a new account of kind `account_kind = 2` (ZIP 48 multisig) with the
+    /// provided full viewing key. The account can track received funds and derive addresses.
+    ///
+    /// # Parameters
+    /// - `name`: A human-readable name for the account.
+    /// - `fvk`: The ZIP 48 full viewing key containing threshold and participant public keys.
+    /// - `birthday`: The account birthday, used for determining scan start height.
+    ///
+    /// Returns details about the imported account.
+    #[cfg(feature = "zip-48")]
+    fn import_account_zip48_multisig(
+        &mut self,
+        _name: &str,
+        _fvk: &transparent::zip48::FullViewingKey,
+        _birthday: &AccountBirthday,
+    ) -> Result<Self::Account, Self::Error> {
+        unimplemented!(
+            "WalletWrite::import_account_zip48_multisig must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
+
     /// Deletes the specified account, and all transactions that exclusively involve it, from the
     /// wallet database.
     ///
@@ -3031,6 +3068,56 @@ pub trait WalletWrite: WalletRead {
         diversifier_index: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
+
+    /// Generates, persists, and marks as exposed the next available address for a ZIP 48
+    /// multisig account.
+    ///
+    /// The address and its redeem script are derived from the account's full viewing key
+    /// at the next available index for the specified scope. The redeem script is stored
+    /// alongside the address for later use in transaction construction.
+    ///
+    /// # Parameters
+    /// - `account`: The identifier for the ZIP 48 multisig account.
+    /// - `scope`: The derivation scope (`External` for receiving, `Internal` for change).
+    ///
+    /// Returns `Ok(None)` if the account identifier does not correspond to a known
+    /// ZIP 48 multisig account.
+    #[cfg(feature = "zip-48")]
+    fn get_next_zip48_multisig_address(
+        &mut self,
+        _account: Self::AccountId,
+        _scope: zip32::Scope,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::get_next_zip48_multisig_address must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
+
+    /// Generates, persists, and marks as exposed an address at a specific index for a ZIP 48
+    /// multisig account.
+    ///
+    /// This method allows generating addresses at specific indices, which may be useful for
+    /// wallet recovery or coordinating with external systems.
+    ///
+    /// # Parameters
+    /// - `account`: The identifier for the ZIP 48 multisig account.
+    /// - `scope`: The derivation scope (`External` for receiving, `Internal` for change).
+    /// - `address_index`: The specific index at which to derive the address.
+    ///
+    /// # Warning
+    /// If the chosen index is outside the wallet's gap limit, funds sent to this address
+    /// may not be discovered on recovery from the viewing key alone.
+    #[cfg(feature = "zip-48")]
+    fn get_zip48_multisig_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _scope: zip32::Scope,
+        _address_index: NonHardenedChildIndex,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::get_zip48_multisig_address_for_index must be overridden for wallets to use the `zip-48` feature"
+        )
+    }
 
     /// Updates the wallet's view of the blockchain.
     ///

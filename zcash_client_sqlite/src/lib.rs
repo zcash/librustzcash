@@ -1299,6 +1299,26 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    #[cfg(feature = "zip-48")]
+    fn import_account_zip48_multisig(
+        &mut self,
+        name: &str,
+        fvk: &transparent::zip48::FullViewingKey,
+        birthday: &AccountBirthday,
+    ) -> Result<Self::Account, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                name,
+                &AccountSource::Zip48,
+                wallet::ViewingKey::Zip48Full(Box::new(fvk.clone())),
+                birthday,
+                &wdb.gap_limits,
+            )
+        })
+    }
+
     fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::delete_account(wdb.conn.0, account_uuid))
     }
@@ -1341,6 +1361,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         if let Some(account) = self.get_account(account)? {
             use zcash_keys::keys::AddressGenerationError::*;
 
+            #[cfg(feature = "zip-48")]
+            if matches!(account.source(), AccountSource::Zip48) {
+                return Err(SqliteClientError::Zip48UnsupportedOperation);
+            }
+
             match account.uivk().address(diversifier_index, request) {
                 Ok(address) => {
                     let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
@@ -1364,6 +1389,41 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         } else {
             Err(SqliteClientError::AccountUnknown)
         }
+    }
+
+    #[cfg(feature = "zip-48")]
+    fn get_next_zip48_multisig_address(
+        &mut self,
+        account: Self::AccountId,
+        scope: zip32::Scope,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::get_next_available_zip48_multisig_address(
+                wdb.conn.0,
+                &wdb.params,
+                &wdb.gap_limits,
+                account,
+                scope,
+            )
+        })
+    }
+
+    #[cfg(feature = "zip-48")]
+    fn get_zip48_multisig_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        scope: zip32::Scope,
+        address_index: NonHardenedChildIndex,
+    ) -> Result<Option<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::get_zip48_multisig_address_for_index(
+                wdb.conn.0,
+                &wdb.params,
+                account,
+                scope,
+                address_index,
+            )
+        })
     }
 
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {

@@ -52,6 +52,7 @@ mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
+mod zip48_multisig;
 
 use std::{rc::Rc, sync::Mutex};
 
@@ -133,6 +134,8 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                                                      |
     //                                           v_tx_outputs_key_scopes
+    //                                                      |
+    //                                               zip48_multisig
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -219,6 +222,7 @@ pub(super) fn all_migrations<
         Box::new(add_transaction_trust_marker::Migration),
         Box::new(account_delete_cascade::Migration),
         Box::new(v_tx_outputs_key_scopes::Migration),
+        Box::new(zip48_multisig::Migration),
     ]
 }
 
@@ -359,7 +363,7 @@ pub const V_0_18_5: &[Uuid] = &[
 pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
-pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[v_tx_outputs_key_scopes::MIGRATION_ID];
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[zip48_multisig::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

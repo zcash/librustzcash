@@ -1338,6 +1338,10 @@ where
                         .expect("spending key derivation should not fail"),
                     #[cfg(feature = "transparent-key-import")]
                     TransparentAddressSource::Standalone(pubkey) => *pubkey,
+                    #[cfg(feature = "zip-48")]
+                    TransparentAddressSource::Zip48 { .. } => {
+                        return Err(Error::ProposalNotSupported);
+                    }
                 };
 
                 utxos_spent.push(outpoint.clone());
@@ -1706,6 +1710,10 @@ where
                 .standalone_transparent_keys
                 .get(&_address)
                 .ok_or(Error::AddressNotRecognized(_address))?,
+            #[cfg(feature = "zip-48")]
+            TransparentAddressSource::Zip48 { .. } => {
+                return Err(Error::ProposalNotSupported);
+            }
         });
     }
     let sapling_extsks = &[
@@ -2078,6 +2086,8 @@ where
                                 } => Some((index, *scope, *address_index)),
                                 #[cfg(feature = "transparent-key-import")]
                                 TransparentAddressSource::Standalone(_) => None,
+                                #[cfg(feature = "zip-48")]
+                                TransparentAddressSource::Zip48 { .. } => None,
                             })
                     })
                     .collect::<Vec<_>>();
