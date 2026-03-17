@@ -717,6 +717,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     target_height,
                     confirmations_policy,
                     &exclude,
+                    false,
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
@@ -765,6 +766,7 @@ where
             target_height,
             confirmations_policy,
             &[],
+            false,
         )
         .map_err(InputSelectorError::DataSource)?;
 
@@ -1096,7 +1098,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 use transparent::keys::TransparentKeyScope;
 
                 let utxos = wallet_db
-                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+                    .get_spendable_transparent_outputs(
+                        taddr,
+                        target_height,
+                        confirmations_policy,
+                        false,
+                    )
                     .map_err(InputSelectorError::DataSource)?;
 
                 // `InputSource::get_spendable_transparent_outputs` is required to return

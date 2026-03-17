@@ -60,7 +60,7 @@ use super::{
     },
 };
 use crate::{
-    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
+    data_api::{MaxSpendMode, TargetValue, error::LockError, wallet::TargetHeight},
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
@@ -69,7 +69,7 @@ use crate::{
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -962,6 +962,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            None,
             #[cfg(feature = "unstable")]
             None,
         )?;
@@ -1005,6 +1006,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            None,
             #[cfg(feature = "unstable")]
             None,
         )
@@ -1038,6 +1040,7 @@ where
             memo,
             mode,
             confirmations_policy,
+            None,
         )
     }
 
@@ -1075,6 +1078,7 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            None,
             #[cfg(feature = "unstable")]
             None,
         );
@@ -1120,6 +1124,7 @@ where
             from_addrs,
             to_account,
             confirmations_policy,
+            None,
         )
     }
 
@@ -1261,6 +1266,13 @@ where
     /// Returns the total balance in the given account at this point in the test.
     pub fn get_total_balance(&self, account: AccountIdT) -> Zatoshis {
         self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
+    }
+
+    /// Returns the locked balance in the given account at this point in the test.
+    pub fn get_locked_balance(&self, account: AccountIdT) -> Zatoshis {
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| {
+            balance.locked_value()
+        })
     }
 
     /// Returns the balance in the given account that is spendable with the given number
@@ -2583,6 +2595,7 @@ impl InputSource for MockWalletDb {
         _protocol: ShieldedProtocol,
         _index: u32,
         _target_height: TargetHeight,
+        _include_locked: bool,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -2595,6 +2608,7 @@ impl InputSource for MockWalletDb {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::empty())
     }
@@ -2605,6 +2619,7 @@ impl InputSource for MockWalletDb {
         _sources: &[ShieldedProtocol],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Err(())
     }
@@ -2615,6 +2630,7 @@ impl InputSource for MockWalletDb {
         _selector: &NoteFilter,
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _include_locked: bool,
     ) -> Result<AccountMeta, Self::Error> {
         Err(())
     }
@@ -2898,6 +2914,18 @@ impl WalletWrite for MockWalletDb {
 
     fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn lock_outputs(
+        &mut self,
+        _outputs: impl Iterator<Item = OutputRef>,
+        _lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(0)
+    }
+
+    fn unlock_output(&mut self, _output: &OutputRef) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     fn store_transactions_to_be_sent(

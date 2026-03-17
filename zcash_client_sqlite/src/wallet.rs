@@ -96,7 +96,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{Note, NoteId, Recipient, WalletTx},
+    wallet::{Note, NoteId, OutputRef, Recipient, WalletTx},
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -126,7 +126,7 @@ use self::{
 use crate::{
     AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb,
-    error::SqliteClientError,
+    error::{LockError, SqliteClientError},
     util::Clock,
     wallet::{
         commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
@@ -2123,6 +2123,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             Zatoshis,
             Zatoshis,
             Zatoshis,
+            Zatoshis,
         ) -> Result<(), SqliteClientError>,
     {
         let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
@@ -2163,7 +2164,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
-                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
+                    MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust,
+                    rn.lock_expiry_height
              FROM {table_prefix}_received_notes rn
              INNER JOIN accounts ON accounts.id = rn.account_id
              INNER JOIN transactions t ON t.id_tx = rn.transaction_id
@@ -2181,11 +2183,12 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
              AND rn.id NOT IN ({}) -- and the received note is unspent
              GROUP BY rn.id",
             common::tx_unexpired_condition("t"),
-            common::spent_notes_clause(table_prefix)
+            common::spent_notes_clause(table_prefix),
         ))?;
 
-        let mut rows =
-            stmt_select_notes.query(named_params![":target_height": u32::from(target_height)])?;
+        let mut rows = stmt_select_notes.query(named_params![
+            ":target_height": u32::from(target_height),
+        ])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>("uuid")?);
 
@@ -2230,9 +2233,15 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
+            let is_locked = row
+                .get::<_, Option<u32>>("lock_expiry_height")?
+                .iter()
+                .any(|h| *h >= u32::from(target_height));
+
             // A note is spendable if we have enough chain tip information to construct witnesses,
             // the shard that its witness resides in is sufficiently scanned that we can construct
-            // the witness for the note, and the note has enough confirmations to be spent.
+            // the witness for the note, the note has enough confirmations to be spent,
+            // and the note is not locked to be spent by any in-flight proposal or PCZT.
             let is_spendable = any_spendable
                 && max_priority <= ScanPriority::Scanned
                 && confirmations_policy.confirmations_until_spendable(
@@ -2250,19 +2259,22 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let (
                 spendable_value,
+                locked_value,
                 change_pending_confirmation,
                 value_pending_spendability,
                 uneconomic_value,
             ) = {
                 let zero = Zatoshis::ZERO;
                 if value <= zip317::MARGINAL_FEE {
-                    (zero, zero, zero, value)
+                    (zero, zero, zero, zero, value)
+                } else if is_spendable && is_locked {
+                    (zero, value, zero, zero, zero)
                 } else if is_spendable {
-                    (value, zero, zero, zero)
+                    (value, zero, zero, zero, zero)
                 } else if is_pending_change {
-                    (zero, value, zero, zero)
+                    (zero, zero, value, zero, zero)
                 } else {
-                    (zero, zero, value, zero)
+                    (zero, zero, zero, value, zero)
                 }
             };
 
@@ -2270,6 +2282,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 with_pool_balance(
                     balances,
                     spendable_value,
+                    locked_value,
                     change_pending_confirmation,
                     value_pending_spendability,
                     uneconomic_value,
@@ -2291,11 +2304,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             ShieldedProtocol::Orchard,
             |balances,
              spendable_value,
+             locked_value,
              change_pending_confirmation,
              value_pending_spendability,
              uneconomic_value| {
                 balances.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
                     bal.add_spendable_value(spendable_value)?;
+                    bal.add_locked_value(locked_value)?;
                     bal.add_pending_change_value(change_pending_confirmation)?;
                     bal.add_pending_spendable_value(value_pending_spendability)?;
                     bal.add_uneconomic_value(uneconomic_value)?;
@@ -2316,11 +2331,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ShieldedProtocol::Sapling,
         |balances,
          spendable_value,
+         locked_value,
          change_pending_confirmation,
          value_pending_spendability,
          uneconomic_value| {
             balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
                 bal.add_spendable_value(spendable_value)?;
+                bal.add_locked_value(locked_value)?;
                 bal.add_pending_change_value(change_pending_confirmation)?;
                 bal.add_pending_spendable_value(value_pending_spendability)?;
                 bal.add_uneconomic_value(uneconomic_value)?;
@@ -2961,6 +2978,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     for utxo_outpoint in sent_tx.utxos_spent() {
         transparent::mark_transparent_utxo_spent(conn, tx_ref, utxo_outpoint)?;
     }
+
+    // Unlock any notes that were locked for this transaction, since the spend records
+    // now prevent them from being selected by subsequent proposals.
+    unlock_spent_notes(conn, tx_ref)?;
 
     for output in sent_tx.outputs() {
         insert_sent_output(conn, params, tx_ref, *sent_tx.account_id(), output)?;
@@ -4330,6 +4351,239 @@ pub(crate) fn get_block_range(
         },
     )
     .map_err(SqliteClientError::from)
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub(crate) fn get_locked_outputs(
+    conn: &rusqlite::Connection,
+    account: AccountUuid,
+) -> Result<Vec<OutputRef>, SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?
+        .map(u32::from)
+        .ok_or(SqliteClientError::ChainHeightUnknown)?;
+
+    let mut result = Vec::new();
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, sn.output_index
+         FROM sapling_received_notes sn
+         JOIN transactions t ON t.id_tx = sn.transaction_id
+         JOIN accounts a ON a.id = sn.account_id
+         WHERE sn.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::SAPLING,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, orn.action_index
+         FROM orchard_received_notes orn
+         JOIN transactions t ON t.id_tx = orn.transaction_id
+         JOIN accounts a ON a.id = orn.account_id
+         WHERE orn.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::ORCHARD,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT t.txid, tro.output_index
+         FROM transparent_received_outputs tro
+         JOIN transactions t ON t.id_tx = tro.transaction_id
+         JOIN accounts a ON a.id = tro.account_id
+         WHERE tro.lock_expiry_height > :chain_tip
+         AND a.uuid = :account_uuid",
+    )?;
+    let rows = stmt.query_map(
+        named_params![
+            ":account_uuid": account.0,
+            ":chain_tip": chain_tip
+        ],
+        |row| {
+            let txid: [u8; 32] = row.get(0)?;
+            let output_index: u32 = row.get(1)?;
+            Ok(OutputRef::new(
+                TxId::from_bytes(txid),
+                PoolType::TRANSPARENT,
+                output_index,
+            ))
+        },
+    )?;
+    for row in rows {
+        result.push(row?);
+    }
+
+    Ok(result)
+}
+
+pub(crate) fn lock_outputs(
+    conn: &rusqlite::Transaction,
+    outputs: impl Iterator<Item = OutputRef>,
+    lock_expiry_height: BlockHeight,
+) -> Result<usize, LockError> {
+    let chain_tip = chain_tip_height(conn)?.map(u32::from);
+
+    let mut rows_updated = 0;
+    for output in outputs {
+        let updated = match output.pool() {
+            PoolType::Shielded(ShieldedProtocol::Sapling) => conn.execute(
+                "UPDATE sapling_received_notes SET lock_expiry_height = :expiry_height
+                WHERE output_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+            PoolType::Shielded(ShieldedProtocol::Orchard) => conn.execute(
+                "UPDATE orchard_received_notes SET lock_expiry_height = :expiry_height
+                WHERE action_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+            PoolType::Transparent => conn.execute(
+                "UPDATE transparent_received_outputs SET lock_expiry_height = :expiry_height
+                WHERE output_index = :idx
+                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                AND (
+                    lock_expiry_height IS NULL
+                    OR lock_expiry_height <= :chain_tip
+                )",
+                named_params![
+                    ":expiry_height": u32::from(lock_expiry_height),
+                    ":idx": output.output_index(),
+                    ":txid": output.txid().as_ref(),
+                    ":chain_tip": chain_tip
+                ],
+            ),
+        }
+        .map_err(LockError::Storage)?;
+
+        if updated == 0 {
+            return Err(LockError::LockFailure(output));
+        } else {
+            rows_updated += updated;
+        }
+    }
+
+    Ok(rows_updated)
+}
+
+pub(crate) fn unlock_output(
+    conn: &rusqlite::Transaction,
+    output: &OutputRef,
+) -> Result<bool, SqliteClientError> {
+    let rows_updated = match output.pool() {
+        PoolType::Shielded(ShieldedProtocol::Sapling) => conn.execute(
+            "UPDATE sapling_received_notes SET lock_expiry_height = NULL
+             WHERE output_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+        PoolType::Shielded(ShieldedProtocol::Orchard) => conn.execute(
+            "UPDATE orchard_received_notes SET lock_expiry_height = NULL
+             WHERE action_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+        PoolType::Transparent => conn.execute(
+            "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
+             WHERE output_index = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            named_params![
+                ":idx": output.output_index(),
+                ":txid": output.txid().as_ref(),
+            ],
+        )?,
+    };
+    Ok(rows_updated > 0)
+}
+
+/// Unlocks all notes that have been recorded as spent by the given transaction.
+/// This is called after marking notes as spent in `store_transaction_to_be_sent`,
+/// since the spend records now prevent them from being selected by subsequent proposals.
+fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE sapling_received_notes SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT sapling_received_note_id FROM sapling_received_note_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    conn.execute(
+        "UPDATE orchard_received_notes SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT orchard_received_note_id FROM orchard_received_note_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    conn.execute(
+        "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
+         WHERE id IN (
+             SELECT transparent_received_output_id FROM transparent_received_output_spends
+             WHERE transaction_id = :tx_ref
+         )",
+        named_params![":tx_ref": tx_ref.0],
+    )?;
+
+    Ok(())
 }
 
 pub(crate) fn get_received_outputs(

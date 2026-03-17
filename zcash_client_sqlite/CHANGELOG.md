@@ -25,6 +25,10 @@ workspace.
 - `impl zcash_keys::keys::transparent::gap_limits::AddressStore for WalletDb`
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
+- A database migration adds `lock_expiry_height` columns to the
+  `sapling_received_notes`, `orchard_received_notes`, and
+  `transparent_received_outputs` tables to support explicit note locking during
+  concurrent proposal creation.
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.

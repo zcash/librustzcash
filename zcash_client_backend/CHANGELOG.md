@@ -13,9 +13,11 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api`:
   - `ll` module
-  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
+  - `Balance::{locked_value, add_locked_value}`
+  - `AccountBalance::locked_value`
   - `DecryptableTransaction`
   - `ReceivedTransactionOutput`
+  - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
 - in `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
   - Added types `CompactTxIn`, `TxOut`
@@ -31,6 +33,11 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- `zcash_client_backend::data_api::ll`
+- `zcash_client_backend::data_api::error::LockError`
+- `zcash_client_backend::wallet::OutputRef`
+- `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
+- `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -72,7 +79,31 @@ workspace.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
-- `zcash_client_backend::data_api::WalletWrite` has added method `truncate_to_chain_state`.
+- `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
+  `OutputRef` instead of `(PoolType, TxId, u32)`.
+- The following `InputSource` trait methods now take an additional
+  `include_locked: bool` parameter that controls whether locked notes
+  are included in results:
+  - `get_spendable_note`
+  - `select_spendable_notes`
+  - `select_unspent_notes`
+  - `get_account_metadata`
+  - `get_unspent_transparent_output` (under `transparent-inputs`)
+  - `get_spendable_transparent_outputs` (under `transparent-inputs`)
+- `WalletWrite::store_transactions_to_be_sent` implementations are now
+  required to unlock any locked outputs that are recorded as spent by
+  the stored transactions.
+- `zcash_client_backend::data_api::WalletWrite` has added methods
+  `truncate_to_chain_state`, `lock_outputs` and `unlock_output`.
+- `zcash_client_backend::data_api::WalletTest` has added method
+  `get_locked_outputs`.
+- The following `zcash_client_backend::data_api::wallet::` proposal creation
+  functions now take a `lock_for_blocks: Option<u32>` parameter and require
+  `WalletWrite` instead of `WalletRead`:
+  - `propose_transfer`
+  - `propose_standard_transfer_to_address`
+  - `propose_send_max_transfer`
+  - `propose_shielding`
 - The associated type `zcash_client_backend::fees::ChangeStrategy::MetaSource` is now
   bounded on the newly added `MetaSource` type instead of
   `zcash_client_backend::data_api::InputSource`.
@@ -95,6 +126,9 @@ workspace.
   than or equal to the provided minimum value. This fixes an inconsistency
   in the various tests related to notes having no economic value in
   `zcash_client_sqlite`.
+- `zcash_client_backend::data_api::Balance` has been modified to now make it
+  possible to represent locked value; this is value that is committed to be
+  spent by an in-flight proposal or PCZT.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use
