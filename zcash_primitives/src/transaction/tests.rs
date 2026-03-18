@@ -436,9 +436,9 @@ fn tachyon_v6_test_vectors() {
 
         // Verify action field values match zebra vector generation
         let action = &bundle.actions[0];
-        // cv = EpAffine::identity() in zebra
+        // cv = EpAffine::generator() in zebra
         let cv_point: EpAffine = action.cv.into();
-        assert_eq!(cv_point, EpAffine::identity());
+        assert_eq!(cv_point, EpAffine::generator());
         // rk derived from seed [0x42; 64]
         assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
         // sig = [0x01; 64]
@@ -457,7 +457,7 @@ fn tachyon_v6_test_vectors() {
         // Verify action fields
         let action = &bundle.actions[0];
         let cv_point: EpAffine = action.cv.into();
-        assert_eq!(cv_point, EpAffine::identity());
+        assert_eq!(cv_point, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
         assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
         assert_eq!(<[u8; 64]>::from(bundle.binding_sig), [0x02u8; 64]);
@@ -478,17 +478,17 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(bundle.actions.len(), 2);
         assert_eq!(bundle.value_balance, 300);
 
-        // Verify action 1: cv=identity, rk from seed [0x42; 64], sig=[0x01; 64]
+        // Verify action 1: cv=generator, rk from seed [0x42; 64], sig=[0x01; 64]
         let action1 = &bundle.actions[0];
         let cv1: EpAffine = action1.cv.into();
-        assert_eq!(cv1, EpAffine::identity());
+        assert_eq!(cv1, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action1.rk), EXPECTED_RK_42);
         assert_eq!(<[u8; 64]>::from(action1.sig), [0x01u8; 64]);
 
-        // Verify action 2: cv=identity, rk from seed [0x43; 64], sig=[0x03; 64]
+        // Verify action 2: cv=generator, rk from seed [0x43; 64], sig=[0x03; 64]
         let action2 = &bundle.actions[1];
         let cv2: EpAffine = action2.cv.into();
-        assert_eq!(cv2, EpAffine::identity());
+        assert_eq!(cv2, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action2.rk), EXPECTED_RK_43);
         assert_eq!(<[u8; 64]>::from(action2.sig), [0x03u8; 64]);
 
