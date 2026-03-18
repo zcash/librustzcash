@@ -1870,6 +1870,11 @@ criteria = "safe-to-deploy"
 delta = "0.15.0 -> 0.16.0"
 notes = "This release involves only updates of previously-vetted dependencies."
 
+[[audits.zcash_script]]
+who = "Jack Grigg <thestr4d@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.4.3"
+
 [[audits.zerocopy]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
