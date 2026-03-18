@@ -579,10 +579,6 @@ criteria = "safe-to-deploy"
 version = "0.2.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.getrandom]]
-version = "0.3.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.getset]]
 version = "0.1.6"
 criteria = "safe-to-deploy"
