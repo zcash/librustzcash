@@ -8,6 +8,7 @@ use zcash_script::{
     pattern::push_num,
     pv,
     script::{self, Evaluable as _},
+    solver,
 };
 
 use zcash_protocol::{
@@ -397,10 +398,9 @@ impl TxOut {
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
     pub fn recipient_address(&self) -> Option<TransparentAddress> {
-        script::PubKey::parse(&self.script_pubkey.0)
-            .ok()
+        self.script_kind()
             .as_ref()
-            .and_then(TransparentAddress::from_script_pubkey)
+            .and_then(TransparentAddress::from_script_kind)
     }
 
     pub fn value(&self) -> Zatoshis {
@@ -409,6 +409,14 @@ impl TxOut {
 
     pub fn script_pubkey(&self) -> &Script {
         &self.script_pubkey
+    }
+
+    /// Returns the kind of script to which the TxOut was sent, if this is a valid output.
+    pub fn script_kind(&self) -> Option<solver::ScriptKind> {
+        script::PubKey::parse(&self.script_pubkey.0)
+            .ok()
+            .as_ref()
+            .and_then(solver::standard)
     }
 }
 

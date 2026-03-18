@@ -150,13 +150,20 @@ impl TransparentAddress {
 
     /// Returns the address that this Script contains, if any.
     pub fn from_script_pubkey(script_pubkey: &script::PubKey) -> Option<Self> {
-        solver::standard(script_pubkey).and_then(|script_kind| match script_kind {
+        solver::standard(script_pubkey)
+            .as_ref()
+            .and_then(Self::from_script_kind)
+    }
+
+    /// Returns the address that this `ScriptKind` contains, if any.
+    pub fn from_script_kind(script_kind: &solver::ScriptKind) -> Option<Self> {
+        match script_kind {
             solver::ScriptKind::PubKeyHash { hash } => {
-                Some(TransparentAddress::PublicKeyHash(hash))
+                Some(TransparentAddress::PublicKeyHash(*hash))
             }
-            solver::ScriptKind::ScriptHash { hash } => Some(TransparentAddress::ScriptHash(hash)),
+            solver::ScriptKind::ScriptHash { hash } => Some(TransparentAddress::ScriptHash(*hash)),
             _ => None,
-        })
+        }
     }
 
     /// Generate the `scriptPubKey` corresponding to this address.

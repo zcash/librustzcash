@@ -11,6 +11,8 @@ workspace.
 ## [0.7.0] - PENDING
 
 ### Added
+- `zcash_transparent::address::TransparentAddress::from_script_kind`
+- `zcash_transparent::bundle::TxOut::script_kind`
 - `zcash_transparent::pczt`:
   - `Input::with_signable_input`
   - `Input::append_signature`
