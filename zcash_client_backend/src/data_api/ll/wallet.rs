@@ -8,6 +8,7 @@ use tracing::{debug, info, trace, warn};
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::error::ShardTreeError;
+use transparent::address::TransparentAddress;
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
@@ -964,7 +965,11 @@ where
             .flat_map(|b| b.vout.iter())
             .enumerate()
         {
-            if let Some(address) = txout.recipient_address() {
+            let script_kind = txout.script_kind();
+            if let Some(address) = script_kind
+                .as_ref()
+                .and_then(TransparentAddress::from_script_kind)
+            {
                 debug!(
                     "{:?} output {} has recipient {}",
                     d_tx.tx().txid(),
@@ -1028,6 +1033,13 @@ where
                         value: txout.value(),
                     });
                 }
+            } else if let Some(script_kind) = script_kind {
+                warn!(
+                    "Ignoring unsupported script kind '{}' for tx {} output {}",
+                    script_kind.as_str(),
+                    d_tx.tx().txid(),
+                    output_index
+                );
             } else {
                 warn!(
                     "Unable to determine recipient address for tx {} output {}",
