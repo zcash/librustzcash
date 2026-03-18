@@ -391,12 +391,6 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     params: &P,
     new_tip: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    // If the caller provided a chain tip that is before Sapling activation, do nothing.
-    let sapling_activation = match params.activation_height(NetworkUpgrade::Sapling) {
-        Some(h) if h <= new_tip => h,
-        _ => return Ok(()),
-    };
-
     // Read the previous max scanned height from the blocks table
     let max_scanned = block_height_extrema(conn)?.map(|range| *range.end());
 
@@ -458,7 +452,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             wallet_birthday.map_or_else(
                 // We don't have a wallet birthday, which means we have no accounts yet.
                 // We can therefore ignore all blocks up to the chain tip.
-                || ScanRange::from_parts(sapling_activation..chain_end, ScanPriority::Ignored),
+                || {
+                    ScanRange::from_parts(
+                        BlockHeight::from_u32(0)..chain_end,
+                        ScanPriority::Ignored,
+                    )
+                },
                 // We have a wallet birthday, so mark all blocks between that and the
                 // chain tip as `Historic` (performing wallet recovery).
                 |wallet_birthday| {
