@@ -386,7 +386,7 @@ fn zip_0244() {
     }
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 #[test]
 fn tachyon_v6_test_vectors() {
     use self::data::tachyon_vectors::*;
