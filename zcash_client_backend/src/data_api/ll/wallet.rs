@@ -320,47 +320,74 @@ where
                 .map_err(PutBlocksError::Storage)?;
 
             // Mark notes as spent and remove them from the scanning cache
-            for spend in tx.sapling_spends() {
-                wallet_db
-                    .mark_sapling_note_spent(spend.nf(), tx_ref)
-                    .map_err(PutBlocksError::Storage)?;
-            }
-            #[cfg(feature = "orchard")]
-            for spend in tx.orchard_spends() {
-                wallet_db
-                    .mark_orchard_note_spent(spend.nf(), tx_ref)
-                    .map_err(PutBlocksError::Storage)?;
-            }
+            mark_notes_spent(
+                wallet_db,
+                tx_ref,
+                #[cfg(feature = "transparent-inputs")]
+                None.iter(),
+                tx.sapling_spends().iter().map(|spend| spend.nf()),
+                #[cfg(feature = "orchard")]
+                tx.orchard_spends().iter().map(|spend| spend.nf()),
+            )
+            .map_err(PutBlocksError::Storage)?;
 
-            for output in tx.sapling_outputs() {
+            // TODO: Pass in the actual network parameters even though we don't need them.
+            let params: Option<&consensus::Network> = None;
+
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.sapling_outputs(),
                 // Check whether this note was spent in a later block range that
                 // we previously scanned.
-                let spent_in = output
-                    .nf()
-                    .map(|nf| wallet_db.detect_sapling_spend(nf))
-                    .transpose()
-                    .map_err(PutBlocksError::Storage)?
-                    .flatten();
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_sapling_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_sapling_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
 
-                wallet_db
-                    .put_received_sapling_note(output, tx_ref, Some(block.height()), spent_in)
-                    .map_err(PutBlocksError::Storage)?;
-            }
             #[cfg(feature = "orchard")]
-            for output in tx.orchard_outputs() {
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.orchard_outputs(),
                 // Check whether this note was spent in a later block range that
                 // we previously scanned.
-                let spent_in = output
-                    .nf()
-                    .map(|nf| wallet_db.detect_orchard_spend(nf))
-                    .transpose()
-                    .map_err(PutBlocksError::Storage)?
-                    .flatten();
-
-                wallet_db
-                    .put_received_orchard_note(output, tx_ref, Some(block.height()), spent_in)
-                    .map_err(PutBlocksError::Storage)?;
-            }
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_orchard_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_orchard_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
         }
 
         // Insert the new nullifiers from this block into the nullifier map.
@@ -789,37 +816,27 @@ where
         wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
 
-    // Mark Sapling notes as spent when we observe their nullifiers.
-    for spend in d_tx
-        .tx()
-        .sapling_bundle()
-        .iter()
-        .flat_map(|b| b.shielded_spends().iter())
-    {
-        wallet_db.mark_sapling_note_spent(spend.nullifier(), tx_ref)?;
-    }
-
-    // Mark Orchard notes as spent when we observe their nullifiers.
-    #[cfg(feature = "orchard")]
-    for action in d_tx
-        .tx()
-        .orchard_bundle()
-        .iter()
-        .flat_map(|b| b.actions().iter())
-    {
-        wallet_db.mark_orchard_note_spent(action.nullifier(), tx_ref)?;
-    }
-
-    // If any of the utxos spent in the transaction are ours, mark them as spent.
-    #[cfg(feature = "transparent-inputs")]
-    for txin in d_tx
-        .tx()
-        .transparent_bundle()
-        .iter()
-        .flat_map(|b| b.vin.iter())
-    {
-        wallet_db.mark_transparent_utxo_spent(txin.prevout(), tx_ref)?;
-    }
+    mark_notes_spent(
+        wallet_db,
+        tx_ref,
+        #[cfg(feature = "transparent-inputs")]
+        d_tx.tx()
+            .transparent_bundle()
+            .iter()
+            .flat_map(|b| b.vin.iter())
+            .map(|txin| txin.prevout()),
+        d_tx.tx()
+            .sapling_bundle()
+            .iter()
+            .flat_map(|b| b.shielded_spends().iter())
+            .map(|spend| spend.nullifier()),
+        #[cfg(feature = "orchard")]
+        d_tx.tx()
+            .orchard_bundle()
+            .iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| action.nullifier()),
+    )?;
 
     // A flag used to determine whether it is necessary to query for transactions that
     // provided transparent inputs to this transaction, in order to be able to correctly
@@ -851,12 +868,13 @@ where
 
     put_shielded_outputs(
         wallet_db,
-        params,
+        Some(params),
         tx_ref,
         funding_account,
         d_tx.sapling_outputs(),
-        |wallet_db, output, tx_ref| {
-            wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), None)
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), spent_in)
         },
         |_account_id| {
             #[cfg(feature = "transparent-inputs")]
@@ -867,12 +885,13 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        params,
+        Some(params),
         tx_ref,
         funding_account,
         d_tx.orchard_outputs(),
-        |wallet_db, output, tx_ref| {
-            wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), None)
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), spent_in)
         },
         |_account_id| {
             #[cfg(feature = "transparent-inputs")]
@@ -1009,9 +1028,8 @@ where
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
-                    let recipient_address = wallet_db
-                        .select_receiving_address(account_uuid, &receiver)?
-                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+                    let recipient_address =
+                        external_address(wallet_db, params, account_uuid, receiver)?;
 
                     #[cfg(not(feature = "transparent-inputs"))]
                     let recipient_address = receiver.to_zcash_address(params.network_type());
@@ -1043,17 +1061,57 @@ where
     }
 }
 
+fn mark_notes_spent<'a, DbT>(
+    wallet_db: &mut DbT,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    #[cfg(feature = "transparent-inputs")] transparent_prevouts: impl Iterator<
+        Item = &'a transparent::bundle::OutPoint,
+    >,
+    sapling_nfs: impl Iterator<Item = &'a sapling::Nullifier>,
+    #[cfg(feature = "orchard")] orchard_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+{
+    // If any of the utxos spent in the transaction are ours, mark them as spent.
+    #[cfg(feature = "transparent-inputs")]
+    for outpoint in transparent_prevouts {
+        wallet_db.mark_transparent_utxo_spent(outpoint, tx_ref)?;
+    }
+
+    // Mark Sapling notes as spent when we observe their nullifiers.
+    for nf in sapling_nfs {
+        wallet_db.mark_sapling_note_spent(nf, tx_ref)?;
+    }
+
+    // Mark Orchard notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for nf in orchard_nfs {
+        wallet_db.mark_orchard_note_spent(nf, tx_ref)?;
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn put_shielded_outputs<DbT, P, Output>(
     wallet_db: &mut DbT,
-    params: &P,
+    params: Option<&P>,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     funding_account: Option<DbT::AccountId>,
     outputs: &[Output],
+    detect_note_spent_in: impl Fn(
+        &mut DbT,
+        &Output,
+    ) -> Result<
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
+        <DbT as LowLevelWalletRead>::Error,
+    >,
     put_received_note: impl Fn(
         &mut DbT,
         &Output,
         <DbT as LowLevelWalletRead>::TxRef,
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
     ) -> Result<(), <DbT as LowLevelWalletRead>::Error>,
     mut on_external_account: impl FnMut(<DbT as LowLevelWalletRead>::AccountId),
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
@@ -1064,34 +1122,25 @@ where
     Output::Note: Clone,
 {
     for output in outputs {
-        match output.transfer_type() {
+        let sent_output = match output.transfer_type() {
             TransferType::Outgoing => {
                 let note = output.note().clone().into();
-                let receiver = note.receiver();
-                let value = note.value();
 
-                let recipient = {
-                    let recipient_address = wallet_db
-                        .select_receiving_address(output.account_id(), &receiver)?
-                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-                    Recipient::External {
-                        recipient_address,
-                        output_pool: Output::POOL_TYPE,
-                    }
+                let recipient = Recipient::External {
+                    recipient_address: external_address(
+                        wallet_db,
+                        params.expect("present when outgoing is possible (store_decrypted_tx)"),
+                        output.account_id(),
+                        note.receiver(),
+                    )?,
+                    output_pool: Output::POOL_TYPE,
                 };
 
-                wallet_db.put_sent_output(
-                    output.account_id(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    value,
-                    output.memo(),
-                )?;
+                Some((output.account_id(), recipient, note.value()))
             }
             TransferType::WalletInternal => {
-                put_received_note(wallet_db, output, tx_ref)?;
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
 
                 let note = output.note().clone().into();
                 let value = note.value();
@@ -1102,49 +1151,47 @@ where
                     note: Box::new(note),
                 };
 
-                wallet_db.put_sent_output(
-                    output.account_id(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    value,
-                    output.memo(),
-                )?;
+                Some((output.account_id(), recipient, value))
             }
             TransferType::Incoming => {
-                put_received_note(wallet_db, output, tx_ref)?;
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
                 on_external_account(output.account_id());
 
                 if let Some(account_id) = funding_account {
                     let note = output.note().clone().into();
-                    let receiver = note.receiver();
                     let value = note.value();
 
                     // Even if the recipient address is external, record the send as internal.
                     let recipient = Recipient::InternalAccount {
                         receiving_account: output.account_id(),
-                        external_address: {
-                            Some(
-                                wallet_db
-                                    .select_receiving_address(output.account_id(), &receiver)?
-                                    .unwrap_or_else(|| {
-                                        receiver.to_zcash_address(params.network_type())
-                                    }),
-                            )
-                        },
+                        external_address: Some(external_address(
+                            wallet_db,
+                            params.expect(
+                                "present when funding_account is known (store_decrypted_tx)",
+                            ),
+                            output.account_id(),
+                            note.receiver(),
+                        )?),
                         note: Box::new(note),
                     };
 
-                    wallet_db.put_sent_output(
-                        account_id,
-                        tx_ref,
-                        output.index(),
-                        &recipient,
-                        value,
-                        output.memo(),
-                    )?;
+                    Some((account_id, recipient, value))
+                } else {
+                    None
                 }
             }
+        };
+
+        if let Some((from_account_uuid, recipient, value)) = sent_output {
+            wallet_db.put_sent_output(
+                from_account_uuid,
+                tx_ref,
+                output.index(),
+                &recipient,
+                value,
+                output.memo(),
+            )?;
         }
     }
 
@@ -1205,4 +1252,22 @@ where
     }
 
     Ok(())
+}
+
+/// Returns the most likely account address that corresponds to the given [`Receiver`].
+fn external_address<DbT, P>(
+    wallet_db: &DbT,
+    params: &P,
+    account_id: DbT::AccountId,
+    receiver: Receiver,
+) -> Result<zcash_address::ZcashAddress, <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletRead,
+    P: consensus::Parameters,
+{
+    let recipient_address = wallet_db
+        .select_receiving_address(account_id, &receiver)?
+        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+
+    Ok(recipient_address)
 }
