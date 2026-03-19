@@ -32,9 +32,9 @@ workspace.
   secret key material.
 - `Debug` output for `zcash_keys::keys::{UnifiedSpendingKey,
   OutgoingViewingKey, UnifiedFullViewingKey, UnifiedIncomingViewingKey}` now
-  redacts sensitive key material. `UnifiedFullViewingKey` and
-  `UnifiedIncomingViewingKey` no longer delegate shielded components to
-  external `Debug` implementations or emit raw unknown-item bytes.
+  redacts sensitive key material. `UnifiedFullViewingKey` and `UnifiedIncomingViewingKey`
+  no longer delegates shielded components to external `Debug` implementations
+  or emits raw unknown-item bytes.
 
 ## [0.12.0] - 2025-10-13
 

@@ -35,7 +35,7 @@ workspace.
 
 ### Fixed
 - `Debug` output for `zcash_transparent::keys::{AccountPrivKey,
-  ExternalIvk, InternalIvk, EphemeralIvk, InternalOvk,
+  AccountPubKey, ExternalIvk, InternalIvk, EphemeralIvk, InternalOvk,
   ExternalOvk}` now redacts key material.
 - `Debug` output for `zcash_transparent::zip48::{AccountPrivKey}`
   now redacts the embedded extended key material.
