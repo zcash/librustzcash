@@ -839,7 +839,7 @@ impl core::fmt::Debug for UnifiedFullViewingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = f.debug_struct("UnifiedFullViewingKey");
         #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &self.transparent);
+        d.field("transparent", &self.transparent.as_ref().map(|_| "..."));
         #[cfg(feature = "sapling")]
         d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
         #[cfg(feature = "orchard")]
@@ -2244,6 +2244,8 @@ mod tests {
         .unwrap();
 
         let debug_str = format!("{:?}", ufvk);
+        #[cfg(feature = "transparent-inputs")]
+        assert!(debug_str.contains("transparent: Some(\"...\")"));
         #[cfg(feature = "sapling")]
         assert!(debug_str.contains("sapling: Some(\"...\")"));
         #[cfg(feature = "orchard")]

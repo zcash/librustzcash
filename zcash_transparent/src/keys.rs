@@ -335,8 +335,15 @@ impl AccountPrivKey {
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[cfg(feature = "transparent-inputs")]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AccountPubKey(ExtendedPublicKey<PublicKey>);
+
+#[cfg(feature = "transparent-inputs")]
+impl core::fmt::Debug for AccountPubKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("AccountPubKey").field(&"...").finish()
+    }
+}
 
 #[cfg(feature = "transparent-inputs")]
 impl AccountPubKey {
@@ -869,6 +876,7 @@ mod tests {
         let account_sk =
             AccountPrivKey::from_seed(&MAIN_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
         let account_pubkey = account_sk.to_account_pubkey();
+        assert_eq!(format!("{:?}", account_pubkey), "AccountPubKey(\"...\")");
 
         let external_ivk = account_pubkey.derive_external_ivk().unwrap();
         assert_eq!(format!("{:?}", external_ivk), "ExternalIvk(\"...\")");
