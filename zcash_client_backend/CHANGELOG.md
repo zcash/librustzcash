@@ -12,6 +12,8 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
+  - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module
   - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
   - `DecryptableTransaction`
@@ -31,6 +33,13 @@ workspace.
   - `Note::receiver`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
+- Import standalone transparent P2SH addresses
+  - `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_script()`
+  - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneScript`
+  - `zcash_client_backend::wallet::TransparentAddressSource::redeem_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_script()`
+  - `zcash_client_backend::wallet::TransparentAddressMetadata::redeem_script()`
+- `zcash_client_backend::wallet::WalletTransparentOutput::with_known_input_size`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now takes
@@ -69,6 +78,9 @@ workspace.
     key that will be used to encrypt any wallet-internal change outputs
     that would otherwise only be recoverable using the wallet's internal
     IVK.
+- `zcash_client_backend::data_api::WalletRead::get_transparent_balances` now returns
+  `TransparentBalances` (using `TransparentKeyOrigin`) to distinguish standalone
+  transparent addresses from HD-derived ones.
 - `zcash_client_backend::data_api::WalletRead` has added method `get_received_outputs`.
 - `zcash_client_backend::proposal::ProposalError` has added variants `PaymentAmountMissing`
   and `IncompatibleTxVersion`
@@ -95,6 +107,16 @@ workspace.
   than or equal to the provided minimum value. This fixes an inconsistency
   in the various tests related to notes having no economic value in
   `zcash_client_sqlite`.
+- Renamed `zcash_client_backend::wallet::TransparentAddressSource::Standalone`
+  to `zcash_client_backend::wallet::TransparentAddressSource::StandalonePubkey`
+- Renamed `zcash_client_backend::wallet::TransparentAddressMetadata::standalone()`
+  to `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_p2pkh()`
+- `zcash_client_backend::data_api::wallet::SpendingKeys::new` now takes
+  `HashMap<TransparentAddress, Vec<secp256k1::SecretKey>>` instead of
+  `HashMap<TransparentAddress, secp256k1::SecretKey>` for standalone transparent
+  keys, to support multi-key P2SH addresses.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  supports spending from standalone P2SH (multisig) transparent addresses.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

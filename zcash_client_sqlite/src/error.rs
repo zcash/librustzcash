@@ -171,10 +171,10 @@ pub enum SqliteClientError {
     #[cfg(feature = "transparent-inputs")]
     GapAddresses,
 
-    /// An attempt to import a transparent pubkey failed because that pubkey had already been
+    /// An attempt to import a standalone transparent address failed because it had already been
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
-    PubkeyImportConflict(Uuid),
+    StandaloneImportConflict(Uuid),
 }
 
 impl error::Error for SqliteClientError {
@@ -334,10 +334,10 @@ impl fmt::Display for SqliteClientError {
                 )
             }
             #[cfg(feature = "transparent-key-import")]
-            SqliteClientError::PubkeyImportConflict(uuid) => {
+            SqliteClientError::StandaloneImportConflict(uuid) => {
                 write!(
                     f,
-                    "The given transparent pubkey is already managed by account {uuid}"
+                    "The given standalone transparent address is already managed by account {uuid}"
                 )
             }
         }

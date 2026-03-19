@@ -125,7 +125,7 @@ pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON a
 /// - `diversifier_index_be`: the diversifier index at which this address was derived.
 ///   This may be null for imported standalone addresses.
 /// - `key_scope`: the BIP 44 change-level index at which this address was derived, or `-1`
-///   for imported transparent pubkeys.
+///   for imported standalone transparent addresses (P2PKH or P2SH).
 /// - `address`: The Unified, Sapling, or transparent address. For Unified and Sapling addresses,
 ///   only external-key scoped addresses should be stored in this table; for purely transparent
 ///   addresses, this may be an internal-scope (change) address, so that we can provide
@@ -162,11 +162,16 @@ pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON a
 /// - `transparent_receiver_next_check_time`: The Unix epoch time at which a client should next
 ///   check to determine whether any new UTXOs have been received by the cached transparent receiver
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
-//  - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
-//    `cached_transparent_receiver_address` value, for imported transparent addresses that were not
-//    obtained via derivation from an HD seed associated with the account. In cases that
-//    `cached_transparent_receiver_address` is non-null, either this column or
-//    `transparent_child_index` must also be non-null.
+/// - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
+///   `cached_transparent_receiver_address` value, for imported transparent P2PKH addresses that
+///   were not obtained via derivation from an HD seed associated with the account. In cases that
+///   `cached_transparent_receiver_address` is non-null, either this column, or
+///   `imported_transparent_receiver_script` (for imported P2SH addresses), or
+///   `transparent_child_index` must also be non-null. This is only set for imported addresses
+///   (key_scope = -1).
+/// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
+///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
+///   address derived from this script. This is only set for imported addresses (key_scope = -1).
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -183,8 +188,10 @@ CREATE TABLE "addresses" (
     receiver_flags INTEGER NOT NULL,
     transparent_receiver_next_check_time INTEGER,
     imported_transparent_receiver_pubkey BLOB,
+    imported_transparent_receiver_script BLOB,
     UNIQUE (account_id, key_scope, diversifier_index_be),
     UNIQUE (imported_transparent_receiver_pubkey),
+    UNIQUE (imported_transparent_receiver_script),
     CONSTRAINT ck_addr_transparent_index_consistency CHECK (
         (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
         AND (
@@ -192,10 +199,18 @@ CREATE TABLE "addresses" (
                 cached_transparent_receiver_address IS NULL
                 AND transparent_child_index IS NULL
                 AND imported_transparent_receiver_pubkey IS NULL
+                AND imported_transparent_receiver_script IS NULL
             )
             OR (
                 cached_transparent_receiver_address IS NOT NULL
-                AND (transparent_child_index IS NULL) == (imported_transparent_receiver_pubkey IS NOT NULL)
+                AND (
+                    (transparent_child_index IS NULL) == (
+                        key_scope = -1 AND (
+                            (imported_transparent_receiver_pubkey IS NULL) !=
+                              (imported_transparent_receiver_script IS NULL)
+                        )
+                    )
+                )
             )
         )
     ),

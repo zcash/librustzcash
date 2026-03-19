@@ -17,6 +17,8 @@ use zcash_protocol::{
     consensus::{BlockHeight, TxIndex},
     value::{BalanceError, Zatoshis},
 };
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script;
 use zip32::Scope;
 
 use crate::fees::sapling as sapling_fees;
@@ -176,6 +178,9 @@ pub struct WalletTransparentOutput {
     txout: TxOut,
     mined_height: Option<BlockHeight>,
     recipient_address: TransparentAddress,
+    /// The known serialized input size for this output, if available.
+    /// This is set for P2SH outputs where the redeem script is known.
+    known_input_size: Option<usize>,
 }
 
 impl WalletTransparentOutput {
@@ -195,7 +200,17 @@ impl WalletTransparentOutput {
                 txout,
                 mined_height,
                 recipient_address,
+                known_input_size: None,
             })
+    }
+
+    /// Sets the known serialized input size for this output.
+    ///
+    /// This should be used for P2SH outputs where the wallet knows the redeem script
+    /// and can compute the expected input size for fee calculation.
+    pub fn with_known_input_size(mut self, size: usize) -> Self {
+        self.known_input_size = Some(size);
+        self
     }
 
     /// Returns the [`OutPoint`] corresponding to the output.
@@ -230,6 +245,24 @@ impl transparent_fees::InputView for WalletTransparentOutput {
     }
     fn coin(&self) -> &TxOut {
         &self.txout
+    }
+    fn serialized_size(&self) -> transparent_fees::InputSize {
+        match self.known_input_size {
+            Some(size) => transparent_fees::InputSize::Known(size),
+            None => {
+                // Fall back to default: only P2PKH is recognized.
+                match zcash_script::script::PubKey::parse(&self.txout.script_pubkey().0)
+                    .ok()
+                    .as_ref()
+                    .and_then(zcash_script::solver::standard)
+                {
+                    Some(zcash_script::solver::ScriptKind::PubKeyHash { .. }) => {
+                        transparent_fees::InputSize::STANDARD_P2PKH
+                    }
+                    _ => transparent_fees::InputSize::Unknown(self.outpoint.clone()),
+                }
+            }
+        }
     }
 }
 
@@ -763,16 +796,31 @@ impl TransparentAddressMetadata {
         }
     }
 
-    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
-    /// information and the specified exposure height.
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::StandalonePubkey`]
+    /// source information for a P2PKH address and the specified exposure height.
     #[cfg(feature = "transparent-key-import")]
-    pub fn standalone(
+    pub fn standalone_p2pkh(
         pubkey: secp256k1::PublicKey,
         exposure: Exposure,
         next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
-            source: TransparentAddressSource::Standalone(pubkey),
+            source: TransparentAddressSource::StandalonePubkey(pubkey),
+            exposure,
+            next_check_time,
+        }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::StandaloneScript`]
+    /// source information for a P2SH address and the specified exposure height.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn standalone_script(
+        redeem_script: script::Redeem,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source: TransparentAddressSource::StandaloneScript(redeem_script),
             exposure,
             next_check_time,
         }
@@ -825,6 +873,13 @@ impl TransparentAddressMetadata {
     pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
         self.source.address_index()
     }
+
+    /// Returns the redeem script for the address, if this is a P2SH address.
+    /// Returns `None` for non-P2SH addresses.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn redeem_script(&self) -> Option<&script::Redeem> {
+        self.source.redeem_script()
+    }
 }
 
 /// Source information for a transparent address.
@@ -837,11 +892,18 @@ pub enum TransparentAddressSource {
         scope: TransparentKeyScope,
         address_index: NonHardenedChildIndex,
     },
+
     /// The address was derived from a secp256k1 public key for which derivation information is
     /// unknown or for which the associated spending key was produced from system randomness.
     /// This variant provides the public key directly.
     #[cfg(feature = "transparent-key-import")]
-    Standalone(secp256k1::PublicKey),
+    StandalonePubkey(secp256k1::PublicKey),
+
+    /// The address was derived from a P2SH redeem_script for which derivation information is
+    /// unknown.
+    /// This variant provides the redeem script directly.
+    #[cfg(feature = "transparent-key-import")]
+    StandaloneScript(script::Redeem),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -852,7 +914,9 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { scope, .. } => Some(*scope),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => None,
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(_) => None,
         }
     }
 
@@ -862,7 +926,22 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { address_index, .. } => Some(*address_index),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => None,
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(_) => None,
+        }
+    }
+
+    /// Returns the redeem script for the address, if this is a P2SH address.
+    /// Returns `None` for non-P2SH addresses.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn redeem_script(&self) -> Option<&script::Redeem> {
+        match self {
+            TransparentAddressSource::Derived { .. } => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(redeem_script) => Some(redeem_script),
         }
     }
 }
