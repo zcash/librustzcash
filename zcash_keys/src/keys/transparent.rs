@@ -29,6 +29,16 @@ pub enum ParseError {
 }
 
 #[cfg(feature = "transparent-key-encoding")]
+impl core::fmt::Debug for Key {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Key")
+            .field("secret", &"...")
+            .field("compressed", &self.compressed)
+            .finish()
+    }
+}
+
+#[cfg(feature = "transparent-key-encoding")]
 impl From<bs58::decode::Error> for ParseError {
     fn from(value: bs58::decode::Error) -> Self {
         ParseError::Base58(value)
@@ -432,5 +442,19 @@ mod tests {
                 Err(zcash_address::ParseError::NotZcash),
             );
         }
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-encoding")]
+    fn key_debug_redaction() {
+        let mut rng = ChaChaRng::from_seed([0u8; 32]);
+        let secret = SecretKey::new(&mut rng);
+        let key = Key {
+            secret,
+            compressed: true,
+        };
+        let debug_str = format!("{:?}", key);
+        assert!(debug_str.contains("secret: \"...\""));
+        assert!(debug_str.contains("compressed: true"));
     }
 }

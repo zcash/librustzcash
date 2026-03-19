@@ -1,5 +1,8 @@
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::{
+    convert::{TryFrom, TryInto},
+    fmt,
+};
 use zcash_protocol::constants;
 
 use super::{
@@ -8,7 +11,7 @@ use super::{
 };
 
 /// The set of known FVKs for Unified FVKs.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Fvk {
     /// The raw encoding of an Orchard Full Viewing Key.
     ///
@@ -39,6 +42,21 @@ pub enum Fvk {
         typecode: u32,
         data: Vec<u8>,
     },
+}
+
+impl fmt::Debug for Fvk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Fvk::Orchard(_) => f.debug_tuple("Fvk::Orchard").field(&"...").finish(),
+            Fvk::Sapling(_) => f.debug_tuple("Fvk::Sapling").field(&"...").finish(),
+            Fvk::P2pkh(_) => f.debug_tuple("Fvk::P2pkh").field(&"...").finish(),
+            Fvk::Unknown { typecode, .. } => f
+                .debug_struct("Fvk::Unknown")
+                .field("typecode", typecode)
+                .field("data", &"...")
+                .finish(),
+        }
+    }
 }
 
 impl TryFrom<(u32, &[u8])> for Fvk {
@@ -380,5 +398,44 @@ mod tests {
                 },
             ]
         )
+    }
+
+    #[test]
+    fn fvk_debug_redaction() {
+        assert_eq!(
+            format!("{:?}", Fvk::Orchard([0; 96])),
+            "Fvk::Orchard(\"...\")"
+        );
+        assert_eq!(
+            format!("{:?}", Fvk::Sapling([0; 128])),
+            "Fvk::Sapling(\"...\")"
+        );
+        assert_eq!(format!("{:?}", Fvk::P2pkh([0; 65])), "Fvk::P2pkh(\"...\")");
+        assert_eq!(
+            format!(
+                "{:?}",
+                Fvk::Unknown {
+                    typecode: 4242,
+                    data: vec![1, 2, 3],
+                }
+            ),
+            "Fvk::Unknown { typecode: 4242, data: \"...\" }"
+        );
+    }
+
+    #[test]
+    fn ufvk_debug_redaction() {
+        let ufvk = Ufvk(vec![
+            Fvk::P2pkh([0; 65]),
+            Fvk::Unknown {
+                typecode: 7,
+                data: vec![9, 9, 9],
+            },
+        ]);
+
+        assert_eq!(
+            format!("{:?}", ufvk),
+            "Ufvk([Fvk::P2pkh(\"...\"), Fvk::Unknown { typecode: 7, data: \"...\" }])"
+        );
     }
 }
