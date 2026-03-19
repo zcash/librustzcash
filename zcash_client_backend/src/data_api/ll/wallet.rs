@@ -229,7 +229,8 @@ impl<
 /// # Parameters
 /// - `wallet_db`: A handle to the underlying data store.
 /// - `from_state`: The note commitment tree state as of the end of the last block prior to the
-///   first block in the provided block vector.
+///   first block in the provided block vector; [`PutBlocksError::NonSequentialBlocks`] will be
+///   returned if this invariant is violated.
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
@@ -243,32 +244,29 @@ where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
 {
-    struct BlockPositions {
-        height: BlockHeight,
-        sapling_start_position: Position,
-        #[cfg(feature = "orchard")]
-        orchard_start_position: Position,
-    }
-
     if blocks.is_empty() {
         return Ok(());
     }
 
     let initial_block = blocks.first().expect("blocks is known to be nonempty");
-    assert!(from_state.block_height() + 1 == initial_block.height());
-
-    let start_positions = BlockPositions {
-        height: initial_block.height(),
-        sapling_start_position: Position::from(
-            u64::from(initial_block.sapling().final_tree_size())
-                - u64::try_from(initial_block.sapling().commitments().len()).unwrap(),
-        ),
-        #[cfg(feature = "orchard")]
-        orchard_start_position: Position::from(
-            u64::from(initial_block.orchard().final_tree_size())
-                - u64::try_from(initial_block.orchard().commitments().len()).unwrap(),
-        ),
-    };
+    let mut initial_block_sequential = from_state.block_height() + 1 == initial_block.height();
+    {
+        initial_block_sequential &= from_state.final_sapling_tree().tree_size()
+            + u64::try_from(initial_block.sapling().commitments().len()).unwrap()
+            == u64::from(initial_block.sapling().final_tree_size());
+    }
+    #[cfg(feature = "orchard")]
+    {
+        initial_block_sequential &= from_state.final_orchard_tree().tree_size()
+            + u64::try_from(initial_block.orchard().commitments().len()).unwrap()
+            == u64::from(initial_block.orchard().final_tree_size());
+    }
+    if !initial_block_sequential {
+        return Err(PutBlocksError::NonSequentialBlocks {
+            prev_height: from_state.block_height(),
+            block_height: initial_block.height(),
+        });
+    }
 
     let mut sapling_commitments = vec![];
     #[cfg(feature = "orchard")]
@@ -472,14 +470,14 @@ where
         // Create subtrees from the note commitments in parallel.
         const CHUNK_SIZE: usize = 1024;
         let sapling_subtrees = build_subtrees::<_, SAPLING_SHARD_HEIGHT>(
-            start_positions.sapling_start_position,
+            Position::from(from_state.final_sapling_tree().tree_size()),
             &mut sapling_commitments,
             CHUNK_SIZE,
         );
 
         #[cfg(feature = "orchard")]
         let orchard_subtrees = build_subtrees::<_, ORCHARD_SHARD_HEIGHT>(
-            start_positions.orchard_start_position,
+            Position::from(from_state.final_orchard_tree().tree_size()),
             &mut orchard_commitments,
             CHUNK_SIZE,
         );
@@ -543,7 +541,7 @@ where
         wallet_db
             .notify_scan_complete(
                 Range {
-                    start: start_positions.height,
+                    start: from_state.block_height() + 1,
                     end: last_scanned_height + 1,
                 },
                 &note_positions,
