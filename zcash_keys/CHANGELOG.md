@@ -27,6 +27,15 @@ workspace.
 - The `std` feature flag now enables the equivalent flag on the dependencies
   `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.
 
+### Fixed
+- `Debug` output for `zcash_keys::keys::transparent::Key` now redacts its
+  secret key material.
+- `Debug` output for `zcash_keys::keys::{UnifiedSpendingKey,
+  OutgoingViewingKey, UnifiedFullViewingKey, UnifiedIncomingViewingKey}` now
+  redacts sensitive key material. `UnifiedFullViewingKey` and `UnifiedIncomingViewingKey`
+  no longer delegates shielded components to external `Debug` implementations
+  or emits raw unknown-item bytes.
+
 ## [0.12.0] - 2025-10-13
 
 ### Changed
