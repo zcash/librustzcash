@@ -719,7 +719,7 @@ where
             None,
             vec![],
         )
-        .ok_or(Error::MemoForbidden)?,
+        .map_err(Error::Payment)?,
     ])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
@@ -777,7 +777,7 @@ where
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
     if memo.is_some() && !recipient.can_receive_memo() {
-        return Err(Error::MemoForbidden);
+        return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
     }
 
     let proposal = propose_send_max(
@@ -1488,7 +1488,7 @@ where
              to: TransparentAddress|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
                 if payment.memo().is_some() {
-                    return Err(Error::MemoForbidden);
+                    return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
                 }
                 builder.add_transparent_output(&to, payment_amount)?;
                 transparent_output_meta.push((

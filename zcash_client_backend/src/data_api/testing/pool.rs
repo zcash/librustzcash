@@ -787,7 +787,9 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
             MaxSpendMode::Everything,
             ConfirmationsPolicy::MIN
         ),
-        Err(data_api::error::Error::MemoForbidden)
+        Err(data_api::error::Error::Payment(
+            zip321::PaymentError::TransparentMemo
+        ))
     );
 }
 

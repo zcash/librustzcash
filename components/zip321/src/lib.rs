@@ -23,6 +23,44 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
+/// Errors that may be produced in constructing a [`Payment`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentError {
+    /// A memo was provided for a recipient address that cannot receive a memo.
+    TransparentMemo,
+    /// A zero-valued output was requested for a transparent recipient address, which is
+    /// disallowed by the Zcash consensus rules.
+    ZeroValuedTransparentOutput,
+}
+
+impl Display for PaymentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PaymentError::TransparentMemo => {
+                write!(f, "Cannot send a memo to a transparent recipient address")
+            }
+            PaymentError::ZeroValuedTransparentOutput => write!(
+                f,
+                "Zero-valued transparent outputs are disallowed by consensus"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PaymentError {}
+
+impl PaymentError {
+    /// Adds a payment index to this error to produce a [`Zip321Error`].
+    pub fn with_index(self, index: usize) -> Zip321Error {
+        match self {
+            PaymentError::TransparentMemo => Zip321Error::TransparentMemo(index),
+            PaymentError::ZeroValuedTransparentOutput => {
+                Zip321Error::ZeroValuedTransparentOutput(index)
+            }
+        }
+    }
+}
+
 /// Errors that may be produced in decoding of payment requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -157,7 +195,7 @@ impl Payment {
     ///   purpose of this payment within the larger structure of the transaction request.
     /// - `other_params`: A list of other arbitrary key/value pairs associated with this payment.
     ///
-    /// Returns `None` if the payment requests that a memo be sent to a recipient that cannot
+    /// Returns an error if the payment requests that a memo be sent to a recipient that cannot
     /// receive a memo or a zero-valued output be sent to a transparent address.
     pub fn new(
         recipient_address: ZcashAddress,
@@ -166,13 +204,13 @@ impl Payment {
         label: Option<String>,
         message: Option<String>,
         other_params: Vec<(String, String)>,
-    ) -> Option<Self> {
-        if (recipient_address.is_transparent_only() && amount == Some(Zatoshis::ZERO))
-            || (memo.is_some() && !recipient_address.can_receive_memo())
-        {
-            None
+    ) -> Result<Self, PaymentError> {
+        if memo.is_some() && !recipient_address.can_receive_memo() {
+            Err(PaymentError::TransparentMemo)
+        } else if recipient_address.is_transparent_only() && amount == Some(Zatoshis::ZERO) {
+            Err(PaymentError::ZeroValuedTransparentOutput)
         } else {
-            Some(Self {
+            Ok(Self {
                 recipient_address,
                 amount,
                 memo,
