@@ -5427,7 +5427,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
         .unwrap();
 }
 
-#[cfg(all(feature = "transparent-inputs"))]
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
 /// Tests that `TransparentOutputFilter::CoinbaseOnly` excludes non-coinbase outputs from
 /// UTXO selection and shielding proposals, and that `CoinbaseOnly` still allows proposing
 /// shielding when only coinbase UTXOs are available.
