@@ -426,3 +426,11 @@ pub(crate) fn immature_coinbase_outputs_are_excluded_from_note_selection<T: Shie
         BlockCache::new(),
     );
 }
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn coinbase_only_filtering<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::coinbase_only_filtering::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}

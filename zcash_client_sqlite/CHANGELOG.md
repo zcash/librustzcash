@@ -39,6 +39,10 @@ workspace.
   between FVK-imported and IVK-imported accounts. Importing an FVK over an existing
   IVK-only account is treated as a capability upgrade if the existing IVK items are
   a subset of those derivable from the new FVK.
+- The `InputSource::get_spendable_transparent_outputs` implementation now
+  accepts an `output_filter: TransparentOutputFilter` parameter. When set to
+  `CoinbaseOnly`, the SQL query restricts results to outputs from coinbase
+  transactions (identified by `tx_index = 0`).
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
@@ -48,7 +52,7 @@ workspace.
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
 - `zcash_client_sqlite::UtxoId` contents are now private.
-- The inadvertently-exposed `zcash_client_sqlite::chain::migrations::blockmeta::init` 
+- The inadvertently-exposed `zcash_client_sqlite::chain::migrations::blockmeta::init`
   module has been removed from the public API.
 
 ### Fixed

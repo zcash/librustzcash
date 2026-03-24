@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::WalletUtxo;
+use zcash_client_backend::data_api::{TransparentOutputFilter, WalletUtxo};
 use zcash_client_backend::{
     data_api::{
         AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
@@ -21,7 +21,7 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::data_api::TransactionStatus,
     zcash_protocol::consensus::BlockHeight,
 };
@@ -154,6 +154,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         // TODO: take into consideration coinbase maturity
         // See <https://github.com/zcash/librustzcash/issues/821>
@@ -165,6 +166,15 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
             .filter(|(outpoint, _, _)| {
                 self.utxo_is_spendable(outpoint, target_height, confirmations_policy)
                     .unwrap_or(false)
+            })
+            .filter(|(_, _, tx)| match output_filter {
+                TransparentOutputFilter::All => true,
+                // Coinbase transactions have tx_index == 0. If tx_index is unknown
+                // (None), conservatively treat it as **non-coinbase**, matching the SQL
+                // implementation's IFNULL(tx_index, 1) == 0 behavior.
+                TransparentOutputFilter::CoinbaseOnly => {
+                    tx.map_or(false, |tx| tx.tx_index().unwrap_or(1) == 0)
+                }
             })
             .filter_map(|(outpoint, txo, tx)| {
                 txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))

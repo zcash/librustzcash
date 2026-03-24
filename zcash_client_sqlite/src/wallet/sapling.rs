@@ -648,4 +648,10 @@ pub(crate) mod tests {
             SaplingPoolTester,
         >();
     }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn coinbase_only_filtering() {
+        testing::pool::coinbase_only_filtering::<SaplingPoolTester>();
+    }
 }

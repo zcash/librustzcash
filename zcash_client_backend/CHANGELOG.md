@@ -19,6 +19,9 @@ workspace.
   - `DecryptableTransaction`
   - `ReceivedTransactionOutput`
   - `impl From<zcash_client_backend::proposal::ProposalError> for wallet::input_selection::InputSelectorError<...>`
+  - `TransparentOutputFilter` enum (behind `transparent-inputs` feature flag),
+    allowing callers to control which transparent outputs are eligible for
+    selection (e.g., coinbase-only filtering).
   - `wallet::ConfirmationsPolicyError`
 - `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:
@@ -49,6 +52,9 @@ workspace.
       (using `TransparentKeyOrigin`) to distinguish standalone transparent
       addresses from HD-derived ones.
     - Added `WalletRead::get_received_outputs` method.
+    - `InputSource::get_spendable_transparent_outputs` now takes an additional
+      `output_filter: TransparentOutputFilter` parameter, controlling which
+      transparent outputs are eligible for selection.
   - Changes to the `WalletWrite` trait:
     - Added `WalletWrite::import_standalone_transparent_script` method.
     - Added `WalletWrite::truncate_to_chain_state` method.
@@ -67,6 +73,11 @@ workspace.
     memo-to-transparent and zero-valued-transparent-output errors.
   - `wallet::create_proposed_transactions` now supports spending from standalone
     P2SH (multisig) transparent addresses.
+  - `wallet::propose_shielding` now takes an additional
+    `output_filter: TransparentOutputFilter` parameter, enabling callers
+    to restrict shielding proposals to coinbase-only UTXOs.
+  - `wallet::input_selection::ShieldingSelector::propose_shielding` now
+    takes an additional `output_filter: TransparentOutputFilter` parameter.
   - `wallet::SpendingKeys::new` now takes
     `HashMap<TransparentAddress, Vec<secp256k1::SecretKey>>` instead of
     `HashMap<TransparentAddress, secp256k1::SecretKey>` for standalone transparent
