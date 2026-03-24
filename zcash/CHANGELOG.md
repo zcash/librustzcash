@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- MSRV is now 1.81.0.
+- MSRV is now 1.85.1.
 - Migrated to `zcash_primitives 0.22`.
 
 ## [0.1.0] - 2024-07-15

@@ -10,21 +10,25 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_client_backend::data_api::ll;
+use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
+use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::BalanceError};
 use zip32::DiversifierIndex;
 
 use crate::{
-    wallet::{commitment_tree, common::ErrUnsupportedPool},
     AccountUuid,
+    wallet::{commitment_tree, common::ErrUnsupportedPool},
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::SchedulingError,
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
-    zcash_keys::encoding::TransparentCodecError,
+    zcash_keys::{
+        encoding::TransparentCodecError, keys::transparent::gap_limits::GapAddressesError,
+    },
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -164,6 +168,9 @@ pub enum SqliteClientError {
         actual: BlockHeight,
     },
 
+    #[cfg(feature = "transparent-inputs")]
+    GapAddresses,
+
     /// An attempt to import a transparent pubkey failed because that pubkey had already been
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
@@ -179,6 +186,17 @@ impl error::Error for SqliteClientError {
             SqliteClientError::BalanceError(e) => Some(e),
             SqliteClientError::AddressGeneration(e) => Some(e),
             _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<GapAddressesError<SqliteClientError>> for SqliteClientError {
+    fn from(err: GapAddressesError<SqliteClientError>) -> Self {
+        match err {
+            GapAddressesError::Storage(e) => e,
+            GapAddressesError::AddressGeneration(e) => SqliteClientError::AddressGeneration(e),
+            GapAddressesError::AccountUnknown => SqliteClientError::AccountUnknown,
         }
     }
 }
@@ -285,6 +303,13 @@ impl fmt::Display for SqliteClientError {
                     u128::from(*i)
                 )
             }
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::GapAddresses => {
+                write!(
+                    f,
+                    "An error occured while generating a transparent gap addresses"
+                )
+            }
             SqliteClientError::AddressReuse(address_str, txids) => {
                 write!(
                     f,
@@ -384,6 +409,20 @@ impl From<AddressGenerationError> for SqliteClientError {
 impl From<SchedulingError> for SqliteClientError {
     fn from(value: SchedulingError) -> Self {
         SqliteClientError::Scheduling(value)
+    }
+}
+
+impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteClientError {
+    fn from(value: PutBlocksError<SqliteClientError, commitment_tree::Error>) -> Self {
+        match value {
+            ll::wallet::PutBlocksError::NonSequentialBlocks { .. } => {
+                SqliteClientError::NonSequentialBlocks
+            }
+            ll::wallet::PutBlocksError::Storage(e) => e,
+            ll::wallet::PutBlocksError::ShardTree(e) => SqliteClientError::from(e),
+            #[cfg(feature = "transparent-inputs")]
+            ll::wallet::PutBlocksError::GapAddresses(e) => SqliteClientError::from(e),
+        }
     }
 }
 

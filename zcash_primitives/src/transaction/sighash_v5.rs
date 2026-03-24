@@ -4,8 +4,8 @@ use core2::io::Write;
 use ::transparent::{
     bundle::{self as transparent, TxOut},
     sighash::{
-        TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE,
-        SIGHASH_SINGLE,
+        SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE,
+        TransparentAuthorizingContext,
     },
 };
 use zcash_encoding::Array;
@@ -13,13 +13,12 @@ use zcash_encoding::Array;
 use crate::{
     encoding::StateWrite,
     transaction::{
+        Authorization, TransactionData, TransparentDigests, TxDigests,
         sighash::SignableInput,
         txid::{
-            hash_transparent_txid_data, to_hash, transparent_outputs_hash,
-            transparent_prevout_hash, transparent_sequence_hash,
-            ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
+            ZCASH_TRANSPARENT_HASH_PERSONALIZATION, hash_transparent_txid_data, to_hash,
+            transparent_outputs_hash, transparent_prevout_hash, transparent_sequence_hash,
         },
-        Authorization, TransactionData, TransparentDigests, TxDigests,
     },
 };
 
@@ -27,7 +26,7 @@ use crate::{
 use {
     crate::{
         encoding::WriteBytesExt,
-        transaction::{components::tze, TzeDigests},
+        transaction::{TzeDigests, components::tze},
     },
     zcash_encoding::{CompactSize, Vector},
 };

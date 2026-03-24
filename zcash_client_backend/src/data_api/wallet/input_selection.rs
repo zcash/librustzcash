@@ -11,24 +11,24 @@ use ::transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
+    FeeRule,
     transparent::InputSize,
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
-    FeeRule,
 };
 use zcash_protocol::{
+    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    PoolType, ShieldedProtocol,
 };
 use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        wallet::TargetHeight, InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention,
-        TargetValue,
+        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
+        wallet::TargetHeight,
     },
-    fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
+    fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -49,6 +49,9 @@ use {
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
+
+#[cfg(feature = "unstable")]
+use zcash_primitives::transaction::TxVersion;
 
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
@@ -150,6 +153,12 @@ impl<E, S, C, N> From<ChangeError<C, N>> for InputSelectorError<E, S, C, N> {
     }
 }
 
+impl<E, S, C, N> From<ProposalError> for InputSelectorError<E, S, C, N> {
+    fn from(err: ProposalError) -> Self {
+        InputSelectorError::Proposal(err)
+    }
+}
+
 /// A strategy for selecting transaction inputs and proposing transaction outputs.
 ///
 /// Proposals should include only economically useful inputs, as determined by `Self::FeeRule`;
@@ -192,6 +201,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -383,6 +393,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -392,6 +403,23 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         Self::InputSource: InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
+        #[cfg(feature = "unstable")]
+        let (sapling_supported, orchard_supported) =
+            proposed_version.map_or(Ok((true, true)), |v| {
+                let branch_id =
+                    consensus::BranchId::for_height(params, BlockHeight::from(target_height));
+                if v.valid_in_branch(branch_id) {
+                    Ok((
+                        v.has_sapling(),
+                        cfg!(feature = "orchard") && v.has_orchard(),
+                    ))
+                } else {
+                    Err(ProposalError::IncompatibleTxVersion(branch_id))
+                }
+            })?;
+        #[cfg(not(feature = "unstable"))]
+        let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
+
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
         #[cfg(feature = "orchard")]
@@ -414,6 +442,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut total_ephemeral = Zatoshis::ZERO;
 
         for (idx, payment) in transaction_request.payments() {
+            let payment_amount = payment
+                .amount()
+                .ok_or(ProposalError::PaymentAmountMissing(*idx))?;
             let recipient_address: Address = payment
                 .recipient_address()
                 .clone()
@@ -422,7 +453,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             match recipient_address {
                 Address::Transparent(addr) => {
                     payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                    transparent_outputs.push(TxOut::new(payment.amount(), addr.script().into()));
+                    transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
                 }
                 #[cfg(feature = "transparent-inputs")]
                 Address::Tex(data) => {
@@ -430,7 +461,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
                     tr1_payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     tr1_transparent_outputs
-                        .push(TxOut::new(payment.amount(), p2pkh_addr.script().into()));
+                        .push(TxOut::new(payment_amount, p2pkh_addr.script().into()));
                     tr1_payments.push(
                         Payment::new(
                             payment.recipient_address().clone(),
@@ -442,7 +473,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         )
                         .expect("cannot fail because memo is None"),
                     );
-                    total_ephemeral = (total_ephemeral + payment.amount())
+                    total_ephemeral = (total_ephemeral + payment_amount)
                         .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                 }
                 #[cfg(not(feature = "transparent-inputs"))]
@@ -453,26 +484,25 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::SAPLING);
-                    sapling_outputs.push(SaplingPayment(payment.amount()));
+                    sapling_outputs.push(SaplingPayment(payment_amount));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    if addr.has_orchard() {
+                    if addr.has_orchard() && orchard_supported {
                         payment_pools.insert(*idx, PoolType::ORCHARD);
-                        orchard_outputs.push(OrchardPayment(payment.amount()));
+                        orchard_outputs.push(OrchardPayment(payment_amount));
                         continue;
                     }
 
-                    if addr.has_sapling() {
+                    if addr.has_sapling() && sapling_supported {
                         payment_pools.insert(*idx, PoolType::SAPLING);
-                        sapling_outputs.push(SaplingPayment(payment.amount()));
+                        sapling_outputs.push(SaplingPayment(payment_amount));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
                         payment_pools.insert(*idx, PoolType::TRANSPARENT);
-                        transparent_outputs
-                            .push(TxOut::new(payment.amount(), addr.script().into()));
+                        transparent_outputs.push(TxOut::new(payment_amount, addr.script().into()));
                         continue;
                     }
 
@@ -541,7 +571,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
 
             let wallet_meta = change_strategy
-                .fetch_wallet_meta(wallet_db, account, &selected_input_ids)
+                .fetch_wallet_meta(wallet_db, account, target_height, &selected_input_ids)
                 .map_err(InputSelectorError::DataSource)?;
 
             #[cfg(not(feature = "transparent-inputs"))]
@@ -667,10 +697,17 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
 
-            #[cfg(not(feature = "orchard"))]
-            let selectable_pools = &[ShieldedProtocol::Sapling];
-            #[cfg(feature = "orchard")]
-            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+            let selectable_pools = {
+                if orchard_supported && sapling_supported {
+                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
+                } else if orchard_supported {
+                    &[ShieldedProtocol::Orchard][..]
+                } else if sapling_supported {
+                    &[ShieldedProtocol::Sapling][..]
+                } else {
+                    &[]
+                }
+            };
 
             shielded_inputs = wallet_db
                 .select_spendable_notes(
@@ -899,12 +936,19 @@ where
     let tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
         .expect("the sum of an single-element vector of fee values cannot overflow");
 
-    let payment = zip321::Payment::new(recipient, total_to_recipient, memo, None, None, vec![])
-        .ok_or_else(|| {
-            InputSelectorError::Proposal(ProposalError::Zip321(
-                zip321::Zip321Error::TransparentMemo(0),
-            ))
-        })?;
+    let payment = zip321::Payment::new(
+        recipient,
+        Some(total_to_recipient),
+        memo,
+        None,
+        None,
+        vec![],
+    )
+    .ok_or_else(|| {
+        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
+            0,
+        )))
+    })?;
 
     let transaction_request =
         TransactionRequest::new(vec![payment.clone()]).map_err(|payment_error| {
@@ -1062,23 +1106,46 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         ParamsT: consensus::Parameters,
         ChangeT: ChangeStrategy<MetaSource = Self::InputSource>,
     {
-        let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
-            .iter()
-            .map(|taddr| {
-                wallet_db.get_spendable_transparent_outputs(
-                    taddr,
-                    target_height,
-                    confirmations_policy,
-                )
-            })
-            .collect::<Result<Vec<Vec<_>>, _>>()
-            .map_err(InputSelectorError::DataSource)?
-            .into_iter()
-            .flat_map(|v| v.into_iter())
-            .collect();
+        let (mut transparent_inputs, _, _) = source_addrs.iter().try_fold(
+            (
+                vec![],
+                BTreeSet::<TransparentAddress>::new(),
+                BTreeSet::<TransparentAddress>::new(),
+            ),
+            |(mut inputs, mut ephemeral_addrs, mut input_addrs), taddr| {
+                use transparent::keys::TransparentKeyScope;
+
+                let utxos = wallet_db
+                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+                    .map_err(InputSelectorError::DataSource)?;
+
+                // `InputSource::get_spendable_transparent_outputs` is required to return
+                // outputs received by `taddr`, so these `.extend()` calls are guaranteed
+                // to add at most a single new address to each set. But it's more
+                // convenient this way as we can reuse `utxo.recipient_key_scope()`
+                // instead of needing to query the wallet twice for each address to
+                // determine their scopes.
+                ephemeral_addrs.extend(utxos.iter().filter_map(|utxo| {
+                    (utxo.recipient_key_scope() == Some(TransparentKeyScope::EPHEMERAL))
+                        .then_some(utxo.recipient_address())
+                }));
+                input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
+                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
+
+                // Funds may be spent from at most one ephemeral address at a time. If there are no
+                // ephemeral addresses, we allow shielding from multiple transparent addresses.
+                if !ephemeral_addrs.is_empty() && input_addrs.len() > 1 {
+                    Err(InputSelectorError::Proposal(
+                        ProposalError::EphemeralAddressLinkability,
+                    ))
+                } else {
+                    Ok((inputs, ephemeral_addrs, input_addrs))
+                }
+            },
+        )?;
 
         let wallet_meta = change_strategy
-            .fetch_wallet_meta(wallet_db, to_account, &[])
+            .fetch_wallet_meta(wallet_db, to_account, target_height, &[])
             .map_err(InputSelectorError::DataSource)?;
 
         let trial_balance = change_strategy.compute_balance(

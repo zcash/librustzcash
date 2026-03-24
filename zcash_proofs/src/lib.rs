@@ -8,13 +8,13 @@
 //!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
+use bellman::groth16::{PreparedVerifyingKey, VerifyingKey, prepare_verifying_key};
 use bls12_381::Bls12;
 use sapling::circuit::{
     OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
@@ -77,15 +77,15 @@ pub struct SaplingParameterPaths {
 pub fn default_params_folder() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        use known_folders::{get_known_folder_path, KnownFolder};
+        use known_folders::{KnownFolder, get_known_folder_path};
         get_known_folder_path(KnownFolder::RoamingAppData).map(|base| base.join("ZcashParams"))
     }
 
     #[cfg(target_os = "macos")]
     {
         xdg::BaseDirectories::new()
-            .ok()
-            .map(|base_dirs| base_dirs.get_data_home().join("ZcashParams"))
+            .get_data_home()
+            .map(|data_home| data_home.join("ZcashParams"))
     }
 
     #[cfg(not(any(windows, target_os = "macos")))]

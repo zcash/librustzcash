@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use transparent::address::TransparentAddress;
 use zcash_address::{
-    unified::{self, Container, Encoding, Typecode},
     ConversionError, ToAddress, TryFromAddress, ZcashAddress,
+    unified::{self, Container, Encoding, Typecode},
 };
 use zcash_protocol::consensus::{self, NetworkType};
 
@@ -392,7 +392,8 @@ impl Address {
     /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
     ///
     /// Returns `None` if any error is encountered in decoding. Use
-    /// [`Self::try_from_zcash_address(s.parse()?)?`] if you need detailed error information.
+    /// [`Self::try_from_zcash_address`] passing in `s.parse()?` if you need detailed
+    /// error information.
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
     }
@@ -508,7 +509,7 @@ pub mod testing {
     use proptest::prelude::*;
     use zcash_protocol::consensus::Network;
 
-    use crate::keys::{testing::arb_unified_spending_key, UnifiedAddressRequest};
+    use crate::keys::{UnifiedAddressRequest, testing::arb_unified_spending_key};
 
     use super::{Address, UnifiedAddress};
 

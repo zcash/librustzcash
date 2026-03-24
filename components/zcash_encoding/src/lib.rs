@@ -300,10 +300,51 @@ impl Optional {
     }
 }
 
+/// This handles the legacy format from Bitcoin Core's `uint256::GetHex`, which reverses
+/// bytes before hex encoding. `zcashd` applied this to all 32-byte JSON-RPC values
+/// (transaction IDs, block hashes, Sprout field elements, etc.), though non-32-byte
+/// hex values are not reversed.
+pub struct ReverseHex;
+
+impl ReverseHex {
+    /// Encodes a byte array by reversing the order of the bytes and then hex encoding
+    pub fn encode(bytes: &[u8; 32]) -> alloc::string::String {
+        let mut reversed = *bytes;
+        reversed.reverse();
+        hex::encode(reversed)
+    }
+
+    /// Decodes a reversed-hex string into a byte array by decoding the hex and
+    /// reversing the order of the bytes.
+    ///
+    /// Returns `None` if the hex decoding fails or if the output is the wrong
+    /// size.
+    pub fn decode(hex_str: &str) -> Option<[u8; 32]> {
+        let mut bytes = [0; 32];
+        let res = hex::decode_to_slice(hex_str, &mut bytes);
+        if res.is_err() {
+            return None;
+        }
+
+        bytes.reverse();
+        Some(bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::fmt::Debug;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn reverse_hex_roundtrip(bytes in prop::array::uniform32(any::<u8>())) {
+            let encoded = ReverseHex::encode(&bytes);
+            let decoded = ReverseHex::decode(&encoded);
+            prop_assert_eq!(decoded, Some(bytes));
+        }
+    }
 
     #[test]
     fn compact_size() {

@@ -3,7 +3,7 @@
 use core::fmt;
 use core2::io::{self, Read, Write};
 
-use zcash_address::TryFromAddress;
+use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
 use zcash_protocol::consensus::NetworkType;
 
 use zcash_encoding::Vector;
@@ -39,7 +39,7 @@ impl fmt::Debug for Script {
                 .finish()
         } else {
             f.debug_tuple("Script")
-                .field(&hex::encode(&self.0 .0))
+                .field(&hex::encode(&self.0.0))
                 .finish()
         }
     }
@@ -53,7 +53,7 @@ impl Default for Script {
 
 impl PartialEq for Script {
     fn eq(&self, other: &Self) -> bool {
-        self.0 .0 == other.0 .0
+        self.0.0 == other.0.0
     }
 }
 
@@ -69,12 +69,12 @@ impl Script {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0 .0, |w, e| w.write_all(&[*e]))
+        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
     pub fn serialized_size(&self) -> usize {
-        Vector::serialized_size_of_u8_vec(&self.0 .0)
+        Vector::serialized_size_of_u8_vec(&self.0.0)
     }
 }
 
@@ -115,10 +115,25 @@ impl From<&script::Sig> for Script {
 }
 
 /// A transparent address corresponding to either a public key hash or a script hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransparentAddress {
     PublicKeyHash([u8; 20]),
     ScriptHash([u8; 20]),
+}
+
+impl core::fmt::Debug for TransparentAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublicKeyHash(arg0) => f
+                .debug_tuple("PublicKeyHash")
+                .field(&hex::encode(arg0))
+                .finish(),
+            Self::ScriptHash(arg0) => f
+                .debug_tuple("ScriptHash")
+                .field(&hex::encode(arg0))
+                .finish(),
+        }
+    }
 }
 
 impl TransparentAddress {
@@ -168,9 +183,25 @@ impl TransparentAddress {
     /// Derives the P2PKH transparent address corresponding to the given pubkey.
     #[cfg(feature = "transparent-inputs")]
     pub fn from_pubkey(pubkey: &secp256k1::PublicKey) -> Self {
+        Self::from_pubkey_bytes(&pubkey.serialize())
+    }
+
+    /// Derives the P2PKH transparent address corresponding to the given pubkey bytes.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn from_pubkey_bytes(pubkey: &[u8; 33]) -> Self {
         TransparentAddress::PublicKeyHash(
-            *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
+            *ripemd::Ripemd160::digest(Sha256::digest(pubkey)).as_ref(),
         )
+    }
+
+    /// Encodes this transparent address for the given network type.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
+        match self {
+            TransparentAddress::PublicKeyHash(data) => {
+                ZcashAddress::from_transparent_p2pkh(net, *data)
+            }
+            TransparentAddress::ScriptHash(data) => ZcashAddress::from_transparent_p2sh(net, *data),
+        }
     }
 }
 

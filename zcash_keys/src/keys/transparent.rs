@@ -3,14 +3,20 @@
 //! These types are provided for compatibility with encodings used in zcashd RPC APIs and
 //! serialization formats.
 
-use core::array::TryFromSliceError;
+#[cfg(feature = "transparent-inputs")]
+pub mod gap_limits;
 
-use bip32::{PrivateKey, PrivateKeyBytes};
-use secp256k1::{PublicKey, Secp256k1, SecretKey, Signing};
-use secrecy::{zeroize::ZeroizeOnDrop, ExposeSecret, SecretString, SecretVec, Zeroize};
-use zcash_protocol::consensus::NetworkConstants;
+#[cfg(feature = "transparent-key-encoding")]
+use {
+    bip32::{PrivateKey, PrivateKeyBytes},
+    core::array::TryFromSliceError,
+    secp256k1::{PublicKey, Secp256k1, SecretKey, Signing},
+    secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize, zeroize::ZeroizeOnDrop},
+    zcash_protocol::consensus::NetworkConstants,
+};
 
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
+#[cfg(feature = "transparent-key-encoding")]
 #[derive(Debug)]
 pub enum ParseError {
     /// The data being decoded had an incorrect length, an incorrect prefix, or has the correct
@@ -22,18 +28,21 @@ pub enum ParseError {
     Bip32(bip32::Error),
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl From<bs58::decode::Error> for ParseError {
     fn from(value: bs58::decode::Error) -> Self {
         ParseError::Base58(value)
     }
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl From<TryFromSliceError> for ParseError {
     fn from(_: TryFromSliceError) -> Self {
         ParseError::InvalidEncoding
     }
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl From<bip32::Error> for ParseError {
     fn from(value: bip32::Error) -> Self {
         ParseError::Bip32(value)
@@ -42,11 +51,13 @@ impl From<bip32::Error> for ParseError {
 
 /// A secp256k1 secret key, along with a flag indicating whether a compressed encoding should be
 /// used when performing DER serialization.
+#[cfg(feature = "transparent-key-encoding")]
 pub struct Key {
     secret: SecretKey,
     compressed: bool,
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl Key {
     /// Constructs a new key value from a secret key and a flag indicating whether
     /// the compressed encoding should be used when performing DER serialization.
@@ -320,18 +331,23 @@ impl Key {
     }
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl Zeroize for Key {
     fn zeroize(&mut self) {
         self.secret.non_secure_erase();
     }
 }
 
+#[cfg(feature = "transparent-key-encoding")]
 impl ZeroizeOnDrop for Key {}
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(all(
+    feature = "transparent-key-encoding",
+    any(test, feature = "test-dependencies")
+))]
 pub mod test_vectors;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "transparent-key-encoding"))]
 mod tests {
     use rand::{Rng, SeedableRng as _};
     use rand_chacha::ChaChaRng;
@@ -342,11 +358,12 @@ mod tests {
     use zcash_script::script::Evaluable;
 
     use super::{
-        test_vectors::{VectorKind, INVALID, VALID},
         Key,
+        test_vectors::{INVALID, VALID, VectorKind},
     };
 
     #[test]
+    #[cfg(feature = "transparent-key-encoding")]
     fn der_encoding_roundtrip() {
         let mut rng = ChaChaRng::from_seed([0u8; 32]);
         let secp = Secp256k1::new();
@@ -391,11 +408,13 @@ mod tests {
                     assert_eq!(hex::encode(script.to_bytes()), v.raw_bytes_hex);
 
                     // Public key must be invalid private key
-                    assert!(Key::decode_base58(
-                        &v.network,
-                        &SecretString::new(v.base58_encoding.into())
-                    )
-                    .is_err());
+                    assert!(
+                        Key::decode_base58(
+                            &v.network,
+                            &SecretString::new(v.base58_encoding.into())
+                        )
+                        .is_err()
+                    );
                 }
             }
         }

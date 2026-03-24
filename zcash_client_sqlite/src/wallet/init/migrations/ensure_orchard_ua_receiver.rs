@@ -11,7 +11,7 @@ use zcash_keys::keys::{
 use zcash_protocol::consensus;
 
 use super::orchard_received_notes;
-use crate::{wallet::init::WalletMigrationError, UA_ORCHARD, UA_TRANSPARENT};
+use crate::{UA_ORCHARD, UA_TRANSPARENT, wallet::init::WalletMigrationError};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
 
@@ -99,9 +99,9 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
+        UA_ORCHARD, UA_TRANSPARENT, WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::addresses_table, WalletMigrator},
-        WalletDb, UA_ORCHARD, UA_TRANSPARENT,
+        wallet::init::{WalletMigrator, migrations::addresses_table},
     };
 
     #[test]

@@ -1,7 +1,7 @@
 //! Migration that adds transaction summary views & add fee information to transactions.
 use std::collections::HashSet;
 
-use rusqlite::{self, params, types::ToSql, OptionalExtension};
+use rusqlite::{self, OptionalExtension, params, types::ToSql};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -273,9 +273,9 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::addresses_table, WalletMigrator},
         WalletDb,
+        testing::db::{test_clock, test_rng},
+        wallet::init::{WalletMigrator, migrations::addresses_table},
     };
 
     #[cfg(feature = "transparent-inputs")]

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_protocol"
 description = "Zcash protocol network constants and value types."
-version = "0.6.2"
+version = "0.7.2"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@nutty.land>",
@@ -29,6 +29,7 @@ memuse = { workspace = true, optional = true }
 document-features = { workspace = true, optional = true }
 
 # - Encodings
+zcash_encoding.workspace = true
 core2.workspace = true
 hex.workspace = true
 

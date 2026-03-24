@@ -3,9 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        sighash::signature_hash, sighash::SignableInput, sighash_v4::v4_signature_hash,
-        testing::arb_tx, transparent, txid::TxIdDigester, Authorization,
-        OrchardBundle::OrchardVanilla, Transaction, TransactionData, TxDigests, TxIn,
+        Authorization, OrchardBundle::OrchardVanilla, Transaction, TransactionData, TxDigests,
+        TxIn, sighash::SignableInput, sighash::signature_hash, sighash_v4::v4_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,

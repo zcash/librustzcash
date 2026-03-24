@@ -10,32 +10,33 @@ use ::transparent::bundle::OutPoint;
 use incrementalmerkletree::{Marking, Position, Retention};
 use shardtree::store::ShardStore;
 use zcash_client_backend::{
+    TransferType,
     address::UnifiedAddress,
-    data_api::{
-        chain::ChainState,
-        scanning::{ScanPriority, ScanRange},
-        AccountPurpose, AccountSource, TransactionStatus, WalletCommitmentTrees as _,
-        Zip32Derivation, SAPLING_SHARD_HEIGHT,
-    },
     data_api::{
         AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction,
         SentTransactionOutput, WalletRead, WalletWrite,
     },
+    data_api::{
+        AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
+        WalletCommitmentTrees as _, Zip32Derivation,
+        chain::ChainState,
+        scanning::{ScanPriority, ScanRange},
+    },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, Recipient, WalletTransparentOutput},
-    TransferType,
 };
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
     PoolType,
     ShieldedProtocol::{self, Sapling},
     TxId,
+    consensus::{self, BlockHeight, NetworkUpgrade},
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use crate::{
-    error::Error, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, PRUNING_DEPTH,
-    VERIFY_LOOKAHEAD,
+    MemoryWalletBlock, MemoryWalletDb, Nullifier, PRUNING_DEPTH, ReceivedNote, VERIFY_LOOKAHEAD,
+    error::Error,
 };
 
 #[cfg(feature = "orchard")]
@@ -47,11 +48,10 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::bundle::TxOut,
+    ::transparent::{address::TransparentAddress, bundle::TxOut},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
-    zcash_primitives::legacy::TransparentAddress,
 };
 
 impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
@@ -99,6 +99,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
             Ok((id, usk))
         }
+    }
+
+    fn delete_account(&mut self, account: Self::AccountId) -> Result<(), Self::Error> {
+        self.accounts.accounts.remove(&account);
+        todo!("remove all transactions associated with the account")
     }
 
     fn get_next_available_address(
@@ -613,7 +618,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<Self::AccountId>,
+        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
         tracing::debug!("store_decrypted_tx");
         self.tx_table.put_tx_data(d_tx.tx(), None, None);
@@ -935,6 +940,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         Ok(())
     }
 
+    fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     /// Truncates the database to the given height.
     ///
     /// If the requested height is greater than or equal to the height of the last scanned
@@ -1050,6 +1059,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             // Willem: We don't need to do this I think..
         }
         Ok(truncation_height)
+    }
+
+    fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
+        todo!()
     }
 
     fn import_account_hd(
@@ -1196,7 +1209,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         use zcash_keys::keys::AddressGenerationError;
         // TODO: We need to implement first_unsafe_index to make sure we dont violate gap invarient
 
-        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
+        use transparent::keys::NonHardenedChildIndex;
         let first_unsafe = self.first_unsafe_index(account_id)?;
         if let Some(account) = self.accounts.get_mut(account_id) {
             let first_unreserved = account.first_unreserved_index()?;

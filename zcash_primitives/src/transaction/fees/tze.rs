@@ -2,7 +2,7 @@
 
 use crate::{
     extensions::transparent as tze,
-    transaction::components::tze::{builder::TzeBuildInput, OutPoint, TzeOut},
+    transaction::components::tze::{OutPoint, TzeOut, builder::TzeBuildInput},
 };
 use zcash_protocol::value::Zatoshis;
 

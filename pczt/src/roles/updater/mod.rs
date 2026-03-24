@@ -6,7 +6,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{common::Global, Pczt};
+use crate::{Pczt, common::Global};
 
 #[cfg(feature = "orchard")]
 mod orchard;

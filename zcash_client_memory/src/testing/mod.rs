@@ -1,20 +1,21 @@
-use std::convert::{identity, Infallible};
+use std::convert::{Infallible, identity};
 use std::fmt::Debug;
 
+use zcash_client_backend::data_api::testing::CacheInsertionResult;
 use zcash_client_backend::{
     data_api::{
+        OutputOfSentTx, SAPLING_SHARD_HEIGHT, WalletTest,
         testing::{DataStoreFactory, Reset, TestCache, TestState},
-        OutputOfSentTx, WalletTest, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient},
 };
 use zcash_keys::address::Address;
 use zcash_protocol::{
+    ShieldedProtocol, TxId,
     consensus::BlockHeight,
     local_consensus::LocalNetwork,
     value::{ZatBalance, Zatoshis},
-    ShieldedProtocol, TxId,
 };
 
 use shardtree::store::ShardStore;
@@ -22,9 +23,12 @@ use shardtree::store::ShardStore;
 use crate::{Account, AccountId, Error, MemBlockCache, MemoryWalletDb, SentNoteId};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::{
-    data_api::{testing::transparent::GapLimits, InputSource, WalletRead},
-    wallet::WalletTransparentOutput,
+use {
+    zcash_client_backend::{
+        data_api::{InputSource, WalletRead, wallet::TargetHeight},
+        wallet::WalletTransparentOutput,
+    },
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
 pub mod pool;
@@ -53,23 +57,36 @@ impl DataStoreFactory for TestMemDbFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
-        #[cfg(feature = "transparent-inputs")] _gap_limits: GapLimits,
+        #[cfg(feature = "transparent-inputs")] _gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error> {
         Ok(MemoryWalletDb::new(network, 100))
+    }
+}
+
+#[derive(Debug)]
+pub struct MemBlockCacheInsertionResult {
+    txids: Vec<TxId>,
+}
+
+impl CacheInsertionResult for MemBlockCacheInsertionResult {
+    fn txids(&self) -> &[TxId] {
+        &self.txids[..]
     }
 }
 
 impl TestCache for MemBlockCache {
     type BsError = Infallible;
     type BlockSource = MemBlockCache;
-    type InsertResult = ();
+    type InsertResult = MemBlockCacheInsertionResult;
 
     fn block_source(&self) -> &Self::BlockSource {
         self
     }
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
+        let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
         self.0.write().unwrap().insert(cb.height(), cb.clone());
+        MemBlockCacheInsertionResult { txids }
     }
 
     fn truncate_to_height(&mut self, height: BlockHeight) {
@@ -79,7 +96,7 @@ impl TestCache for MemBlockCache {
 
 impl<P> Reset for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     type Handle = ();
 
@@ -91,7 +108,7 @@ where
 
 impl<P> WalletTest for MemoryWalletDb<P>
 where
-    P: zcash_primitives::consensus::Parameters + Clone + Debug + PartialEq,
+    P: zcash_protocol::consensus::Parameters + Clone + Debug + PartialEq,
 {
     #[allow(clippy::type_complexity)]
     fn get_sent_outputs(&self, txid: &TxId) -> Result<Vec<OutputOfSentTx>, Error> {
@@ -153,8 +170,9 @@ where
     fn get_transparent_output(
         &self,
         outpoint: &::transparent::bundle::OutPoint,
-        _allow_unspendable: bool,
+        _spendable_as_of: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+        // FIXME: perform spendability check according to `_spendable_as_of`
         Ok(self
             .transparent_received_outputs
             .get(outpoint)

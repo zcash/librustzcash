@@ -7,17 +7,17 @@ use incrementalmerkletree::Position;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 
-use shardtree::{store::ShardStore, ShardTree};
+use shardtree::{ShardTree, store::ShardStore};
 use uuid::Uuid;
 
 use sapling::{
-    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey, Zip212Enforcement},
-    zip32::DiversifiableFullViewingKey,
     Diversifier, Node, Rseed,
+    note_encryption::{PreparedIncomingViewingKey, Zip212Enforcement, try_sapling_note_decryption},
+    zip32::DiversifiableFullViewingKey,
 };
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
+use zcash_primitives::transaction::{Transaction, components::sapling::zip212_enforcement};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId},
     value::Zatoshis,
@@ -25,13 +25,12 @@ use zcash_protocol::{
 use zip32::Scope;
 
 use crate::{
-    wallet::{
-        chain_tip_height,
-        commitment_tree::SqliteShardStore,
-        init::{migrations::shardtree_support, WalletMigrationError},
-        KeyScope,
-    },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
+    wallet::{
+        KeyScope, chain_tip_height,
+        commitment_tree::SqliteShardStore,
+        init::{WalletMigrationError, migrations::shardtree_support},
+    },
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
@@ -277,13 +276,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 mod tests {
     use std::convert::Infallible;
 
-    use crate::ParallelSliceMut;
-    #[cfg(feature = "multicore")]
-    use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
-
     use incrementalmerkletree::Position;
     use rand_core::OsRng;
-    use rusqlite::{named_params, params, Connection, OptionalExtension};
+    use rusqlite::{Connection, OptionalExtension, named_params, params};
     use tempfile::NamedTempFile;
 
     use ::transparent::{
@@ -292,20 +287,22 @@ mod tests {
         keys::{IncomingViewingKey, NonHardenedChildIndex},
     };
     use zcash_client_backend::{
-        data_api::{BlockMetadata, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT},
+        TransferType,
+        data_api::{
+            BlockMetadata, SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, ll::ReceivedSaplingOutput,
+        },
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
-        scanning::{scan_block, Nullifiers, ScanningKeys},
+        scanning::{Nullifiers, ScanningKeys, scan_block},
         wallet::WalletTx,
-        TransferType,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
         block::BlockHash,
         transaction::{
+            Transaction,
             builder::{BuildConfig, BuildResult, Builder},
             fees::fixed,
-            Transaction,
         },
     };
     use zcash_proofs::prover::LocalTxProver;
@@ -317,18 +314,17 @@ mod tests {
     use zip32::Scope;
 
     use crate::{
+        AccountRef, TxRef, WalletDb,
         error::SqliteClientError,
         testing::db::{test_clock, test_rng},
         wallet::{
+            KeyScope,
             init::{
-                migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
                 WalletMigrator,
+                migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
             },
             memo_repr,
-            sapling::ReceivedSaplingOutput,
-            KeyScope,
         },
-        AccountRef, TxRef, WalletDb,
     };
 
     // These must be different.
@@ -370,7 +366,7 @@ mod tests {
         );
         let mut transparent_signing_set = TransparentSigningSet::new();
         builder
-            .add_transparent_input(
+            .add_transparent_p2pkh_input(
                 transparent_signing_set.add_key(
                     usk0.transparent()
                         .derive_external_secret_key(NonHardenedChildIndex::ZERO)
@@ -648,7 +644,7 @@ mod tests {
         let tx = res.transaction();
 
         let mut compact_tx = CompactTx {
-            hash: tx.txid().as_ref()[..].into(),
+            txid: tx.txid().as_ref()[..].into(),
             ..Default::default()
         };
         for output in tx.sapling_bundle().unwrap().shielded_outputs() {
@@ -743,7 +739,7 @@ mod tests {
                     // Create subtrees from the note commitments in parallel.
                     const CHUNK_SIZE: usize = 1024;
                     let subtrees = sapling_commitments
-                        .par_chunks_mut(CHUNK_SIZE)
+                        .chunks_mut(CHUNK_SIZE)
                         .enumerate()
                         .filter_map(|(i, chunk)| {
                             let start = start_position + (i * CHUNK_SIZE) as u64;
@@ -913,7 +909,7 @@ mod tests {
         let tx_params = named_params![
             ":txid": &txid_bytes.as_ref()[..],
             ":block": u32::from(height),
-            ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
+            ":tx_index": u16::from(tx.block_index()),
         ];
 
         stmt_upsert_tx_meta

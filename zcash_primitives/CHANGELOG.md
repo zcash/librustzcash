@@ -8,7 +8,108 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.27.0] - PENDING
+
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `impl<FE> From<coinbase::Error> for Error<FE>`
+  - `Builder::add_transparent_p2pkh_input`
+  - `Builder::propose_version`
+- `zcash_primitives::transaction::TxVersion::valid_in_branch`
+
+### Changed
+- MSRV is now 1.85.1.
+- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- `zcash_primitives::transaction::builder`:
+  - `Error` has new `Coinbase` and `TargetIncompatible` variants.
+  - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
+    instead of `u64`.
+  - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`
+    instead of its constituent parts. Use `Builder::add_transparent_p2pkh_input` if you need the
+    previous API.
+  - `BuildConfig`:
+    -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
+    -  No longer implements `Copy`.
+
+### Removed
+- `zcash_primitives::consensus` module (use `zcash_protocol::consensus` instead).
+- `zcash_primitives::constants` module (use `zcash_protocol::constants` instead).
+- `zcash_primitives::legacy` module (use the `zcash_transparent` crate instead).
+- `zcash_primitives::memo` module (use `zcash_protocol::memo` instead)
+- `zcash_primitives::transaction`:
+  - `builder::Builder::set_coinbase_miner_data` use the added
+    `BuildConfig::Coinbase` payload instead.
+  - `components`:
+    - `amount::testing` module; use `zcash_protocol::value::testing` instead
+      with the following renames:
+      - `arb_positive_amount` to `zcash_protocol::value::testing::arb_positive_zat_balance`
+      - `arb_amount` to `zcash_protocol::value::testing::arb_zat_balance`
+      - `arb_nonnegative_amount` to `zcash_protocol::value::testing::arb_zatoshis`.
+    - `amount` module (use `zcash_protocol::value` instead).
+    - `transparent::builder` module (use `zcash_transparent::builder` instead).
+    - `transparent::pczt` module (use `zcash_transparent::pczt` instead).
+    - `transparent` module (use `zcash_transparent` instead).
+    - `Amount` (use `zcash_protocol::value::ZatBalance` instead).
+    - `Outpoint` (use `zcash_transparent::bundle::Outpoint` instead).
+    - `OutputDescription` (use `sapling_crypto::bundle::OutputDescription` instead).
+    - `SpendDescription` (use `sapling_crypto::bundle::SpendDescription` instead).
+    - `TxIn` (use `zcash_transparent::bundle::TxIn` instead).
+    - `TxOut` (use `zcash_transparent::bundle::TxOut` instead).
+  - `sighash`:
+    - `SIGHASH_ALL` (use `zcash_transparent::sighash::SIGHASH_ALL` instead).
+    - `SIGHASH_NONE` (use `zcash_transparent::sighash::SIGHASH_NONE` instead).
+    - `SIGHASH_SINGLE` (use `zcash_transparent::sighash::SIGHASH_SINGLE` instead).
+    - `SIGHASH_MASK` (use `zcash_transparent::sighash::SIGHASH_MASK` instead).
+    - `SIGHASH_ANYONECANPAY` (use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead).
+    - `SighashType` (use `zcash_transparent::sighash::SighashType` instead).
+- `zcash_primitives::zip32` module (use the `zip32` crate instead).
+
+## [0.26.4] - 2025-12-17
+
+### Changed
+- Enabling the `std` feature now enables `orchard/std`, `sapling/std`, and
+  `transparent/std`. This change is intended to improve the ergonomics for
+  downstream users of this crate, to eliminate the need for users to manually
+  enable the `std` feature of those dependencies.
+- The bound of the progress notifier type in `zcash_primitives::transaction::builder::Builder`
+  on `sapling_crypto::builder::ProverProgress` has been relaxed; it is now retained
+  only for the `build` and `build_zfuture` methods.
+
+## [0.26.3] - 2025-12-15
+
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `BuildConfig::is_coinbase`
+  - `Builder::set_coinbase_miner_data`
+
+### Fixed
+- `zcash_primitives::transaction::builder::Builder` has been modified to
+  support constructing transparent coinbase transactions. Previously, although
+  `BuildConfig::Coinbase` was a configuration that could be selected, the
+  transaction that was generated as a result would not be a valid coinbase
+  transaction.
+- Fixed a problem in the `zcash_primitives-0.26.2` release where we missed
+  updating to `zcash_transparent 0.6.2`; without this change, downstream crates
+  using `cargo update -p zcash_primitives` would end up with their codebase
+  failing to compile unless they also manually updated `zcash_transparent`.
+
+## [0.26.2] - YANKED
+
+## [0.26.1] - 2025-10-18
+
+### Fixed
+- Adjusted doc features to fix builds on docs.rs after nightly Rust update.
+
+## [0.26.0] - 2025-10-02
+
+### Added
+- `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
+  (only for use in combination with `Builder::build_for_pczt`).
+
+### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`, `zcash_transparent 0.6`
+- `zcash_primitives::transaction::fees::zip317`:
+  - `FeeError::NonP2pkhInputs` has been renamed to `UnknownP2shInputs`.
 
 ## [0.25.0] - 2025-09-25
 

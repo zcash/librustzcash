@@ -5,11 +5,11 @@
 use alloc::collections::BTreeMap;
 
 use crate::{
+    Pczt,
     common::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    Pczt,
 };
 
 use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};

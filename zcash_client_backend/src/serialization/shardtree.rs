@@ -97,7 +97,7 @@ pub fn read_shard<H: HashSer, R: Read>(mut reader: R) -> io::Result<PrunableTree
 
 #[cfg(test)]
 mod tests {
-    use incrementalmerkletree::frontier::testing::{arb_test_node, TestNode};
+    use incrementalmerkletree::frontier::testing::{TestNode, arb_test_node};
     use proptest::prelude::*;
     use shardtree::testing::arb_prunable_tree;
     use std::io::Cursor;

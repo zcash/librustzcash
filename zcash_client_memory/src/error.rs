@@ -1,12 +1,13 @@
 use std::{array::TryFromSliceError, convert::Infallible};
 
 use shardtree::error::ShardTreeError;
+use transparent::address::TransparentAddress;
 use zcash_address::ConversionError;
 use zcash_keys::{
     encoding::TransparentCodecError,
     keys::{AddressGenerationError, DerivationError},
 };
-use zcash_primitives::{legacy::TransparentAddress, transaction::TxId};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, memo};
 
 use crate::AccountId;
@@ -81,9 +82,7 @@ pub enum Error {
     ProtoEncodingError(#[from] prost::EncodeError),
     #[error("Missing proto field: {0}")]
     ProtoMissingField(&'static str),
-    #[error(
-        "Requested rewind to invalid block height. Safe height: {0:?}, requested height {1:?}"
-    )]
+    #[error("Requested rewind to invalid block height. Safe height: {0:?}, requested height {1:?}")]
     RequestedRewindInvalid(Option<BlockHeight>, BlockHeight),
     #[cfg(feature = "transparent-inputs")]
     #[error("Requested gap limit {1} reached for account {0:?}")]

@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::mem;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use memuse::DynamicUsage;
-use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
+use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput, batch};
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
 /// A decrypted transaction output.
@@ -470,11 +470,11 @@ where
             self.pending_results.dynamic_usage_bounds(),
         );
         (
-            bounds.0 .0 + running_usage + bounds.1 .0,
+            bounds.0.0 + running_usage + bounds.1.0,
             bounds
                 .0
-                 .1
-                .zip(bounds.1 .1)
+                .1
+                .zip(bounds.1.1)
                 .map(|(a, b)| a + running_usage + b),
         )
     }

@@ -15,19 +15,19 @@ use zcash_keys::{
 use zcash_note_encryption::try_output_recovery_with_ovk;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
-    ShieldedProtocol,
 };
 
 use crate::{
     data_api::{
-        chain::{CommitmentTreeRoot, ScanSummary},
-        testing::{pool::ShieldedPoolTester, TestState},
-        wallet::{ConfirmationsPolicy, TargetHeight},
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
+        chain::{CommitmentTreeRoot, ScanSummary},
+        testing::{TestState, pool::ShieldedPoolTester},
+        wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{Note, ReceivedNote},
 };
@@ -146,12 +146,12 @@ impl ShieldedPoolTester for OrchardPoolTester {
             .map(|n| n.take_orchard())
     }
 
-    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize {
+    fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<Transaction, A>) -> usize {
         d_tx.orchard_outputs().len()
     }
 
     fn with_decrypted_pool_memos<A>(
-        d_tx: &DecryptedTransaction<'_, A>,
+        d_tx: &DecryptedTransaction<Transaction, A>,
         mut f: impl FnMut(&MemoBytes),
     ) {
         for output in d_tx.orchard_outputs() {

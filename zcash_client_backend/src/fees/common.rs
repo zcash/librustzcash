@@ -1,21 +1,21 @@
-use core::cmp::{max, min, Ordering};
+use core::cmp::{Ordering, max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::transaction::fees::{
-    transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
+    FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
 use zcash_protocol::{
+    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
-    ShieldedProtocol,
 };
 
-use crate::data_api::{wallet::TargetHeight, AccountMeta};
+use crate::data_api::{AccountMeta, wallet::TargetHeight};
 
 use super::{
-    sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    EphemeralBalance, SplitPolicy, TransactionBalance,
+    ChangeError, ChangeValue, DustAction, DustOutputPolicy, EphemeralBalance, SplitPolicy,
+    TransactionBalance, sapling as sapling_fees,
 };
 
 #[cfg(feature = "orchard")]
@@ -570,11 +570,11 @@ where
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
-/// to the transaction have value less than the marginal fee, and could not be
+/// to the transaction have value less than or equal to the marginal fee, and could not be
 /// determined to have any economic value in the context of this input selection.
 ///
 /// This determination is potentially conservative in the sense that outputs
-/// with value less than the marginal fee might be excluded, even though in
+/// with value less than or equal to the marginal fee might be excluded, even though in
 /// practice they would not cause the fee to increase. Outputs with value
 /// greater than the marginal fee will never be excluded.
 ///

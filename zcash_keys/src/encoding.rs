@@ -17,8 +17,8 @@ use zcash_protocol::consensus::{self, NetworkConstants};
 use {
     alloc::vec::Vec,
     bech32::{
-        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
         Bech32, Hrp,
+        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
     },
     core2::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -495,11 +495,11 @@ pub fn decode_transparent_address(
 #[cfg(feature = "sapling")]
 mod tests_sapling {
     use super::{
-        decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
-        encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address,
-        Bech32DecodeError,
+        Bech32DecodeError, decode_extended_full_viewing_key, decode_extended_spending_key,
+        decode_payment_address, encode_extended_full_viewing_key, encode_extended_spending_key,
+        encode_payment_address,
     };
-    use sapling::{zip32::ExtendedSpendingKey, PaymentAddress};
+    use sapling::{PaymentAddress, zip32::ExtendedSpendingKey};
     use zcash_protocol::constants;
 
     #[test]

@@ -1,8 +1,8 @@
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, Authorization, TransactionData,
-    TxDigests, TxVersion,
+    Authorization, TransactionData, TxDigests, TxVersion, sighash_v4::v4_signature_hash,
+    sighash_v5::v5_signature_hash,
 };
 use ::sapling::bundle::GrothProofBytes;
 
@@ -11,20 +11,6 @@ use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatosh
 
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 use super::sighash_v6::v6_signature_hash;
-
-#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ALL` instead.")]
-pub const SIGHASH_ALL: u8 = ::transparent::sighash::SIGHASH_ALL;
-#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_NONE` instead.")]
-pub const SIGHASH_NONE: u8 = ::transparent::sighash::SIGHASH_NONE;
-#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_SINGLE` instead.")]
-pub const SIGHASH_SINGLE: u8 = ::transparent::sighash::SIGHASH_SINGLE;
-#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_MASK` instead.")]
-pub const SIGHASH_MASK: u8 = ::transparent::sighash::SIGHASH_MASK;
-#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead.")]
-pub const SIGHASH_ANYONECANPAY: u8 = ::transparent::sighash::SIGHASH_ANYONECANPAY;
-
-#[deprecated(note = "use `::zcash_transparent::sighash::SighashType` instead.")]
-pub type SighashType = ::transparent::sighash::SighashType;
 
 pub enum SignableInput<'a> {
     Shielded,

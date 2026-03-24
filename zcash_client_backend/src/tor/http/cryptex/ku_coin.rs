@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{retry_filter, Exchange, ExchangeData, RETRY_LIMIT};
+use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
 use crate::tor::{Client, Error};
 
 /// Querier for the KuCoin exchange.

@@ -326,7 +326,7 @@ fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a
 #[cfg(test)]
 mod tests {
     use super::{Entry, EntryKind, EntryLink, Tree};
-    use crate::{node_data, NodeData, Version, V2};
+    use crate::{NodeData, V2, Version, node_data};
 
     use assert_matches::assert_matches;
     use proptest::prelude::*;

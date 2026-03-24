@@ -10,6 +10,27 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::consensus::TxIndex`
+- `zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS`
+- `zcash_protocol::consensus::BranchId::{has_sprout, has_sapling, has_orchard}`
+
+## [0.7.2] - 2025-12-10
+
+### Added
+- `zcash_protocol::txid::TxId::NULL`
+
+## [0.7.1] - 2025-10-18
+
+### Fixed
+- Adjusted doc features to fix builds on docs.rs after nightly Rust update.
+
+## [0.7.0] - 2025-10-02
+
+- The mainnet activation height has been set for `consensus::BranchId::Nu6_1`
+
+### Changed
+
 ## [0.6.2] - 2025-09-25
 
 ### Added

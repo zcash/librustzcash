@@ -33,15 +33,15 @@ use self::{
         orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
     },
-    txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
+    txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
     util::sha256d::{HashReader, HashWriter},
 };
 
 #[cfg(feature = "circuits")]
 use {::sapling::builder as sapling_builder, orchard::builder::Unproven};
 
-use orchard::flavor::OrchardVanilla;
 use orchard::Bundle;
+use orchard::flavor::OrchardVanilla;
 use zcash_protocol::constants::{
     V3_TX_VERSION, V3_VERSION_GROUP_ID, V4_TX_VERSION, V4_VERSION_GROUP_ID, V5_TX_VERSION,
     V5_VERSION_GROUP_ID,
@@ -261,6 +261,48 @@ impl TxVersion {
             BranchId::ZFuture => TxVersion::ZFuture,
         }
     }
+
+    /// Returns `true` if this transaction version is valid for us in the specified consensus
+    /// branch, `false` otherwise.
+    pub fn valid_in_branch(&self, consensus_branch_id: BranchId) -> bool {
+        use BranchId::*;
+        // Note: we intentionally use `match` expressions instead of the `matches!`
+        // macro below because we want exhaustivity.
+        match self {
+            TxVersion::Sprout(_) => consensus_branch_id == Sprout,
+            TxVersion::V3 => consensus_branch_id == Overwinter,
+            TxVersion::V4 => match consensus_branch_id {
+                Sprout | Overwinter => false,
+                Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => true,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => false, // ZIP 2003
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => false, // ZIP 2003
+            },
+            TxVersion::V5 => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
+                Nu5 | Nu6 | Nu6_1 => true,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => true,
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
+            },
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6 => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
+                | Nu6_1 => false,
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
+                Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
+            },
+            #[cfg(zcash_unstable = "zfuture")]
+            TxVersion::ZFuture => match consensus_branch_id {
+                Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
+                | Nu6_1 | Nu7 => false,
+                ZFuture => true,
+            },
+        }
+    }
 }
 
 /// Authorization state for a bundle of transaction data.
@@ -292,7 +334,7 @@ impl Authorization for Authorized {
     type TzeAuth = tze::Authorized;
 }
 
-/// [`Authorization`] marker type for transactions without authorization data.
+/// [`Authorization`] marker type for non-coinbase transactions without authorization data.
 ///
 /// Currently this includes Sapling proofs because the types in this crate support v4
 /// transactions, which commit to the Sapling proofs in the transaction digest.
@@ -304,6 +346,25 @@ impl Authorization for Unauthorized {
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth = orchard::builder::InProgress<Unproven, orchard::builder::Unauthorized>;
+
+    #[cfg(zcash_unstable = "nu7")]
+    type IssueAuth = orchard::issuance::AwaitingSighash;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = tze::builder::Unauthorized;
+}
+
+/// [`Authorization`] marker type for coinbase transactions without authorization data.
+#[cfg(feature = "circuits")]
+struct Coinbase;
+
+#[cfg(feature = "circuits")]
+impl Authorization for Coinbase {
+    type TransparentAuth = ::transparent::builder::Coinbase;
+    type SaplingAuth =
+        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
+    type OrchardAuth =
+        orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 
     #[cfg(zcash_unstable = "nu7")]
     type IssueAuth = orchard::issuance::AwaitingSighash;
@@ -1345,15 +1406,18 @@ pub mod testing {
     use proptest::prelude::*;
 
     use super::{
+        Authorized, Transaction, TransactionData, TxId, TxVersion,
         components::{
             orchard::testing::{self as orchard_testing},
             sapling::testing::{self as sapling_testing},
         },
-        Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
 
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    use zcash_protocol::value::{Zatoshis, MAX_MONEY};
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     #[cfg(zcash_unstable = "zfuture")]
     use super::components::tze::testing::{self as tze};
@@ -1516,9 +1580,9 @@ pub mod testing {
             lock_time in any::<u32>(),
             expiry_height in if version == TxVersion::V6 || version == TxVersion::ZFuture { Just(0u32).boxed() } else { any::<u32>().boxed() },
             zip233_amount in 0..=MAX_MONEY,
-            transparent_bundle in transparent::arb_bundle(),
-            sapling_bundle in sapling::arb_bundle_for_version(version),
-            orchard_bundle in orchard::arb_bundle_for_version(version),
+            transparent_bundle in transparent_testing::arb_bundle(),
+            sapling_bundle in sapling_testing::arb_bundle_for_version(version),
+            orchard_bundle in orchard_testing::arb_bundle_for_version(version),
             issue_bundle in issuance::testing::arb_bundle_for_version(version),
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)

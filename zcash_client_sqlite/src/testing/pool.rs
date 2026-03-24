@@ -3,11 +3,12 @@
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
 use crate::{
-    testing::{db::TestDbFactory, BlockCache},
     SAPLING_TABLES_PREFIX,
+    testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::testing::{
-    pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    pool::{InputTrust, ShieldedPoolTester},
+    sapling::SaplingPoolTester,
 };
 
 #[cfg(feature = "orchard")]
@@ -190,6 +191,13 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn account_deletion<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::account_deletion::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     T: ShieldedPoolTester,
 >() {
@@ -297,6 +305,13 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn truncate_to_chain_state<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::truncate_to_chain_state::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),
@@ -370,11 +385,15 @@ pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
 }
 
 pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
-    for is_trusted in [false, true] {
+    for trust in [
+        InputTrust::Internal,
+        InputTrust::ExternalUntrusted,
+        InputTrust::ExternalTrusted,
+    ] {
         zcash_client_backend::data_api::testing::pool::zip_315_confirmations_test_steps::<T>(
             TestDbFactory::default(),
             BlockCache::new(),
-            is_trusted,
+            trust,
         );
     }
 }
@@ -384,4 +403,12 @@ pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::immature_coinbase_outputs_are_excluded_from_note_selection::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
 }
