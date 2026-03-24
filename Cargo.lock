@@ -1369,7 +1369,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1623,7 +1623,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4019,7 +4019,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4134,7 +4134,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.6.0"
-source = "git+https://github.com/QED-it/sapling-crypto?rev=33937b8c26d83ffb593df5ecf40621059985e2a2#33937b8c26d83ffb593df5ecf40621059985e2a2"
+source = "git+https://github.com/QED-it/sapling-crypto?rev=59535fb5d34b5c5cf1b20ef18269f5c65228378c#59535fb5d34b5c5cf1b20ef18269f5c65228378c"
 dependencies = [
  "aes",
  "bellman",
@@ -7550,8 +7550,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "halo2_proofs"
-version = "0.3.1"
-source = "git+https://github.com/zcash/halo2?rev=2308caf68c48c02468b66cfc452dad54e355e32f#2308caf68c48c02468b66cfc452dad54e355e32f"

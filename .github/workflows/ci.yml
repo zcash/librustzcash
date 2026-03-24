@@ -45,12 +45,8 @@ jobs:
             all-pools: true
           - state: all-features
             all-features: true
-
-          # For NU7, we are running with the zip-233 feature:
-          # RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --features zip-233
           - state: NU7
-            all-features: true
-            extra_flags: zip-233
+            all-features: true # ZIP-233 feature is enabled
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -112,12 +108,8 @@ jobs:
             all-pools: true
           - state: all-features
             all-features: true
-
-          # For NU7, we are running with the zip-233 feature:
-          # RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --features zip-233
           - state: NU7
-            all-features: true
-            extra_flags: zip-233
+            all-features: true # ZIP-233 feature is enabled
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
@@ -185,12 +177,8 @@ jobs:
             orchard-pool: true
           - state: all-features
             all-features: true
-
-            # For NU7, we are running with the zip-233 feature:
-            # RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --features zip-233
           - state: NU7
-            all-features: true
-            extra_flags: zip-233
+            all-features: true # ZIP-233 feature is enabled
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:

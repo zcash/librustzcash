@@ -5109,7 +5109,7 @@ fn build_transparent_coinbase_tx(
             // unused internally
             &StandardFeeRule::Zip317,
             #[cfg(zcash_unstable = "nu7")]
-            |_| false,
+            crate::no_new_assets,
         )
         .unwrap()
 }

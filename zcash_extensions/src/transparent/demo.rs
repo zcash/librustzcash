@@ -478,9 +478,9 @@ mod tests {
 
     use blake2b_simd::Params;
     use ff::Field;
-    use orchard::note::AssetBase;
     use rand_core::OsRng;
 
+    use orchard::note::AssetBase;
     use sapling::{Node, Rseed, zip32::ExtendedSpendingKey};
     use transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_primitives::{
@@ -543,7 +543,7 @@ mod tests {
     }
 
     /// This is a helper function for testing that indicates no assets are newly created.
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(all(test, zcash_unstable = "nu7"))]
     fn no_new_assets(_: &AssetBase) -> bool {
         false
     }
@@ -631,7 +631,7 @@ mod tests {
             txn_builder: Builder::new(
                 FutureNetwork,
                 height,
-                BuildConfig::TxV5 {
+                BuildConfig::Standard {
                     sapling_anchor: Some(sapling_anchor),
                     orchard_anchor: Some(orchard::Anchor::empty_tree()),
                 },

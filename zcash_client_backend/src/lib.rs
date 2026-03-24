@@ -81,6 +81,9 @@ pub mod tor;
 
 pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
 
+#[cfg(zcash_unstable = "nu7")]
+use orchard::note::AssetBase;
+
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {
     pub use zcash_keys::address::*;
@@ -105,3 +108,9 @@ pub mod zip321 {
 #[cfg(test)]
 #[macro_use]
 extern crate assert_matches;
+
+/// This is a helper function that indicates no assets are newly created.
+#[cfg(zcash_unstable = "nu7")]
+fn no_new_assets(_: &AssetBase) -> bool {
+    false
+}

@@ -15,6 +15,14 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
+use crate::{
+    sighash_versioning::orchard_sighash_kind_to_info,
+    transaction::{
+        Authorization, Authorized, OrchardBundle, OrchardBundle::OrchardVanilla, TransactionDigest,
+        TransparentDigests, TxDigests, TxVersion,
+    },
+};
+
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use zcash_protocol::value::Zatoshis;
 
@@ -23,12 +31,7 @@ use super::{
     TzeDigests,
     components::tze::{self, TzeIn, TzeOut},
 };
-use crate::sighash_versioning::orchard_sighash_kind_to_info;
-use crate::transaction::OrchardBundle::OrchardVanilla;
-use crate::transaction::{
-    Authorization, Authorized, OrchardBundle, TransactionDigest, TransparentDigests, TxDigests,
-    TxVersion,
-};
+
 #[cfg(zcash_unstable = "nu7")]
 use {
     crate::sighash_versioning::issue_sighash_kind_to_info,
@@ -390,9 +393,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         transparent_digests: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[rustfmt::skip]
-        #[cfg(zcash_unstable = "nu7")]
-        issue_digest: Self::IssueDigest,
+        #[cfg(zcash_unstable = "nu7")] issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digests: Self::TzeDigest,
     ) -> Self::Digest {
         TxDigests {
@@ -408,7 +409,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn to_hash(
     _txversion: TxVersion,
     consensus_branch_id: BranchId,
@@ -416,9 +416,7 @@ pub(crate) fn to_hash(
     transparent_digest: Blake2bHash,
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
-    #[rustfmt::skip]
-    #[cfg(zcash_unstable = "nu7")]
-    issue_digest: Option<Blake2bHash>,
+    #[cfg(zcash_unstable = "nu7")] issue_digest: Option<Blake2bHash>,
     #[cfg(zcash_unstable = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
@@ -618,9 +616,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[rustfmt::skip]
-        #[cfg(zcash_unstable = "nu7")]
-        issue_digest: Self::IssueDigest,
+        #[cfg(zcash_unstable = "nu7")] issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
         let digests = [transparent_digest, sapling_digest, orchard_digest];

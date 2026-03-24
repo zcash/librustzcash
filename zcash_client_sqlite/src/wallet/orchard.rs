@@ -1,10 +1,9 @@
 use std::{collections::HashSet, rc::Rc};
 
 use incrementalmerkletree::Position;
-use orchard::note::AssetBase;
 use orchard::{
     keys::Diversifier,
-    note::{Note, Nullifier, RandomSeed, Rho},
+    note::{AssetBase, Note, Nullifier, RandomSeed, Rho},
 };
 use rusqlite::{Connection, Row, named_params, types::Value};
 

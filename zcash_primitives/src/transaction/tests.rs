@@ -3,9 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, OrchardBundle::OrchardVanilla, Transaction, TransactionData, TxDigests,
-        TxIn, sighash::SignableInput, sighash::signature_hash, sighash_v4::v4_signature_hash,
-        testing::arb_tx, transparent, txid::TxIdDigester,
+        Authorization, Transaction, TransactionData, TxDigests, TxIn, sighash::SignableInput,
+        sighash::signature_hash, sighash_v4::v4_signature_hash, testing::arb_tx, transparent,
+        txid::TxIdDigester,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
@@ -19,9 +19,6 @@ use {
 
 #[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
-
-#[cfg(all(test, zcash_unstable = "nu7"))]
-use crate::transaction::OrchardBundle::OrchardZSA;
 
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
@@ -59,16 +56,8 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     );
     prop_assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     prop_assert_eq!(
-        tx.orchard_bundle.as_ref().map(|v| match v {
-            OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(zcash_unstable = "nu7")]
-            OrchardZSA(b) => *b.value_balance(),
-        }),
-        txo.orchard_bundle.as_ref().map(|v| match v {
-            OrchardVanilla(b) => *b.value_balance(),
-            #[cfg(zcash_unstable = "nu7")]
-            OrchardZSA(b) => *b.value_balance(),
-        })
+        tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
+        txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
     #[cfg(zcash_unstable = "nu7")]
     if tx.issue_bundle.is_some() {
@@ -79,7 +68,6 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     if tx.version.has_zip233() {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
-
     Ok(())
 }
 
@@ -329,6 +317,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu7")]
             txdata.issue_bundle().cloned(),
             txdata.tze_bundle().cloned(),
         );
@@ -482,6 +471,7 @@ fn zip_0233() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu7")]
             txdata.issue_bundle().cloned(),
         );
 

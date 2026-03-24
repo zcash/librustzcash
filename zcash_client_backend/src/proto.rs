@@ -35,13 +35,10 @@ use crate::{
 use transparent::bundle::OutPoint;
 
 #[cfg(feature = "orchard")]
-use orchard::flavor::OrchardVanilla;
-#[cfg(feature = "orchard")]
-use orchard::primitives::OrchardPrimitives;
-#[cfg(feature = "orchard")]
-use orchard::tree::MerkleHashOrchard;
-#[cfg(feature = "orchard")]
-use zcash_note_encryption::note_bytes::{NoteBytes, NoteBytesData};
+use {
+    orchard::{flavor::OrchardVanilla, primitives::OrchardPrimitives, tree::MerkleHashOrchard},
+    zcash_note_encryption::note_bytes::{NoteBytes, NoteBytesData},
+};
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]

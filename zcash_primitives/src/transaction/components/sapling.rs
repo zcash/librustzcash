@@ -183,7 +183,7 @@ fn read_versioned_signature<R: Read, T: SigType>(
 }
 
 #[cfg(zcash_unstable = "nu7")]
-pub fn write_versioned_signature<W: Write, T: SigType>(
+fn write_versioned_signature<W: Write, T: SigType>(
     mut writer: W,
     sig: &redjubjub::Signature<T>,
 ) -> io::Result<()> {

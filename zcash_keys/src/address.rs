@@ -536,11 +536,11 @@ pub mod testing {
 
     #[cfg(not(feature = "sapling"))]
     pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
-        prop_oneof![
+        return prop_oneof![
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
             proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
-        ]
+        ];
     }
 }
 

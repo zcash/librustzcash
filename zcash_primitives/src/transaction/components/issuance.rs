@@ -86,25 +86,17 @@ fn read_action<R: Read>(
     })?;
     let asset = AssetBase::custom(&AssetId::new_v0(ik, &asset_desc_hash));
     let notes = Vector::read(&mut reader, |r| read_note(r, asset))?;
-    let finalize = match reader.read_u8()? {
-        0 => false,
-        1 => true,
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid value for finalize",
-            ));
-        }
-    };
-    Ok(IssueAction::from_parts(asset_desc_hash, notes, finalize))
+    let flags = reader.read_u8()?;
+    IssueAction::new_with_flags(asset_desc_hash, notes, flags)
+        .ok_or(Error::new(ErrorKind::InvalidData, "Invalid action"))
 }
 
 #[cfg(zcash_unstable = "nu7")]
-pub fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
+pub(crate) fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
-    let mut tmp = [0; 8];
-    reader.read_exact(&mut tmp)?;
-    let value = u64::from_le_bytes(tmp);
+    let mut value_bytes = [0u8; 8];
+    reader.read_exact(&mut value_bytes)?;
+    let value = u64::from_le_bytes(value_bytes);
     let rho = read_rho(&mut reader)?;
     let rseed = read_rseed(&mut reader, &rho)?;
 
@@ -139,7 +131,7 @@ fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
 }
 
 #[cfg(zcash_unstable = "nu7")]
-pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
+pub(crate) fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
     Option::from(AssetBase::from_bytes(&bytes))
@@ -185,7 +177,7 @@ pub fn write_bundle<W: Write>(
 fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Result<()> {
     writer.write_all(action.asset_desc_hash())?;
     Vector::write(&mut writer, action.notes(), write_note)?;
-    writer.write_u8(action.is_finalized() as u8)?;
+    writer.write_u8(action.flags().to_byte())?;
     Ok(())
 }
 
@@ -228,7 +220,7 @@ pub mod testing {
     use crate::transaction::TxVersion;
 
     prop_compose! {
-        pub fn arb_issue_bundle(n_actions: usize)(
+        fn arb_issue_bundle(n_actions: usize)(
             bundle in t_issue::arb_signed_issue_bundle(n_actions)
         ) -> IssueBundle<Signed> {
             bundle

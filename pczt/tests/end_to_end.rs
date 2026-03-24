@@ -39,7 +39,7 @@ use zcash_script::script::{self, Evaluable};
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 /// This is a helper function for testing that indicates no assets are newly created.
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(test, zcash_unstable = "nu7"))]
 fn no_new_assets(_: &AssetBase) -> bool {
     false
 }
@@ -90,7 +90,7 @@ fn transparent_to_orchard() {
     let mut builder = Builder::new(
         params,
         10_000_000.into(),
-        BuildConfig::TxV5 {
+        BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -253,7 +253,7 @@ fn transparent_p2sh_multisig_to_orchard() {
     let mut builder = Builder::new(
         params,
         10_000_000.into(),
-        BuildConfig::TxV5 {
+        BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -284,7 +284,7 @@ fn transparent_p2sh_multisig_to_orchard() {
             rng,
             &zip317::FeeRule::standard(),
             #[cfg(zcash_unstable = "nu7")]
-            |_| false,
+            no_new_assets,
         )
         .unwrap();
 
@@ -414,7 +414,12 @@ fn sapling_to_orchard() {
             sapling::Anchor::empty_tree(),
         );
         sapling_builder
-            .add_output(None, sapling_recipient, value, None)
+            .add_output(
+                None,
+                sapling_recipient,
+                value,
+                Memo::Empty.encode().into_bytes(),
+            )
             .unwrap();
         let (bundle, meta) = sapling_builder
             .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
@@ -455,7 +460,7 @@ fn sapling_to_orchard() {
     let mut builder = Builder::new(
         MainNetwork,
         10_000_000.into(),
-        BuildConfig::TxV5 {
+        BuildConfig::Standard {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -629,7 +634,7 @@ fn orchard_to_orchard() {
     let mut builder = Builder::new(
         MainNetwork,
         10_000_000.into(),
-        BuildConfig::TxV5 {
+        BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
         },
