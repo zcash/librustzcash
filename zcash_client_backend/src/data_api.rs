@@ -84,7 +84,7 @@ use zcash_keys::{
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
-    consensus::{BlockHeight, TxIndex},
+    consensus::{self, BlockHeight, TxIndex},
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
@@ -1622,39 +1622,17 @@ impl<E> From<E> for FindAccountForAddressError<E> {
 
 /// Returns `true` if `address` contains any receiver that matches the given `ua`'s
 /// receivers.
-pub fn address_receiver_matches_ua(address: &Address, ua: &UnifiedAddress) -> bool {
-    match address {
-        Address::Transparent(t) => ua.transparent().map(|nt| nt == t).unwrap_or(false),
-        Address::Sapling(s) => ua.sapling().map(|ns| ns == s).unwrap_or(false),
-        Address::Unified(ua2) => {
-            let matches_transparent = ua
-                .transparent()
-                .zip(ua2.transparent())
-                .map(|(a, b)| a == b)
-                .unwrap_or(false);
-            let matches_sapling = ua
-                .sapling()
-                .zip(ua2.sapling())
-                .map(|(a, b)| a == b)
-                .unwrap_or(false);
-            let matches_orchard = {
-                #[cfg(feature = "orchard")]
-                {
-                    ua.orchard()
-                        .zip(ua2.orchard())
-                        .map(|(a, b)| a == b)
-                        .unwrap_or(false)
-                }
-                #[cfg(not(feature = "orchard"))]
-                {
-                    false
-                }
-            };
-            matches_transparent || matches_sapling || matches_orchard
-        }
-        // TEX addresses can never appear as a receiver inside a UnifiedAddress
-        _ => false,
-    }
+pub fn address_receiver_matches_ua<P: consensus::Parameters>(
+    address: &Address,
+    ua: &UnifiedAddress,
+    params: &P,
+) -> bool {
+    let zcash_address = address.to_zcash_address(params);
+    let ua_receivers = ua.as_understood_receivers();
+
+    ua_receivers
+        .iter()
+        .any(|ua_receiver| ua_receiver.corresponds(&zcash_address))
 }
 
 /// Read-only operations required for light wallet functions.
@@ -1751,8 +1729,9 @@ pub trait WalletRead {
     ///   backend error.
     /// - `Err(FindAccountForAddressError::UnifiedAddressConflict)` if the provided address
     ///   is a Unified Address whose receiver components map to different accounts.
-    fn find_account_for_address(
+    fn find_account_for_address<P: consensus::Parameters>(
         &self,
+        params: &P,
         address: &zcash_keys::address::Address,
     ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
         let mut baseline_acc_id: Option<Self::AccountId> = None;
@@ -1761,7 +1740,7 @@ pub trait WalletRead {
             for acc_id in self.get_account_ids()? {
                 for addr_info in self.list_addresses(acc_id)? {
                     let stored = addr_info.address();
-                    if address_receiver_matches_ua(stored, ua) {
+                    if address_receiver_matches_ua(stored, ua, params) {
                         match baseline_acc_id {
                             None => baseline_acc_id = Some(acc_id),
                             Some(prev) if prev == acc_id => {}
@@ -3745,8 +3724,10 @@ mod tests {
                 ))],
             ),
         ]);
-        let result =
-            wallet.find_account_for_address(&Address::Transparent(transparent_address_for_tag(1)));
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Transparent(transparent_address_for_tag(1)),
+        );
         assert_eq!(result.unwrap(), Some(1));
     }
 
@@ -3756,7 +3737,10 @@ mod tests {
         let wallet = TestWalletDb::new([(1, vec![address_info_of(address)])]);
 
         let other_address = Address::Transparent(transparent_address_for_tag(9));
-        let result = wallet.find_account_for_address(&other_address);
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &other_address,
+        );
 
         assert_eq!(result.unwrap(), None);
     }
@@ -3783,7 +3767,10 @@ mod tests {
             Some(orchard_address),
         );
 
-        let result = wallet.find_account_for_address(&ua_with_all_addresses);
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &ua_with_all_addresses,
+        );
 
         assert_eq!(result.unwrap(), Some(1));
     }
@@ -3806,7 +3793,10 @@ mod tests {
             Some(orchard_address(12)),
         );
 
-        let result = wallet.find_account_for_address(&ua_with_different_receivers);
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &ua_with_different_receivers,
+        );
 
         assert_eq!(result.unwrap(), None);
     }
@@ -3828,7 +3818,10 @@ mod tests {
         let invalid_unified_address =
             unified_account_with(Some(transparent_address), Some(sapling_address), None);
 
-        let result = wallet.find_account_for_address(&invalid_unified_address);
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &invalid_unified_address,
+        );
 
         assert!(matches!(
             result,

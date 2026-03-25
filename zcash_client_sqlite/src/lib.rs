@@ -756,11 +756,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     /// O(accounts × addresses) scan that `get_account_ids` + `list_addresses` would
     /// require.  See [`zcash_client_backend::data_api::WalletRead::find_account_for_address`]
     /// for the query design.
-    fn find_account_for_address(
+    fn find_account_for_address<Q: consensus::Parameters>(
         &self,
+        params: &Q,
         address: &zcash_keys::address::Address,
     ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
-        wallet::find_account_for_address(self.conn.borrow(), &self.params, address)
+        wallet::find_account_for_address(self.conn.borrow(), params, address)
     }
 
     fn get_last_generated_address_matching(
@@ -3407,7 +3408,7 @@ mod tests {
         // Asserts that looking up the exact same UA returns the owning account
         let result = state
             .wallet()
-            .find_account_for_address(&Address::Unified(ua));
+            .find_account_for_address(state.network(), &Address::Unified(ua));
 
         assert_eq!(result.unwrap(), Some(account.id()));
     }
@@ -3427,7 +3428,7 @@ mod tests {
         // Asserts that an unrelated address does not resolve to any account
         assert_eq!(
             st.wallet()
-                .find_account_for_address(&unknown_address)
+                .find_account_for_address(st.network(), &unknown_address)
                 .unwrap(),
             None
         );
@@ -3510,7 +3511,9 @@ mod tests {
 
         // Asserts that the unique possible account is found anyways, based on the transparent address,
         // since there are no UA conflicts.
-        let result = state.wallet().find_account_for_address(&address);
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
         assert_eq!(result.unwrap(), Some(acc1_id));
     }
 
@@ -3561,7 +3564,9 @@ mod tests {
         );
 
         // Asserts that the account is still found via the shielded receiver flags path
-        let result = state.wallet().find_account_for_address(&address);
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
 
         assert_eq!(result.unwrap(), Some(acc1_id));
     }
@@ -3604,7 +3609,9 @@ mod tests {
         );
 
         // Asserts that the account is still found via the shielded receiver flags path
-        let result = state.wallet().find_account_for_address(&address);
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
 
         assert_eq!(result.unwrap(), Some(acc1_id));
     }
@@ -3659,7 +3666,9 @@ mod tests {
         );
 
         // Asserts that the lookup reports a conflict instead of arbitrarily choosing one account
-        let result = state.wallet().find_account_for_address(&invalid_address);
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &invalid_address);
         assert!(matches!(
             result,
             Err(FindAccountForAddressError::UnifiedAddressConflict)

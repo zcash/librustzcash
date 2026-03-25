@@ -1228,7 +1228,7 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
                 ))
             })?;
 
-            if address_receiver_matches_ua(&row_address, unified_address) {
+            if address_receiver_matches_ua(&row_address, unified_address, params) {
                 let row_account_uuid = AccountUuid::from_uuid(row_account_uuid);
                 match found_account_uuid {
                     None => found_account_uuid = Some(row_account_uuid),
