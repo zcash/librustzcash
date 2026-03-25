@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.22.0] - PLANNED
 
 ### Added
 - `zcash_client_backend::data_api`:
@@ -20,7 +20,7 @@ workspace.
   - `ReceivedTransactionOutput`
 - in `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
-  - Added types `CompactTxIn`, `TxOut`
+  - Added types `CompactTxIn`, `OutPoint`, `TxOut`
 - in `zcash_client_backend::proto::service`:
   - Added enum `PoolType`
   - `BlockRange` has added field `pool_types`
@@ -57,7 +57,7 @@ workspace.
   `proposed_version: Option<TxVersion>` parameter under the `unstable` feature
   flag.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
-- Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
+- Migrated to `lightwallet-protocol v0.4.1`. This results in the following API
   changes:
   - in `zcash_client_backend::proto::compact_formats`:
     - `CompactTx::hash` has been renamed to `CompactTx::txid`
@@ -120,6 +120,12 @@ workspace.
   keys, to support multi-key P2SH addresses.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
   supports spending from standalone P2SH (multisig) transparent addresses.
+
+### Deprecated
+- `zcash_client_backend::proto::service::compact_tx_streamer_client`
+  The following are deprecated as in `lightwallet-protocol v0.4.1`:
+  - `get_block_nullifiers`
+  - `get_block_range_nullifiers`
 
 ### Removed
 - `zcash_client_backend::data_api::testing::transparent::GapLimits` use

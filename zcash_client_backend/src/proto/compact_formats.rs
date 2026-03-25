@@ -16,6 +16,11 @@ pub struct ChainMetadata {
 ///    2. Detect a spend of your Shielded notes
 ///    3. Update your witnesses to generate new spend proofs.
 ///    4. Spend UTXOs associated to t-addresses of your wallet.
+///
+/// Currently, the `header` field should always be unset (empty). In the future,
+/// the presence or absence of header data may be made dependent on request
+/// parameters, although it is likely that such flexibility will only be provided via
+/// newly-added service methods, not via existing APIs.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactBlock {
     /// the version of this wire format, for storage
@@ -24,16 +29,16 @@ pub struct CompactBlock {
     /// the height of this block
     #[prost(uint64, tag = "2")]
     pub height: u64,
-    /// the ID (hash) of this block, same as in block explorers
+    /// if present, the ID (hash) of this block
     #[prost(bytes = "vec", tag = "3")]
     pub hash: ::prost::alloc::vec::Vec<u8>,
-    /// the ID (hash) of this block's predecessor
+    /// if present, the ID (hash) of this block's predecessor
     #[prost(bytes = "vec", tag = "4")]
     pub prev_hash: ::prost::alloc::vec::Vec<u8>,
-    /// Unix epoch time when the block was mined
+    /// if non-zero, Unix epoch time when the block was mined
     #[prost(uint32, tag = "5")]
     pub time: u32,
-    /// full header (as returned by the getblock RPC)
+    /// if present, full header (as returned by the getblock RPC)
     #[prost(bytes = "vec", tag = "6")]
     pub header: ::prost::alloc::vec::Vec<u8>,
     /// zero or more compact transactions from this block
