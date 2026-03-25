@@ -2863,14 +2863,16 @@ mod tests {
     ) where
         DbT::Account: core::fmt::Debug,
     {
+        // Re-importing the same UFVK is a duplicate (no new capability added), so
+        // it should produce an AccountCollision error.
         assert_matches!(
             st.wallet_mut()
                 .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
             Err(e) if is_account_collision(&e)
         );
 
-        // Remove the transparent component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Importing a UFVK with fewer components than the existing account should fail:
+        // the existing IVK items are not a subset of the new (smaller) FVK's items.
         #[cfg(feature = "transparent-inputs")]
         {
             assert!(ufvk.transparent().is_some());
@@ -2893,8 +2895,7 @@ mod tests {
             );
         }
 
-        // Remove the Orchard component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Remove the Orchard component: still a collision since existing has Orchard.
         #[cfg(feature = "orchard")]
         {
             assert!(ufvk.orchard().is_some());

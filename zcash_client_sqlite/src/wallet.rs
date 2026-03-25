@@ -139,7 +139,7 @@ use {
     crate::GapLimits,
     ::transparent::{
         bundle::{OutPoint, TxOut},
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
+        keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
     std::collections::HashSet,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
@@ -407,13 +407,49 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     birthday: &AccountBirthday,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Account, SqliteClientError> {
-    if let Some(ufvk) = viewing_key.ufvk() {
-        // Check whether any component of this UFVK collides with an existing imported or derived FVK.
-        if let Some(existing_account) = get_account_for_ufvk(conn, params, ufvk)? {
-            return Err(SqliteClientError::AccountCollision(existing_account.id()));
+    // Check whether any IVK component collides with an existing account. If two accounts
+    // share an FVK they necessarily share an IVK, and there is negligible chance that two
+    // different FVKs produce colliding IVKs.
+    let uivk = viewing_key.uivk();
+    if let Some(existing_account) = get_account_for_uivk(conn, params, &uivk)? {
+        let existing_uivk = existing_account.uivk();
+        match (&viewing_key, existing_account.ufvk()) {
+            (ViewingKey::Full(new_ufvk), existing_ufvk) => {
+                // FVK import over an existing account (either IVK-only or FVK).
+                // This is permitted as a capability upgrade if every existing IVK item
+                // has a corresponding item in the new FVK, AND the new FVK is strictly
+                // additive (has at least one new item). If the item sets are identical,
+                // it's a duplicate import and is an error.
+                if !new_ufvk.subsumes_uivk(&existing_uivk) {
+                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
+                }
+                // Check that the new FVK actually adds capability. If the existing
+                // account already has a UFVK that subsumes the new one as well,
+                // the item sets are identical and this is a duplicate import.
+                if existing_ufvk.is_some_and(|efvk| efvk.subsumes_ufvk(new_ufvk)) {
+                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
+                }
+                return upgrade_account_ufvk(conn, params, &existing_account, new_ufvk);
+            }
+            (ViewingKey::Incoming(_), Some(_)) => {
+                // IVK-over-FVK: the existing account already has full viewing
+                // capability. Importing a lower-capability key is not permitted.
+                return Err(SqliteClientError::AccountCollision(existing_account.id()));
+            }
+            (ViewingKey::Incoming(_), None) => {
+                // IVK-over-IVK: permitted if the new UIVK strictly adds items.
+                if !uivk.subsumes(&existing_uivk) {
+                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
+                }
+                // If the existing UIVK also subsumes the new one, the item sets
+                // are identical — this is a duplicate import.
+                if existing_uivk.subsumes(&uivk) {
+                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
+                }
+                return upgrade_account_uivk(conn, params, &existing_account, &uivk);
+            }
         }
     }
-    // TODO(#1490): check for IVK collisions.
 
     let account_uuid = AccountUuid(Uuid::new_v4());
 
@@ -433,22 +469,16 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     };
 
     #[cfg(feature = "orchard")]
-    let orchard_item = viewing_key
-        .ufvk()
-        .and_then(|ufvk| ufvk.orchard().map(|k| k.to_bytes()));
+    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
     #[cfg(not(feature = "orchard"))]
-    let orchard_item: Option<Vec<u8>> = None;
+    let orchard_ivk_item: Option<Vec<u8>> = None;
 
-    let sapling_item = viewing_key
-        .ufvk()
-        .and_then(|ufvk| ufvk.sapling().map(|k| k.to_bytes()));
+    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
 
     #[cfg(feature = "transparent-inputs")]
-    let transparent_item = viewing_key
-        .ufvk()
-        .and_then(|ufvk| ufvk.transparent().map(|k| k.serialize()));
+    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
     #[cfg(not(feature = "transparent-inputs"))]
-    let transparent_item: Option<Vec<u8>> = None;
+    let p2pkh_ivk_item: Option<Vec<u8>> = None;
 
     let birthday_sapling_tree_size = Some(birthday.sapling_frontier().tree_size());
     #[cfg(feature = "orchard")]
@@ -473,7 +503,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 zcashd_legacy_address_index,
                 key_source,
                 ufvk, uivk,
-                orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                orchard_ivk_item_cache, sapling_ivk_item_cache, p2pkh_ivk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
                 recover_until_height,
                 has_spend_key
@@ -485,7 +515,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :zcashd_legacy_address_index,
                 :key_source,
                 :ufvk, :uivk,
-                :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+                :orchard_ivk_item_cache, :sapling_ivk_item_cache, :p2pkh_ivk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
                 :recover_until_height,
                 :has_spend_key
@@ -501,10 +531,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":zcashd_legacy_address_index": zcashd_legacy_address_index,
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
-                ":uivk": viewing_key.uivk().encode(params),
-                ":orchard_fvk_item_cache": orchard_item,
-                ":sapling_fvk_item_cache": sapling_item,
-                ":p2pkh_fvk_item_cache": transparent_item,
+                ":uivk": uivk.encode(params),
+                ":orchard_ivk_item_cache": orchard_ivk_item,
+                ":sapling_ivk_item_cache": sapling_ivk_item,
+                ":p2pkh_ivk_item_cache": p2pkh_ivk_item,
                 ":birthday_height": u32::from(birthday.height()),
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
@@ -518,9 +548,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 if f.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
                 // An account conflict occurred. This should already have been caught by
-                // the check using `get_account_for_ufvk` above, but in case it wasn't,
-                // make a best effort to determine the AccountRef of the pre-existing row
-                // and provide that to our caller.
+                // the IVK collision check above, but in case it wasn't, make a best
+                // effort to determine the AccountRef of the pre-existing row and provide
+                // that to our caller.
                 if let Ok(colliding_uuid) = conn.query_row(
                     "SELECT uuid FROM accounts WHERE ufvk = ?",
                     params![ufvk_encoded],
@@ -1497,15 +1527,26 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     params: &P,
     ufvk: &UnifiedFullViewingKey,
 ) -> Result<Option<Account>, SqliteClientError> {
+    let uivk = ufvk.to_unified_incoming_viewing_key();
+    get_account_for_uivk(conn, params, &uivk)
+}
+
+/// Returns the account corresponding to a given [`UnifiedIncomingViewingKey`],
+/// if any IVK component matches an existing account.
+pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    uivk: &UnifiedIncomingViewingKey,
+) -> Result<Option<Account>, SqliteClientError> {
     #[cfg(feature = "orchard")]
-    let orchard_item = ufvk.orchard().map(|k| k.to_bytes());
+    let orchard_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
     #[cfg(not(feature = "orchard"))]
     let orchard_item: Option<Vec<u8>> = None;
 
-    let sapling_item = ufvk.sapling().map(|k| k.to_bytes());
+    let sapling_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
 
     #[cfg(feature = "transparent-inputs")]
-    let transparent_item = ufvk.transparent().map(|k| k.serialize());
+    let transparent_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_item: Option<Vec<u8>> = None;
 
@@ -1514,17 +1555,17 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
                 ufvk, uivk, has_spend_key, birthday_height
          FROM accounts
-         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
-            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
-            OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache",
+         WHERE orchard_ivk_item_cache = :orchard_ivk_item_cache
+            OR sapling_ivk_item_cache = :sapling_ivk_item_cache
+            OR p2pkh_ivk_item_cache = :p2pkh_ivk_item_cache",
     )?;
 
     let accounts = stmt
         .query_and_then::<_, SqliteClientError, _, _>(
             named_params![
-                ":orchard_fvk_item_cache": orchard_item,
-                ":sapling_fvk_item_cache": sapling_item,
-                ":p2pkh_fvk_item_cache": transparent_item,
+                ":orchard_ivk_item_cache": orchard_item,
+                ":sapling_ivk_item_cache": sapling_item,
+                ":p2pkh_ivk_item_cache": transparent_item,
             ],
             |row| parse_account_row(row, params),
         )?
@@ -1532,11 +1573,130 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
     if accounts.len() > 1 {
         Err(SqliteClientError::CorruptedData(
-            "Mutiple account records matched the provided UFVK".to_owned(),
+            "Multiple account records matched the provided UIVK".to_owned(),
         ))
     } else {
         Ok(accounts.into_iter().next())
     }
+}
+
+/// Upgrades an existing account to store a full viewing key, updating the UIVK
+/// and IVK cache columns to reflect any newly-added items.
+///
+/// The caller must have already verified that the existing account's IVK items
+/// are a subset of those derivable from `ufvk`.
+fn upgrade_account_ufvk<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    existing_account: &Account,
+    ufvk: &UnifiedFullViewingKey,
+) -> Result<Account, SqliteClientError> {
+    let account_id = existing_account.internal_id();
+    let ufvk_encoded = ufvk.encode(params);
+    let uivk = ufvk.to_unified_incoming_viewing_key();
+    let uivk_encoded = uivk.encode(params);
+
+    #[cfg(feature = "orchard")]
+    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
+    #[cfg(not(feature = "orchard"))]
+    let orchard_ivk_item: Option<Vec<u8>> = None;
+
+    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
+
+    #[cfg(feature = "transparent-inputs")]
+    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let p2pkh_ivk_item: Option<Vec<u8>> = None;
+
+    conn.execute(
+        "UPDATE accounts
+         SET ufvk = :ufvk,
+             uivk = :uivk,
+             orchard_ivk_item_cache = :orchard_ivk,
+             sapling_ivk_item_cache = :sapling_ivk,
+             p2pkh_ivk_item_cache = :p2pkh_ivk
+         WHERE id = :id",
+        named_params![
+            ":ufvk": ufvk_encoded,
+            ":uivk": uivk_encoded,
+            ":orchard_ivk": orchard_ivk_item,
+            ":sapling_ivk": sapling_ivk_item,
+            ":p2pkh_ivk": p2pkh_ivk_item,
+            ":id": account_id.0,
+        ],
+    )?;
+
+    // Reload and return the updated account.
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, name, uuid, account_kind,
+                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
+                ufvk, uivk, has_spend_key, birthday_height
+         FROM accounts
+         WHERE id = :account_id",
+    )?;
+    stmt.query_row(named_params![":account_id": account_id.0], |row| {
+        Ok(parse_account_row(row, params))
+    })?
+}
+
+/// Upgrades an existing IVK-only account with a UIVK that adds new items,
+/// updating the UIVK encoding and IVK cache columns.
+///
+/// The caller must have already verified that the existing account's IVK items
+/// are a strict subset of those in `uivk`.
+fn upgrade_account_uivk<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    existing_account: &Account,
+    uivk: &UnifiedIncomingViewingKey,
+) -> Result<Account, SqliteClientError> {
+    let account_id = existing_account.internal_id();
+    let uivk_encoded = uivk.encode(params);
+
+    #[cfg(feature = "orchard")]
+    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
+    #[cfg(not(feature = "orchard"))]
+    let orchard_ivk_item: Option<Vec<u8>> = None;
+
+    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
+
+    #[cfg(feature = "transparent-inputs")]
+    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let p2pkh_ivk_item: Option<Vec<u8>> = None;
+
+    let rows_affected = conn.execute(
+        "UPDATE accounts
+         SET uivk = :uivk,
+             orchard_ivk_item_cache = :orchard_ivk,
+             sapling_ivk_item_cache = :sapling_ivk,
+             p2pkh_ivk_item_cache = :p2pkh_ivk
+         WHERE id = :id AND ufvk IS NULL",
+        named_params![
+            ":uivk": uivk_encoded,
+            ":orchard_ivk": orchard_ivk_item,
+            ":sapling_ivk": sapling_ivk_item,
+            ":p2pkh_ivk": p2pkh_ivk_item,
+            ":id": account_id.0,
+        ],
+    )?;
+    if rows_affected != 1 {
+        return Err(SqliteClientError::CorruptedData(
+            "UIVK upgrade failed: account already has a UFVK".to_owned(),
+        ));
+    }
+
+    // Reload and return the updated account.
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, name, uuid, account_kind,
+                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
+                ufvk, uivk, has_spend_key, birthday_height
+         FROM accounts
+         WHERE id = :account_id",
+    )?;
+    stmt.query_row(named_params![":account_id": account_id.0], |row| {
+        Ok(parse_account_row(row, params))
+    })?
 }
 
 /// Returns the account id corresponding to a given [`SeedFingerprint`]

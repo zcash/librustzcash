@@ -555,7 +555,7 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Size
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[cfg(feature = "transparent-inputs")]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ExternalIvk(ExtendedPublicKey<PublicKey>);
 
 #[cfg(feature = "transparent-inputs")]

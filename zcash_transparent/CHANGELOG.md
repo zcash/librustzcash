@@ -22,6 +22,7 @@ workspace.
 - `zcash_transparent::builder::SpendInfo`
 - `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
 - `zcash_transparent::builder::Builder::add_p2pkh_input`
+- `impl {PartialEq, Eq} for zcash_transparent::keys::ExternalIvk`
 - `impl Hash for zcash_transparent::keys::TransparentKeyScope`
 - `zcash_transparent::builder::p2sh_input_serialized_len`
 

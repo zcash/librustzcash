@@ -819,6 +819,10 @@ mod tests {
         }
 
         let expected_indices = vec![
+            db::INDEX_ACCOUNTS_ORCHARD_IVK,
+            db::INDEX_ACCOUNTS_P2PKH_IVK,
+            db::INDEX_ACCOUNTS_P2SH_IVK,
+            db::INDEX_ACCOUNTS_SAPLING_IVK,
             db::INDEX_ACCOUNTS_UFVK,
             db::INDEX_ACCOUNTS_UIVK,
             db::INDEX_ACCOUNTS_UUID,
