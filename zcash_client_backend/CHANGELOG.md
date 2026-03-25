@@ -42,7 +42,6 @@ workspace.
 - `zcash_client_backend::wallet::WalletTransparentOutput::with_known_input_size`
 
 ### Changed
-- Updated to `lightwallet_protocol v0.4.1`
 - `zcash_client_backend::data_api::error::Error::MemoForbidden` has been replaced
   by `Error::Payment(zip321::PaymentError)`, which can represent both memo-to-transparent
   and zero-valued-transparent-output errors.
@@ -58,7 +57,7 @@ workspace.
   `proposed_version: Option<TxVersion>` parameter under the `unstable` feature
   flag.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`
-- Migrated to `lightwallet-protocol v0.4.0`. This results in the following API
+- Migrated to `lightwallet-protocol v0.4.1`. This results in the following API
   changes:
   - in `zcash_client_backend::proto::compact_formats`:
     - `CompactTx::hash` has been renamed to `CompactTx::txid`
