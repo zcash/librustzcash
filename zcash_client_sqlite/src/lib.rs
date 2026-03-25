@@ -3540,7 +3540,7 @@ mod tests {
             .update_chain_tip(sapling_activation)
             .unwrap();
 
-        // Expose a normal UA for that account and keep only its Orchard receiver
+        // Expose a normal UA for that account and keep only its Sapling receiver
         let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
 
         let sapling_receiver = ua1

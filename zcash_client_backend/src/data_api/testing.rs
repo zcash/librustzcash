@@ -2577,6 +2577,8 @@ pub struct MockWalletDb {
         { ORCHARD_SHARD_HEIGHT * 2 },
         ORCHARD_SHARD_HEIGHT,
     >,
+    account_ids: Vec<u32>,
+    addresses_by_account: HashMap<u32, Vec<AddressInfo>>,
 }
 
 impl MockWalletDb {
@@ -2587,7 +2589,23 @@ impl MockWalletDb {
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), 100),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), 100),
+            account_ids: vec![],
+            addresses_by_account: HashMap::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_account_addresses(
+        network: Network,
+        entries: impl IntoIterator<Item = (u32, Vec<AddressInfo>)>,
+    ) -> Self {
+        let mut wallet = Self::new(network);
+        for (account_id, addresses) in entries {
+            wallet.account_ids.push(account_id);
+            wallet.addresses_by_account.insert(account_id, addresses);
+        }
+        wallet.account_ids.sort_unstable();
+        wallet
     }
 }
 
@@ -2645,7 +2663,7 @@ impl WalletRead for MockWalletDb {
     type Account = (Self::AccountId, UnifiedFullViewingKey, BlockHeight);
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self.account_ids.clone())
     }
 
     fn get_account(
@@ -2684,8 +2702,12 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
-        Ok(vec![])
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        Ok(self
+           .addresses_by_account
+           .get(&account)
+           .cloned()
+           .unwrap_or_default())
     }
 
     fn get_last_generated_address_matching(
