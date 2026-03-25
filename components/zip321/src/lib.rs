@@ -881,6 +881,9 @@ pub mod testing {
         }
     }
 
+    /// Parameter names that are reserved by ZIP 321 and must not appear in `other_params`.
+    const RESERVED_PARAM_NAMES: &[&str] = &["address", "amount", "memo", "label", "message"];
+
     prop_compose! {
         pub fn arb_zip321_payment(network: NetworkType)(
             (recipient_address, amount) in arb_address(network).prop_flat_map(|addr| {
@@ -898,9 +901,12 @@ pub mod testing {
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
         ) -> Payment {
             let memo = memo.filter(|_| recipient_address.can_receive_memo());
-            let other_params = other_params
+            let other_params: Vec<(String, String)> = other_params
                 .into_iter()
-                .filter(|(name, _)| !name.starts_with("req-"))
+                .filter(|(name, _)| {
+                    !name.starts_with("req-")
+                        && !RESERVED_PARAM_NAMES.contains(&name.as_str())
+                })
                 .collect();
             Payment {
                 recipient_address,
