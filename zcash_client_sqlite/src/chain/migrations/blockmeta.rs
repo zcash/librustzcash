@@ -1,15 +1,20 @@
+//! Migrations for the `compactblocks_meta` table used by [`FsBlockDb`](crate::FsBlockDb).
+
 use schemerz_rusqlite::RusqliteMigration;
 
+/// Returns all migrations required for the block metadata database.
 pub fn all_migrations() -> Vec<Box<dyn RusqliteMigration<Error = rusqlite::Error>>> {
     vec![Box::new(init::Migration {})]
 }
 
+/// The initial migration that creates the `compactblocks_meta` table.
 pub mod init {
     use rusqlite::{self};
     use schemerz::{self, migration};
     use schemerz_rusqlite::RusqliteMigration;
     use uuid::Uuid;
 
+    /// The migration that creates the `compactblocks_meta` table.
     pub struct Migration;
 
     /// The migration that added the `compactblocks_meta` table.

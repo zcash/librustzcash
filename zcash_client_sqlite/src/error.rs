@@ -78,7 +78,10 @@ pub enum SqliteClientError {
     /// this error is (safe rewind height, requested height). If no safe rewind height can be
     /// determined, the safe rewind height member will be `None`.
     RequestedRewindInvalid {
+        /// The height to which it is possible to safely rewind, or `None` if no safe
+        /// rewind height could be determined.
         safe_rewind_height: Option<BlockHeight>,
+        /// The block height that was requested for the rewind.
         requested_height: BlockHeight,
     },
 
@@ -164,10 +167,13 @@ pub enum SqliteClientError {
     /// [`TransactionsInvolvingAddress`]: zcash_client_backend::data_api::TransactionsInvolvingAddress
     #[cfg(feature = "transparent-inputs")]
     NotificationMismatch {
+        /// The expected ending block height.
         expected: BlockHeight,
+        /// The actual ending block height returned.
         actual: BlockHeight,
     },
 
+    /// One or more gap addresses were detected in the transparent address sequence.
     #[cfg(feature = "transparent-inputs")]
     GapAddresses,
 

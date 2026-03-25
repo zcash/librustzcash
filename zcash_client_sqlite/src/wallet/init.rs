@@ -28,6 +28,7 @@ const MIN_SQLITE_MINOR_VERSION: u32 = 35;
 
 const MIGRATIONS_TABLE: &str = "schemer_migrations";
 
+/// Errors that can occur when applying migrations to the wallet database.
 #[derive(Debug)]
 pub enum WalletMigrationError {
     /// A feature required by the wallet database is not supported by the version of
