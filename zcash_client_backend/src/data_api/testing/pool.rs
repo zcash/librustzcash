@@ -2908,7 +2908,7 @@ pub fn z_to_t_account_detection<T: ShieldedPoolTester>(
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN), value);
 
     // Send from the shielded pool to a transparent address.
     let transparent_addr = TransparentAddress::PublicKeyHash([7; 20]);
@@ -2927,7 +2927,7 @@ pub fn z_to_t_account_detection<T: ShieldedPoolTester>(
             )])
             .unwrap(),
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
     let sent_txid = *txids.first();
