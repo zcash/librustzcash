@@ -33,6 +33,7 @@ workspace.
   `TransparentSignatureContext::finalize_signatures` now support P2SH (multisig)
   inputs.
 - `zcash_transparent::pczt`:
+  - `Bundle::extract` now takes its `self` argument by reference.
   - `SignerError` has added variants:
     - `InvalidExternalSignature`
     - `MissingPreimage`

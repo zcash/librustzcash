@@ -27,7 +27,7 @@ impl super::Bundle {
     /// This is used by the Transaction Extractor role to produce the final transaction.
     ///
     /// [regular `Bundle`]: super::Bundle
-    pub fn extract(self) -> Result<Option<crate::bundle::Bundle<Unbound>>, TxExtractorError> {
+    pub fn extract(&self) -> Result<Option<crate::bundle::Bundle<Unbound>>, TxExtractorError> {
         self.to_tx_data(
             |input| {
                 input
