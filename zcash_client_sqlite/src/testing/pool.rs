@@ -184,6 +184,13 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn z_to_t_account_detection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::z_to_t_account_detection::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::change_note_spends_succeed::<T>(
         TestDbFactory::default(),

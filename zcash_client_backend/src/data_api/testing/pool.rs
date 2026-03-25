@@ -2881,6 +2881,87 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     );
 }
 
+/// Verifies that a shielded-to-transparent transaction is correctly detected as belonging
+/// to the sending account when the transaction is scanned from the block chain.
+///
+/// This exercises the z->t account detection logic that identifies the funding account
+/// by matching nullifiers from shielded spends, then records the transparent outputs
+/// as sent from that account. Per ZIP 316, Orchard nullifiers take preference over
+/// Sapling nullifiers when determining the funding account.
+pub fn z_to_t_account_detection<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in a single shielded note.
+    let value = Zatoshis::const_from_u64(100000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+
+    // Send from the shielded pool to a transparent address.
+    let transparent_addr = TransparentAddress::PublicKeyHash([7; 20]);
+    let transfer_amount = Zatoshis::const_from_u64(50000);
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let txids = st
+        .spend(
+            &input_selector,
+            &change_strategy,
+            account.usk(),
+            TransactionRequest::new(vec![Payment::without_memo(
+                Address::Transparent(transparent_addr).to_zcash_address(st.network()),
+                transfer_amount,
+            )])
+            .unwrap(),
+            OvkPolicy::Sender,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+    let sent_txid = *txids.first();
+
+    // Verify that the transaction was recorded as sent from the correct account
+    // before mining (i.e., from the initial `store_decrypted_tx` call during creation).
+    let tx_unmined = st.get_tx_from_history(sent_txid).unwrap().unwrap();
+    assert_eq!(tx_unmined.account_id(), &account_id);
+    // The transparent output should be counted as a sent note.
+    assert_eq!(tx_unmined.sent_note_count(), 1);
+    assert!(tx_unmined.has_change());
+
+    // Mine the transaction and scan the resulting block. This exercises the z->t
+    // account detection in `store_decrypted_tx` as called from the scan path, which
+    // must identify the spending account via shielded nullifiers and attribute the
+    // transparent outputs accordingly.
+    let (h, _) = st.generate_next_block_including(sent_txid);
+    st.scan_cached_blocks(h, 1);
+
+    // Verify the transaction metadata after scanning.
+    let tx_mined = st.get_tx_from_history(sent_txid).unwrap().unwrap();
+    assert_eq!(tx_mined.account_id(), &account_id);
+    assert_eq!(tx_mined.sent_note_count(), 1);
+    assert!(tx_mined.has_change());
+    assert!(tx_mined.mined_height().is_some());
+
+    // The balance should reflect the send: value - transfer_amount - fee.
+    let fee = tx_mined
+        .fee_paid()
+        .expect("fee should be known after mining");
+    let expected_remaining = (value - transfer_amount - fee).unwrap();
+    assert_eq!(st.get_total_balance(account_id), expected_remaining);
+}
+
 pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
