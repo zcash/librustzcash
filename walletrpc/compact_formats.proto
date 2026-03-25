@@ -23,13 +23,18 @@ message ChainMetadata {
 //   2. Detect a spend of your Shielded notes
 //   3. Update your witnesses to generate new spend proofs.
 //   4. Spend UTXOs associated to t-addresses of your wallet.
+//
+// Currently, the `header` field should always be unset (empty). In the future, 
+// the presence or absence of header data may be made dependent on request 
+// parameters, although it is likely that such flexibility will only be provided via 
+// newly-added service methods, not via existing APIs.
 message CompactBlock {
     uint32 protoVersion = 1;         // the version of this wire format, for storage
     uint64 height = 2;               // the height of this block
-    bytes hash = 3;                  // the ID (hash) of this block, same as in block explorers
-    bytes prevHash = 4;              // the ID (hash) of this block's predecessor
-    uint32 time = 5;                 // Unix epoch time when the block was mined
-    bytes header = 6;                // full header (as returned by the getblock RPC)
+    bytes hash = 3;                  // if present, the ID (hash) of this block
+    bytes prevHash = 4;              // if present, the ID (hash) of this block's predecessor
+    uint32 time = 5;                 // if non-zero, Unix epoch time when the block was mined
+    bytes header = 6;                // if present, full header (as returned by the getblock RPC)
     repeated CompactTx vtx = 7;      // zero or more compact transactions from this block
     ChainMetadata chainMetadata = 8; // information about the state of the chain as of this block
 }
