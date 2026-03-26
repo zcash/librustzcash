@@ -25,7 +25,7 @@ use zip32::Scope;
 
 use crate::{
     data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
-    proto::compact_formats::CompactBlock,
+    proto::compact_formats::{ChainMetadata, CompactBlock, CompactTx},
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
 };
@@ -729,113 +729,10 @@ where
     let cur_hash = block.hash();
     let zip212_enforcement = zip212_enforcement(params, cur_height);
 
-    let mut sapling_commitment_tree_size = prior_block_metadata
-        .and_then(|m| m.sapling_tree_size())
-        .map_or_else(
-            || {
-                block.chain_metadata.as_ref().map_or_else(
-                    || {
-                        // If we're below Sapling activation, or Sapling activation is not set, the tree size is zero
-                        params
-                            .activation_height(NetworkUpgrade::Sapling)
-                            .map_or_else(
-                                || Ok(0),
-                                |sapling_activation| {
-                                    if cur_height < sapling_activation {
-                                        Ok(0)
-                                    } else {
-                                        Err(ScanError::TreeSizeUnknown {
-                                            protocol: ShieldedProtocol::Sapling,
-                                            at_height: cur_height,
-                                        })
-                                    }
-                                },
-                            )
-                    },
-                    |m| {
-                        let sapling_output_count: u32 = block
-                            .vtx
-                            .iter()
-                            .map(|tx| tx.outputs.len())
-                            .sum::<usize>()
-                            .try_into()
-                            .expect("Sapling output count cannot exceed a u32");
-
-                        // The default for m.sapling_commitment_tree_size is zero, so we need to check
-                        // that the subtraction will not underflow; if it would do so, we were given
-                        // invalid chain metadata for a block with Sapling outputs.
-                        m.sapling_commitment_tree_size
-                            .checked_sub(sapling_output_count)
-                            .ok_or(ScanError::TreeSizeInvalid {
-                                protocol: ShieldedProtocol::Sapling,
-                                at_height: cur_height,
-                            })
-                    },
-                )
-            },
-            Ok,
-        )?;
-    let sapling_final_tree_size = sapling_commitment_tree_size
-        + block
-            .vtx
-            .iter()
-            .map(|tx| u32::try_from(tx.outputs.len()).unwrap())
-            .sum::<u32>();
-
-    #[cfg(feature = "orchard")]
-    let mut orchard_commitment_tree_size = prior_block_metadata
-        .and_then(|m| m.orchard_tree_size())
-        .map_or_else(
-            || {
-                block.chain_metadata.as_ref().map_or_else(
-                    || {
-                        // If we're below Orchard activation, or Orchard activation is not set, the tree size is zero
-                        params.activation_height(NetworkUpgrade::Nu5).map_or_else(
-                            || Ok(0),
-                            |orchard_activation| {
-                                if cur_height < orchard_activation {
-                                    Ok(0)
-                                } else {
-                                    Err(ScanError::TreeSizeUnknown {
-                                        protocol: ShieldedProtocol::Orchard,
-                                        at_height: cur_height,
-                                    })
-                                }
-                            },
-                        )
-                    },
-                    |m| {
-                        let orchard_action_count: u32 = block
-                            .vtx
-                            .iter()
-                            .map(|tx| tx.actions.len())
-                            .sum::<usize>()
-                            .try_into()
-                            .expect("Orchard action count cannot exceed a u32");
-
-                        // The default for m.orchard_commitment_tree_size is zero, so we need to check
-                        // that the subtraction will not underflow; if it would do so, we were given
-                        // invalid chain metadata for a block with Orchard actions.
-                        m.orchard_commitment_tree_size
-                            .checked_sub(orchard_action_count)
-                            .ok_or(ScanError::TreeSizeInvalid {
-                                protocol: ShieldedProtocol::Orchard,
-                                at_height: cur_height,
-                            })
-                    },
-                )
-            },
-            Ok,
-        )?;
-    #[cfg(feature = "orchard")]
-    let orchard_final_tree_size = orchard_commitment_tree_size
-        + block
-            .vtx
-            .iter()
-            .map(|tx| u32::try_from(tx.actions.len()).unwrap())
-            .sum::<u32>();
+    let mut pos_tracker = PositionTracker::for_block(params, &block, prior_block_metadata)?;
 
     let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
+
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
 
@@ -887,10 +784,9 @@ where
 
         let (sapling_outputs, mut sapling_nc) = find_received(
             cur_height,
-            sapling_final_tree_size
-                == sapling_commitment_tree_size + u32::try_from(tx.outputs.len()).unwrap(),
+            pos_tracker.contains_last_sapling_outputs_in_block(&tx),
             txid,
-            sapling_commitment_tree_size,
+            |output_idx| pos_tracker.sapling_note_position(output_idx),
             &scanning_keys.sapling,
             &spent_from_accounts,
             &tx.outputs
@@ -921,10 +817,9 @@ where
         #[cfg(feature = "orchard")]
         let (orchard_outputs, mut orchard_nc) = find_received(
             cur_height,
-            orchard_final_tree_size
-                == orchard_commitment_tree_size + u32::try_from(tx.actions.len()).unwrap(),
+            pos_tracker.contains_last_orchard_actions_in_block(&tx),
             txid,
-            orchard_commitment_tree_size,
+            |output_idx| pos_tracker.orchard_note_position(output_idx),
             &scanning_keys.orchard,
             &spent_from_accounts,
             &tx.actions
@@ -968,35 +863,10 @@ where
             ));
         }
 
-        sapling_commitment_tree_size +=
-            u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
-        #[cfg(feature = "orchard")]
-        {
-            orchard_commitment_tree_size +=
-                u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
-        }
+        pos_tracker.increment_over_tx(&tx);
     }
 
-    if let Some(chain_meta) = block.chain_metadata {
-        if chain_meta.sapling_commitment_tree_size != sapling_commitment_tree_size {
-            return Err(ScanError::TreeSizeMismatch {
-                protocol: ShieldedProtocol::Sapling,
-                at_height: cur_height,
-                given: chain_meta.sapling_commitment_tree_size,
-                computed: sapling_commitment_tree_size,
-            });
-        }
-
-        #[cfg(feature = "orchard")]
-        if chain_meta.orchard_commitment_tree_size != orchard_commitment_tree_size {
-            return Err(ScanError::TreeSizeMismatch {
-                protocol: ShieldedProtocol::Orchard,
-                at_height: cur_height,
-                given: chain_meta.orchard_commitment_tree_size,
-                computed: orchard_commitment_tree_size,
-            });
-        }
-    }
+    pos_tracker.check_end_of_block_consistency(cur_height, block.chain_metadata)?;
 
     Ok(ScannedBlock::from_parts(
         cur_height,
@@ -1004,17 +874,220 @@ where
         block.time,
         wtxs,
         ScannedBundles::new(
-            sapling_commitment_tree_size,
+            pos_tracker.sapling_final_tree_size,
             sapling_note_commitments,
             sapling_nullifier_map,
         ),
         #[cfg(feature = "orchard")]
         ScannedBundles::new(
-            orchard_commitment_tree_size,
+            pos_tracker.orchard_final_tree_size,
             orchard_note_commitments,
             orchard_nullifier_map,
         ),
     ))
+}
+
+/// Tracks the scanner's position within the note commitment trees, in order to calculate
+/// received note positions.
+struct PositionTracker {
+    sapling_tree_position: u32,
+    sapling_final_tree_size: u32,
+    #[cfg(feature = "orchard")]
+    orchard_tree_position: u32,
+    #[cfg(feature = "orchard")]
+    orchard_final_tree_size: u32,
+}
+
+impl PositionTracker {
+    fn for_block<P>(
+        params: &P,
+        block: &CompactBlock,
+        prior_block_metadata: Option<&BlockMetadata>,
+    ) -> Result<Self, ScanError>
+    where
+        P: consensus::Parameters,
+    {
+        /// Returns the size of the given shielded protocol's note commitment tree before and
+        /// after the application of the given block.
+        #[allow(clippy::too_many_arguments)]
+        fn tree_sizes_around<P>(
+            params: &P,
+            block: &CompactBlock,
+            prior_block_metadata: Option<&BlockMetadata>,
+            protocol: ShieldedProtocol,
+            activation_nu: NetworkUpgrade,
+            prior_tree_size: impl Fn(&BlockMetadata) -> Option<u32>,
+            tx_output_count: impl Fn(&CompactTx) -> usize,
+            final_tree_size: impl Fn(&ChainMetadata) -> u32,
+        ) -> Result<(u32, u32), ScanError>
+        where
+            P: consensus::Parameters,
+        {
+            let at_height = block.height();
+
+            let start_tree_size = prior_block_metadata.and_then(prior_tree_size).map_or_else(
+                || {
+                    block.chain_metadata.as_ref().map_or_else(
+                        || {
+                            // If we're below the protocol's activation height, or it is
+                            // not set, the tree size is zero.
+                            params.activation_height(activation_nu).map_or_else(
+                                || Ok(0),
+                                |activation_height| {
+                                    if at_height < activation_height {
+                                        Ok(0)
+                                    } else {
+                                        Err(ScanError::TreeSizeUnknown {
+                                            protocol,
+                                            at_height,
+                                        })
+                                    }
+                                },
+                            )
+                        },
+                        |m| {
+                            let output_count: u32 = block
+                                .vtx
+                                .iter()
+                                .map(&tx_output_count)
+                                .sum::<usize>()
+                                .try_into()
+                                .expect("Shielded output count cannot exceed a u32");
+
+                            // The default for `final_tree_size(m)` is zero, so we need to
+                            // check that the subtraction will not underflow; if it would
+                            // do so, we were given invalid chain metadata for a block
+                            // with outputs in this shielded protocol.
+                            final_tree_size(m).checked_sub(output_count).ok_or(
+                                ScanError::TreeSizeInvalid {
+                                    protocol,
+                                    at_height,
+                                },
+                            )
+                        },
+                    )
+                },
+                Ok,
+            )?;
+
+            // We pre-compute the end tree size here so we can determine when we reach the
+            // last transaction in the block that adds notes to the tree. This enables us
+            // to correctly set the tree checkpoint in `find_received`.
+            let end_tree_size = start_tree_size
+                + block
+                    .vtx
+                    .iter()
+                    .map(tx_output_count)
+                    .map(|tx_outputs| u32::try_from(tx_outputs).unwrap())
+                    .sum::<u32>();
+
+            Ok((start_tree_size, end_tree_size))
+        }
+
+        let (sapling_prior_tree_size, sapling_final_tree_size) = tree_sizes_around(
+            params,
+            block,
+            prior_block_metadata,
+            ShieldedProtocol::Sapling,
+            NetworkUpgrade::Sapling,
+            |m| m.sapling_tree_size(),
+            |tx| tx.outputs.len(),
+            |m| m.sapling_commitment_tree_size,
+        )?;
+
+        #[cfg(feature = "orchard")]
+        let (orchard_prior_tree_size, orchard_final_tree_size) = tree_sizes_around(
+            params,
+            block,
+            prior_block_metadata,
+            ShieldedProtocol::Orchard,
+            NetworkUpgrade::Nu5,
+            |m| m.orchard_tree_size(),
+            |tx| tx.actions.len(),
+            |m| m.orchard_commitment_tree_size,
+        )?;
+
+        Ok(Self {
+            sapling_tree_position: sapling_prior_tree_size,
+            sapling_final_tree_size,
+            #[cfg(feature = "orchard")]
+            orchard_tree_position: orchard_prior_tree_size,
+            #[cfg(feature = "orchard")]
+            orchard_final_tree_size,
+        })
+    }
+
+    fn contains_last_sapling_outputs_in_block(&self, tx: &CompactTx) -> bool {
+        self.sapling_tree_position
+            + u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32")
+            == self.sapling_final_tree_size
+    }
+
+    #[cfg(feature = "orchard")]
+    fn contains_last_orchard_actions_in_block(&self, tx: &CompactTx) -> bool {
+        self.orchard_tree_position
+            + u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32")
+            == self.orchard_final_tree_size
+    }
+
+    fn sapling_note_position(&self, output_idx: usize) -> Position {
+        Position::from(u64::from(
+            self.sapling_tree_position + u32::try_from(output_idx).unwrap(),
+        ))
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_note_position(&self, output_idx: usize) -> Position {
+        Position::from(u64::from(
+            self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
+        ))
+    }
+
+    fn increment_over_tx(&mut self, tx: &CompactTx) {
+        self.sapling_tree_position +=
+            u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard_tree_position +=
+                u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
+        }
+    }
+
+    fn check_end_of_block_consistency(
+        &self,
+        at_height: BlockHeight,
+        chain_metadata: Option<ChainMetadata>,
+    ) -> Result<(), ScanError> {
+        // It is a programming error to construct `PositionTracker` from a `CompactBlock`
+        // and then not call `PositionTracker::increment_over_tx` on every transaction
+        // within the block.
+        assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
+        #[cfg(feature = "orchard")]
+        assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
+
+        if let Some(chain_meta) = chain_metadata {
+            if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
+                return Err(ScanError::TreeSizeMismatch {
+                    protocol: ShieldedProtocol::Sapling,
+                    at_height,
+                    given: chain_meta.sapling_commitment_tree_size,
+                    computed: self.sapling_tree_position,
+                });
+            }
+
+            #[cfg(feature = "orchard")]
+            if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
+                return Err(ScanError::TreeSizeMismatch {
+                    protocol: ShieldedProtocol::Orchard,
+                    at_height,
+                    given: chain_meta.orchard_commitment_tree_size,
+                    computed: self.orchard_tree_position,
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Check for spent notes. The comparison against known-unspent nullifiers is done
@@ -1074,7 +1147,7 @@ fn find_received<
     block_height: BlockHeight,
     last_commitments_in_block: bool,
     txid: TxId,
-    commitment_tree_size: u32,
+    note_position: impl Fn(usize) -> Position,
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
     decoded: &[(D, Output)],
@@ -1157,9 +1230,7 @@ fn find_received<
             // - Notes created by consolidation transactions.
             // - Notes sent from one account to itself.
             let is_change = spent_from_accounts.contains(key.account_id());
-            let note_commitment_tree_position = Position::from(u64::from(
-                commitment_tree_size + u32::try_from(output_idx).unwrap(),
-            ));
+            let note_commitment_tree_position = note_position(output_idx);
             let nf = key.nf(&note, note_commitment_tree_position);
 
             shielded_outputs.push(WalletOutput::from_parts(
