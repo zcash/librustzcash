@@ -1100,6 +1100,7 @@ where
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn propose_shielding<InputsT, ChangeT>(
         &mut self,
