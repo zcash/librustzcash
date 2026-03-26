@@ -161,7 +161,10 @@ use zcash_protocol::consensus::{self, BlockHeight};
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
-    scanning::{BatchRunners, Nullifiers, ScanningKeys, scan_block_with_runners},
+    scanning::{
+        Nullifiers, ScanningKeys,
+        compact::{BatchRunners, scan_block_with_runners},
+    },
 };
 
 #[cfg(feature = "sync")]
