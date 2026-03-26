@@ -338,6 +338,20 @@ impl AccountPrivKey {
 #[derive(Clone)]
 pub struct AccountPubKey(ExtendedPublicKey<PublicKey>);
 
+/// Compares only the chain code and public key, ignoring BIP 32 derivation
+/// metadata (depth, parent fingerprint, child number) which are not preserved
+/// by the UFVK encoding.
+#[cfg(feature = "transparent-inputs")]
+impl PartialEq for AccountPubKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.attrs().chain_code == other.0.attrs().chain_code
+            && self.0.public_key() == other.0.public_key()
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl Eq for AccountPubKey {}
+
 #[cfg(feature = "transparent-inputs")]
 impl core::fmt::Debug for AccountPubKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

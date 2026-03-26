@@ -1117,11 +1117,52 @@ impl UnifiedFullViewingKey {
         self.to_unified_incoming_viewing_key().subsumes(other)
     }
 
-    /// Returns `true` if this UFVK subsumes the given UFVK: every IVK item derivable
-    /// from `other` has a matching item derivable from `self`. The UFVK may have
-    /// additional items representing capabilities not present in the other UFVK.
+    /// Returns `true` if this UFVK subsumes `other`: every FVK item in `other` has a
+    /// matching item in `self`, including both incoming and outgoing viewing capability.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required.
     pub fn subsumes_ufvk(&self, other: &UnifiedFullViewingKey) -> bool {
-        self.subsumes_uivk(&other.to_unified_incoming_viewing_key())
+        #[cfg(feature = "orchard")]
+        match (&other.orchard, &self.orchard) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "sapling")]
+        match (&other.sapling, &self.sapling) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        match (&other.transparent, &self.transparent) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
@@ -1474,11 +1515,14 @@ impl UnifiedIncomingViewingKey {
     /// Returns `true` if this UIVK subsumes `other`: every IVK item present in `other`
     /// has a matching item in `self`. This key may have additional items representing
     /// capabilities not present in `other`.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required. Future
+    /// revisions may apply more specific semantics for known metadata typecodes.
     pub fn subsumes(&self, other: &UnifiedIncomingViewingKey) -> bool {
         #[cfg(feature = "orchard")]
         match (other.orchard(), &self.orchard) {
             (Some(e), Some(n)) => {
-                if *e != *n {
+                if e != n {
                     return false;
                 }
             }
@@ -1489,7 +1533,7 @@ impl UnifiedIncomingViewingKey {
         #[cfg(feature = "sapling")]
         match (other.sapling(), &self.sapling) {
             (Some(e), Some(n)) => {
-                if e.to_bytes() != n.to_bytes() {
+                if e != n {
                     return false;
                 }
             }
@@ -1500,12 +1544,19 @@ impl UnifiedIncomingViewingKey {
         #[cfg(feature = "transparent-inputs")]
         match (other.transparent(), &self.transparent) {
             (Some(e), Some(n)) => {
-                if *e != *n {
+                if e != n {
                     return false;
                 }
             }
             (Some(_), None) => return false,
             _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
         }
 
         true

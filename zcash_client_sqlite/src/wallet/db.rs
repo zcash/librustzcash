@@ -52,8 +52,9 @@ use crate::wallet::scanning::priority_code;
 ///   from the account's viewing key, if any. Used for collision detection.
 /// - `p2pkh_ivk_item_cache`: The serialized representation of the transparent P2PKH IVK item
 ///   derived from the account's viewing key, if any. Used for collision detection.
-/// - `p2sh_ivk_item_cache`: Reserved for future ZIP 316 Revision 2 P2SH IVK items.
-///   At most one of `p2pkh_ivk_item_cache` and `p2sh_ivk_item_cache` may be non-NULL.
+/// - `p2sh_ivk_item_cache`: The serialized representation of a P2SH IVK item derived from
+///   the account's viewing key, if any. At most one of `p2pkh_ivk_item_cache` and
+///   `p2sh_ivk_item_cache` may be non-NULL.
 /// - `birthday_height`: The minimum block height among blocks that may potentially contain
 ///   shielded funds belonging to the account.
 /// - `birthday_sapling_tree_size`: A cache of the size of the Sapling note commitment tree

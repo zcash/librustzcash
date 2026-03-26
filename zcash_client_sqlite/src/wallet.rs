@@ -321,6 +321,36 @@ impl ViewingKey {
     }
 }
 
+/// Serialized IVK items extracted from a [`UnifiedIncomingViewingKey`] for storage
+/// in the `accounts` table cache columns.
+struct IvkItemCache {
+    orchard: Option<Vec<u8>>,
+    sapling: Option<Vec<u8>>,
+    p2pkh: Option<Vec<u8>>,
+}
+
+impl IvkItemCache {
+    fn from_uivk(uivk: &UnifiedIncomingViewingKey) -> Self {
+        #[cfg(feature = "orchard")]
+        let orchard = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
+        #[cfg(not(feature = "orchard"))]
+        let orchard = None;
+
+        let sapling = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
+
+        #[cfg(feature = "transparent-inputs")]
+        let p2pkh = uivk.transparent().as_ref().map(|k| k.serialize());
+        #[cfg(not(feature = "transparent-inputs"))]
+        let p2pkh = None;
+
+        IvkItemCache {
+            orchard,
+            sapling,
+            p2pkh,
+        }
+    }
+}
+
 pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
     params: &P,
     seed: &SecretVec<u8>,
@@ -468,17 +498,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         } => (None, false, key_source),
     };
 
-    #[cfg(feature = "orchard")]
-    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
-    #[cfg(not(feature = "orchard"))]
-    let orchard_ivk_item: Option<Vec<u8>> = None;
-
-    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
-
-    #[cfg(feature = "transparent-inputs")]
-    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
-    #[cfg(not(feature = "transparent-inputs"))]
-    let p2pkh_ivk_item: Option<Vec<u8>> = None;
+    let ivk_cache = IvkItemCache::from_uivk(&uivk);
 
     let birthday_sapling_tree_size = Some(birthday.sapling_frontier().tree_size());
     #[cfg(feature = "orchard")]
@@ -532,9 +552,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
                 ":uivk": uivk.encode(params),
-                ":orchard_ivk_item_cache": orchard_ivk_item,
-                ":sapling_ivk_item_cache": sapling_ivk_item,
-                ":p2pkh_ivk_item_cache": p2pkh_ivk_item,
+                ":orchard_ivk_item_cache": ivk_cache.orchard,
+                ":sapling_ivk_item_cache": ivk_cache.sapling,
+                ":p2pkh_ivk_item_cache": ivk_cache.p2pkh,
                 ":birthday_height": u32::from(birthday.height()),
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
@@ -1538,17 +1558,7 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
     params: &P,
     uivk: &UnifiedIncomingViewingKey,
 ) -> Result<Option<Account>, SqliteClientError> {
-    #[cfg(feature = "orchard")]
-    let orchard_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
-    #[cfg(not(feature = "orchard"))]
-    let orchard_item: Option<Vec<u8>> = None;
-
-    let sapling_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
-
-    #[cfg(feature = "transparent-inputs")]
-    let transparent_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
-    #[cfg(not(feature = "transparent-inputs"))]
-    let transparent_item: Option<Vec<u8>> = None;
+    let ivk_cache = IvkItemCache::from_uivk(uivk);
 
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
@@ -1563,9 +1573,9 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
     let accounts = stmt
         .query_and_then::<_, SqliteClientError, _, _>(
             named_params![
-                ":orchard_ivk_item_cache": orchard_item,
-                ":sapling_ivk_item_cache": sapling_item,
-                ":p2pkh_ivk_item_cache": transparent_item,
+                ":orchard_ivk_item_cache": ivk_cache.orchard,
+                ":sapling_ivk_item_cache": ivk_cache.sapling,
+                ":p2pkh_ivk_item_cache": ivk_cache.p2pkh,
             ],
             |row| parse_account_row(row, params),
         )?
@@ -1595,18 +1605,7 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
     let ufvk_encoded = ufvk.encode(params);
     let uivk = ufvk.to_unified_incoming_viewing_key();
     let uivk_encoded = uivk.encode(params);
-
-    #[cfg(feature = "orchard")]
-    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
-    #[cfg(not(feature = "orchard"))]
-    let orchard_ivk_item: Option<Vec<u8>> = None;
-
-    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
-
-    #[cfg(feature = "transparent-inputs")]
-    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
-    #[cfg(not(feature = "transparent-inputs"))]
-    let p2pkh_ivk_item: Option<Vec<u8>> = None;
+    let ivk_cache = IvkItemCache::from_uivk(&uivk);
 
     conn.execute(
         "UPDATE accounts
@@ -1619,9 +1618,9 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
         named_params![
             ":ufvk": ufvk_encoded,
             ":uivk": uivk_encoded,
-            ":orchard_ivk": orchard_ivk_item,
-            ":sapling_ivk": sapling_ivk_item,
-            ":p2pkh_ivk": p2pkh_ivk_item,
+            ":orchard_ivk": ivk_cache.orchard,
+            ":sapling_ivk": ivk_cache.sapling,
+            ":p2pkh_ivk": ivk_cache.p2pkh,
             ":id": account_id.0,
         ],
     )?;
@@ -1653,17 +1652,7 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
     let account_id = existing_account.internal_id();
     let uivk_encoded = uivk.encode(params);
 
-    #[cfg(feature = "orchard")]
-    let orchard_ivk_item: Option<Vec<u8>> = uivk.orchard().as_ref().map(|k| k.to_bytes().to_vec());
-    #[cfg(not(feature = "orchard"))]
-    let orchard_ivk_item: Option<Vec<u8>> = None;
-
-    let sapling_ivk_item: Option<Vec<u8>> = uivk.sapling().as_ref().map(|k| k.to_bytes().to_vec());
-
-    #[cfg(feature = "transparent-inputs")]
-    let p2pkh_ivk_item: Option<Vec<u8>> = uivk.transparent().as_ref().map(|k| k.serialize());
-    #[cfg(not(feature = "transparent-inputs"))]
-    let p2pkh_ivk_item: Option<Vec<u8>> = None;
+    let ivk_cache = IvkItemCache::from_uivk(uivk);
 
     let rows_affected = conn.execute(
         "UPDATE accounts
@@ -1674,9 +1663,9 @@ fn upgrade_account_uivk<P: consensus::Parameters>(
          WHERE id = :id AND ufvk IS NULL",
         named_params![
             ":uivk": uivk_encoded,
-            ":orchard_ivk": orchard_ivk_item,
-            ":sapling_ivk": sapling_ivk_item,
-            ":p2pkh_ivk": p2pkh_ivk_item,
+            ":orchard_ivk": ivk_cache.orchard,
+            ":sapling_ivk": ivk_cache.sapling,
+            ":p2pkh_ivk": ivk_cache.p2pkh,
             ":id": account_id.0,
         ],
     )?;

@@ -202,10 +202,98 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use crate::wallet::init::migrations::tests::test_migrate;
+    use assert_matches::assert_matches;
+    use rusqlite::named_params;
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+
+    use crate::{
+        WalletDb,
+        testing::db::{test_clock, test_rng},
+        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
+    };
+
+    use super::{DEPENDENCIES, MIGRATION_ID};
 
     #[test]
     fn migrate() {
-        test_migrate(&[super::MIGRATION_ID]);
+        test_migrate(&[MIGRATION_ID]);
+    }
+
+    #[test]
+    fn migrate_populates_ivk_cache() {
+        let network = Network::TestNetwork;
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+
+        let seed_bytes = vec![0xab; 32];
+
+        // Migrate to database state just prior to this migration.
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes.clone()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
+
+        // Insert a test account.
+        let usk =
+            UnifiedSpendingKey::from_seed(&network, &seed_bytes, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let ufvk_str = ufvk.encode(&network);
+        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
+
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (uuid, account_kind, hd_seed_fingerprint,
+                 hd_account_index, ufvk, uivk, has_spend_key, birthday_height)
+                 VALUES (X'0000000000000000000000000000AAAA', 0,
+                 X'00000000000000000000000000000000000000000000000000000000000000AB',
+                 0, :ufvk, :uivk, 1, 1)",
+                named_params![":ufvk": ufvk_str, ":uivk": uivk_str],
+            )
+            .unwrap();
+
+        // Run the migration.
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
+
+        // Verify that the IVK cache columns were populated.
+        let sapling_ivk_cached: Option<Vec<u8>> = db_data
+            .conn
+            .query_row(
+                "SELECT sapling_ivk_item_cache FROM accounts
+                 WHERE uuid = X'0000000000000000000000000000AAAA'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(sapling_ivk_cached.is_some());
+
+        // Verify that the FVK cache columns no longer exist.
+        assert_matches!(
+            db_data.conn.query_row(
+                "SELECT sapling_fvk_item_cache FROM accounts LIMIT 1",
+                [],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            ),
+            Err(_)
+        );
+
+        // Verify that the UNIQUE index prevents inserting a duplicate IVK item.
+        let duplicate_result = db_data.conn.execute(
+            "INSERT INTO accounts (uuid, account_kind, uivk, has_spend_key,
+             birthday_height, sapling_ivk_item_cache)
+             VALUES (X'0000000000000000000000000000BBBB', 1, 'different_uivk', 0, 1,
+             :sapling_ivk)",
+            named_params![":sapling_ivk": sapling_ivk_cached],
+        );
+        assert_matches!(duplicate_result, Err(_));
     }
 }
