@@ -159,7 +159,7 @@ use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
-    data_api::{NullifierQuery, WalletWrite},
+    data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
         Nullifiers, ScanningKeys,
@@ -620,15 +620,7 @@ where
     };
 
     // Get the nullifiers for the unspent notes we are tracking
-    let mut nullifiers = Nullifiers::new(
-        data_db
-            .get_sapling_nullifiers(NullifierQuery::Unspent)
-            .map_err(Error::Wallet)?,
-        #[cfg(feature = "orchard")]
-        data_db
-            .get_orchard_nullifiers(NullifierQuery::Unspent)
-            .map_err(Error::Wallet)?,
-    );
+    let mut nullifiers = Nullifiers::unspent(data_db).map_err(Error::Wallet)?;
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
@@ -657,34 +649,7 @@ where
                 }
             }
 
-            let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
-                .collect();
-            nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
-            nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs()
-                    .iter()
-                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-            }));
-
-            #[cfg(feature = "orchard")]
-            {
-                let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
-                    .transactions
-                    .iter()
-                    .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
-                    .collect();
-
-                nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
-                nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
-                    tx.orchard_outputs()
-                        .iter()
-                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                }));
-            }
-
+            nullifiers.update_with(&scanned_block);
             prior_block_metadata = Some(scanned_block.to_block_metadata());
             scanned_blocks.push(scanned_block);
 

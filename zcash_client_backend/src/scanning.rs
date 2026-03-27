@@ -19,7 +19,7 @@ use zcash_protocol::{
 use zip32::Scope;
 
 use crate::{
-    data_api::{BlockMetadata, ScannedBlock},
+    data_api::{BlockMetadata, NullifierQuery, ScannedBlock, WalletRead},
     proto::compact_formats::CompactBlock,
     scan::DecryptedOutput,
     wallet::WalletOutput,
@@ -307,6 +307,17 @@ impl<AccountId> Nullifiers<AccountId> {
         }
     }
 
+    /// Fetches the nullifiers for the unspent notes being tracked by the given wallet.
+    pub(crate) fn unspent<DbT: WalletRead<AccountId = AccountId>>(
+        db_data: &DbT,
+    ) -> Result<Self, DbT::Error> {
+        Ok(Self::new(
+            db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
+            #[cfg(feature = "orchard")]
+            db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
+        ))
+    }
+
     /// Construct a nullifier set from its constituent parts.
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
@@ -358,6 +369,49 @@ impl<AccountId> Nullifiers<AccountId> {
         nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
     ) {
         self.orchard.extend(nfs);
+    }
+}
+
+impl<AccountId: Copy> Nullifiers<AccountId> {
+    /// Updates this set of unspent nullifiers based on the results of scanning a block.
+    ///
+    /// This is intended for use when scanning multiple sequential blocks in memory, prior
+    /// to updating the wallet's state (after which [`Self::unspent`] would produce the
+    /// same set).
+    ///
+    /// - Notes spent by the wallet in this block will have their nullifiers removed from
+    ///   the set, so we don't bother .
+    /// - Notes received by the wallet in this block will have their nullifiers added to
+    ///   the set, enabling spend detection in subsequent blocks.
+    pub(crate) fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
+        let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            .transactions()
+            .iter()
+            .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
+            .collect();
+
+        self.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+        self.extend_sapling(scanned_block.transactions().iter().flat_map(|tx| {
+            tx.sapling_outputs()
+                .iter()
+                .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+        }));
+
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            self.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+            self.extend_orchard(scanned_block.transactions().iter().flat_map(|tx| {
+                tx.orchard_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
+        }
     }
 }
 
