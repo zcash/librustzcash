@@ -10,17 +10,17 @@ use sapling::{SaplingIvk, note_encryption::SaplingDomain};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_note_encryption::{BatchDomain, COMPACT_NOTE_SIZE, Domain, ShieldedOutput, batch};
+use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     ShieldedProtocol,
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, BlockHeight},
 };
 use zip32::Scope;
 
 use crate::{
-    data_api::{BlockMetadata, ScannedBlock},
-    proto::compact_formats::{ChainMetadata, CompactBlock, CompactTx},
+    data_api::{BlockMetadata, NullifierQuery, ScannedBlock, WalletRead},
+    proto::compact_formats::CompactBlock,
     scan::DecryptedOutput,
     wallet::WalletOutput,
 };
@@ -86,6 +86,26 @@ impl<D: Domain, AccountId, Nf, K: ScanningKeyOps<D, AccountId, Nf>> ScanningKeyO
 
 impl<D: Domain, AccountId, Nf> ScanningKeyOps<D, AccountId, Nf>
     for Box<dyn ScanningKeyOps<D, AccountId, Nf>>
+{
+    fn prepare(&self) -> D::IncomingViewingKey {
+        self.as_ref().prepare()
+    }
+
+    fn account_id(&self) -> &AccountId {
+        self.as_ref().account_id()
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.as_ref().key_scope()
+    }
+
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf> {
+        self.as_ref().nf(note, note_position)
+    }
+}
+
+impl<D: Domain, AccountId: Send + Sync, Nf> ScanningKeyOps<D, AccountId, Nf>
+    for Box<dyn ScanningKeyOps<D, AccountId, Nf> + Send + Sync>
 {
     fn prepare(&self) -> D::IncomingViewingKey {
         self.as_ref().prepare()
@@ -179,11 +199,14 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
 
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
-    sapling: HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
+    sapling: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
+    >,
     #[cfg(feature = "orchard")]
     orchard: HashMap<
         IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
     >,
 }
 
@@ -192,11 +215,15 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     pub fn new(
         sapling: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
         >,
         #[cfg(feature = "orchard")] orchard: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+                    + Send
+                    + Sync,
+            >,
         >,
     ) -> Self {
         Self {
@@ -218,8 +245,10 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     /// Returns the Sapling keys to be used for incoming note detection.
     pub fn sapling(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
+    > {
         &self.sapling
     }
 
@@ -227,13 +256,17 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
+    > {
         &self.orchard
     }
 }
 
-impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, Scope)> {
+impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
+    ScanningKeys<AccountId, (AccountId, Scope)>
+{
     /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
     /// along with the account identifiers corresponding to those UFVKs.
     pub fn from_account_ufvks(
@@ -243,12 +276,16 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
 
         let mut sapling: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
         > = HashMap::new();
         #[cfg(feature = "orchard")]
         let mut orchard: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+                    + Send
+                    + Sync,
+            >,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -307,6 +344,17 @@ impl<AccountId> Nullifiers<AccountId> {
         }
     }
 
+    /// Fetches the nullifiers for the unspent notes being tracked by the given wallet.
+    pub(crate) fn unspent<DbT: WalletRead<AccountId = AccountId>>(
+        db_data: &DbT,
+    ) -> Result<Self, DbT::Error> {
+        Ok(Self::new(
+            db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
+            #[cfg(feature = "orchard")]
+            db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
+        ))
+    }
+
     /// Construct a nullifier set from its constituent parts.
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
@@ -358,6 +406,49 @@ impl<AccountId> Nullifiers<AccountId> {
         nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
     ) {
         self.orchard.extend(nfs);
+    }
+}
+
+impl<AccountId: Copy> Nullifiers<AccountId> {
+    /// Updates this set of unspent nullifiers based on the results of scanning a block.
+    ///
+    /// This is intended for use when scanning multiple sequential blocks in memory, prior
+    /// to updating the wallet's state (after which [`Self::unspent`] would produce the
+    /// same set).
+    ///
+    /// - Notes spent by the wallet in this block will have their nullifiers removed from
+    ///   the set, so we don't bother .
+    /// - Notes received by the wallet in this block will have their nullifiers added to
+    ///   the set, enabling spend detection in subsequent blocks.
+    pub(crate) fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
+        let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            .transactions()
+            .iter()
+            .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
+            .collect();
+
+        self.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+        self.extend_sapling(scanned_block.transactions().iter().flat_map(|tx| {
+            tx.sapling_outputs()
+                .iter()
+                .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+        }));
+
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            self.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+            self.extend_orchard(scanned_block.transactions().iter().flat_map(|tx| {
+                tx.orchard_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
+        }
     }
 }
 
@@ -512,7 +603,7 @@ pub fn scan_block<P, AccountId, IvkTag>(
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
     compact::scan_block_with_runners::<_, _, _, (), ()>(
@@ -537,137 +628,6 @@ struct PositionTracker {
 }
 
 impl PositionTracker {
-    fn for_block<P>(
-        params: &P,
-        block: &CompactBlock,
-        prior_block_metadata: Option<&BlockMetadata>,
-    ) -> Result<Self, ScanError>
-    where
-        P: consensus::Parameters,
-    {
-        /// Returns the size of the given shielded protocol's note commitment tree before and
-        /// after the application of the given block.
-        #[allow(clippy::too_many_arguments)]
-        fn tree_sizes_around<P>(
-            params: &P,
-            block: &CompactBlock,
-            prior_block_metadata: Option<&BlockMetadata>,
-            protocol: ShieldedProtocol,
-            activation_nu: NetworkUpgrade,
-            prior_tree_size: impl Fn(&BlockMetadata) -> Option<u32>,
-            tx_output_count: impl Fn(&CompactTx) -> usize,
-            final_tree_size: impl Fn(&ChainMetadata) -> u32,
-        ) -> Result<(u32, u32), ScanError>
-        where
-            P: consensus::Parameters,
-        {
-            let at_height = block.height();
-
-            let start_tree_size = prior_block_metadata.and_then(prior_tree_size).map_or_else(
-                || {
-                    block.chain_metadata.as_ref().map_or_else(
-                        || {
-                            // If we're below the protocol's activation height, or it is
-                            // not set, the tree size is zero.
-                            params.activation_height(activation_nu).map_or_else(
-                                || Ok(0),
-                                |activation_height| {
-                                    if at_height < activation_height {
-                                        Ok(0)
-                                    } else {
-                                        Err(ScanError::TreeSizeUnknown {
-                                            protocol,
-                                            at_height,
-                                        })
-                                    }
-                                },
-                            )
-                        },
-                        |m| {
-                            let output_count: u32 = block
-                                .vtx
-                                .iter()
-                                .map(&tx_output_count)
-                                .sum::<usize>()
-                                .try_into()
-                                .expect("Shielded output count cannot exceed a u32");
-
-                            // The default for `final_tree_size(m)` is zero, so we need to
-                            // check that the subtraction will not underflow; if it would
-                            // do so, we were given invalid chain metadata for a block
-                            // with outputs in this shielded protocol.
-                            final_tree_size(m).checked_sub(output_count).ok_or(
-                                ScanError::TreeSizeInvalid {
-                                    protocol,
-                                    at_height,
-                                },
-                            )
-                        },
-                    )
-                },
-                Ok,
-            )?;
-
-            // We pre-compute the end tree size here so we can determine when we reach the
-            // last transaction in the block that adds notes to the tree. This enables us
-            // to correctly set the tree checkpoint in `find_received`.
-            let end_tree_size = start_tree_size
-                + block
-                    .vtx
-                    .iter()
-                    .map(tx_output_count)
-                    .map(|tx_outputs| u32::try_from(tx_outputs).unwrap())
-                    .sum::<u32>();
-
-            Ok((start_tree_size, end_tree_size))
-        }
-
-        let (sapling_prior_tree_size, sapling_final_tree_size) = tree_sizes_around(
-            params,
-            block,
-            prior_block_metadata,
-            ShieldedProtocol::Sapling,
-            NetworkUpgrade::Sapling,
-            |m| m.sapling_tree_size(),
-            |tx| tx.outputs.len(),
-            |m| m.sapling_commitment_tree_size,
-        )?;
-
-        #[cfg(feature = "orchard")]
-        let (orchard_prior_tree_size, orchard_final_tree_size) = tree_sizes_around(
-            params,
-            block,
-            prior_block_metadata,
-            ShieldedProtocol::Orchard,
-            NetworkUpgrade::Nu5,
-            |m| m.orchard_tree_size(),
-            |tx| tx.actions.len(),
-            |m| m.orchard_commitment_tree_size,
-        )?;
-
-        Ok(Self {
-            sapling_tree_position: sapling_prior_tree_size,
-            sapling_final_tree_size,
-            #[cfg(feature = "orchard")]
-            orchard_tree_position: orchard_prior_tree_size,
-            #[cfg(feature = "orchard")]
-            orchard_final_tree_size,
-        })
-    }
-
-    fn contains_last_sapling_outputs_in_block(&self, tx: &CompactTx) -> bool {
-        self.sapling_tree_position
-            + u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32")
-            == self.sapling_final_tree_size
-    }
-
-    #[cfg(feature = "orchard")]
-    fn contains_last_orchard_actions_in_block(&self, tx: &CompactTx) -> bool {
-        self.orchard_tree_position
-            + u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32")
-            == self.orchard_final_tree_size
-    }
-
     fn sapling_note_position(&self, output_idx: usize) -> Position {
         Position::from(u64::from(
             self.sapling_tree_position + u32::try_from(output_idx).unwrap(),
@@ -679,52 +639,6 @@ impl PositionTracker {
         Position::from(u64::from(
             self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
         ))
-    }
-
-    fn increment_over_tx(&mut self, tx: &CompactTx) {
-        self.sapling_tree_position +=
-            u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
-        #[cfg(feature = "orchard")]
-        {
-            self.orchard_tree_position +=
-                u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
-        }
-    }
-
-    fn check_end_of_block_consistency(
-        &self,
-        at_height: BlockHeight,
-        chain_metadata: Option<ChainMetadata>,
-    ) -> Result<(), ScanError> {
-        // It is a programming error to construct `PositionTracker` from a `CompactBlock`
-        // and then not call `PositionTracker::increment_over_tx` on every transaction
-        // within the block.
-        assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
-        #[cfg(feature = "orchard")]
-        assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
-
-        if let Some(chain_meta) = chain_metadata {
-            if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Sapling,
-                    at_height,
-                    given: chain_meta.sapling_commitment_tree_size,
-                    computed: self.sapling_tree_position,
-                });
-            }
-
-            #[cfg(feature = "orchard")]
-            if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
-                return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Orchard,
-                    at_height,
-                    given: chain_meta.orchard_commitment_tree_size,
-                    computed: self.orchard_tree_position,
-                });
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -776,11 +690,13 @@ fn find_spent<
 fn find_received<
     AccountId: Copy + Eq + Hash,
     D: BatchDomain,
+    M,
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
+    Output: ShieldedOutput<D, CIPHERTEXT_SIZE>,
     NoteCommitment,
+    const CIPHERTEXT_SIZE: usize,
 >(
     block_height: BlockHeight,
     last_commitments_in_block: bool,
@@ -789,9 +705,11 @@ fn find_received<
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
     decoded: &[(D, Output)],
-    batch_results: Option<
-        impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, ()>>,
-    >,
+    batch_results: Option<impl FnOnce(TxId) -> HashMap<usize, DecryptedOutput<IvkTag, D, M>>>,
+    decrypt_inline: impl FnOnce(
+        &[D::IncomingViewingKey],
+        &[(D, Output)],
+    ) -> Vec<Option<((D::Note, D::Recipient, M), usize)>>,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
 ) -> (
     Vec<WalletOutput<D::Note, Nf, AccountId>>,
@@ -805,7 +723,7 @@ fn find_received<
             (0..decoded.len())
                 .map(|i| {
                     decrypted
-                        .remove(&(txid, i))
+                        .remove(&i)
                         .map(|d_out| (d_out.ivk_tag, d_out.note))
                 })
                 .collect::<Vec<_>>(),
@@ -821,10 +739,10 @@ fn find_received<
 
         let mut decrypted_len = 0;
         (
-            batch::try_compact_note_decryption(&ivks, decoded)
+            decrypt_inline(&ivks, decoded)
                 .into_iter()
                 .map(|v| {
-                    v.map(|((note, _), ivk_idx)| {
+                    v.map(|((note, _, _), ivk_idx)| {
                         decrypted_len += 1;
                         (*ivk_lookup[ivk_idx], note)
                     })
@@ -1034,5 +952,21 @@ pub mod testing {
             });
 
         cb
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::thread::spawn;
+
+    use super::ScanningKeys;
+
+    #[test]
+    fn arc_scanning_keys() {
+        let keys = Arc::new(ScanningKeys::<(), ()>::empty());
+        spawn(move || {
+            let _ = keys.sapling().get(&());
+        });
     }
 }

@@ -826,7 +826,7 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId:
-        std::fmt::Debug + ConditionallySelectable + Default + Send + 'static,
+        std::fmt::Debug + ConditionallySelectable + Default + Send + Sync + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) -> ScanSummary {
@@ -1414,7 +1414,14 @@ pub struct InitialChainState {
 /// Trait representing the ability to construct a new data store for use in a test.
 pub trait DataStoreFactory {
     type Error: core::fmt::Debug;
-    type AccountId: std::fmt::Debug + ConditionallySelectable + Default + Hash + Eq + Send + 'static;
+    type AccountId: std::fmt::Debug
+        + ConditionallySelectable
+        + Default
+        + Hash
+        + Eq
+        + Send
+        + Sync
+        + 'static;
     type Account: Account<AccountId = Self::AccountId> + Clone;
     type DsError: core::fmt::Debug;
     type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
