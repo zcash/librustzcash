@@ -183,7 +183,7 @@ pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     TS: SaplingTasks<IvkTag> + Sync,
     TO: OrchardTasks<IvkTag> + Sync,

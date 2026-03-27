@@ -104,6 +104,26 @@ impl<D: Domain, AccountId, Nf> ScanningKeyOps<D, AccountId, Nf>
     }
 }
 
+impl<D: Domain, AccountId: Send + Sync, Nf> ScanningKeyOps<D, AccountId, Nf>
+    for Box<dyn ScanningKeyOps<D, AccountId, Nf> + Send + Sync>
+{
+    fn prepare(&self) -> D::IncomingViewingKey {
+        self.as_ref().prepare()
+    }
+
+    fn account_id(&self) -> &AccountId {
+        self.as_ref().account_id()
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.as_ref().key_scope()
+    }
+
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf> {
+        self.as_ref().nf(note, note_position)
+    }
+}
+
 /// An incoming viewing key, paired with an optional nullifier key and key source metadata.
 pub struct ScanningKey<Ivk, Nk, AccountId> {
     ivk: Ivk,
@@ -179,11 +199,14 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
 
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
-    sapling: HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
+    sapling: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
+    >,
     #[cfg(feature = "orchard")]
     orchard: HashMap<
         IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
     >,
 }
 
@@ -192,11 +215,15 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     pub fn new(
         sapling: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
         >,
         #[cfg(feature = "orchard")] orchard: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+                    + Send
+                    + Sync,
+            >,
         >,
     ) -> Self {
         Self {
@@ -218,8 +245,10 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     /// Returns the Sapling keys to be used for incoming note detection.
     pub fn sapling(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
+    > {
         &self.sapling
     }
 
@@ -227,13 +256,17 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
+    > {
         &self.orchard
     }
 }
 
-impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, Scope)> {
+impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
+    ScanningKeys<AccountId, (AccountId, Scope)>
+{
     /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
     /// along with the account identifiers corresponding to those UFVKs.
     pub fn from_account_ufvks(
@@ -243,12 +276,16 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
 
         let mut sapling: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier> + Send + Sync>,
         > = HashMap::new();
         #[cfg(feature = "orchard")]
         let mut orchard: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+                    + Send
+                    + Sync,
+            >,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -566,7 +603,7 @@ pub fn scan_block<P, AccountId, IvkTag>(
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
     compact::scan_block_with_runners::<_, _, _, (), ()>(
@@ -915,5 +952,21 @@ pub mod testing {
             });
 
         cb
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::thread::spawn;
+
+    use super::ScanningKeys;
+
+    #[test]
+    fn arc_scanning_keys() {
+        let keys = Arc::new(ScanningKeys::<(), ()>::empty());
+        spawn(move || {
+            let _ = keys.sapling().get(&());
+        });
     }
 }

@@ -90,6 +90,15 @@ workspace.
   - `service::Exclude` has been renamed to `GetMempoolTxRequest`
   - `service::Exclude::txid` has been renamed to
     `GetMempoolTxRequest::exclude_txid_suffixes`
+- `zcash_client_backend::scanning`:
+  - `ScanningKeys` now stores `Box<dyn ScanningKeyOps<_, _, _> + Send + Sync>`
+    in its maps instead of `Box<dyn ScanningKeyOps<_, _, _>>`, enabling their
+    usage across threads, such as in `Arc<ScanningKeys<_, _>>`. Its constructors
+    and getters have been changed accordingly; for example,
+    `ScanningKeys::from_account_ufvks` now has the additional bound
+    `AccountId: Send + Sync`.
+  - `scan_block` now requires `DbT::AccountId: Sync` (in addition to its
+    existing `Send + 'static` bounds).
 - `zcash_client_backend::sync`:
   - `run` now requires `DbT::AccountId: Sync` (in addition to its existing
     `Send + 'static` bounds).
