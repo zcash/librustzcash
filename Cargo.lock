@@ -2721,6 +2721,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock_ragu"
+version = "0.0.0"
+source = "git+https://github.com/S1nus/tachyon.git?rev=d4f9c0bc21c81e0d78f1fc52af4073bfb65cd3c7#d4f9c0bc21c81e0d78f1fc52af4073bfb65cd3c7"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "lazy_static",
+ "pasta_curves",
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7422,12 +7434,14 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5#a441c0cba73c9accebac324abdbd28b2f9701dd5"
+source = "git+https://github.com/S1nus/tachyon.git?rev=d4f9c0bc21c81e0d78f1fc52af4073bfb65cd3c7#d4f9c0bc21c81e0d78f1fc52af4073bfb65cd3c7"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
+ "halo2_poseidon",
  "lazy_static",
+ "mock_ragu",
  "pasta_curves",
  "rand_core 0.6.4",
  "reddsa",

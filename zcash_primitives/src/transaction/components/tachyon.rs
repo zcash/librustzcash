@@ -185,11 +185,14 @@ fn write_anchor<W: Write>(mut writer: W, anchor: &Anchor) -> io::Result<()> {
     writer.write_all(&fp.to_repr())
 }
 
+/// Serialized size of a Tachyon proof in bytes.
+/// Matches `mock_ragu::proof::PROOF_SIZE_COMPRESSED`.
+const TACHYON_PROOF_SIZE: usize = 23_000;
+
 fn read_stamp<R: Read>(mut reader: R) -> io::Result<Stamp> {
     let tachygrams = Vector::read(&mut reader, |r| read_tachygram(r))?;
     let anchor = read_anchor(&mut reader)?;
-    // Proof is a unit struct stub — nothing to read
-    let proof = Proof;
+    let proof = read_proof(&mut reader)?;
 
     Ok(Stamp {
         tachygrams,
@@ -201,8 +204,22 @@ fn read_stamp<R: Read>(mut reader: R) -> io::Result<Stamp> {
 fn write_stamp<W: Write>(mut writer: W, stamp: &Stamp) -> io::Result<()> {
     Vector::write(&mut writer, &stamp.tachygrams, |w, t| write_tachygram(w, t))?;
     write_anchor(&mut writer, &stamp.anchor)?;
-    // Proof is a unit struct stub — nothing to write
+    write_proof(&mut writer, &stamp.proof)?;
     Ok(())
+}
+
+fn read_proof<R: Read>(mut reader: R) -> io::Result<Proof> {
+    let mut bytes = vec![0u8; TACHYON_PROOF_SIZE];
+    reader.read_exact(&mut bytes)?;
+    let arr: [u8; TACHYON_PROOF_SIZE] = bytes.try_into().expect("vec is TACHYON_PROOF_SIZE");
+    Proof::try_from(&arr).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "invalid tachyon proof")
+    })
+}
+
+fn write_proof<W: Write>(mut writer: W, proof: &Proof) -> io::Result<()> {
+    let bytes = proof.serialize();
+    writer.write_all(bytes.as_ref())
 }
 
 fn read_option_stamp<R: Read>(mut reader: R) -> io::Result<Option<Stamp>> {
