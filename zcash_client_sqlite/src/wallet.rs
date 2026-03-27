@@ -3262,20 +3262,21 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Find the minimum checkpoint height for each tree and take the maximum of those minima.
-///
-/// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
-/// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
-/// this correctly returns only the sapling minimum in that case.
+/// Returns the minimum checkpoint height that exists in all note commitment trees that contain
+/// data. When both trees have checkpoints, returns the minimum of their intersection. When only
+/// one tree has checkpoints, returns that tree's minimum. Returns `None` when both are empty.
 fn min_shared_checkpoint_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     Ok(conn
         .query_row(
-            "SELECT MAX(m) FROM (
-                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
+            "SELECT MIN(checkpoint_id) FROM (
+                 SELECT checkpoint_id FROM sapling_tree_checkpoints
+                 WHERE checkpoint_id IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                    OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
                  UNION ALL
-                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+                 SELECT checkpoint_id FROM orchard_tree_checkpoints
+                 WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
              )",
             [],
             |row| row.get::<_, Option<u32>>(0),
@@ -3313,9 +3314,8 @@ fn select_truncation_height(
     .map_or_else(
         || {
             // If we don't have a checkpoint at a height less than or equal to the requested
-            // truncation height, query for the minimum height to which it's possible for us to
-            // truncate so that we can report it to the caller. We take the maximum of the per-tree
-            // minimums, since that is the earliest height at which all trees have a checkpoint.
+            // truncation height, query for the minimum shared checkpoint height so that we can
+            // report the safe rewind height to the caller.
             Err(SqliteClientError::RequestedRewindInvalid {
                 safe_rewind_height: min_shared_checkpoint_height(conn)?,
                 requested_height,
