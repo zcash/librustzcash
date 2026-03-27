@@ -1293,6 +1293,14 @@ pub struct UnifiedIncomingViewingKey {
     unknown: Vec<(u32, Vec<u8>)>,
 }
 
+impl PartialEq for UnifiedIncomingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.subsumes(other) && other.subsumes(self)
+    }
+}
+
+impl Eq for UnifiedIncomingViewingKey {}
+
 impl core::fmt::Debug for UnifiedIncomingViewingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = f.debug_struct("UnifiedIncomingViewingKey");

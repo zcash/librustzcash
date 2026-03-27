@@ -437,28 +437,13 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     birthday: &AccountBirthday,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Account, SqliteClientError> {
-    // Check whether any IVK component collides with an existing account. If two accounts
-    // share an FVK they necessarily share an IVK, and there is negligible chance that two
-    // different FVKs produce colliding IVKs.
+    // Check whether any IVK component collides with an existing account.
     let uivk = viewing_key.uivk();
     if let Some(existing_account) = get_account_for_uivk(conn, params, &uivk)? {
-        let existing_uivk = existing_account.uivk();
         match (&viewing_key, existing_account.ufvk()) {
-            (ViewingKey::Full(new_ufvk), existing_ufvk) => {
-                // FVK import over an existing account (either IVK-only or FVK).
-                // This is permitted as a capability upgrade if every existing IVK item
-                // has a corresponding item in the new FVK, AND the new FVK is strictly
-                // additive (has at least one new item). If the item sets are identical,
-                // it's a duplicate import and is an error.
-                if !new_ufvk.subsumes_uivk(&existing_uivk) {
-                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
-                }
-                // Check that the new FVK actually adds capability. If the existing
-                // account already has a UFVK that subsumes the new one as well,
-                // the item sets are identical and this is a duplicate import.
-                if existing_ufvk.is_some_and(|efvk| efvk.subsumes_ufvk(new_ufvk)) {
-                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
-                }
+            (ViewingKey::Full(new_ufvk), _) => {
+                // FVK import over an existing account. The upgrade function
+                // validates that the new FVK strictly adds capability.
                 return upgrade_account_ufvk(conn, params, &existing_account, new_ufvk);
             }
             (ViewingKey::Incoming(_), Some(_)) => {
@@ -467,15 +452,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 return Err(SqliteClientError::AccountCollision(existing_account.id()));
             }
             (ViewingKey::Incoming(_), None) => {
-                // IVK-over-IVK: permitted if the new UIVK strictly adds items.
-                if !uivk.subsumes(&existing_uivk) {
-                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
-                }
-                // If the existing UIVK also subsumes the new one, the item sets
-                // are identical — this is a duplicate import.
-                if existing_uivk.subsumes(&uivk) {
-                    return Err(SqliteClientError::AccountCollision(existing_account.id()));
-                }
+                // IVK-over-IVK: the upgrade function validates that the new
+                // UIVK strictly adds capability.
                 return upgrade_account_uivk(conn, params, &existing_account, &uivk);
             }
         }
@@ -1593,14 +1571,30 @@ pub(crate) fn get_account_for_uivk<P: consensus::Parameters>(
 /// Upgrades an existing account to store a full viewing key, updating the UIVK
 /// and IVK cache columns to reflect any newly-added items.
 ///
-/// The caller must have already verified that the existing account's IVK items
-/// are a subset of those derivable from `ufvk`.
+/// Returns [`SqliteClientError::AccountCollision`] if the new UFVK does not
+/// strictly add capability over the existing account's key material.
 fn upgrade_account_ufvk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     existing_account: &Account,
     ufvk: &UnifiedFullViewingKey,
 ) -> Result<Account, SqliteClientError> {
+    let existing_uivk = existing_account.uivk();
+
+    // The new FVK must subsume the existing account's IVK items.
+    if !ufvk.subsumes_uivk(&existing_uivk) {
+        return Err(SqliteClientError::AccountCollision(existing_account.id()));
+    }
+
+    // If the existing account already has a UFVK that subsumes the new one,
+    // this is a duplicate import (no new capability).
+    if existing_account
+        .ufvk()
+        .is_some_and(|efvk| efvk.subsumes_ufvk(ufvk))
+    {
+        return Err(SqliteClientError::AccountCollision(existing_account.id()));
+    }
+
     let account_id = existing_account.internal_id();
     let ufvk_encoded = ufvk.encode(params);
     let uivk = ufvk.to_unified_incoming_viewing_key();
@@ -1641,14 +1635,22 @@ fn upgrade_account_ufvk<P: consensus::Parameters>(
 /// Upgrades an existing IVK-only account with a UIVK that adds new items,
 /// updating the UIVK encoding and IVK cache columns.
 ///
-/// The caller must have already verified that the existing account's IVK items
-/// are a strict subset of those in `uivk`.
+/// Returns [`SqliteClientError::AccountCollision`] if the new UIVK does not
+/// strictly add capability over the existing UIVK.
 fn upgrade_account_uivk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     existing_account: &Account,
     uivk: &UnifiedIncomingViewingKey,
 ) -> Result<Account, SqliteClientError> {
+    let existing_uivk = existing_account.uivk();
+
+    // The new UIVK must strictly add items: it must subsume the existing,
+    // but not be identical to it.
+    if !uivk.subsumes(&existing_uivk) || *uivk == existing_uivk {
+        return Err(SqliteClientError::AccountCollision(existing_account.id()));
+    }
+
     let account_id = existing_account.internal_id();
     let uivk_encoded = uivk.encode(params);
 
