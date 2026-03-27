@@ -374,6 +374,17 @@ mod tests {
     }
 
     #[test]
+    fn truncate_to_chain_state_below_birthday_sapling() {
+        testing::pool::truncate_to_chain_state_below_birthday::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_to_chain_state_below_birthday_orchard() {
+        testing::pool::truncate_to_chain_state_below_birthday::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }

@@ -4370,6 +4370,109 @@ where
     );
 }
 
+pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Regression test: truncate_to_chain_state should succeed when truncating to a height
+    // below the wallet birthday (where no entry exists in the blocks table). Previously,
+    // this would fail with RequestedRewindInvalid because select_truncation_height requires
+    // the target height to have an entry in the blocks table.
+
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Sapling).unwrap() + 200;
+
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(rng, 1u64, NonZeroU8::new(16).unwrap());
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 100, root))
+                .collect::<Vec<_>>();
+
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(rng, 1u64, NonZeroU8::new(16).unwrap());
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 100, root))
+                .collect::<Vec<_>>();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
+
+    // Generate and scan a few initial blocks from the birthday height.
+    let other_fvk = T::random_fvk(st.rng_mut());
+    let birthday_height = st.test_account().unwrap().birthday().height();
+
+    for _ in 0..5 {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    st.scan_cached_blocks(birthday_height, 5);
+
+    // Generate and scan blocks well beyond PRUNING_DEPTH to ensure early checkpoints
+    // are pruned from the note commitment tree.
+    let extra_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5000),
+        );
+    }
+    st.scan_cached_blocks(birthday_height + 5, extra_blocks as usize);
+
+    // Get the prior chain state from the account birthday. This chain state is at
+    // birthday_height - 1, which has valid tree frontiers but NO entry in the blocks
+    // table (since the wallet never scanned a block at that height).
+    let prior_chain_state = st
+        .test_account()
+        .unwrap()
+        .birthday()
+        .prior_chain_state()
+        .clone();
+
+    // This should succeed. On the buggy code, this fails with RequestedRewindInvalid
+    // because select_truncation_height cannot find an entry in the blocks table at the
+    // target height.
+    let _target_height = prior_chain_state.block_height();
+    st.wallet_mut()
+        .truncate_to_chain_state(prior_chain_state)
+        .expect("truncate_to_chain_state below birthday should succeed");
+
+    // All blocks were above the target height, so they should have been removed.
+    assert_eq!(
+        st.wallet().get_block_hash(birthday_height).unwrap(),
+        None,
+        "blocks at birthday height should be removed after truncating below birthday"
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,
