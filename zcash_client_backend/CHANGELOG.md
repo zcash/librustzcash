@@ -58,6 +58,8 @@ workspace.
     instead of notes having value greater than or equal to the provided minimum
     value. This fixes an inconsistency in the various tests related to notes
     having no economic value in `zcash_client_sqlite`.
+  - `chain::scan_cached_blocks` now requires `DbT::AccountId: Sync` (in addition
+    to its existing `Send + 'static` bounds).
   - `error::Error::MemoForbidden` has been replaced by
     `Error::Payment(zip321::PaymentError)`, which can represent both
     memo-to-transparent and zero-valued-transparent-output errors.
@@ -88,6 +90,9 @@ workspace.
   - `service::Exclude` has been renamed to `GetMempoolTxRequest`
   - `service::Exclude::txid` has been renamed to
     `GetMempoolTxRequest::exclude_txid_suffixes`
+- `zcash_client_backend::sync`:
+  - `run` now requires `DbT::AccountId: Sync` (in addition to its existing
+    `Send + 'static` bounds).
 - `zcash_client_backend::wallet`:
   - `OvkPolicy` has been substantially modified to reflect the view that a
     single outgoing viewing key should be uniformly applied to encrypt all
