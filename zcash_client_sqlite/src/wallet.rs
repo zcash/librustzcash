@@ -3501,18 +3501,22 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
         Err(SqliteClientError::RequestedRewindInvalid {
             safe_rewind_height, ..
         }) => {
-            // The safe rewind height is at a position greater than the requested height, so we
-            // truncate to that height first to clear out checkpoints that would otherwise cause
-            // the checkpoint we're about to insert to be immediately pruned, then, we fall through
-            // to insertion of the frontier.
             if let Some(min_checkpoint_height) = safe_rewind_height {
-                truncate_to_height(
+                // The safe rewind height is at a position greater than the requested height, so we
+                // truncate wallet data and tree state to the earliest shared checkpoint. This removes
+                // blocks and transaction data above that height. Given that we always add
+                // checkpoints in pairs, if there are at least two checkpoints in any table then
+                // the minimum between them will result in checkpoints having been removed, and so
+                // there will be space for the checkpoint that is about to be inserted.
+                truncate_to_height_internal(
                     wdb.conn.0,
                     &wdb.params,
                     #[cfg(feature = "transparent-inputs")]
                     &wdb.gap_limits,
                     min_checkpoint_height,
                 )?;
+            } else {
+                // There are no checkpoints in either table; just continue.
             }
         }
         Err(e) => {
@@ -3520,11 +3524,7 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
         }
     };
 
-    // If there are checkpoints, truncate to the earliest common one first. If there are no
-    // checkpoints at all, we can skip this step and proceed directly to inserting the frontier.
-
     // Insert the frontier from the chain state, creating a checkpoint at the target height.
-    // Because we just truncated down to a single checkpoint, there is room for this new one.
     wdb.with_sapling_tree_mut(|tree| {
         tree.insert_frontier(
             chain_state.final_sapling_tree().clone(),
@@ -3548,8 +3548,11 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
         Ok::<_, SqliteClientError>(())
     })?;
 
-    // Now truncate to the target height checkpoint we just created.
-    let truncated_height = truncate_to_height(
+    // Now truncate wallet data to the target height. We use truncate_to_height_internal
+    // directly (bypassing select_truncation_height) because the frontier insertion created
+    // tree checkpoints at target_height but did not add a blocks table entry, and
+    // select_truncation_height requires the height to be present in the blocks table.
+    let truncated_height = truncate_to_height_internal(
         wdb.conn.0,
         &wdb.params,
         #[cfg(feature = "transparent-inputs")]
