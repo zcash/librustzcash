@@ -668,9 +668,7 @@ fn find_received<
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
     decoded: &[(D, Output)],
-    batch_results: Option<
-        impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, ()>>,
-    >,
+    batch_results: Option<impl FnOnce(TxId) -> HashMap<usize, DecryptedOutput<IvkTag, D, M>>>,
     decrypt_inline: impl FnOnce(
         &[D::IncomingViewingKey],
         &[(D, Output)],
@@ -688,7 +686,7 @@ fn find_received<
             (0..decoded.len())
                 .map(|i| {
                     decrypted
-                        .remove(&(txid, i))
+                        .remove(&i)
                         .map(|d_out| (d_out.ivk_tag, d_out.note))
                 })
                 .collect::<Vec<_>>(),
