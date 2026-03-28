@@ -3271,12 +3271,19 @@ fn min_shared_checkpoint_height(
     Ok(conn
         .query_row(
             "SELECT MIN(checkpoint_id) FROM (
-                 SELECT checkpoint_id FROM sapling_tree_checkpoints
-                 WHERE checkpoint_id IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
-                    OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
-                 UNION ALL
-                 SELECT checkpoint_id FROM orchard_tree_checkpoints
-                 WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
+                -- When both trees have checkpoints, returns the minimum of their intersection.
+                SELECT MIN(sc.checkpoint_id) AS checkpoint_id
+                    FROM sapling_tree_checkpoints sc
+                    JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = sc.checkpoint_id
+                -- When only one tree has checkpoints, returns that tree's minimum.
+                UNION ALL
+                    SELECT MIN(sc.checkpoint_id) AS checkpoint_id
+                    FROM sapling_tree_checkpoints sc
+                    WHERE NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
+                UNION ALL
+                    SELECT MIN(oc.checkpoint_id) AS checkpoint_id
+                    FROM orchard_tree_checkpoints oc
+                    WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
              )",
             [],
             |row| row.get::<_, Option<u32>>(0),
