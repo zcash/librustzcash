@@ -523,6 +523,14 @@ impl zcash_client_backend::data_api::Account for Account {
         self.account_id
     }
 
+    fn name(&self) -> Option<&str> {
+        None
+    }
+
+    fn birthday_height(&self) -> zcash_protocol::consensus::BlockHeight {
+        self.birthday().height()
+    }
+
     fn source(&self) -> &AccountSource {
         &self.kind
     }
@@ -533,10 +541,6 @@ impl zcash_client_backend::data_api::Account for Account {
 
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         self.viewing_key.to_unified_incoming_viewing_key()
-    }
-
-    fn name(&self) -> Option<&str> {
-        todo!()
     }
 }
 

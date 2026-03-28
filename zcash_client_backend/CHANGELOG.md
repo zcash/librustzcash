@@ -78,6 +78,7 @@ workspace.
       input selection avoids pools incompatible with the requested transaction
       version.
     - `input_selection::InputSelector::propose_transaction` trait method.
+  - Trait `Account` has added method `birthday_height`
 - `zcash_client_backend::fees`:
   - The associated type `ChangeStrategy::MetaSource` is now bounded on the newly
     added `MetaSource` type instead of `zcash_client_backend::data_api::InputSource`.

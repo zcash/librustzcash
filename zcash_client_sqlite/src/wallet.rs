@@ -288,6 +288,10 @@ impl zcash_client_backend::data_api::Account for Account {
         self.name.as_deref()
     }
 
+    fn birthday_height(&self) -> BlockHeight {
+        self.birthday()
+    }
+
     fn source(&self) -> &AccountSource {
         &self.kind
     }
@@ -539,7 +543,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         birthday: birthday.height(),
     };
 
-    // If a birthday frontiers are available and the birthday height is less than or equal to the
+    // If birthday frontiers are available and the birthday height is less than or equal to the
     // max-scanned height, insert them into the note commitment trees. Otherwise, we don't need to
     // do anything.
     if block_max_scanned(conn, params)?.is_some_and(|m| m.block_height() > birthday.height()) {
