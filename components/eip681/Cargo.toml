@@ -1,9 +1,9 @@
 [package]
 name = "eip681"
 description = "Parsing functions and data types for Ethereum EIP 681 Payment Request URIs"
-version = "0.0.0"
+version = "0.1.0"
 authors = [
-    "Schell Scivally <schell@electriccoin.co>"
+    "Schell Scivally <schell@zodl.com>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
 edition.workspace = true
