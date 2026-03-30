@@ -9,6 +9,8 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## Unreleased
+## [Unreleased]
 
-- Initial commit.
+## [0.1.0] - Tue 31 March 2026
+
+- Initial release!
