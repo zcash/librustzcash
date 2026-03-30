@@ -539,59 +539,62 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         birthday: birthday.height(),
     };
 
-    // If a birthday frontier is available, insert it into the note commitment tree. If the
-    // birthday frontier is the empty frontier, we don't need to do anything.
-    if let Some(frontier) = birthday.sapling_frontier().value() {
-        debug!("Inserting Sapling frontier into ShardTree: {:?}", frontier);
-        let shard_store =
-            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                conn,
-                crate::SAPLING_TABLES_PREFIX,
+    // If a birthday frontiers are available and the birthday height is less than or equal to the
+    // max-scanned height, insert them into the note commitment trees. Otherwise, we don't need to
+    // do anything.
+    if block_max_scanned(conn, params)?.is_some_and(|m| m.block_height() > birthday.height()) {
+        if let Some(frontier) = birthday.sapling_frontier().value() {
+            debug!("Inserting Sapling frontier into ShardTree: {:?}", frontier);
+            let shard_store =
+                SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                    conn,
+                    crate::SAPLING_TABLES_PREFIX,
+                )?;
+            let mut shard_tree: ShardTree<
+                _,
+                { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            shard_tree.insert_frontier_nodes(
+                frontier.clone(),
+                Retention::Checkpoint {
+                    // This subtraction is safe, because all leaves in the tree appear in blocks, and
+                    // the invariant that birthday.height() always corresponds to the block for which
+                    // `frontier` is the tree state at the start of the block. Together, this means
+                    // there exists a prior block for which frontier is the tree state at the end of
+                    // the block.
+                    id: birthday.height() - 1,
+                    marking: Marking::Reference,
+                },
             )?;
-        let mut shard_tree: ShardTree<
-            _,
-            { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
-            SAPLING_SHARD_HEIGHT,
-        > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
-        shard_tree.insert_frontier_nodes(
-            frontier.clone(),
-            Retention::Checkpoint {
-                // This subtraction is safe, because all leaves in the tree appear in blocks, and
-                // the invariant that birthday.height() always corresponds to the block for which
-                // `frontier` is the tree state at the start of the block. Together, this means
-                // there exists a prior block for which frontier is the tree state at the end of
-                // the block.
-                id: birthday.height() - 1,
-                marking: Marking::Reference,
-            },
-        )?;
-    }
+        }
 
-    #[cfg(feature = "orchard")]
-    if let Some(frontier) = birthday.orchard_frontier().value() {
-        debug!("Inserting Orchard frontier into ShardTree: {:?}", frontier);
-        let shard_store = SqliteShardStore::<
-            _,
-            ::orchard::tree::MerkleHashOrchard,
-            ORCHARD_SHARD_HEIGHT,
-        >::from_connection(conn, crate::ORCHARD_TABLES_PREFIX)?;
-        let mut shard_tree: ShardTree<
-            _,
-            { ::orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-            ORCHARD_SHARD_HEIGHT,
-        > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
-        shard_tree.insert_frontier_nodes(
-            frontier.clone(),
-            Retention::Checkpoint {
-                // This subtraction is safe, because all leaves in the tree appear in blocks, and
-                // the invariant that birthday.height() always corresponds to the block for which
-                // `frontier` is the tree state at the start of the block. Together, this means
-                // there exists a prior block for which frontier is the tree state at the end of
-                // the block.
-                id: birthday.height() - 1,
-                marking: Marking::Reference,
-            },
-        )?;
+        #[cfg(feature = "orchard")]
+        if let Some(frontier) = birthday.orchard_frontier().value() {
+            debug!("Inserting Orchard frontier into ShardTree: {:?}", frontier);
+            let shard_store = SqliteShardStore::<
+                _,
+                ::orchard::tree::MerkleHashOrchard,
+                ORCHARD_SHARD_HEIGHT,
+            >::from_connection(conn, crate::ORCHARD_TABLES_PREFIX)?;
+            let mut shard_tree: ShardTree<
+                _,
+                { ::orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+                ORCHARD_SHARD_HEIGHT,
+            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            shard_tree.insert_frontier_nodes(
+                frontier.clone(),
+                Retention::Checkpoint {
+                    // This subtraction is safe, because all leaves in the tree appear in blocks, and
+                    // the invariant that birthday.height() always corresponds to the block for which
+                    // `frontier` is the tree state at the start of the block. Together, this means
+                    // there exists a prior block for which frontier is the tree state at the end of
+                    // the block.
+                    id: birthday.height() - 1,
+                    marking: Marking::Reference,
+                },
+            )?;
+        }
     }
 
     // The ignored range always starts at Sapling activation
@@ -2828,8 +2831,7 @@ fn parse_block_metadata<P: consensus::Parameters>(
         #[cfg(feature = "orchard")]
         if _params
             .activation_height(NetworkUpgrade::Nu5)
-            .iter()
-            .any(|nu5_activation| &block_height >= nu5_activation)
+            .is_some_and(|nu5_activation| block_height >= nu5_activation)
         {
             _orchard_tree_size_opt
         } else {
@@ -3262,20 +3264,28 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Find the minimum checkpoint height for each tree and take the maximum of those minima.
-///
-/// This returns the earliest height at which all trees have a checkpoint. The orchard table exists
-/// unconditionally but is empty when the `orchard` feature is not active; MAX ignores NULLs, so
-/// this correctly returns only the sapling minimum in that case.
+/// Returns the minimum checkpoint height that exists in all note commitment trees that contain
+/// data. When both trees have checkpoints, returns the minimum of their intersection. When only
+/// one tree has checkpoints, returns that tree's minimum. Returns `None` when both are empty.
 fn min_shared_checkpoint_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     Ok(conn
         .query_row(
-            "SELECT MAX(m) FROM (
-                 SELECT MIN(checkpoint_id) AS m FROM sapling_tree_checkpoints
-                 UNION ALL
-                 SELECT MIN(checkpoint_id) AS m FROM orchard_tree_checkpoints
+            "SELECT MIN(checkpoint_id) FROM (
+                -- When both trees have checkpoints, returns the minimum of their intersection.
+                SELECT MIN(sc.checkpoint_id) AS checkpoint_id
+                    FROM sapling_tree_checkpoints sc
+                    JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = sc.checkpoint_id
+                -- When only one tree has checkpoints, returns that tree's minimum.
+                UNION ALL
+                    SELECT MIN(sc.checkpoint_id) AS checkpoint_id
+                    FROM sapling_tree_checkpoints sc
+                    WHERE NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
+                UNION ALL
+                    SELECT MIN(oc.checkpoint_id) AS checkpoint_id
+                    FROM orchard_tree_checkpoints oc
+                    WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
              )",
             [],
             |row| row.get::<_, Option<u32>>(0),
@@ -3313,9 +3323,8 @@ fn select_truncation_height(
     .map_or_else(
         || {
             // If we don't have a checkpoint at a height less than or equal to the requested
-            // truncation height, query for the minimum height to which it's possible for us to
-            // truncate so that we can report it to the caller. We take the maximum of the per-tree
-            // minimums, since that is the earliest height at which all trees have a checkpoint.
+            // truncation height, query for the minimum shared checkpoint height so that we can
+            // report the safe rewind height to the caller.
             Err(SqliteClientError::RequestedRewindInvalid {
                 safe_rewind_height: min_shared_checkpoint_height(conn)?,
                 requested_height,
@@ -3464,8 +3473,8 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 /// This function enables precise truncation even when the target height's checkpoint has been
 /// pruned from the note commitment tree. It works in two cases:
 ///
-/// - If a checkpoint exists at or below the target height, it delegates to
-///   [`truncate_to_height`] directly.
+/// - If a checkpoint exists at the target height, this behaves identically to
+///   [`truncate_to_height`].
 /// - If the target height is below the oldest available checkpoint, it first truncates to the
 ///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
 ///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
@@ -3476,80 +3485,98 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 ) -> Result<(), SqliteClientError> {
     let target_height = chain_state.block_height();
 
-    // Try the simple case first: if a checkpoint exists at or below the target height,
-    // truncate_to_height will succeed directly.
-    match select_truncation_height(wdb.conn.0, target_height) {
-        Ok(h) => {
-            if h == target_height {
-                // There is a checkpoint for the requested height, we can just truncate to it and
-                // return.
-                return truncate_to_height_internal(
-                    wdb.conn.0,
-                    &wdb.params,
-                    #[cfg(feature = "transparent-inputs")]
-                    &wdb.gap_limits,
-                    h,
-                )
-                .map(|_| ());
-            } else {
-                // The returned height corresponds to a checkpoint that is below the requested
-                // height. Inserting a checkpoint at a height *greater* than this returned height
-                // may cause an older checkpoint to be deleted, but that's fine, so we just fall
-                // through here.
+    // Only truncate trees when the maximum scanned height is greater than the target height. When
+    // the target height is at or above the max scanned height, we skip frontier insertion (it is
+    // unnecessary at the max scanned height, and could introduce a subtree root discontinuity
+    // above it; the frontier will be added naturally during scanning). We will however still need
+    // to truncate the scan queue so that ranges above the target are removed.
+    let truncate_trees = block_max_scanned(wdb.conn.0, &wdb.params)?
+        .is_some_and(|meta| meta.block_height() > target_height);
+
+    if truncate_trees {
+        // Try the simple case first: if a checkpoint exists at or below the target height,
+        // truncate_to_height will succeed directly.
+        match select_truncation_height(wdb.conn.0, target_height) {
+            Ok(h) => {
+                if h == target_height {
+                    // There is a checkpoint for the requested height, we can just truncate to
+                    // it and return.
+                    return truncate_to_height_internal(
+                        wdb.conn.0,
+                        &wdb.params,
+                        #[cfg(feature = "transparent-inputs")]
+                        &wdb.gap_limits,
+                        h,
+                    )
+                    .map(|_| ());
+                } else {
+                    // The returned height corresponds to a checkpoint that is below the
+                    // requested height. Inserting a checkpoint at a height *greater* than this
+                    // returned height may cause an older checkpoint to be deleted, but that's
+                    // fine, so we just fall through here.
+                }
             }
-        }
-        Err(SqliteClientError::RequestedRewindInvalid {
-            safe_rewind_height, ..
-        }) => {
-            // The safe rewind height is at a position greater than the requested height, so we
-            // truncate to that height first to clear out checkpoints that would otherwise cause
-            // the checkpoint we're about to insert to be immediately pruned, then, we fall through
-            // to insertion of the frontier.
-            if let Some(min_checkpoint_height) = safe_rewind_height {
-                truncate_to_height(
-                    wdb.conn.0,
-                    &wdb.params,
-                    #[cfg(feature = "transparent-inputs")]
-                    &wdb.gap_limits,
-                    min_checkpoint_height,
-                )?;
+            Err(SqliteClientError::RequestedRewindInvalid {
+                safe_rewind_height, ..
+            }) => {
+                if let Some(min_checkpoint_height) = safe_rewind_height {
+                    // The safe rewind height is at a position greater than the requested
+                    // height, so we truncate wallet data and tree state to the earliest shared
+                    // checkpoint. This removes blocks and transaction data above that height.
+                    // Given that we always add checkpoints in pairs, if there are at least two
+                    // checkpoints in any table then the minimum between them will result in
+                    // checkpoints having been removed, and so there will be space for the
+                    // checkpoint that is about to be inserted.
+                    truncate_to_height_internal(
+                        wdb.conn.0,
+                        &wdb.params,
+                        #[cfg(feature = "transparent-inputs")]
+                        &wdb.gap_limits,
+                        min_checkpoint_height,
+                    )?;
+                } else {
+                    // There are no checkpoints in either table; just continue.
+                }
             }
-        }
-        Err(e) => {
-            return Err(e);
-        }
-    };
+            Err(e) => {
+                return Err(e);
+            }
+        };
 
-    // If there are checkpoints, truncate to the earliest common one first. If there are no
-    // checkpoints at all, we can skip this step and proceed directly to inserting the frontier.
+        // Insert the frontier from the chain state, creating a checkpoint at the target
+        // height.
+        wdb.with_sapling_tree_mut(|tree| {
+            tree.insert_frontier(
+                chain_state.final_sapling_tree().clone(),
+                Retention::Checkpoint {
+                    id: target_height,
+                    marking: Marking::None,
+                },
+            )?;
+            Ok::<_, SqliteClientError>(())
+        })?;
 
-    // Insert the frontier from the chain state, creating a checkpoint at the target height.
-    // Because we just truncated down to a single checkpoint, there is room for this new one.
-    wdb.with_sapling_tree_mut(|tree| {
-        tree.insert_frontier(
-            chain_state.final_sapling_tree().clone(),
-            Retention::Checkpoint {
-                id: target_height,
-                marking: Marking::None,
-            },
-        )?;
-        Ok::<_, SqliteClientError>(())
-    })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_orchard_tree_mut(|tree| {
+            tree.insert_frontier(
+                chain_state.final_orchard_tree().clone(),
+                Retention::Checkpoint {
+                    id: target_height,
+                    marking: Marking::None,
+                },
+            )?;
+            Ok::<_, SqliteClientError>(())
+        })?;
+    }
 
-    #[cfg(feature = "orchard")]
-    wdb.with_orchard_tree_mut(|tree| {
-        tree.insert_frontier(
-            chain_state.final_orchard_tree().clone(),
-            Retention::Checkpoint {
-                id: target_height,
-                marking: Marking::None,
-            },
-        )?;
-        Ok::<_, SqliteClientError>(())
-    })?;
-
-    // Now truncate to the target height checkpoint we just created.
-    let truncated_height = truncate_to_height(
+    // Truncate wallet data to the target height. This always trims the scan queue so that
+    // ranges above target_height are removed. When truncate_trees is true, it also truncates
+    // blocks and note commitment trees (using the checkpoint created by the frontier insertion
+    // above). We use truncate_to_height_internal directly (bypassing select_truncation_height)
+    // because the frontier insertion created tree checkpoints at target_height but did not add
+    // a blocks table entry, and select_truncation_height requires the height to be present in
+    // the blocks table.
+    let truncated_height = truncate_to_height_internal(
         wdb.conn.0,
         &wdb.params,
         #[cfg(feature = "transparent-inputs")]
