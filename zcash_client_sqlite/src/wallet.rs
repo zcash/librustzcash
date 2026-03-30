@@ -542,10 +542,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // If a birthday frontiers are available and the birthday height is less than or equal to the
     // max-scanned height, insert them into the note commitment trees. Otherwise, we don't need to
     // do anything.
-    if block_max_scanned(conn, params)?
-        .iter()
-        .any(|m| m.block_height() > birthday.height())
-    {
+    if block_max_scanned(conn, params)?.is_some_and(|m| m.block_height() > birthday.height()) {
         if let Some(frontier) = birthday.sapling_frontier().value() {
             debug!("Inserting Sapling frontier into ShardTree: {:?}", frontier);
             let shard_store =
@@ -2834,8 +2831,7 @@ fn parse_block_metadata<P: consensus::Parameters>(
         #[cfg(feature = "orchard")]
         if _params
             .activation_height(NetworkUpgrade::Nu5)
-            .iter()
-            .any(|nu5_activation| &block_height >= nu5_activation)
+            .is_some_and(|nu5_activation| block_height >= nu5_activation)
         {
             _orchard_tree_size_opt
         } else {
@@ -3477,8 +3473,8 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 /// This function enables precise truncation even when the target height's checkpoint has been
 /// pruned from the note commitment tree. It works in two cases:
 ///
-/// - If a checkpoint exists at or below the target height, it delegates to
-///   [`truncate_to_height`] directly.
+/// - If a checkpoint exists at the target height, this behaves identically to
+///   [`truncate_to_height`].
 /// - If the target height is below the oldest available checkpoint, it first truncates to the
 ///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
 ///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
@@ -3492,8 +3488,8 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     // Only truncate trees when the maximum scanned height is greater than the target height. When
     // the target height is at or above the max scanned height, we skip frontier insertion (it is
     // unnecessary at the max scanned height, and could introduce a subtree root discontinuity
-    // above it,and the frontier will be added naturally during scanning). We will however still
-    // need to truncate the scan queue so that ranges above the target are removed.
+    // above it; the frontier will be added naturally during scanning). We will however still need
+    // to truncate the scan queue so that ranges above the target are removed.
     let truncate_trees = block_max_scanned(wdb.conn.0, &wdb.params)?
         .is_some_and(|meta| meta.block_height() > target_height);
 
