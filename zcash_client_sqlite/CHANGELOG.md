@@ -27,6 +27,9 @@ workspace.
 - `zcash_client_sqlite::AccountRef` is now public.
 - Implement standalone P2SH address import support
   - `impl zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_script()`
+- `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
+  enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
+  database transaction overhead).
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
