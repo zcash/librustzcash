@@ -403,6 +403,10 @@ impl<A: Account> Account for TestAccount<A> {
         self.account.name()
     }
 
+    fn birthday_height(&self) -> BlockHeight {
+        self.account.birthday_height()
+    }
+
     fn source(&self) -> &AccountSource {
         self.account.source()
     }
@@ -2635,7 +2639,7 @@ impl InputSource for MockWalletDb {
 impl WalletRead for MockWalletDb {
     type Error = ();
     type AccountId = u32;
-    type Account = (Self::AccountId, UnifiedFullViewingKey);
+    type Account = (Self::AccountId, UnifiedFullViewingKey, BlockHeight);
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
         Ok(Vec::new())

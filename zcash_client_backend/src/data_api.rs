@@ -552,6 +552,9 @@ pub trait Account {
     /// Returns the human-readable name for the account, if any has been configured.
     fn name(&self) -> Option<&str>;
 
+    /// Returns the birthday height for the account.
+    fn birthday_height(&self) -> BlockHeight;
+
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
     fn source(&self) -> &AccountSource;
@@ -581,11 +584,19 @@ pub trait Account {
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<A: Copy> Account for (A, UnifiedFullViewingKey) {
+impl<A: Copy> Account for (A, UnifiedFullViewingKey, BlockHeight) {
     type AccountId = A;
 
     fn id(&self) -> A {
         self.0
+    }
+
+    fn name(&self) -> Option<&str> {
+        None
+    }
+
+    fn birthday_height(&self) -> BlockHeight {
+        self.2
     }
 
     fn source(&self) -> &AccountSource {
@@ -602,14 +613,10 @@ impl<A: Copy> Account for (A, UnifiedFullViewingKey) {
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         self.1.to_unified_incoming_viewing_key()
     }
-
-    fn name(&self) -> Option<&str> {
-        None
-    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
+impl<A: Copy> Account for (A, UnifiedIncomingViewingKey, BlockHeight) {
     type AccountId = A;
 
     fn id(&self) -> A {
@@ -618,6 +625,10 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
 
     fn name(&self) -> Option<&str> {
         None
+    }
+
+    fn birthday_height(&self) -> BlockHeight {
+        self.2
     }
 
     fn source(&self) -> &AccountSource {
