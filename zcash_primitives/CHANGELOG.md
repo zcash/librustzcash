@@ -11,6 +11,9 @@ workspace.
 ## [0.27.0] - PENDING
 
 ### Added
+- `zcash_primitives::block`:
+  - `Block`
+  - `impl Debug for {BlockHeader, BlockHeaderData}`
 - `zcash_primitives::transaction::builder`:
   - `impl<FE> From<coinbase::Error> for Error<FE>`
   - `Builder::add_transparent_p2pkh_input`

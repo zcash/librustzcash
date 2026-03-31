@@ -563,6 +563,22 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
+    /// Changes the consensus branch ID stored in this transaction for pre-v5 transactions.
+    ///
+    /// This can be used to fix an incorrect value passed to [`Transaction::read`]. Just
+    /// like that method, this method does nothing for v5+ transactions.
+    pub(crate) fn fix_consensus_branch_id(mut self, consensus_branch_id: BranchId) -> Self {
+        match self.version() {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                self.consensus_branch_id = consensus_branch_id;
+            }
+            // All later tx versions directly commit to the consensus branch ID, so what
+            // we parse is what we trust.
+            _ => (),
+        }
+        self
+    }
+
     /// Maps the bundles from one type to another.
     ///
     /// This shouldn't be necessary for most use cases; it is provided for handling the

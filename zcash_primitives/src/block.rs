@@ -5,12 +5,20 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::ops::Deref;
 use core2::io::{self, Read, Write};
+use transparent::bundle::OutPoint;
+use zcash_script::{Opcode, opcode::PossiblyBad};
 
-use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
+use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
 
-use zcash_encoding::Vector;
+use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_protocol::consensus::{self, BlockHeight};
+
+use crate::{
+    encoding::{ReadBytesExt, WriteBytesExt},
+    transaction::{Transaction, TxVersion},
+};
 
 pub use equihash;
 
@@ -64,6 +72,7 @@ impl BlockHash {
 }
 
 /// A Zcash block header.
+#[derive(Debug)]
 pub struct BlockHeader {
     hash: BlockHash,
     data: BlockHeaderData,
@@ -78,6 +87,7 @@ impl Deref for BlockHeader {
 }
 
 /// The information contained in a Zcash block header.
+#[derive(Debug)]
 pub struct BlockHeaderData {
     pub version: i32,
     pub prev_block: BlockHash,
@@ -161,12 +171,173 @@ impl BlockHeader {
     }
 }
 
+/// A Zcash block.
+#[derive(Debug)]
+pub struct Block {
+    header: BlockHeader,
+    vtx: NonEmpty<Transaction>,
+    claimed_height: BlockHeight,
+}
+
+impl Block {
+    /// Parses a block from bytes.
+    ///
+    /// Limitation: currently this method returns an error if given a genesis block.
+    pub fn read<R: Read, P: consensus::Parameters>(mut reader: R, params: &P) -> io::Result<Self> {
+        let header = BlockHeader::read(&mut reader)?;
+
+        // Instead of using `Vector::read`, we manually read the length, so we can then
+        // individually read the coinbase transaction before the rest.
+        let n_tx: usize = CompactSize::read_t(&mut reader)?;
+        if n_tx == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "block has no coinbase tx",
+            ));
+        }
+
+        // Parse with an arbitrary consensus branch ID initially; we will fix it later.
+        let coinbase = Transaction::read(&mut reader, consensus::BranchId::Sprout)?;
+
+        // Extract the claimed block height from the coinbase transaction.
+        let claimed_height = {
+            let coinbase_transparent = coinbase
+                .transparent_bundle()
+                .filter(|b| b.is_coinbase())
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::Other, "first tx of block is not coinbase")
+                })?;
+
+            // Verify some simple structural consensus rules on the coinbase transaction.
+            if coinbase.sprout_bundle().is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "coinbase tx has sprout data",
+                ));
+            }
+
+            let coinbase_txin = coinbase_transparent.vin.first().expect("checked above");
+
+            match coinbase_txin.script_sig().0.parse().next() {
+                Some(Ok(PossiblyBad::Good(Opcode::PushValue(height)))) => height
+                    .to_num()
+                    .map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            "coinbase input specifies an invalid block height",
+                        )
+                    })
+                    .and_then(|h| {
+                        BlockHeight::try_from(h).map_err(|_| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                "coinbase input specifies an invalid block height",
+                            )
+                        })
+                    }),
+                // TODO: Permit missing height in genesis blocks by matching their block
+                // hash against the provided params.
+                _ => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "coinbase scriptSig missing height",
+                )),
+            }?
+        };
+
+        // Fix the coinbase tx's consensus branch ID if necessary.
+        let consensus_branch_id = consensus::BranchId::for_height(params, claimed_height);
+        let coinbase = match coinbase.version() {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => coinbase
+                .into_data()
+                .fix_consensus_branch_id(consensus_branch_id)
+                .freeze()
+                .expect("valid"),
+            // All later tx versions directly commit to the consensus branch ID.
+            _ => {
+                if coinbase.consensus_branch_id() != consensus_branch_id {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "coinbase tx's claimed height doesn't match its consensus branch ID for given network parameters",
+                    ));
+                }
+                coinbase
+            }
+        };
+
+        // Now parse the rest of the transactions with the expected consensus branch ID.
+        let mut non_coinbase = Array::read(&mut reader, n_tx - 1, |r| {
+            Transaction::read(r, consensus_branch_id)
+        })?;
+
+        // Verify some simple structural consensus rules on the non-coinbase transactions.
+        if non_coinbase
+            .iter()
+            .flat_map(|tx| tx.transparent_bundle())
+            .flat_map(|b| &b.vin)
+            .any(|txin| txin.prevout() == &OutPoint::NULL)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "non-coinbase tx has null transparent input",
+            ));
+        }
+
+        let mut vtx = NonEmpty::singleton(coinbase);
+        vtx.append(&mut non_coinbase);
+
+        Ok(Self {
+            header,
+            vtx,
+            claimed_height,
+        })
+    }
+
+    /// Writes the block to the given writer.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.header.write(&mut writer)?;
+        Vector::write_nonempty(&mut writer, &self.vtx, |w, tx| tx.write(w))?;
+        Ok(())
+    }
+
+    /// Breaks this block into its component parts for further processing.
+    pub fn into_parts(self) -> (BlockHeader, NonEmpty<Transaction>) {
+        (self.header, self.vtx)
+    }
+
+    /// Returns the block's header.
+    pub fn header(&self) -> &BlockHeader {
+        &self.header
+    }
+
+    /// Returns the block's transactions, in consensus order (the order they are encoded
+    /// in the block and applied to chain state).
+    ///
+    /// The first transaction is always the coinbase transaction.
+    pub fn vtx(&self) -> &NonEmpty<Transaction> {
+        &self.vtx
+    }
+
+    /// Returns the claimed height of this block.
+    ///
+    /// This is a "claimed height" for two reasons:
+    /// - It is the value recorded in the `scriptSig` of the coinbase transaction's null
+    ///   transparent input, and thus can only be trusted if the block has been fully
+    ///   validated in the context of a chain.
+    /// - Blocks not in the main chain **do not have heights** (because heights are by
+    ///   definition measured with respect to the longest chain). This value can only be
+    ///   used as a "height" if the block is verified to be currently in the main chain.
+    pub fn claimed_height(&self) -> BlockHeight {
+        self.claimed_height
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::BlockHeader;
+    use super::{Block, BlockHeader};
     use alloc::vec::Vec;
+    use zcash_protocol::consensus::MAIN_NETWORK;
 
-    const HEADER_MAINNET_415000: [u8; 1487] = [
+    const BLOCK_MAINNET_415000: [u8; 1640] = [
         0x04, 0x00, 0x00, 0x00, 0x52, 0x74, 0xb4, 0x3b, 0x9e, 0x4a, 0xd8, 0xf4, 0x3e, 0x93, 0xf7,
         0x84, 0x63, 0xd2, 0x4d, 0xcf, 0xe5, 0x31, 0xae, 0xb4, 0x71, 0x98, 0x19, 0xf4, 0xf9, 0x7f,
         0x7e, 0x03, 0x00, 0x00, 0x00, 0x00, 0x66, 0x30, 0x73, 0xbc, 0x4b, 0xfa, 0x95, 0xc9, 0xbe,
@@ -266,18 +437,45 @@ mod tests {
         0x4a, 0x12, 0x5e, 0xbc, 0x25, 0x0e, 0x08, 0xfe, 0xdb, 0xfa, 0xa6, 0x6f, 0x45, 0x3d, 0x90,
         0x93, 0x2c, 0xab, 0x3f, 0xf4, 0x52, 0x21, 0x90, 0x99, 0x68, 0xe5, 0x1e, 0x6b, 0xc2, 0x54,
         0xd5, 0x09, 0xad, 0xeb, 0x75, 0xcb, 0xa7, 0x6d, 0x48, 0xfe, 0x02, 0x4e, 0x3e, 0x66, 0xd8,
-        0xdf, 0x5e,
+        0xdf, 0x5e, 0x01, 0x03, 0x00, 0x00, 0x80, 0x70, 0x82, 0xc4, 0x03, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+        0xff, 0xff, 0xff, 0x1a, 0x03, 0x18, 0x55, 0x06, 0x15, 0x2f, 0x56, 0x69, 0x61, 0x42, 0x54,
+        0x43, 0x2f, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x2f,
+        0xff, 0xff, 0xff, 0xff, 0x02, 0x00, 0xca, 0x9a, 0x3b, 0x00, 0x00, 0x00, 0x00, 0x19, 0x76,
+        0xa9, 0x14, 0xfb, 0x8a, 0x6a, 0x4c, 0x11, 0xcb, 0x21, 0x6c, 0xe2, 0x1f, 0x9f, 0x37, 0x1d,
+        0xfc, 0x92, 0x71, 0xa4, 0x69, 0xbd, 0x6d, 0x88, 0xac, 0x80, 0xb2, 0xe6, 0x0e, 0x00, 0x00,
+        0x00, 0x00, 0x17, 0xa9, 0x14, 0xe0, 0xa5, 0xea, 0x13, 0x40, 0xcc, 0x6b, 0x1d, 0x6a, 0x82,
+        0xc0, 0x6c, 0x0a, 0x9c, 0x60, 0xb9, 0x89, 0x8b, 0x6a, 0xe9, 0x87, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
     ];
 
     #[test]
     fn header_read_write() {
-        let header = BlockHeader::read(&HEADER_MAINNET_415000[..]).unwrap();
+        let header_mainnet_415000 = &BLOCK_MAINNET_415000[..1487];
+
+        let header = BlockHeader::read(header_mainnet_415000).unwrap();
         assert_eq!(
             format!("{}", header.hash()),
             "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168"
         );
-        let mut encoded = Vec::with_capacity(HEADER_MAINNET_415000.len());
+        let mut encoded = Vec::with_capacity(header_mainnet_415000.len());
         header.write(&mut encoded).unwrap();
-        assert_eq!(&HEADER_MAINNET_415000[..], &encoded[..]);
+        assert_eq!(header_mainnet_415000, &encoded[..]);
+    }
+
+    #[test]
+    fn block_read_write() {
+        let block = Block::read(&BLOCK_MAINNET_415000[..], &MAIN_NETWORK).unwrap();
+        assert_eq!(
+            format!("{}", block.header().hash()),
+            "0000000001ab37793ce771262b2ffa082519aa3fe891250a1adb43baaf856168"
+        );
+        assert_eq!(block.claimed_height(), 415000.into());
+        assert_eq!(block.vtx().len(), 1);
+
+        let mut encoded = Vec::with_capacity(BLOCK_MAINNET_415000.len());
+        block.write(&mut encoded).unwrap();
+        assert_eq!(&BLOCK_MAINNET_415000[..], &encoded[..]);
     }
 }
