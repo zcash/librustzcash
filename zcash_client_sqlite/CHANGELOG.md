@@ -11,9 +11,6 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `WalletDb` now overrides `WalletRead::find_account_for_address` with a single SQL query,
-  replacing the `O(accounts × addresses)` scan that the default trait implementation would
-  require.
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`
   - `tx_mined_height`
@@ -35,6 +32,7 @@ workspace.
   database transaction overhead).
 
 ### Changed
+- Migrated to `zcash_client_backend 0.22`
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
   collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
   ZIP 316 Revision 2 P2SH support.
