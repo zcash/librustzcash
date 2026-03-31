@@ -187,7 +187,7 @@ impl Payment {
     /// - `amount`: The amount of the payment that is being requested, if any. If no amount is
     ///   provided, this indicates that the sender of should specify the amount.
     /// - `memo`: A memo that, if included, must be provided with the payment. If a memo is present
-    ///   and [`recipient_address`] is not a shielded address, the wallet should report an error.
+    ///   and `recipient_address` is not a shielded address, the wallet should report an error.
     /// - `label` A human-readable label for this payment (usually identifying information
     ///   associated with the recipient address) within the larger structure of the transaction
     ///   request.
