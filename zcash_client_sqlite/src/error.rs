@@ -173,10 +173,6 @@ pub enum SqliteClientError {
         actual: BlockHeight,
     },
 
-    /// One or more gap addresses were detected in the transparent address sequence.
-    #[cfg(feature = "transparent-inputs")]
-    GapAddresses,
-
     /// An attempt to import a standalone transparent address failed because it had already been
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
@@ -307,13 +303,6 @@ impl fmt::Display for SqliteClientError {
                     f,
                     "An address has already been exposed for diversifier index {}",
                     u128::from(*i)
-                )
-            }
-            #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::GapAddresses => {
-                write!(
-                    f,
-                    "An error occured while generating a transparent gap addresses"
                 )
             }
             SqliteClientError::AddressReuse(address_str, txids) => {
