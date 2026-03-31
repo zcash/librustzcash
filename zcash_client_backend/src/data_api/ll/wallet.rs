@@ -35,6 +35,7 @@ use {
     crate::{data_api::Account, wallet::WalletTransparentOutput},
     std::collections::HashSet,
     transparent::{bundle::OutPoint, keys::TransparentKeyScope},
+    zcash_address::ZcashAddress,
     zcash_keys::keys::{
         ReceiverRequirement, UnifiedAddressRequest,
         transparent::gap_limits::{
@@ -646,13 +647,18 @@ where
         )
     }
 
-    let wallet_transparent_outputs = detect_wallet_transparent_outputs::<DbT, P>(
-        #[cfg(feature = "transparent-inputs")]
-        wallet_db,
-        params,
-        &d_tx,
-        funding_account,
-    )?;
+    let wallet_transparent_outputs =
+        detect_wallet_transparent_outputs::<_, _, <DbT as LowLevelWalletRead>::Error>(
+            params,
+            d_tx.tx(),
+            #[cfg(feature = "transparent-inputs")]
+            d_tx.mined_height(),
+            funding_account,
+            #[cfg(feature = "transparent-inputs")]
+            |address| wallet_db.find_account_for_transparent_address(address),
+            #[cfg(feature = "transparent-inputs")]
+            |account_id, receiver| external_address(wallet_db, params, account_id, receiver),
+        )?;
 
     // If there is no wallet involvement, we don't need to store the transaction, so just return
     // here.
@@ -822,22 +828,30 @@ where
     Ok(())
 }
 
-fn detect_wallet_transparent_outputs<DbT, P>(
-    #[cfg(feature = "transparent-inputs")] wallet_db: &DbT,
+fn detect_wallet_transparent_outputs<P, AccountId, E>(
     params: &P,
-    d_tx: &DecryptedTransaction<Transaction, DbT::AccountId>,
-    funding_account: Option<DbT::AccountId>,
-) -> Result<WalletTransparentOutputs<DbT::AccountId>, DbT::Error>
+    tx: &Transaction,
+    #[cfg(feature = "transparent-inputs")] mined_height: Option<BlockHeight>,
+    funding_account: Option<AccountId>,
+    #[cfg(feature = "transparent-inputs")] belongs_to_wallet: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+    #[cfg(feature = "transparent-inputs")] external_address: impl Fn(
+        AccountId,
+        Receiver,
+    ) -> Result<ZcashAddress, E>,
+) -> Result<WalletTransparentOutputs<AccountId>, E>
 where
-    DbT: LowLevelWalletRead,
-    DbT::AccountId: core::fmt::Debug,
     P: consensus::Parameters,
+    AccountId: Copy + core::fmt::Debug,
 {
     // This `if` is just an optimization for cases where we would do nothing in the loop.
     if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
         let mut result = WalletTransparentOutputs::empty();
-        for (output_index, txout) in d_tx
-            .tx()
+        for (output_index, txout) in tx
             .transparent_bundle()
             .iter()
             .flat_map(|b| b.vout.iter())
@@ -850,30 +864,25 @@ where
             {
                 debug!(
                     "{:?} output {} has recipient {}",
-                    d_tx.tx().txid(),
+                    tx.txid(),
                     output_index,
                     address.encode(params)
                 );
 
                 // If the output belongs to the wallet, add it to `transparent_received_outputs`.
                 #[cfg(feature = "transparent-inputs")]
-                if let Some((account_uuid, key_scope)) =
-                    wallet_db.find_account_for_transparent_address(&address)?
-                {
+                if let Some((account_uuid, key_scope)) = belongs_to_wallet(&address)? {
                     debug!(
                         "{:?} output {} belongs to account {:?}",
-                        d_tx.tx().txid(),
+                        tx.txid(),
                         output_index,
                         account_uuid
                     );
                     result.received.push((
                         WalletTransparentOutput::from_parts(
-                            OutPoint::new(
-                                d_tx.tx().txid().into(),
-                                u32::try_from(output_index).unwrap(),
-                            ),
+                            OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                             txout.clone(),
-                            d_tx.mined_height(),
+                            mined_height,
                         )
                         .expect("txout.recipient_address extraction previously checked"),
                         key_scope,
@@ -892,8 +901,7 @@ where
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
-                    let recipient_address =
-                        external_address(wallet_db, params, account_uuid, receiver)?;
+                    let recipient_address = external_address(account_uuid, receiver)?;
 
                     #[cfg(not(feature = "transparent-inputs"))]
                     let recipient_address = receiver.to_zcash_address(params.network_type());
@@ -914,13 +922,13 @@ where
                 warn!(
                     "Ignoring unsupported script kind '{}' for tx {} output {}",
                     script_kind.as_str(),
-                    d_tx.tx().txid(),
+                    tx.txid(),
                     output_index
                 );
             } else {
                 warn!(
                     "Unable to determine recipient address for tx {} output {}",
-                    d_tx.tx().txid(),
+                    tx.txid(),
                     output_index
                 );
             }
