@@ -92,7 +92,7 @@ fn read_action<R: Read>(
 }
 
 #[cfg(zcash_unstable = "nu7")]
-pub(crate) fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
+pub fn read_note<R: Read>(mut reader: R, asset: AssetBase) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
     let mut value_bytes = [0u8; 8];
     reader.read_exact(&mut value_bytes)?;
