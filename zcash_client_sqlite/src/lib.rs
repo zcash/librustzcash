@@ -274,7 +274,7 @@ pub struct WalletDb<C, P, CL, R> {
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
-pub struct SqlTransaction<'conn>(pub(crate) &'conn rusqlite::Transaction<'conn>);
+pub struct SqlTransaction<'conn>(&'conn rusqlite::Transaction<'conn>);
 
 impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     fn borrow(&self) -> &rusqlite::Connection {
