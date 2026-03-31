@@ -28,6 +28,7 @@ const MIN_SQLITE_MINOR_VERSION: u32 = 35;
 
 const MIGRATIONS_TABLE: &str = "schemer_migrations";
 
+/// Errors that can occur when applying migrations to the wallet database.
 #[derive(Debug)]
 pub enum WalletMigrationError {
     /// A feature required by the wallet database is not supported by the version of
@@ -211,10 +212,6 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         }
         SqliteClientError::AccountUnknown => {
             unreachable!("all accounts are known in migration context")
-        }
-        #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::GapAddresses => {
-            unreachable!("we don't deal with gap addresses in migrations")
         }
         SqliteClientError::UnknownZip32Derivation => {
             unreachable!("we don't call methods that require operating on imported accounts")

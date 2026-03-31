@@ -78,7 +78,10 @@ pub enum SqliteClientError {
     /// this error is (safe rewind height, requested height). If no safe rewind height can be
     /// determined, the safe rewind height member will be `None`.
     RequestedRewindInvalid {
+        /// The height to which it is possible to safely rewind, or `None` if no safe
+        /// rewind height could be determined.
         safe_rewind_height: Option<BlockHeight>,
+        /// The block height that was requested for the rewind.
         requested_height: BlockHeight,
     },
 
@@ -164,12 +167,11 @@ pub enum SqliteClientError {
     /// [`TransactionsInvolvingAddress`]: zcash_client_backend::data_api::TransactionsInvolvingAddress
     #[cfg(feature = "transparent-inputs")]
     NotificationMismatch {
+        /// The expected ending block height.
         expected: BlockHeight,
+        /// The actual ending block height returned.
         actual: BlockHeight,
     },
-
-    #[cfg(feature = "transparent-inputs")]
-    GapAddresses,
 
     /// An attempt to import a standalone transparent address failed because it had already been
     /// imported to a different account.
@@ -301,13 +303,6 @@ impl fmt::Display for SqliteClientError {
                     f,
                     "An address has already been exposed for diversifier index {}",
                     u128::from(*i)
-                )
-            }
-            #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::GapAddresses => {
-                write!(
-                    f,
-                    "An error occured while generating a transparent gap addresses"
                 )
             }
             SqliteClientError::AddressReuse(address_str, txids) => {

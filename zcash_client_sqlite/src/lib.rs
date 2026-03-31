@@ -31,6 +31,7 @@
 #![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+#![deny(missing_docs)]
 
 use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
@@ -2458,13 +2459,21 @@ pub struct FsBlockDb {
 #[derive(Debug)]
 #[cfg(feature = "unstable")]
 pub enum FsBlockDbError {
+    /// Filesystem I/O error.
     Fs(io::Error),
+    /// SQLite database error.
     Db(rusqlite::Error),
+    /// Protobuf decoding error.
     Protobuf(prost::DecodeError),
+    /// The expected block file was not found at the given path.
     MissingBlockPath(PathBuf),
+    /// The block store root directory is invalid.
     InvalidBlockstoreRoot(PathBuf),
+    /// A block file path within the store is invalid.
     InvalidBlockPath(PathBuf),
+    /// Data in the block store is corrupted.
     CorruptedData(String),
+    /// The requested block was not found in the cache.
     CacheMiss(BlockHeight),
 }
 

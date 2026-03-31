@@ -33,7 +33,6 @@ workspace.
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
-- `zcash_client_sqlite::error::SqliteClientError` has added variant `GapAddresses`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a
@@ -42,6 +41,8 @@ workspace.
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
 - `zcash_client_sqlite::UtxoId` contents are now private.
+- The inadvertently-exposed `zcash_client_sqlite::chain::migrations::blockmeta::init` 
+  module has been removed from the public API.
 
 ### Fixed
 - `get_transparent_balances` no longer fails for standalone transparent addresses

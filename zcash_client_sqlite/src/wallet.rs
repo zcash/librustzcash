@@ -4530,6 +4530,7 @@ pub(crate) fn get_received_outputs(
     Ok(results)
 }
 
+/// Test utilities for wallet database assertions.
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use incrementalmerkletree::Position;

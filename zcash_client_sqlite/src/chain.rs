@@ -97,15 +97,21 @@ where
 #[cfg(feature = "unstable")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
+    /// The height of the block.
     pub height: BlockHeight,
+    /// The hash of the block.
     pub block_hash: BlockHash,
+    /// The block timestamp as a Unix epoch time.
     pub block_time: u32,
+    /// The number of Sapling outputs in the block.
     pub sapling_outputs_count: u32,
+    /// The number of Orchard actions in the block.
     pub orchard_actions_count: u32,
 }
 
 #[cfg(feature = "unstable")]
 impl BlockMeta {
+    /// Returns the path to this block's file within the given blocks directory.
     pub fn block_file_path<P: AsRef<Path>>(&self, blocks_dir: &P) -> PathBuf {
         blocks_dir.as_ref().join(Path::new(&format!(
             "{}-{}-compactblock",

@@ -1,3 +1,6 @@
+//! SQLite-backed implementation of [`ShardStore`](shardtree::store::ShardStore)
+//! for note commitment trees.
+
 use rusqlite::{self, OptionalExtension, named_params};
 use std::{
     collections::BTreeSet,
@@ -41,15 +44,21 @@ pub enum Error {
     /// already exists, but the tree state being checkpointed or the marks removed at that
     /// checkpoint conflict with the existing tree state.
     CheckpointConflict {
+        /// The block height of the conflicting checkpoint.
         checkpoint_id: BlockHeight,
+        /// The checkpoint data that was attempted to be inserted.
         checkpoint: Checkpoint,
+        /// The tree state already stored at that checkpoint height.
         extant_tree_state: TreeState,
+        /// The marks-removed set already stored at that checkpoint height, if any.
         extant_marks_removed: Option<BTreeSet<Position>>,
     },
     /// Raised when attempting to add shard roots to the database that
     /// are discontinuous with the existing roots in the database.
     SubtreeDiscontinuity {
+        /// The index range of the subtree roots that were attempted to be inserted.
         attempted_insertion_range: Range<u64>,
+        /// The index range of subtree roots already present in the database.
         existing_range: Range<u64>,
     },
 }
@@ -94,6 +103,7 @@ impl error::Error for Error {
     }
 }
 
+/// An implementation of [`ShardStore`] backed by an SQLite database.
 pub struct SqliteShardStore<C, H, const SHARD_HEIGHT: u8> {
     pub(crate) conn: C,
     table_prefix: &'static str,
