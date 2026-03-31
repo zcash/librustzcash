@@ -7,20 +7,18 @@ pub fn all_migrations() -> Vec<Box<dyn RusqliteMigration<Error = rusqlite::Error
     vec![Box::new(init::Migration {})]
 }
 
-/// The initial migration that creates the `compactblocks_meta` table.
-pub mod init {
+mod init {
     use rusqlite::{self};
     use schemerz::{self, migration};
     use schemerz_rusqlite::RusqliteMigration;
     use uuid::Uuid;
 
-    /// The migration that creates the `compactblocks_meta` table.
-    pub struct Migration;
+    pub(super) struct Migration;
 
     /// The migration that added the `compactblocks_meta` table.
     ///
     /// 68525b40-36e5-46aa-a765-720f8389b99d
-    pub const MIGRATION_ID: Uuid = Uuid::from_fields(
+    pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
         0x68525b40,
         0x36e5,
         0x46aa,

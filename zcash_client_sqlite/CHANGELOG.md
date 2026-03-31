@@ -41,6 +41,8 @@ workspace.
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
 - `zcash_client_sqlite::UtxoId` contents are now private.
+- The inadvertently-exposed `zcash_client_sqlite::chain::migrations::blockmeta::init` 
+  module has been removed from the public API.
 
 ### Fixed
 - `get_transparent_balances` no longer fails for standalone transparent addresses
