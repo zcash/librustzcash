@@ -1041,7 +1041,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     #[allow(unreachable_code, unused_variables)] //FIXME: need address key scope detection
     pub(crate) fn put_transparent_output(
         &mut self,
-        output: &WalletTransparentOutput,
+        output: &WalletTransparentOutput<AccountId>,
         receiving_account: &AccountId,
         known_unspent: bool,
     ) -> Result<OutPoint, Error> {

@@ -36,6 +36,7 @@ workspace.
   - `TransparentAddressMetadata::standalone_script`
   - `TransparentAddressMetadata::redeem_script`
   - `WalletTransparentOutput::with_known_input_size`
+  - `WalletTransparentOutput::account_id`
   - `WalletTransparentOutput::recipient_key_scope`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
@@ -88,6 +89,8 @@ workspace.
   - The associated type `ChangeStrategy::MetaSource` is now bounded on the newly
     added `MetaSource` type instead of `zcash_client_backend::data_api::InputSource`.
 - `zcash_client_backend::proposal`:
+  - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
+    as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
   - `ProposalError` has added variants `PaymentAmountMissing` and
     `IncompatibleTxVersion`.
 - Migrated to `lightwallet-protocol v0.4.1`. This results in the following API
@@ -129,8 +132,11 @@ workspace.
   - `GapMetadata` has been moved behind the `transparent-inputs` feature flag,
     as it is only useful in the context of the wallet receiving transparent
     funds.
-  - `WalletTransparentOutput::from_parts` now takes an
-    `Option<TransparentKeyScope>` parameter.
+  - `WalletTransparentOutput` has been refactored to convey information
+    equivalent to `WalletOutput`:
+    - It now has an `AccountId` generic parameter,
+    - `WalletTransparentOutput::from_parts` now takes `TransferType`,
+      `AccountId`, and `Option<TransparentKeyScope>` parameters.
   - `WalletTx::block_index` now has type `zcash_protocol::consensus::TxIndex`
     and the `WalletTx::new` function has been modified accordingly.
   - Renamed `TransparentAddressSource::Standalone` to

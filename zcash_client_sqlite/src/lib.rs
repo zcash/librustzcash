@@ -582,7 +582,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         outpoint: &OutPoint,
         target_height: TargetHeight,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -596,7 +596,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
@@ -1099,7 +1099,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<
+        Option<WalletTransparentOutput<<Self as InputSource>::AccountId>>,
+        <Self as InputSource>::Error,
+    > {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -1276,7 +1279,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return self.transactionally(|wdb| wdb.put_received_transparent_utxo(_output));
@@ -1563,7 +1566,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return {
@@ -1794,7 +1797,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -2041,7 +2044,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     #[cfg(feature = "transparent-inputs")]
     fn put_transparent_output(
         &mut self,
-        output: &zcash_client_backend::wallet::WalletTransparentOutput,
+        output: &WalletTransparentOutput<Self::AccountId>,
         observation_height: BlockHeight,
         known_unspent: bool,
     ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error> {

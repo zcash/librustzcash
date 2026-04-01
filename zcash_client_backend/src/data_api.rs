@@ -1476,7 +1476,7 @@ pub trait InputSource {
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -1497,7 +1497,7 @@ pub trait InputSource {
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -1917,7 +1917,10 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         _outpoint: &OutPoint,
         _spendable_as_of: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<
+        Option<WalletTransparentOutput<<Self as WalletRead>::AccountId>>,
+        <Self as InputSource>::Error,
+    > {
         unimplemented!(
             "WalletTest::get_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -3033,7 +3036,7 @@ pub trait WalletWrite: WalletRead {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.

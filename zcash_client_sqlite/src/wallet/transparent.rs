@@ -941,7 +941,9 @@ pub(crate) fn utxo_query_height(
     }
 }
 
-fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, SqliteClientError> {
+fn to_unspent_transparent_output(
+    row: &Row,
+) -> Result<WalletTransparentOutput<AccountUuid>, SqliteClientError> {
     let txid: Vec<u8> = row.get("txid")?;
     let mut txid_bytes = [0u8; 32];
     txid_bytes.copy_from_slice(&txid);
@@ -953,6 +955,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
     })?;
     let height: Option<u32> = row.get("received_height")?;
+    let account_id = AccountUuid(row.get("account_uuid")?);
     let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
 
     let outpoint = OutPoint::new(txid_bytes, index);
@@ -960,6 +963,14 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
         outpoint,
         TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
+        match key_scope {
+            // TODO: Is this right?
+            Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL) => {
+                zcash_client_backend::TransferType::WalletInternal
+            }
+            _ => zcash_client_backend::TransferType::Incoming,
+        },
+        account_id,
         key_scope,
     )
     .ok_or_else(|| {
@@ -1098,7 +1109,7 @@ pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
-) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
+) -> Result<Option<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
     // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
@@ -1107,6 +1118,7 @@ pub(crate) fn get_wallet_transparent_output(
     let mut stmt_select_utxo = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
+                accounts.uuid AS account_uuid,
                 t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1128,7 +1140,7 @@ pub(crate) fn get_wallet_transparent_output(
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
-    let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
+    let result: Result<Option<WalletTransparentOutput<_>>, SqliteClientError> = stmt_select_utxo
         .query_and_then(
             named_params![
                 ":txid": outpoint.hash(),
@@ -1164,10 +1176,11 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
+                accounts.uuid AS account_uuid,
                 addresses.imported_transparent_receiver_script,
                 t.mined_height AS received_height
          FROM transparent_received_outputs u
@@ -1203,7 +1216,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":min_value": u64::from(zip317::MARGINAL_FEE),
     ])?;
 
-    let mut utxos = Vec::<WalletTransparentOutput>::new();
+    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
         let mut output = to_unspent_transparent_output(row)?;
 
@@ -1560,7 +1573,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     gap_limits: &GapLimits,
-    output: &WalletTransparentOutput,
+    output: &WalletTransparentOutput<AccountUuid>,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
     let observed_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
     put_transparent_output(conn, params, gap_limits, output, observed_height, true)
@@ -2028,7 +2041,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     gap_limits: &GapLimits,
-    output: &WalletTransparentOutput,
+    output: &WalletTransparentOutput<AccountUuid>,
     observation_height: BlockHeight,
     known_unspent: bool,
 ) -> Result<(AccountRef, AccountUuid, KeyScope, UtxoId), SqliteClientError> {
