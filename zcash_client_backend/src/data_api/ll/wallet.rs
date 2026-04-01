@@ -10,7 +10,7 @@ use tracing::{debug, info, trace, warn};
 
 use incrementalmerkletree::{Hashable, Marking, Position, Retention, frontier::Frontier};
 use shardtree::{LocatedPrunableTree, ShardTree, error::ShardTreeError, store::ShardStore};
-use transparent::address::TransparentAddress;
+use transparent::{address::TransparentAddress, bundle::OutPoint};
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
@@ -25,17 +25,16 @@ use crate::{
         DecryptedTransaction, SAPLING_SHARD_HEIGHT, ScannedBlock, TransactionStatus,
         WalletCommitmentTrees, chain::ChainState, ll::ReceivedShieldedOutput,
     },
-    wallet::Recipient,
+    wallet::{Recipient, WalletTransparentOutput},
 };
 
 use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{data_api::Account, wallet::WalletTransparentOutput},
+    crate::data_api::Account,
     std::collections::HashSet,
-    transparent::{bundle::OutPoint, keys::TransparentKeyScope},
-    zcash_address::ZcashAddress,
+    transparent::keys::TransparentKeyScope,
     zcash_keys::keys::{
         ReceiverRequirement, UnifiedAddressRequest,
         transparent::gap_limits::{
@@ -51,42 +50,6 @@ use {crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint};
 /// consistent with the bound in zcashd, and allows block data deeper than
 /// this delta from the chain tip to be pruned.
 pub(crate) const PRUNING_DEPTH: u32 = 100;
-
-#[derive(Debug)]
-struct TransparentSentOutput<AccountId> {
-    from_account_uuid: AccountId,
-    output_index: usize,
-    recipient: Recipient<AccountId>,
-    value: Zatoshis,
-}
-
-#[derive(Debug)]
-struct WalletTransparentOutputs<AccountId> {
-    #[cfg(feature = "transparent-inputs")]
-    received: Vec<WalletTransparentOutput<AccountId>>,
-    sent: Vec<TransparentSentOutput<AccountId>>,
-}
-
-impl<AccountId> WalletTransparentOutputs<AccountId> {
-    fn empty() -> Self {
-        Self {
-            #[cfg(feature = "transparent-inputs")]
-            received: vec![],
-            sent: vec![],
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        #[cfg(feature = "transparent-inputs")]
-        let has_received = !self.received.is_empty();
-        #[cfg(not(feature = "transparent-inputs"))]
-        let has_received = false;
-
-        let has_sent = !self.sent.is_empty();
-
-        !(has_received || has_sent)
-    }
-}
 
 pub(crate) fn determine_fee<DbT, T: TxMeta>(
     _wallet_db: &DbT,
@@ -651,13 +614,10 @@ where
         detect_wallet_transparent_outputs::<_, _, <DbT as LowLevelWalletRead>::Error>(
             params,
             d_tx.tx(),
-            #[cfg(feature = "transparent-inputs")]
             d_tx.mined_height(),
             funding_account,
             #[cfg(feature = "transparent-inputs")]
             |address| wallet_db.find_account_for_transparent_address(address),
-            #[cfg(feature = "transparent-inputs")]
-            |account_id, receiver| external_address(wallet_db, params, account_id, receiver),
         )?;
 
     // If there is no wallet involvement, we don't need to store the transaction, so just return
@@ -718,14 +678,13 @@ where
             tx_has_wallet_outputs |= !d_tx.orchard_outputs().is_empty();
         }
 
-        // Since the wallet created the transparent output, we need to ensure
-        // that any transparent inputs belonging to the wallet will be
-        // discovered.
-        tx_has_wallet_outputs |= !wallet_transparent_outputs.received.is_empty();
-
-        // Even though we know the funding account, we don't know that we have
-        // information for all of the transparent inputs to the transaction.
-        tx_has_wallet_outputs |= !wallet_transparent_outputs.sent.is_empty();
+        // Two cases handled here:
+        // - If the wallet created the transparent output, we need to ensure
+        //   that any transparent inputs belonging to the wallet will be
+        //   discovered.
+        // - Even if we know the funding account, we don't know that we have
+        //   information for all of the transparent inputs to the transaction.
+        tx_has_wallet_outputs |= !wallet_transparent_outputs.is_empty();
     }
 
     // The set of account/scope pairs for which to update the gap limit.
@@ -767,7 +726,9 @@ where
 
     put_transparent_outputs(
         wallet_db,
+        params,
         tx_ref,
+        funding_account,
         &wallet_transparent_outputs,
         #[cfg(feature = "transparent-inputs")]
         |wallet_db, output| wallet_db.put_transparent_output(output, observed_height, false),
@@ -831,7 +792,7 @@ where
 fn detect_wallet_transparent_outputs<P, AccountId, E>(
     params: &P,
     tx: &Transaction,
-    #[cfg(feature = "transparent-inputs")] mined_height: Option<BlockHeight>,
+    mined_height: Option<BlockHeight>,
     funding_account: Option<AccountId>,
     #[cfg(feature = "transparent-inputs")] belongs_to_wallet: impl Fn(
         &TransparentAddress,
@@ -839,113 +800,102 @@ fn detect_wallet_transparent_outputs<P, AccountId, E>(
         Option<(AccountId, Option<TransparentKeyScope>)>,
         E,
     >,
-    #[cfg(feature = "transparent-inputs")] external_address: impl Fn(
-        AccountId,
-        Receiver,
-    ) -> Result<ZcashAddress, E>,
-) -> Result<WalletTransparentOutputs<AccountId>, E>
+) -> Result<Vec<WalletTransparentOutput<AccountId>>, E>
 where
     P: consensus::Parameters,
     AccountId: Copy + core::fmt::Debug,
 {
-    // This `if` is just an optimization for cases where we would do nothing in the loop.
-    if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
-        let mut result = WalletTransparentOutputs::empty();
-        for (output_index, txout) in tx
-            .transparent_bundle()
-            .iter()
-            .flat_map(|b| b.vout.iter())
-            .enumerate()
+    let mut result = vec![];
+    for (output_index, txout) in tx
+        .transparent_bundle()
+        .iter()
+        .flat_map(|b| b.vout.iter())
+        .enumerate()
+    {
+        let script_kind = txout.script_kind();
+        if let Some(address) = script_kind
+            .as_ref()
+            .and_then(TransparentAddress::from_script_kind)
         {
-            let script_kind = txout.script_kind();
-            if let Some(address) = script_kind
-                .as_ref()
-                .and_then(TransparentAddress::from_script_kind)
-            {
+            debug!(
+                "{:?} output {} has recipient {}",
+                tx.txid(),
+                output_index,
+                address.encode(params)
+            );
+
+            #[allow(unused_mut)]
+            let mut detected = false;
+
+            // If the output belongs to the wallet, add it to `transparent_received_outputs`.
+            #[cfg(feature = "transparent-inputs")]
+            if let Some((account_uuid, key_scope)) = belongs_to_wallet(&address)? {
                 debug!(
-                    "{:?} output {} has recipient {}",
+                    "{:?} output {} belongs to account {:?}",
                     tx.txid(),
                     output_index,
+                    account_uuid
+                );
+                result.push(
+                    WalletTransparentOutput::from_parts(
+                        OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
+                        txout.clone(),
+                        mined_height,
+                        // TODO: Confirm this is correct for `TransferType::WalletInternal`.
+                        match key_scope {
+                            Some(
+                                TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL,
+                            ) => TransferType::WalletInternal,
+                            _ => TransferType::Incoming,
+                        },
+                        account_uuid,
+                        key_scope,
+                    )
+                    .expect("txout.recipient_address extraction previously checked"),
+                );
+                detected = true;
+            } else {
+                debug!(
+                    "Address {} is not recognized as belonging to any of our accounts.",
                     address.encode(params)
                 );
+            }
 
-                // If the output belongs to the wallet, add it to `transparent_received_outputs`.
-                #[cfg(feature = "transparent-inputs")]
-                if let Some((account_uuid, key_scope)) = belongs_to_wallet(&address)? {
-                    debug!(
-                        "{:?} output {} belongs to account {:?}",
-                        tx.txid(),
-                        output_index,
-                        account_uuid
-                    );
-                    result.received.push(
+            if !detected {
+                // If a transaction we observe contains spends from our wallet, we will
+                // store its transparent outputs in the same way they would be stored by
+                // create_spend_to_address.
+                if let Some(account_id) = funding_account {
+                    result.push(
                         WalletTransparentOutput::from_parts(
                             OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                             txout.clone(),
                             mined_height,
-                            // TODO: Confirm this is correct for `TransferType::WalletInternal`.
-                            match key_scope {
-                                Some(
-                                    TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL,
-                                ) => TransferType::WalletInternal,
-                                _ => TransferType::Incoming,
-                            },
-                            account_uuid,
-                            key_scope,
+                            TransferType::Outgoing,
+                            account_id,
+                            None,
                         )
                         .expect("txout.recipient_address extraction previously checked"),
                     );
-                } else {
-                    debug!(
-                        "Address {} is not recognized as belonging to any of our accounts.",
-                        address.encode(params)
-                    );
                 }
-
-                // If a transaction we observe contains spends from our wallet, we will
-                // store its transparent outputs in the same way they would be stored by
-                // create_spend_to_address.
-                if let Some(account_uuid) = funding_account {
-                    let receiver = Receiver::Transparent(address);
-
-                    #[cfg(feature = "transparent-inputs")]
-                    let recipient_address = external_address(account_uuid, receiver)?;
-
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    let recipient_address = receiver.to_zcash_address(params.network_type());
-
-                    let recipient = Recipient::External {
-                        recipient_address,
-                        output_pool: PoolType::TRANSPARENT,
-                    };
-
-                    result.sent.push(TransparentSentOutput {
-                        from_account_uuid: account_uuid,
-                        output_index,
-                        recipient,
-                        value: txout.value(),
-                    });
-                }
-            } else if let Some(script_kind) = script_kind {
-                warn!(
-                    "Ignoring unsupported script kind '{}' for tx {} output {}",
-                    script_kind.as_str(),
-                    tx.txid(),
-                    output_index
-                );
-            } else {
-                warn!(
-                    "Unable to determine recipient address for tx {} output {}",
-                    tx.txid(),
-                    output_index
-                );
             }
+        } else if let Some(script_kind) = script_kind {
+            warn!(
+                "Ignoring unsupported script kind '{}' for tx {} output {}",
+                script_kind.as_str(),
+                tx.txid(),
+                output_index
+            );
+        } else {
+            warn!(
+                "Unable to determine recipient address for tx {} output {}",
+                tx.txid(),
+                output_index
+            );
         }
-
-        Ok(result)
-    } else {
-        Ok(WalletTransparentOutputs::empty())
     }
+
+    Ok(result)
 }
 
 fn mark_notes_spent<'a, DbT>(
@@ -1085,10 +1035,12 @@ where
     Ok(())
 }
 
-fn put_transparent_outputs<DbT>(
+fn put_transparent_outputs<DbT, P>(
     wallet_db: &mut DbT,
+    params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
-    outputs: &WalletTransparentOutputs<<DbT as LowLevelWalletRead>::AccountId>,
+    funding_account: Option<DbT::AccountId>,
+    outputs: &[WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>],
     #[cfg(feature = "transparent-inputs")] put_received_output: impl Fn(
         &mut DbT,
         &WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>,
@@ -1106,36 +1058,84 @@ fn put_transparent_outputs<DbT>(
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
 where
     DbT: LowLevelWalletWrite,
+    P: consensus::Parameters,
 {
-    #[cfg(feature = "transparent-inputs")]
-    for received_t_output in &outputs.received {
-        let (account_id, _) = put_received_output(wallet_db, received_t_output)?;
+    for output in outputs {
+        let sent_output = match output.transfer_type() {
+            TransferType::Outgoing => {
+                let receiver = Receiver::Transparent(*output.recipient_address());
 
-        if let Some(t_key_scope) = received_t_output.recipient_key_scope() {
-            on_received(account_id, t_key_scope);
+                #[cfg(feature = "transparent-inputs")]
+                let recipient_address =
+                    external_address(wallet_db, params, *output.account_id(), receiver)?;
+
+                #[cfg(not(feature = "transparent-inputs"))]
+                let recipient_address = receiver.to_zcash_address(params.network_type());
+
+                let recipient = Recipient::External {
+                    recipient_address,
+                    output_pool: PoolType::TRANSPARENT,
+                };
+
+                Some((*output.account_id(), recipient))
+            }
+            TransferType::Incoming | TransferType::WalletInternal => {
+                #[cfg(feature = "transparent-inputs")]
+                {
+                    let (account_id, _) = put_received_output(wallet_db, output)?;
+
+                    if let Some(t_key_scope) = output.recipient_key_scope() {
+                        on_received(account_id, t_key_scope);
+                    }
+
+                    // When we receive transparent funds (particularly as ephemeral outputs
+                    // in transaction pairs sending to a ZIP 320 address) it becomes
+                    // possible that the spend of these outputs is not then later detected
+                    // if the transaction that spends them is purely transparent. This is
+                    // especially a problem in wallet recovery.
+                    wallet_db.queue_transparent_spend_detection(
+                        *output.recipient_address(),
+                        tx_ref,
+                        output.outpoint().n(),
+                    )?;
+                }
+
+                // If a transaction we observe contains spends from our wallet, we will
+                // store its transparent outputs in the same way they would be stored by
+                // create_spend_to_address.
+                if let Some(account_uuid) = funding_account {
+                    let receiver = Receiver::Transparent(*output.recipient_address());
+
+                    #[cfg(feature = "transparent-inputs")]
+                    let recipient_address =
+                        external_address(wallet_db, params, account_uuid, receiver)?;
+
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    let recipient_address = receiver.to_zcash_address(params.network_type());
+
+                    // TODO: Even if the recipient address is external, record the send as internal.
+                    let recipient = Recipient::External {
+                        recipient_address,
+                        output_pool: PoolType::TRANSPARENT,
+                    };
+
+                    Some((account_uuid, recipient))
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some((from_account_uuid, recipient)) = sent_output {
+            wallet_db.put_sent_output(
+                from_account_uuid,
+                tx_ref,
+                output.index(),
+                &recipient,
+                output.value(),
+                None,
+            )?;
         }
-
-        // When we receive transparent funds (particularly as ephemeral outputs
-        // in transaction pairs sending to a ZIP 320 address) it becomes
-        // possible that the spend of these outputs is not then later detected
-        // if the transaction that spends them is purely transparent. This is
-        // especially a problem in wallet recovery.
-        wallet_db.queue_transparent_spend_detection(
-            *received_t_output.recipient_address(),
-            tx_ref,
-            received_t_output.outpoint().n(),
-        )?;
-    }
-
-    for sent_t_output in &outputs.sent {
-        wallet_db.put_sent_output(
-            sent_t_output.from_account_uuid,
-            tx_ref,
-            sent_t_output.output_index,
-            &sent_t_output.recipient,
-            sent_t_output.value,
-            None,
-        )?;
     }
 
     Ok(())
