@@ -156,7 +156,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: TransparentOutputFilter,
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Vec<WalletTransparentOutput<AccountId>>, Self::Error> {
         // TODO: take into consideration coinbase maturity
         // See <https://github.com/zcash/librustzcash/issues/821>
         let txos = self
@@ -189,7 +189,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         &self,
         outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<AccountId>>, Self::Error> {
         // FIXME: make use of `target_height` to check spendability.
         Ok(self
             .transparent_received_outputs

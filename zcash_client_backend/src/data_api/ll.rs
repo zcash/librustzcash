@@ -239,7 +239,7 @@ pub trait LowLevelWalletRead {
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error>;
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error>;
 
     /// Returns the vector of transactions in the wallet that spend the transparent outputs of the
     /// referenced transaction, but for which the amount of fee paid is unknown. This should
@@ -487,7 +487,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     #[cfg(feature = "transparent-inputs")]
     fn put_transparent_output(
         &mut self,
-        output: &crate::wallet::WalletTransparentOutput,
+        output: &crate::wallet::WalletTransparentOutput<Self::AccountId>,
         observation_height: BlockHeight,
         known_unspent: bool,
     ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error>;

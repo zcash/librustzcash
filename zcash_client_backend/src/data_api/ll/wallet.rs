@@ -63,7 +63,7 @@ struct TransparentSentOutput<AccountId> {
 #[derive(Debug)]
 struct WalletTransparentOutputs<AccountId> {
     #[cfg(feature = "transparent-inputs")]
-    received: Vec<WalletTransparentOutput>,
+    received: Vec<WalletTransparentOutput<AccountId>>,
     sent: Vec<TransparentSentOutput<AccountId>>,
 }
 
@@ -879,6 +879,14 @@ where
                             OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                             txout.clone(),
                             mined_height,
+                            // TODO: Confirm this is correct for `TransferType::WalletInternal`.
+                            match key_scope {
+                                Some(
+                                    TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL,
+                                ) => TransferType::WalletInternal,
+                                _ => TransferType::Incoming,
+                            },
+                            account_uuid,
                             key_scope,
                         )
                         .expect("txout.recipient_address extraction previously checked"),
@@ -1079,7 +1087,7 @@ fn put_transparent_outputs<DbT>(
     outputs: &WalletTransparentOutputs<<DbT as LowLevelWalletRead>::AccountId>,
     #[cfg(feature = "transparent-inputs")] put_received_output: impl Fn(
         &mut DbT,
-        &WalletTransparentOutput,
+        &WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>,
     ) -> Result<
         (
             <DbT as LowLevelWalletRead>::AccountId,

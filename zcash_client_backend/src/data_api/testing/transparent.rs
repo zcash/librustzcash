@@ -131,6 +131,8 @@ where
         outpoint.clone(),
         txout.clone(),
         Some(height_1),
+        crate::TransferType::Incoming,
+        account_id,
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
@@ -163,6 +165,8 @@ where
         outpoint,
         txout,
         Some(height_2),
+        crate::TransferType::Incoming,
+        account_id,
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
@@ -254,6 +258,8 @@ where
         OutPoint::fake(),
         txout,
         Some(height),
+        crate::TransferType::Incoming,
+        account.id(),
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
@@ -401,6 +407,8 @@ where
         OutPoint::fake(),
         txout,
         Some(height),
+        crate::TransferType::Incoming,
+        account.id(),
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
@@ -769,7 +777,15 @@ where
     let value = Zatoshis::const_from_u64(50_000);
     let outpoint = OutPoint::fake();
     let txout = TxOut::new(value, taddr.script().into());
-    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height), None).unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint,
+        txout,
+        Some(height),
+        crate::TransferType::Incoming,
+        account_id,
+        None,
+    )
+    .unwrap();
     st.wallet_mut()
         .put_received_transparent_utxo(&utxo)
         .unwrap();
@@ -845,8 +861,15 @@ where
     let value = Zatoshis::from_u64(100000).unwrap();
     let height = st.wallet().chain_height().unwrap().unwrap();
     let txout = TxOut::new(value, taddr.script().into());
-    let utxo =
-        WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height), None).unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        txout,
+        Some(height),
+        crate::TransferType::Incoming,
+        account_id,
+        None,
+    )
+    .unwrap();
     st.wallet_mut()
         .put_received_transparent_utxo(&utxo)
         .unwrap();
@@ -1100,7 +1123,15 @@ where
     let value = Zatoshis::const_from_u64(50_000);
     let outpoint = OutPoint::fake();
     let txout = TxOut::new(value, taddr.script().into());
-    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height), None).unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint,
+        txout,
+        Some(height),
+        crate::TransferType::Incoming,
+        account_id,
+        None,
+    )
+    .unwrap();
     st.wallet_mut()
         .put_received_transparent_utxo(&utxo)
         .unwrap();
@@ -1173,8 +1204,15 @@ where
     let value = Zatoshis::from_u64(100000).unwrap();
     let height = st.wallet().chain_height().unwrap().unwrap();
     let txout = TxOut::new(value, taddr.script().into());
-    let utxo =
-        WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height), None).unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        txout,
+        Some(height),
+        crate::TransferType::Incoming,
+        account_id,
+        None,
+    )
+    .unwrap();
     st.wallet_mut()
         .put_received_transparent_utxo(&utxo)
         .unwrap();
