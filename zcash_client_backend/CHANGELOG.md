@@ -36,12 +36,17 @@ workspace.
   - `TransparentAddressMetadata::standalone_script`
   - `TransparentAddressMetadata::redeem_script`
   - `WalletTransparentOutput::with_known_input_size`
+  - `WalletTransparentOutput::recipient_key_scope`
   - `impl From<sapling_crypto::Note> for Note`
   - `impl From<orchard::Note> for Note`
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`.
 - `zcash_client_backend::data_api`:
+  - Changes to the `InputSource` trait:
+    - The result types of `InputSource::get_unspent_transparent_output` and
+      `InputSource::get_unspent_transparent_outputs` have each changed; these
+      have reverted to returning `WalletTransparentOutput`.
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`
       (using `TransparentKeyOrigin`) to distinguish standalone transparent
@@ -124,6 +129,8 @@ workspace.
   - `GapMetadata` has been moved behind the `transparent-inputs` feature flag,
     as it is only useful in the context of the wallet receiving transparent
     funds.
+  - `WalletTransparentOutput::from_parts` now takes an
+    `Option<TransparentKeyScope>` parameter.
   - `WalletTx::block_index` now has type `zcash_protocol::consensus::TxIndex`
     and the `WalletTx::new` function has been modified accordingly.
   - Renamed `TransparentAddressSource::Standalone` to
@@ -142,8 +149,10 @@ workspace.
   - `get_block_range_nullifiers`
 
 ### Removed
-- `zcash_client_backend::data_api::testing::transparent::GapLimits` (use
-  `zcash_keys::keys::transparent::GapLimits` instead).
+- `zcash_client_backend::data_api`:
+  - `WalletUtxo` (use `WalletTransparentOutput` instead).
+  - `testing::transparent::GapLimits` (use
+    `zcash_keys::keys::transparent::GapLimits` instead).
 
 ## [0.21.2] - 2026-03-10
 - The following APIs no longer crash in certain regtest mode configurations with

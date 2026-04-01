@@ -7,6 +7,7 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
+    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
 use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
@@ -27,10 +28,7 @@ use crate::fees::sapling as sapling_fees;
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-    std::time::SystemTime,
-};
+use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -177,6 +175,7 @@ pub struct WalletTransparentOutput {
     outpoint: OutPoint,
     txout: TxOut,
     mined_height: Option<BlockHeight>,
+    recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
     /// The known serialized input size for this output, if available.
     /// This is set for P2SH outputs where the redeem script is known.
@@ -192,13 +191,15 @@ impl WalletTransparentOutput {
         outpoint: OutPoint,
         txout: TxOut,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
+        recipient_key_scope: Option<TransparentKeyScope>,
+    ) -> Option<Self> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
                 mined_height,
+                recipient_key_scope,
                 recipient_address,
                 known_input_size: None,
             })
@@ -226,6 +227,15 @@ impl WalletTransparentOutput {
     /// Returns the height at which the UTXO was mined, if any.
     pub fn mined_height(&self) -> Option<BlockHeight> {
         self.mined_height
+    }
+
+    /// Returns the transparent key scope at which this address was derived, if known.
+    ///
+    /// This metadata MUST be returned for any transparent address derived by the wallet;
+    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
+    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
+    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.recipient_key_scope
     }
 
     /// Returns the wallet address that received the UTXO.

@@ -23,7 +23,7 @@ use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, WalletUtxo,
+        TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{
@@ -953,12 +953,14 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
     })?;
     let height: Option<u32> = row.get("received_height")?;
+    let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
 
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(
         outpoint,
         TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
+        key_scope,
     )
     .ok_or_else(|| {
         SqliteClientError::CorruptedData(
@@ -1096,7 +1098,7 @@ pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
-) -> Result<Option<WalletUtxo>, SqliteClientError> {
+) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
     // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
@@ -1126,7 +1128,7 @@ pub(crate) fn get_wallet_transparent_output(
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
     ))?;
 
-    let result: Result<Option<WalletUtxo>, SqliteClientError> = stmt_select_utxo
+    let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
         .query_and_then(
             named_params![
                 ":txid": outpoint.hash(),
@@ -1134,12 +1136,7 @@ pub(crate) fn get_wallet_transparent_output(
                 ":target_height": target_height.map(u32::from),
                 ":allow_unspendable": target_height.is_none(),
             ],
-            |row| {
-                let output = to_unspent_transparent_output(row)?;
-                let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
-
-                Ok(WalletUtxo::new(output, key_scope))
-            },
+            to_unspent_transparent_output,
         )?
         .next()
         .transpose();
@@ -1167,7 +1164,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-) -> Result<Vec<WalletUtxo>, SqliteClientError> {
+) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
@@ -1206,10 +1203,9 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":min_value": u64::from(zip317::MARGINAL_FEE),
     ])?;
 
-    let mut utxos = Vec::<WalletUtxo>::new();
+    let mut utxos = Vec::<WalletTransparentOutput>::new();
     while let Some(row) = rows.next()? {
         let mut output = to_unspent_transparent_output(row)?;
-        let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
 
         // If the address has a redeem script, compute the known input size for fee
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
@@ -1225,7 +1221,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
             }
         }
 
-        utxos.push(WalletUtxo::new(output, key_scope));
+        utxos.push(output);
     }
 
     Ok(utxos)

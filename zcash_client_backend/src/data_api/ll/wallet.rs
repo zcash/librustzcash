@@ -63,7 +63,7 @@ struct TransparentSentOutput<AccountId> {
 #[derive(Debug)]
 struct WalletTransparentOutputs<AccountId> {
     #[cfg(feature = "transparent-inputs")]
-    received: Vec<(WalletTransparentOutput, Option<TransparentKeyScope>)>,
+    received: Vec<WalletTransparentOutput>,
     sent: Vec<TransparentSentOutput<AccountId>>,
 }
 
@@ -878,15 +878,15 @@ where
                         output_index,
                         account_uuid
                     );
-                    result.received.push((
+                    result.received.push(
                         WalletTransparentOutput::from_parts(
                             OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                             txout.clone(),
                             mined_height,
+                            key_scope,
                         )
                         .expect("txout.recipient_address extraction previously checked"),
-                        key_scope,
-                    ));
+                    );
                 } else {
                     debug!(
                         "Address {} is not recognized as belonging to any of our accounts.",
@@ -1100,11 +1100,11 @@ where
     DbT: LowLevelWalletWrite,
 {
     #[cfg(feature = "transparent-inputs")]
-    for (received_t_output, key_scope) in &outputs.received {
+    for received_t_output in &outputs.received {
         let (account_id, _) = put_received_output(wallet_db, received_t_output)?;
 
-        if let Some(t_key_scope) = key_scope {
-            on_received(account_id, *t_key_scope);
+        if let Some(t_key_scope) = received_t_output.recipient_key_scope() {
+            on_received(account_id, t_key_scope);
         }
 
         // When we receive transparent funds (particularly as ephemeral outputs
