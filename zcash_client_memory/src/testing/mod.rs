@@ -171,7 +171,7 @@ where
         &self,
         outpoint: &::transparent::bundle::OutPoint,
         _spendable_as_of: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<Option<WalletTransparentOutput<AccountId>>, <Self as InputSource>::Error> {
         // FIXME: perform spendability check according to `_spendable_as_of`
         Ok(self
             .transparent_received_outputs

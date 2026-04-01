@@ -13,6 +13,7 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::wallet`:
+  - `WalletTransparentOutput::account_id`
   - `WalletTransparentOutput::recipient_key_scope`
 
 ### Changed
@@ -30,9 +31,15 @@ workspace.
     fail with `RewindError::RewindBeyondBirthdays`; the caller should re-try
     with the affected account ids included in the `reset_account_birthdays`
     argument to acknowledge that those birthdays will be lowered.
+- `zcash_client_backend::proposal`:
+  - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
+    as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
 - `zcash_client_backend::wallet`:
-  - `WalletTransparentOutput::from_parts` now takes an
-    `Option<TransparentKeyScope>` parameter.
+  - `WalletTransparentOutput` has been refactored to convey information
+    equivalent to `WalletOutput`:
+    - It now has an `AccountId` generic parameter,
+    - `WalletTransparentOutput::from_parts` now takes `TransferType`,
+      `AccountId`, and `Option<TransparentKeyScope>` parameters.
 
 ### Removed
 - `zcash_client_backend::data_api`:

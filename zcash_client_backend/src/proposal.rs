@@ -304,7 +304,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn single_step(
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
@@ -397,7 +397,7 @@ impl StepOutput {
 pub struct Step<NoteRef> {
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
-    transparent_inputs: Vec<WalletTransparentOutput>,
+    transparent_inputs: Vec<WalletTransparentOutput<()>>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
@@ -428,7 +428,7 @@ impl<NoteRef> Step<NoteRef> {
         prior_steps: &[Step<NoteRef>],
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
@@ -537,7 +537,7 @@ impl<NoteRef> Step<NoteRef> {
         &self.payment_pools
     }
     /// Returns the transparent inputs that have been selected to fund the transaction.
-    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
+    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput<()>] {
         &self.transparent_inputs
     }
     /// Returns the shielded inputs that have been selected to fund the transaction.

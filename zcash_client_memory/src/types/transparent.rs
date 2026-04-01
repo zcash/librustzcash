@@ -124,11 +124,18 @@ impl ReceivedTransparentOutput {
         &self,
         outpoint: &OutPoint,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
+    ) -> Option<WalletTransparentOutput<AccountId>> {
         WalletTransparentOutput::from_parts(
             outpoint.clone(),
             self.txout.clone(),
             mined_height,
+            match self.key_scope {
+                TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL => {
+                    zcash_client_backend::TransferType::WalletInternal
+                }
+                _ => zcash_client_backend::TransferType::Incoming,
+            },
+            self.account_id,
             Some(self.key_scope),
         )
     }

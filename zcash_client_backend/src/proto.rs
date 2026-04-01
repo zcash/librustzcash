@@ -780,7 +780,8 @@ impl proposal::Proposal {
                                                             PoolType::TRANSPARENT,
                                                             out.index,
                                                         )
-                                                    })?,
+                                                    })?
+                                                    .without_account_id(),
                                             );
                                         }
                                     }

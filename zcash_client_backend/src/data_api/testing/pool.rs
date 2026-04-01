@@ -3350,6 +3350,8 @@ where
         spent_outpoint.clone(),
         TxOut::new(Zatoshis::const_from_u64(100000), taddr.script().into()),
         Some(h),
+        crate::TransferType::Incoming,
+        account.id(),
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
@@ -6012,6 +6014,8 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             outpoint,
             t_bundle.vout[0].clone(),
             Some(h),
+            crate::TransferType::Incoming,
+            dest_account_id,
             Some(TransparentKeyScope::EXTERNAL),
         )
         .unwrap();
@@ -6306,6 +6310,8 @@ where
         OutPoint::fake(),
         TxOut::new(non_coinbase_value, t_addr.script().into()),
         Some(h),
+        crate::TransferType::Incoming,
+        account,
         Some(TransparentKeyScope::EXTERNAL),
     )
     .unwrap();
