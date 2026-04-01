@@ -29,6 +29,7 @@ use crate::{
 use orchard::note_encryption::OrchardDomain;
 
 pub(crate) mod compact;
+pub mod full;
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a [`CompactSaplingOutput`] or [`CompactOrchardAction`].
@@ -345,7 +346,7 @@ impl<AccountId> Nullifiers<AccountId> {
     }
 
     /// Fetches the nullifiers for the unspent notes being tracked by the given wallet.
-    pub(crate) fn unspent<DbT: WalletRead<AccountId = AccountId>>(
+    pub fn unspent<DbT: WalletRead<AccountId = AccountId>>(
         db_data: &DbT,
     ) -> Result<Self, DbT::Error> {
         Ok(Self::new(
@@ -420,7 +421,7 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
     ///   the set, so we don't bother .
     /// - Notes received by the wallet in this block will have their nullifiers added to
     ///   the set, enabling spend detection in subsequent blocks.
-    pub(crate) fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
+    pub fn update_with(&mut self, scanned_block: &ScannedBlock<AccountId>) {
         let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
             .transactions()
             .iter()
@@ -644,22 +645,25 @@ impl PositionTracker {
 
 /// Check for spent notes. The comparison against known-unspent nullifiers is done
 /// in constant time.
-fn find_spent<
-    AccountId: ConditionallySelectable + Default,
-    Spend,
-    Nf: ConstantTimeEq + Copy,
-    WS,
->(
-    spends: &[Spend],
+fn find_spent<'a, I, AccountId, Spend, Nf, WS>(
+    spends: I,
     nullifiers: &[(AccountId, Nf)],
     extract_nf: impl Fn(&Spend) -> Nf,
     construct_wallet_spend: impl Fn(usize, Nf, AccountId) -> WS,
-) -> (Vec<WS>, Vec<Nf>) {
+) -> (Vec<WS>, Vec<Nf>)
+where
+    I: IntoIterator<Item = &'a Spend>,
+    I::IntoIter: ExactSizeIterator,
+    Spend: 'a,
+    AccountId: ConditionallySelectable + Default,
+    Nf: ConstantTimeEq + Copy,
+{
+    let spends = spends.into_iter();
     // TODO: this is O(|nullifiers| * |notes|); does using constant-time operations here really
     // make sense?
     let mut found_spent = vec![];
     let mut unlinked_nullifiers = Vec::with_capacity(spends.len());
-    for (index, spend) in spends.iter().enumerate() {
+    for (index, spend) in spends.enumerate() {
         let spend_nf = extract_nf(spend);
 
         // Find whether any tracked nullifier that matches this spend, and produce a

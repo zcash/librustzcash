@@ -220,6 +220,15 @@ sync = [
     "dep:futures-util",
 ]
 
+## Exposes a batch decryption engine for use within syncing.
+##
+## This feature flag will eventually be removed when the `sync::run` function behind the
+## `sync` feature flag is replaced with a sync engine that makes use of the batch
+## decryption engine.
+sync-decryptor = [
+    "dep:tokio",
+]
+
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
 ## operations.
 tor = [

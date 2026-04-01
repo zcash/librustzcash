@@ -70,11 +70,14 @@ pub mod scan;
 pub mod scanning;
 pub mod wallet;
 
-#[cfg(feature = "sync")]
+#[cfg(any(feature = "sync", feature = "sync-decryptor"))]
 pub mod sync;
 
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
+
+#[cfg(feature = "sync-decryptor")]
+mod task;
 
 #[cfg(feature = "tor")]
 pub mod tor;
