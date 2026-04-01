@@ -98,6 +98,7 @@ pub enum Recipient<AccountId> {
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: TxIndex,
+    transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
     #[cfg(feature = "orchard")]
@@ -111,6 +112,7 @@ impl<AccountId> WalletTx<AccountId> {
     pub fn new(
         txid: TxId,
         block_index: TxIndex,
+        transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
         #[cfg(feature = "orchard")] orchard_spends: Vec<
@@ -121,6 +123,7 @@ impl<AccountId> WalletTx<AccountId> {
         Self {
             txid,
             block_index,
+            transparent_outputs,
             sapling_spends,
             sapling_outputs,
             #[cfg(feature = "orchard")]
@@ -140,6 +143,12 @@ impl<AccountId> WalletTx<AccountId> {
     /// Returns the index of the transaction in the containing block.
     pub fn block_index(&self) -> TxIndex {
         self.block_index
+    }
+
+    /// Returns a record for each transparent coin received or produced by the wallet in
+    /// the transaction.
+    pub fn transparent_outputs(&self) -> &[WalletTransparentOutput<AccountId>] {
+        &self.transparent_outputs
     }
 
     /// Returns a record for each Sapling note belonging to the wallet that was spent in the

@@ -789,7 +789,7 @@ where
     Ok(())
 }
 
-fn detect_wallet_transparent_outputs<P, AccountId, E>(
+pub(crate) fn detect_wallet_transparent_outputs<P, AccountId, E>(
     params: &P,
     tx: &Transaction,
     mined_height: Option<BlockHeight>,

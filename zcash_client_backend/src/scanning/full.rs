@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt;
 use std::hash::Hash;
 
 use incrementalmerkletree::Retention;
 use sapling::note_encryption::SaplingDomain;
 use subtle::ConditionallySelectable;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use zcash_note_encryption::batch;
 use zcash_primitives::{
@@ -19,7 +20,9 @@ use zcash_protocol::{
 
 use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
 use crate::{
-    data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
+    data_api::{
+        BlockMetadata, ScannedBlock, ScannedBundles, ll::wallet::detect_wallet_transparent_outputs,
+    },
     scan::{Batch, BatchReceiver, BatchRunner, DecryptedOutput, FullDecryptor, Tasks},
     wallet::{WalletSpend, WalletTx},
 };
@@ -273,7 +276,7 @@ pub fn scan_block<P, AccountId, IvkTag>(
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
+    AccountId: Default + fmt::Debug + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
     fn check_hash_continuity(
@@ -329,6 +332,9 @@ where
         let tx_index =
             TxIndex::try_from(tx_index).expect("Cannot fit more than 2^16 transactions in a block");
 
+        // TODO: Detect.
+        let transparent_spends: Vec<()> = vec![];
+
         let (sapling_spends, sapling_unlinked_nullifiers) = tx
             .tx
             .sapling_bundle()
@@ -368,6 +374,26 @@ where
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
+
+        // TODO(#1305): Correctly track accounts that fund each transaction output.
+        let funding_account = spent_from_accounts.iter().next().copied();
+        if spent_from_accounts.len() > 1 {
+            warn!(
+                "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                tx.tx.txid(),
+                funding_account.unwrap()
+            )
+        }
+
+        let transparent_outputs = detect_wallet_transparent_outputs(
+            params,
+            &tx.tx,
+            Some(height),
+            funding_account,
+            #[cfg(feature = "transparent-inputs")]
+            |address| wallet_db.find_account_for_transparent_address(address),
+        )?;
+        let has_transparent = !(transparent_spends.is_empty() && transparent_outputs.is_empty());
 
         let (sapling_outputs, mut sapling_nc) = tx
             .tx
@@ -425,10 +451,11 @@ where
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
-        if has_sapling || has_orchard {
+        if has_transparent || has_sapling || has_orchard {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                transparent_outputs,
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]

@@ -4388,6 +4388,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             index,
             vec![],
             vec![],
+            vec![],
             #[cfg(feature = "orchard")]
             vec![],
             #[cfg(feature = "orchard")]
