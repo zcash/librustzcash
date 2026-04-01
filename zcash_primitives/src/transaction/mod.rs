@@ -9,7 +9,6 @@ pub mod sighash_v5;
 pub mod sighash_v6;
 
 pub mod txid;
-pub mod util;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod tests;
@@ -34,8 +33,8 @@ use self::{
         sprout::{self, JsDescription},
     },
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
-    util::sha256d::{HashReader, HashWriter},
 };
+use ::transparent::util::sha256d::{HashReader, HashWriter};
 
 #[cfg(feature = "circuits")]
 use ::sapling::builder as sapling_builder;
