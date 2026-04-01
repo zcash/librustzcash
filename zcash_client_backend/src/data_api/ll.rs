@@ -35,7 +35,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::WalletUtxo,
+    crate::wallet::WalletTransparentOutput,
     transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
 };
@@ -239,7 +239,7 @@ pub trait LowLevelWalletRead {
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletUtxo>, Self::Error>;
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error>;
 
     /// Returns the vector of transactions in the wallet that spend the transparent outputs of the
     /// referenced transaction, but for which the amount of fee paid is unknown. This should

@@ -12,8 +12,15 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::wallet`:
+  - `WalletTransparentOutput::recipient_key_scope`
 
 ### Changed
+- `zcash_client_backend::data_api`:
+  - Changes to the `InputSource` trait:
+    - The result types of `InputSource::get_unspent_transparent_output` and
+      `InputSource::get_unspent_transparent_outputs` have each changed; these
+      have reverted to returning `WalletTransparentOutput`.
 - `zcash_client_backend::data_api::WalletWrite`:
   - `rewind_to_height` has been replaced by `rewind_to_chain_state`. Callers
     that previously passed a `BlockHeight` should now construct a
@@ -23,6 +30,13 @@ workspace.
     fail with `RewindError::RewindBeyondBirthdays`; the caller should re-try
     with the affected account ids included in the `reset_account_birthdays`
     argument to acknowledge that those birthdays will be lowered.
+- `zcash_client_backend::wallet`:
+  - `WalletTransparentOutput::from_parts` now takes an
+    `Option<TransparentKeyScope>` parameter.
+
+### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletUtxo` (use `WalletTransparentOutput` instead).
 
 ## [0.22.0] - 2026-04-27
 
