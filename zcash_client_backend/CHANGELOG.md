@@ -33,6 +33,7 @@ workspace.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
+- `zcash_client_backend::wallet::WalletTx::transparent_outputs`
 - `zcash_client_backend::scanning`:
   - `full` module, providing full-block scanning.
   - `Nullifiers::unspent` and `Nullifiers::update_with` are now public, for use
@@ -75,6 +76,8 @@ workspace.
 - `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector`
   now requires implementors to provide `propose_shielding_coinbase` in
   addition to `propose_shielding`.
+- `zcash_client_backend::wallet::WalletTx::new` now takes a `transparent_outputs`
+  argument.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`

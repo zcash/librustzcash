@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt;
 use std::hash::Hash;
 
 use incrementalmerkletree::Retention;
 use sapling::note_encryption::SaplingDomain;
 use subtle::ConditionallySelectable;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use zcash_note_encryption::{Domain, batch};
 use zcash_primitives::{
@@ -19,7 +20,9 @@ use zcash_protocol::{
 
 use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
 use crate::{
-    data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
+    data_api::{
+        BlockMetadata, ScannedBlock, ScannedBundles, ll::wallet::detect_wallet_transparent_outputs,
+    },
     scan::{Batch, BatchReceiver, BatchRunner, DecryptedOutput, FullDecryptor, Tasks},
     wallet::{WalletSpend, WalletTx},
 };
@@ -29,6 +32,9 @@ use orchard::{note_encryption::OrchardDomain, primitives::redpallas, tree::Merkl
 
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
+
+#[cfg(feature = "transparent-inputs")]
+use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
 
 /// The default number of outputs at which a batch runner immediately flushes a batch.
 pub(crate) const DEFAULT_BATCH_SIZE_THRESHOLD: usize = 200;
@@ -252,6 +258,22 @@ where
     (header, vtx)
 }
 
+/// Errors that can occur while scanning a full block via [`scan_block`].
+#[derive(Debug)]
+pub enum ScanBlockError<E> {
+    /// A structural or continuity error in the block being scanned.
+    Scan(ScanError),
+    /// An error occurred while looking up the wallet account associated with a
+    /// transparent address.
+    AddressLookup(E),
+}
+
+impl<E> From<ScanError> for ScanBlockError<E> {
+    fn from(e: ScanError) -> Self {
+        ScanBlockError::Scan(e)
+    }
+}
+
 /// Scans a block with a set of [`ScanningKeys`].
 ///
 /// Returns a [`ScannedBlock`] containing one [`WalletTx`] for each transaction in the
@@ -271,7 +293,8 @@ where
 ///
 /// [`WalletTx`]: crate::wallet::WalletTx
 #[tracing::instrument(skip_all, fields(height = u32::from(height)))]
-pub fn scan_block<P, AccountId, IvkTag>(
+#[allow(clippy::too_many_arguments)]
+pub fn scan_block<P, AccountId, IvkTag, E>(
     params: &P,
     height: BlockHeight,
     header: &BlockHeader,
@@ -279,10 +302,16 @@ pub fn scan_block<P, AccountId, IvkTag>(
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<AccountId>, ScanError>
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<ScannedBlock<AccountId>, ScanBlockError<E>>
 where
     P: consensus::Parameters + Send + 'static,
-    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
+    AccountId: Default + fmt::Debug + Ord + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
     fn check_hash_continuity(
@@ -313,7 +342,7 @@ where
     }
 
     if let Some(scan_error) = check_hash_continuity(height, header, prior_block_metadata) {
-        return Err(scan_error);
+        return Err(scan_error.into());
     }
 
     trace!("Block continuity okay at {:?}", height);
@@ -378,6 +407,32 @@ where
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
+        // TODO(#1305): Correctly track accounts that fund each transaction output. For now
+        // we pick a single funding account; when more than one wallet account contributed
+        // inputs we select the lowest account id, so that the choice is deterministic.
+        let funding_account = spent_from_accounts.iter().min().copied();
+        if spent_from_accounts.len() > 1 {
+            warn!(
+                "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                tx.tx.txid(),
+                funding_account
+                    .expect("funding_account is Some when spent_from_accounts is nonempty")
+            )
+        }
+
+        // Transparent spend detection for full blocks is not yet implemented; only
+        // received transparent outputs are scanned here.
+        let transparent_outputs = detect_wallet_transparent_outputs(
+            params,
+            &tx.tx,
+            Some(height),
+            funding_account,
+            #[cfg(feature = "transparent-inputs")]
+            &find_account_for_address,
+        )
+        .map_err(ScanBlockError::AddressLookup)?;
+        let has_transparent = !transparent_outputs.is_empty();
+
         let (sapling_outputs, mut sapling_nc) = tx
             .tx
             .sapling_bundle()
@@ -434,10 +489,11 @@ where
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
-        if has_sapling || has_orchard {
+        if has_transparent || has_sapling || has_orchard {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                transparent_outputs,
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]

@@ -363,6 +363,9 @@ where
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                // TODO: Scan transparent data in CompactTx if present.
+                // https://github.com/zcash/librustzcash/issues/2187
+                vec![],
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
