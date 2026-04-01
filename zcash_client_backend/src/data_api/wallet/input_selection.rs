@@ -1117,7 +1117,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                         .then_some(utxo.recipient_address())
                 }));
                 input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
-                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
+                inputs.extend(utxos.into_iter());
 
                 // Funds may be spent from at most one ephemeral address at a time. If there are no
                 // ephemeral addresses, we allow shielding from multiple transparent addresses.

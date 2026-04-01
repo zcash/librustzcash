@@ -780,8 +780,7 @@ impl proposal::Proposal {
                                                             PoolType::TRANSPARENT,
                                                             out.index,
                                                         )
-                                                    })?
-                                                    .into_wallet_output(),
+                                                    })?,
                                             );
                                         }
                                     }

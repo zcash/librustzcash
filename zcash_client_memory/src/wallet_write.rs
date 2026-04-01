@@ -48,7 +48,7 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::TxOut},
+    ::transparent::{address::TransparentAddress, bundle::TxOut, keys::TransparentKeyScope},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
@@ -840,6 +840,8 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                             ),
                             txout.clone(),
                             d_tx.mined_height(),
+                            // TODO: Get from somewhere
+                            None,
                         )
                         .unwrap();
                         self.put_transparent_output(
@@ -1169,6 +1171,7 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                             outpoint.clone(),
                             TxOut::new(output.value(), ephemeral_address.script().into()),
                             None,
+                            Some(TransparentKeyScope::EPHEMERAL),
                         )
                         .unwrap();
                         self.put_transparent_output(&txo, receiving_account, true)?;
