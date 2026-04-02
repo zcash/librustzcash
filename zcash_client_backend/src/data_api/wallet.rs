@@ -372,6 +372,20 @@ where
 ///
 /// See [`ZIP 315`] for details including the definitions of "trusted" and "untrusted" notes.
 ///
+/// An error indicating that a [`ConfirmationsPolicy`] could not be constructed because the
+/// trusted confirmation count exceeds the untrusted confirmation count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfirmationsPolicyError;
+
+impl core::fmt::Display for ConfirmationsPolicyError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Trusted confirmations must not exceed untrusted confirmations"
+        )
+    }
+}
+
 /// [`ZIP 315`]: https://zips.z.cash/zip-0315
 #[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
@@ -419,7 +433,7 @@ impl ConfirmationsPolicy {
     /// provided values.
     ///
     /// The number of confirmations required for trusted notes must be less than or equal to the
-    /// number of confirmations required for untrusted notes; this returns `Err(())` if this
+    /// number of confirmations required for untrusted notes; this returns an error if this
     /// invariant is violated.
     ///
     /// WARNING: This should only be used with great care to avoid problems of transaction
@@ -428,9 +442,9 @@ impl ConfirmationsPolicy {
         trusted: NonZeroU32,
         untrusted: NonZeroU32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ConfirmationsPolicyError> {
         if trusted > untrusted {
-            Err(())
+            Err(ConfirmationsPolicyError)
         } else {
             Ok(Self {
                 trusted,

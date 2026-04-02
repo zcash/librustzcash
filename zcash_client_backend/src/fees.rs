@@ -148,6 +148,20 @@ impl ChangeValue {
     }
 }
 
+/// An error indicating that the sum of proposed change and fee values overflows the valid range
+/// of [`Zatoshis`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BalanceOverflow;
+
+impl Display for BalanceOverflow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "The sum of proposed change and fee values overflows the valid range"
+        )
+    }
+}
+
 /// The amount of change and fees required to make a transaction's inputs and
 /// outputs balance under a specific fee rule, as computed by a particular
 /// [`ChangeStrategy`] that is aware of that rule.
@@ -163,13 +177,16 @@ pub struct TransactionBalance {
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
-    pub fn new(proposed_change: Vec<ChangeValue>, fee_required: Zatoshis) -> Result<Self, ()> {
+    pub fn new(
+        proposed_change: Vec<ChangeValue>,
+        fee_required: Zatoshis,
+    ) -> Result<Self, BalanceOverflow> {
         let total = proposed_change
             .iter()
             .map(|c| c.value())
             .chain(Some(fee_required).into_iter())
             .sum::<Option<Zatoshis>>()
-            .ok_or(())?;
+            .ok_or(BalanceOverflow)?;
 
         Ok(Self {
             proposed_change,
