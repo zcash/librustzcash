@@ -599,6 +599,32 @@ impl From<bip32::Error> for AddressGenerationError {
     }
 }
 
+/// An error type for failures in combining [`ReceiverRequirement`] values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReceiverRequirementError {
+    /// The two requirements are incompatible: one requires inclusion and the other requires
+    /// omission.
+    Conflict,
+    /// A set of receiver requirements would not include any shielded receiver.
+    NoShieldedReceiver,
+}
+
+impl Display for ReceiverRequirementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReceiverRequirementError::Conflict => {
+                write!(f, "Require and Omit receiver requirements are incompatible")
+            }
+            ReceiverRequirementError::NoShieldedReceiver => {
+                write!(
+                    f,
+                    "A unified address must include at least one shielded receiver"
+                )
+            }
+        }
+    }
+}
+
 /// An enumeration of the ways in which a receiver may be requested to be present in a generated
 /// [`UnifiedAddress`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -622,18 +648,13 @@ impl ReceiverRequirement {
     /// Return the intersection of two requirements that chooses the stronger requirement, if one
     /// exists. [`ReceiverRequirement::Require`] and [`ReceiverRequirement::Omit`] are
     /// incompatible; attempting an intersection between these will return an error.
-    pub fn intersect(self, other: Self) -> Result<Self, ()> {
+    pub fn intersect(self, other: Self) -> Result<Self, ReceiverRequirementError> {
         use ReceiverRequirement::*;
         match (self, other) {
-            (Require, Omit) => Err(()),
-            (Require, Require) => Ok(Require),
-            (Require, Allow) => Ok(Require),
-            (Allow, Require) => Ok(Require),
+            (Require, Omit) | (Omit, Require) => Err(ReceiverRequirementError::Conflict),
+            (Require, Require) | (Require, Allow) | (Allow, Require) => Ok(Require),
             (Allow, Allow) => Ok(Allow),
-            (Allow, Omit) => Ok(Omit),
-            (Omit, Require) => Err(()),
-            (Omit, Allow) => Ok(Omit),
-            (Omit, Omit) => Ok(Omit),
+            (Allow, Omit) | (Omit, Allow) | (Omit, Omit) => Ok(Omit),
         }
     }
 }
@@ -659,7 +680,7 @@ impl UnifiedAddressRequest {
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ReceiverRequirementError> {
         ReceiverRequirements::new(orchard, sapling, p2pkh).map(UnifiedAddressRequest::Custom)
     }
 
@@ -683,15 +704,16 @@ pub struct ReceiverRequirements {
 impl ReceiverRequirements {
     /// Construct a new unified address request from its constituent parts.
     ///
-    /// Returns `Err(())` if the resulting unified address would not include at least one shielded receiver.
+    /// Returns an error if the resulting unified address would not include at least one shielded
+    /// receiver.
     pub fn new(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ReceiverRequirementError> {
         use ReceiverRequirement::*;
         if orchard == Omit && sapling == Omit {
-            Err(())
+            Err(ReceiverRequirementError::NoShieldedReceiver)
         } else {
             Ok(Self {
                 orchard,
@@ -720,9 +742,12 @@ impl ReceiverRequirements {
     };
 
     /// Constructs a new unified address request that includes only the receivers that are allowed
-    /// both in itself and a given other request. Returns [`None`] if requirements are incompatible
+    /// both in itself and a given other request. Returns an error if requirements are incompatible
     /// or if no shielded receiver type is allowed.
-    pub fn intersect(&self, other: &ReceiverRequirements) -> Result<ReceiverRequirements, ()> {
+    pub fn intersect(
+        &self,
+        other: &ReceiverRequirements,
+    ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
         let orchard = self.orchard.intersect(other.orchard)?;
         let sapling = self.sapling.intersect(other.sapling)?;
         let p2pkh = self.p2pkh.intersect(other.p2pkh)?;
@@ -1773,9 +1798,9 @@ impl UnifiedIncomingViewingKey {
 
     /// Constructs the [`ReceiverRequirements`] that requires a receiver for each data item of this UIVK.
     ///
-    /// Returns [`Err`] if the resulting request would not include a shielded receiver.
+    /// Returns an error if the resulting request would not include a shielded receiver.
     #[allow(unused_mut)]
-    pub fn to_receiver_requirements(&self) -> Result<ReceiverRequirements, ()> {
+    pub fn to_receiver_requirements(&self) -> Result<ReceiverRequirements, ReceiverRequirementError> {
         use ReceiverRequirement::*;
 
         let mut orchard = Omit;

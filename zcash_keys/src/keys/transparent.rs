@@ -15,6 +15,18 @@ use {
     zcash_protocol::consensus::NetworkConstants,
 };
 
+/// An error indicating that a DER-encoded secret key could not be decoded.
+#[cfg(feature = "transparent-key-encoding")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DerDecodeError;
+
+#[cfg(feature = "transparent-key-encoding")]
+impl core::fmt::Display for DerDecodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Invalid DER encoding for transparent secret key")
+    }
+}
+
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
 #[cfg(feature = "transparent-key-encoding")]
 #[derive(Debug)]
@@ -240,7 +252,7 @@ impl Key {
     }
 
     // Decodes a secret key from the "openssl-inspired" DER encoding used by zcashd.
-    pub fn der_decode(encoded: &SecretVec<u8>, compressed: bool) -> Result<Self, ()> {
+    pub fn der_decode(encoded: &SecretVec<u8>, compressed: bool) -> Result<Self, DerDecodeError> {
         // Ported from https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key.cpp#L36
         // The original c++ code is retained as comments.
 
@@ -253,7 +265,7 @@ impl Key {
         //    seckey++;
         let seckey = match seckey.split_first() {
             Some((&0x30, rest)) => Ok(rest),
-            _ => Err(()),
+            _ => Err(DerDecodeError),
         }?;
 
         //    /* sequence length constructor */
@@ -269,13 +281,13 @@ impl Key {
         //    }
         let (lenb, seckey) = match seckey.split_first() {
             Some((lenb, seckey)) if lenb & 0x80 != 0 => Ok((usize::from(lenb & !0x80), seckey)),
-            _ => Err(()),
+            _ => Err(DerDecodeError),
         }?;
         if !(1..=2).contains(&lenb) {
-            return Err(());
+            return Err(DerDecodeError);
         }
         if seckey.len() < lenb {
-            return Err(());
+            return Err(DerDecodeError);
         }
 
         //    /* sequence length */
@@ -293,7 +305,7 @@ impl Key {
         let len = len_low_bits | len_high_bits;
         let seckey = &seckey[lenb..];
         if seckey.len() < len {
-            return Err(());
+            return Err(DerDecodeError);
         }
 
         //    /* sequence element 0: version number (=1) */
@@ -303,7 +315,7 @@ impl Key {
         //    seckey += 3;
         let seckey = match seckey.split_at(3) {
             (&[0x02, 0x01, 0x01], rest) => Ok(rest),
-            _ => Err(()),
+            _ => Err(DerDecodeError),
         }?;
 
         //    /* sequence element 1: octet string, up to 32 bytes */
@@ -323,12 +335,12 @@ impl Key {
         //    return 1;
         //}
         if seckey.len() < 2 || seckey[0] != 0x04 {
-            return Err(());
+            return Err(DerDecodeError);
         }
         let oslen = usize::from(seckey[1]);
         let seckey = &seckey[2..];
         if oslen > 32 || seckey.len() < oslen {
-            return Err(());
+            return Err(DerDecodeError);
         }
         let mut secret_buf = [0u8; 32];
         secret_buf[(32 - oslen)..].copy_from_slice(&seckey[..oslen]);
@@ -337,7 +349,7 @@ impl Key {
 
         secret_key
             .map(|secret| Self { secret, compressed })
-            .map_err(|_| ())
+            .map_err(|_| DerDecodeError)
     }
 }
 
