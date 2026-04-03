@@ -201,10 +201,7 @@ impl TransparentInputInfo {
                 // output may be spent.
                 match TransparentAddress::from_script_pubkey(&script_pubkey) {
                     Some(TransparentAddress::PublicKeyHash(hash)) => {
-                        use ripemd::Ripemd160;
-                        use sha2::{Digest, Sha256};
-
-                        if hash[..] != Ripemd160::digest(Sha256::digest(pubkey.serialize()))[..] {
+                        if hash != crate::util::hash160::hash(&pubkey.serialize()) {
                             return Err(Error::InvalidAddress);
                         }
                     }
@@ -221,11 +218,7 @@ impl TransparentInputInfo {
                     .and_then(TransparentAddress::from_script_pubkey)
                 {
                     Some(TransparentAddress::ScriptHash(hash)) => {
-                        use ripemd::Ripemd160;
-                        use sha2::{Digest, Sha256};
-                        if hash[..]
-                            != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..]
-                        {
+                        if hash != crate::util::hash160::hash(&redeem_script.to_bytes()) {
                             return Err(Error::InvalidAddress);
                         }
                     }
@@ -901,9 +894,7 @@ mod tests {
 
     use super::{Error, OutPoint, SignableInput, TransparentBuilder, TxOut};
     use crate::address::TransparentAddress;
-    use ripemd::Ripemd160;
     use secp256k1::{Message, Secp256k1, SecretKey};
-    use sha2::{Digest, Sha256};
     use zcash_address::ZcashAddress;
     use zcash_protocol::value::Zatoshis;
 
@@ -915,9 +906,7 @@ mod tests {
         let secp = Secp256k1::new();
         let pk = secp256k1::PublicKey::from_secret_key(&secp, &sk);
 
-        let pk_hash_generic_array = Ripemd160::digest(Sha256::digest(pk.serialize()));
-        let pk_hash_bytes: [u8; 20] = pk_hash_generic_array.into();
-        let taddr = TransparentAddress::PublicKeyHash(pk_hash_bytes);
+        let taddr = TransparentAddress::PublicKeyHash(crate::util::hash160::hash(&pk.serialize()));
 
         let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
 
@@ -1127,9 +1116,8 @@ mod tests {
                 .weaken();
 
         // Create P2SH address from HASH160(redeem_script)
-        let hash = Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()));
-        let hash_bytes: [u8; 20] = hash.into();
-        let taddr = TransparentAddress::ScriptHash(hash_bytes);
+        let taddr =
+            TransparentAddress::ScriptHash(crate::util::hash160::hash(&redeem_script.to_bytes()));
 
         let txout = TxOut::new(Zatoshis::from_u64(10000).unwrap(), taddr.script().into());
         let outpoint = OutPoint::new([0u8; 32], 0);

@@ -44,6 +44,7 @@ workspace.
 - `zcash_primitives::legacy` module (use the `zcash_transparent` crate instead).
 - `zcash_primitives::memo` module (use `zcash_protocol::memo` instead)
 - `zcash_primitives::transaction`:
+  - `util::sha256d` module (use `zcash_transparent::util::sha256d` instead).
   - `builder::Builder::set_coinbase_miner_data` use the added
     `BuildConfig::Coinbase` payload instead.
   - `components`:

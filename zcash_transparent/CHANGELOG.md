@@ -11,6 +11,9 @@ workspace.
 ## [0.7.0] - PENDING
 
 ### Added
+- `zcash_transparent::util::hash160` module
+- `zcash_transparent::util::sha256d` (moved from
+  `zcash_primitives::transaction::util::sha256d`)
 - `zcash_transparent::address::TransparentAddress::from_script_kind`
 - `zcash_transparent::bundle::TxOut::script_kind`
 - `zcash_transparent::pczt`:
