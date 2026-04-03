@@ -30,8 +30,18 @@ workspace.
 - `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
+- `zcash_client_sqlite::wallet::pir` module behind the `sync-nullifier-pir` feature
+  flag, providing PIR (Private Information Retrieval) spent-note tracking. This
+  enables Orchard note spendability detection via nullifier PIR queries against
+  an external server, without waiting for sequential shard-tree scanning.
+- `pir_spent_notes` database migration (unconditional, not feature-gated) to keep
+  the migration DAG identical across all builds.
 
 ### Changed
+- When `sync-nullifier-pir` is enabled, `get_wallet_summary` and note selection
+  skip the unscanned-range spendability gate for Orchard notes.
+- `truncate_to_height` now unconditionally clears the `pir_spent_notes` table
+  to avoid stale PIR exclusions after reorgs.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`

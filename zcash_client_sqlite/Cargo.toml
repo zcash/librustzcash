@@ -169,6 +169,9 @@ expensive-tests = []
 ## protocol-specific flags. Test-only.
 pczt-tests = ["serde", "zcash_client_backend/pczt"]
 
+## Enables PIR (Private Information Retrieval) spent note tracking.
+sync-nullifier-pir = []
+
 [lib]
 bench = false
 

@@ -26,6 +26,7 @@ mod initial_setup;
 mod nullifier_map;
 mod orchard_received_notes;
 mod orchard_shardtree;
+mod pir_spent_notes;
 mod received_notes_nullable_nf;
 mod receiving_key_scopes;
 mod sapling_memo_consistency;
@@ -132,8 +133,8 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
-    //                                              /               \
-    //                               v_tx_outputs_key_scopes    standalone_p2sh
+    //                                            /          |           \
+    //                         v_tx_outputs_key_scopes  standalone_p2sh  pir_spent_notes
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -221,6 +222,7 @@ pub(super) fn all_migrations<
         Box::new(account_delete_cascade::Migration),
         Box::new(v_tx_outputs_key_scopes::Migration),
         Box::new(standalone_p2sh::Migration),
+        Box::new(pir_spent_notes::Migration),
     ]
 }
 
@@ -362,6 +364,7 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
+    pir_spent_notes::MIGRATION_ID,
     v_tx_outputs_key_scopes::MIGRATION_ID,
     standalone_p2sh::MIGRATION_ID,
 ];
