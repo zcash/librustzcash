@@ -17,63 +17,74 @@ use crate::error::SqliteClientError;
 pub mod testing {
     use rusqlite::Connection;
 
-    const PIR_TEST_SCHEMA_SQL: &str = "\
-        CREATE TABLE transactions (
-            id_tx INTEGER PRIMARY KEY
-        );
-        INSERT INTO transactions (id_tx) VALUES (100);
+    use secrecy::SecretVec;
+    use zcash_protocol::consensus::Network;
 
-        CREATE TABLE accounts (
-            id INTEGER PRIMARY KEY
-        );
-        INSERT INTO accounts (id) VALUES (1);
+    use crate::{wallet::init::WalletMigrator, WalletDb};
 
-        CREATE TABLE orchard_received_notes (
-            id INTEGER PRIMARY KEY,
-            tx INTEGER NOT NULL,
-            action_index INTEGER NOT NULL,
-            account_id INTEGER NOT NULL,
-            diversifier BLOB NOT NULL,
-            value INTEGER NOT NULL,
-            rho BLOB NOT NULL,
-            rseed BLOB NOT NULL,
-            nf BLOB UNIQUE,
-            is_change INTEGER NOT NULL,
-            memo BLOB,
-            commitment_tree_position INTEGER,
-            recipient_key_scope INTEGER,
-            FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-            FOREIGN KEY (account_id) REFERENCES accounts(id),
-            CONSTRAINT tx_output UNIQUE (tx, action_index)
-        );
+    /// Runs the full wallet migration on `path`, then reopens a plain
+    /// [`Connection`] with FK enforcement and prerequisite rows for PIR tests.
+    fn migrate_and_setup(path: impl AsRef<std::path::Path>) -> Connection {
+        let mut db = WalletDb::for_path(
+            path.as_ref(),
+            Network::TestNetwork,
+            crate::util::SystemClock,
+            rand_core::OsRng,
+        )
+        .unwrap();
+        WalletMigrator::new()
+            .with_seed(SecretVec::new(vec![0xab; 32]))
+            .init_or_migrate(&mut db)
+            .unwrap();
+        drop(db);
 
-        CREATE TABLE orchard_received_note_spends (
-            orchard_received_note_id INTEGER NOT NULL,
-            transaction_id INTEGER NOT NULL,
-            FOREIGN KEY (orchard_received_note_id)
-                REFERENCES orchard_received_notes(id)
-                ON DELETE CASCADE,
-            FOREIGN KEY (transaction_id)
-                REFERENCES transactions(id_tx),
-            UNIQUE (orchard_received_note_id, transaction_id)
-        );
-
-        CREATE TABLE pir_spent_notes (
-            note_id INTEGER NOT NULL PRIMARY KEY
-                REFERENCES orchard_received_notes(id) ON DELETE CASCADE
-        );";
-
-    /// Creates an in-memory SQLite database with the minimal schema needed
-    /// for PIR spend-tracking tests.
-    pub fn create_pir_test_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(PIR_TEST_SCHEMA_SQL).unwrap();
+        let conn = Connection::open(path.as_ref()).unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (
+                 uuid, account_kind, uivk, birthday_height, has_spend_key
+             ) VALUES (
+                 X'00000000000000000000000000000001', 1,
+                 'test-uivk-for-pir', 1, 1
+             );
+             INSERT INTO transactions (id_tx, txid, min_observed_height)
+             VALUES (
+                 100,
+                 X'0000000000000000000000000000000000000000000000000000000000000001',
+                 1
+             );",
+        )
+        .unwrap();
+
         conn
     }
 
-    /// Creates an on-disk SQLite database with the PIR test schema.
-    /// Returns the connection and the path (caller is responsible for cleanup).
+    /// A migrated wallet database for PIR tests. Holds the temp file so the
+    /// on-disk database is not cleaned up while tests are running.
+    #[cfg(test)]
+    pub struct PirTestDb {
+        conn: Connection,
+        _data_file: tempfile::NamedTempFile,
+    }
+
+    #[cfg(test)]
+    impl PirTestDb {
+        pub fn new() -> Self {
+            let data_file = tempfile::NamedTempFile::new().unwrap();
+            let conn = migrate_and_setup(data_file.path());
+            Self {
+                conn,
+                _data_file: data_file,
+            }
+        }
+
+        pub fn conn(&self) -> &Connection {
+            &self.conn
+        }
+    }
+
+    /// Creates an on-disk SQLite database with the full migrated wallet schema,
+    /// ready for PIR tests. Caller is responsible for cleanup.
     pub fn create_pir_test_db_on_disk(suffix: &str) -> (Connection, std::path::PathBuf) {
         let db_path = std::env::temp_dir().join(format!(
             "pir_test_{}_{}_{}.db",
@@ -81,9 +92,7 @@ pub mod testing {
             suffix,
             std::thread::current().name().unwrap_or("t")
         ));
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(PIR_TEST_SCHEMA_SQL).unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        let conn = migrate_and_setup(&db_path);
         (conn, db_path)
     }
 
@@ -91,7 +100,8 @@ pub mod testing {
     pub fn insert_test_note(conn: &Connection, id: i64, value: i64, nf: Option<&[u8]>) {
         conn.execute(
             "INSERT INTO orchard_received_notes \
-             (id, tx, action_index, account_id, diversifier, value, rho, rseed, nf, is_change) \
+             (id, transaction_id, action_index, account_id, diversifier, value, \
+              rho, rseed, nf, is_change) \
              VALUES (?1, 100, ?1, 1, X'00', ?2, X'00', X'00', ?3, 0)",
             rusqlite::params![id, value, nf],
         )
@@ -211,7 +221,7 @@ pub fn insert_pir_spent_note(conn: &Connection, note_id: i64) -> Result<(), Sqli
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testing::{create_pir_test_db, insert_test_note};
+    use testing::{PirTestDb, insert_test_note};
 
     fn make_nf(byte: u8) -> Vec<u8> {
         vec![byte; 32]
@@ -240,20 +250,20 @@ mod tests {
 
     #[test]
     fn empty_table_returns_no_notes() {
-        let conn = create_pir_test_db();
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let db = PirTestDb::new();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert!(notes.is_empty());
     }
 
     #[test]
     fn returns_unspent_notes_with_nullifiers() {
-        let conn = create_pir_test_db();
+        let db = PirTestDb::new();
         let nf1 = make_nf(0xAA);
         let nf2 = make_nf(0xBB);
-        insert_test_note(&conn, 1, 50_000, Some(&nf1));
-        insert_test_note(&conn, 2, 75_000, Some(&nf2));
+        insert_test_note(db.conn(), 1, 50_000, Some(&nf1));
+        insert_test_note(db.conn(), 2, 75_000, Some(&nf2));
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].id, 1);
         assert_eq!(notes[0].value, 50_000);
@@ -264,29 +274,29 @@ mod tests {
 
     #[test]
     fn excludes_notes_without_nullifier() {
-        let conn = create_pir_test_db();
+        let db = PirTestDb::new();
         let nf1 = make_nf(0xAA);
-        insert_test_note(&conn, 1, 50_000, Some(&nf1));
-        insert_test_note(&conn, 2, 75_000, None);
+        insert_test_note(db.conn(), 1, 50_000, Some(&nf1));
+        insert_test_note(db.conn(), 2, 75_000, None);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].id, 1);
     }
 
     #[test]
     fn excludes_spent_notes() {
-        let conn = create_pir_test_db();
+        let db = PirTestDb::new();
         let nf1 = make_nf(0xAA);
         let nf2 = make_nf(0xBB);
         let nf3 = make_nf(0xCC);
-        insert_test_note(&conn, 1, 10_000, Some(&nf1));
-        insert_test_note(&conn, 2, 20_000, Some(&nf2));
-        insert_test_note(&conn, 3, 30_000, Some(&nf3));
+        insert_test_note(db.conn(), 1, 10_000, Some(&nf1));
+        insert_test_note(db.conn(), 2, 20_000, Some(&nf2));
+        insert_test_note(db.conn(), 3, 30_000, Some(&nf3));
 
-        mark_spent(&conn, 2);
+        mark_spent(db.conn(), 2);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
         let ids: Vec<i64> = notes.iter().map(|n| n.id).collect();
         assert!(ids.contains(&1));
@@ -296,18 +306,18 @@ mod tests {
 
     #[test]
     fn excludes_spent_notes_and_null_nf_combined() {
-        let conn = create_pir_test_db();
+        let db = PirTestDb::new();
         let nf1 = make_nf(0x01);
         let nf2 = make_nf(0x02);
         let nf3 = make_nf(0x03);
-        insert_test_note(&conn, 1, 100, Some(&nf1));
-        insert_test_note(&conn, 2, 200, Some(&nf2));
-        insert_test_note(&conn, 3, 300, None);
-        insert_test_note(&conn, 4, 400, Some(&nf3));
+        insert_test_note(db.conn(), 1, 100, Some(&nf1));
+        insert_test_note(db.conn(), 2, 200, Some(&nf2));
+        insert_test_note(db.conn(), 3, 300, None);
+        insert_test_note(db.conn(), 4, 400, Some(&nf3));
 
-        mark_spent(&conn, 2);
+        mark_spent(db.conn(), 2);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
         let total: u64 = notes.iter().map(|n| n.value).sum();
         assert_eq!(total, 500);
@@ -315,16 +325,16 @@ mod tests {
 
     #[test]
     fn all_notes_spent_returns_empty() {
-        let conn = create_pir_test_db();
+        let db = PirTestDb::new();
         let nf1 = make_nf(0xAA);
         let nf2 = make_nf(0xBB);
-        insert_test_note(&conn, 1, 10_000, Some(&nf1));
-        insert_test_note(&conn, 2, 20_000, Some(&nf2));
+        insert_test_note(db.conn(), 1, 10_000, Some(&nf1));
+        insert_test_note(db.conn(), 2, 20_000, Some(&nf2));
 
-        mark_spent(&conn, 1);
-        mark_spent(&conn, 2);
+        mark_spent(db.conn(), 1);
+        mark_spent(db.conn(), 2);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert!(notes.is_empty());
     }
 
@@ -334,14 +344,14 @@ mod tests {
 
     #[test]
     fn excludes_pir_spent_notes() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
-        insert_test_note(&conn, 2, 20_000, Some(&make_nf(0x02)));
-        insert_test_note(&conn, 3, 30_000, Some(&make_nf(0x03)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
+        insert_test_note(db.conn(), 2, 20_000, Some(&make_nf(0x02)));
+        insert_test_note(db.conn(), 3, 30_000, Some(&make_nf(0x03)));
 
-        mark_pir_spent(&conn, 2);
+        mark_pir_spent(db.conn(), 2);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
         let ids: Vec<i64> = notes.iter().map(|n| n.id).collect();
         assert!(ids.contains(&1));
@@ -351,39 +361,40 @@ mod tests {
 
     #[test]
     fn excludes_both_pir_and_real_spent() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
-        insert_test_note(&conn, 2, 20_000, Some(&make_nf(0x02)));
-        insert_test_note(&conn, 3, 30_000, Some(&make_nf(0x03)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
+        insert_test_note(db.conn(), 2, 20_000, Some(&make_nf(0x02)));
+        insert_test_note(db.conn(), 3, 30_000, Some(&make_nf(0x03)));
 
-        mark_spent(&conn, 2);
-        mark_pir_spent(&conn, 3);
+        mark_spent(db.conn(), 2);
+        mark_pir_spent(db.conn(), 3);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].id, 1);
     }
 
     #[test]
     fn pir_and_real_spend_same_note() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        mark_spent(&conn, 1);
-        mark_pir_spent(&conn, 1);
+        mark_spent(db.conn(), 1);
+        mark_pir_spent(db.conn(), 1);
 
-        let notes = get_unspent_orchard_notes_for_pir(&conn).unwrap();
+        let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert!(notes.is_empty());
     }
 
     #[test]
     fn insert_pir_basic() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        insert_pir_spent_note(&conn, 1).unwrap();
+        insert_pir_spent_note(db.conn(), 1).unwrap();
 
-        let count: i64 = conn
+        let count: i64 = db
+            .conn()
             .query_row("SELECT COUNT(*) FROM pir_spent_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
@@ -391,13 +402,14 @@ mod tests {
 
     #[test]
     fn insert_pir_skips_real_spent() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        mark_spent(&conn, 1);
-        insert_pir_spent_note(&conn, 1).unwrap();
+        mark_spent(db.conn(), 1);
+        insert_pir_spent_note(db.conn(), 1).unwrap();
 
-        let count: i64 = conn
+        let count: i64 = db
+            .conn()
             .query_row("SELECT COUNT(*) FROM pir_spent_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
@@ -405,13 +417,14 @@ mod tests {
 
     #[test]
     fn insert_pir_idempotent() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        insert_pir_spent_note(&conn, 1).unwrap();
-        insert_pir_spent_note(&conn, 1).unwrap();
+        insert_pir_spent_note(db.conn(), 1).unwrap();
+        insert_pir_spent_note(db.conn(), 1).unwrap();
 
-        let count: i64 = conn
+        let count: i64 = db
+            .conn()
             .query_row("SELECT COUNT(*) FROM pir_spent_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
@@ -419,15 +432,17 @@ mod tests {
 
     #[test]
     fn insert_pir_fk_cascade() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        mark_pir_spent(&conn, 1);
+        mark_pir_spent(db.conn(), 1);
 
-        conn.execute("DELETE FROM orchard_received_notes WHERE id = 1", [])
+        db.conn()
+            .execute("DELETE FROM orchard_received_notes WHERE id = 1", [])
             .unwrap();
 
-        let count: i64 = conn
+        let count: i64 = db
+            .conn()
             .query_row("SELECT COUNT(*) FROM pir_spent_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
@@ -439,25 +454,25 @@ mod tests {
 
     #[test]
     fn pending_spends_empty_when_no_pir_notes() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
 
-        let result = get_pir_pending_spends(&conn).unwrap();
+        let result = get_pir_pending_spends(db.conn()).unwrap();
         assert!(result.notes.is_empty());
         assert_eq!(result.total_value, 0);
     }
 
     #[test]
     fn pending_spends_returns_pir_only_notes() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
-        insert_test_note(&conn, 2, 20_000, Some(&make_nf(0x02)));
-        insert_test_note(&conn, 3, 30_000, Some(&make_nf(0x03)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
+        insert_test_note(db.conn(), 2, 20_000, Some(&make_nf(0x02)));
+        insert_test_note(db.conn(), 3, 30_000, Some(&make_nf(0x03)));
 
-        mark_pir_spent(&conn, 1);
-        mark_pir_spent(&conn, 3);
+        mark_pir_spent(db.conn(), 1);
+        mark_pir_spent(db.conn(), 3);
 
-        let result = get_pir_pending_spends(&conn).unwrap();
+        let result = get_pir_pending_spends(db.conn()).unwrap();
         assert_eq!(result.notes.len(), 2);
         assert_eq!(result.total_value, 40_000);
         let ids: Vec<i64> = result.notes.iter().map(|n| n.note_id).collect();
@@ -467,18 +482,18 @@ mod tests {
 
     #[test]
     fn pending_spends_excludes_scan_confirmed() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
-        insert_test_note(&conn, 2, 20_000, Some(&make_nf(0x02)));
-        insert_test_note(&conn, 3, 30_000, Some(&make_nf(0x03)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
+        insert_test_note(db.conn(), 2, 20_000, Some(&make_nf(0x02)));
+        insert_test_note(db.conn(), 3, 30_000, Some(&make_nf(0x03)));
 
-        mark_pir_spent(&conn, 1);
-        mark_pir_spent(&conn, 2);
-        mark_pir_spent(&conn, 3);
+        mark_pir_spent(db.conn(), 1);
+        mark_pir_spent(db.conn(), 2);
+        mark_pir_spent(db.conn(), 3);
 
-        mark_spent(&conn, 2);
+        mark_spent(db.conn(), 2);
 
-        let result = get_pir_pending_spends(&conn).unwrap();
+        let result = get_pir_pending_spends(db.conn()).unwrap();
         assert_eq!(result.notes.len(), 2);
         assert_eq!(result.total_value, 40_000);
         let ids: Vec<i64> = result.notes.iter().map(|n| n.note_id).collect();
@@ -489,16 +504,16 @@ mod tests {
 
     #[test]
     fn pending_spends_empty_when_all_confirmed() {
-        let conn = create_pir_test_db();
-        insert_test_note(&conn, 1, 10_000, Some(&make_nf(0x01)));
-        insert_test_note(&conn, 2, 20_000, Some(&make_nf(0x02)));
+        let db = PirTestDb::new();
+        insert_test_note(db.conn(), 1, 10_000, Some(&make_nf(0x01)));
+        insert_test_note(db.conn(), 2, 20_000, Some(&make_nf(0x02)));
 
-        mark_pir_spent(&conn, 1);
-        mark_pir_spent(&conn, 2);
-        mark_spent(&conn, 1);
-        mark_spent(&conn, 2);
+        mark_pir_spent(db.conn(), 1);
+        mark_pir_spent(db.conn(), 2);
+        mark_spent(db.conn(), 1);
+        mark_spent(db.conn(), 2);
 
-        let result = get_pir_pending_spends(&conn).unwrap();
+        let result = get_pir_pending_spends(db.conn()).unwrap();
         assert!(result.notes.is_empty());
         assert_eq!(result.total_value, 0);
     }
