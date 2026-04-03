@@ -161,6 +161,8 @@ pub(crate) mod encoding;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
+#[cfg(feature = "sync-nullifier-pir")]
+pub mod pir;
 pub(crate) mod sapling;
 pub(crate) mod scanning;
 #[cfg(feature = "transparent-inputs")]
@@ -2154,6 +2156,16 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let untrusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
 
+        // With PIR sync, Orchard note spendability is discovered via nullifier PIR rather than
+        // sequential shard-tree scanning.
+        // Skip the spendability gate that would otherwise block spending.
+        #[cfg(feature = "sync-nullifier-pir")]
+        let any_spendable = if table_prefix == "orchard" {
+            true
+        } else {
+            anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?
+        };
+        #[cfg(not(feature = "sync-nullifier-pir"))]
         let any_spendable =
             anchor_height.map_or(Ok(false), |h| is_any_spendable(tx, h, table_prefix))?;
 
@@ -3319,6 +3331,13 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
          WHERE mined_height > :height",
         named_params![":height": u32::from(truncation_height)],
     )?;
+
+    // Clear all PIR spent-note entries unconditionally. After a reorg the on-chain
+    // nullifier set may have changed, so stale PIR exclusions must not persist.
+    // The table is created unconditionally (migration is not feature-gated), so this
+    // DELETE is valid in all builds — for non-PIR builds it is a harmless no-op on
+    // an always-empty table.
+    conn.execute("DELETE FROM pir_spent_notes", [])?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
     // affected block records from the database.

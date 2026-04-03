@@ -1346,6 +1346,11 @@ UNION
     JOIN addresses a ON a.id = tro.address_id
     JOIN transactions t ON t.id_tx = tro.transaction_id";
 
+pub(super) const TABLE_PIR_SPENT_NOTES: &str = "CREATE TABLE pir_spent_notes (
+    note_id INTEGER NOT NULL PRIMARY KEY
+        REFERENCES orchard_received_notes ( id ) ON DELETE CASCADE
+)";
+
 pub(super) const VIEW_ADDRESS_FIRST_USE: &str = "
     CREATE VIEW v_address_first_use AS
     SELECT
