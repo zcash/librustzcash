@@ -215,6 +215,42 @@ fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> 
     Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
 }
 
+/// Reads the effecting data of a Sapling spend for V6Ext format.
+///
+/// This reads cv, nullifier, and rk. The anchor is shared across all spends
+/// and read separately.
+#[cfg(zcash_unstable = "nu7")]
+pub fn read_v6ext_spend<R: Read>(mut reader: R) -> io::Result<SpendDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let nullifier = read_nullifier(&mut reader)?;
+    let rk = read_rk(&mut reader)?;
+
+    Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
+}
+
+/// Reads an output description for V6Ext format (same as V5).
+#[cfg(zcash_unstable = "nu7")]
+pub fn read_v6ext_output<R: Read>(mut reader: R) -> io::Result<OutputDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let cmu = read_cmu(&mut reader)?;
+
+    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+    reader.read_exact(&mut ephemeral_key.0)?;
+
+    let mut enc_ciphertext = [0u8; 580];
+    let mut out_ciphertext = [0u8; 80];
+    reader.read_exact(&mut enc_ciphertext)?;
+    reader.read_exact(&mut out_ciphertext)?;
+
+    Ok(OutputDescriptionV5::from_parts(
+        cv,
+        cmu,
+        ephemeral_key,
+        enc_ciphertext,
+        out_ciphertext,
+    ))
+}
+
 #[cfg(feature = "temporary-zcashd")]
 pub fn temporary_zcashd_read_output_v4<R: Read>(
     mut reader: R,
