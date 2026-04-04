@@ -497,6 +497,77 @@ pub(crate) fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
+/// Writes the effecting data for a Sapling bundle in V6 format.
+/// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
+///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
+///         anchorSapling (32 bytes, present if nSpends > 0).
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub(crate) fn write_v6_effects<W: Write>(
+    mut writer: W,
+    bundle: &Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // nSpends + spend effecting data (cv + nullifier + rk = 96 bytes each)
+    Vector::write(&mut writer, bundle.shielded_spends(), |w, s| {
+        w.write_all(&s.cv().to_bytes())?;
+        w.write_all(s.nullifier().as_ref())?;
+        w.write_all(&<[u8; 32]>::from(*s.rk()))?;
+        Ok(())
+    })?;
+
+    // nOutputs + output data (same as V5: 756 bytes each)
+    Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
+        write_output_v5_without_proof(w, e)
+    })?;
+
+    // anchorSapling (only if nSpends > 0)
+    if !bundle.shielded_spends().is_empty() {
+        writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
+    }
+
+    Ok(())
+}
+
+/// Writes the authorizing data for a Sapling bundle in V6 format.
+/// Layout: vSpendProofsSapling (192*nSpends),
+///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
+///         vOutputProofsSapling (192*nOutputs),
+///         bindingSigSapling (SaplingSignature with sighashInfo).
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub(crate) fn write_v6_auth<W: Write>(
+    mut writer: W,
+    bundle: &Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // Spend proofs
+    Array::write(
+        &mut writer,
+        bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
+        |w, e| w.write_all(e),
+    )?;
+
+    // Spend auth sigs with sighashInfo prefix
+    for spend in bundle.shielded_spends() {
+        CompactSize::write(&mut writer, 1)?; // sighashInfo length
+        writer.write_all(&[0x00])?; // sighash version 0
+        writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))?;
+    }
+
+    // Output proofs
+    Array::write(
+        &mut writer,
+        bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
+        |w, e| w.write_all(e),
+    )?;
+
+    // Binding sig with sighashInfo prefix (only if nSpends + nOutputs > 0)
+    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+        CompactSize::write(&mut writer, 1)?;
+        writer.write_all(&[0x00])?;
+        writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
