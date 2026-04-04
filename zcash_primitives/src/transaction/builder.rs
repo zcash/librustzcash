@@ -17,7 +17,7 @@ use zcash_protocol::{
 use zcash_script::opcode::PushValue;
 
 use crate::transaction::{
-    Transaction, TxVersion,
+    Transaction, TxVersion, zip248,
     components::orchard::bundle_version_for_branch,
     fees::{
         FeeRule,
@@ -1627,27 +1627,48 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             None => (None, orchard::builder::BundleMetadata::empty()),
         };
 
+        // Build value pool deltas from bundle value_balances + fee + zip233.
+        let mut vp_deltas = zip248::ValuePoolDeltas::empty();
+        if let Some(ref sb) = sapling_bundle {
+            vp_deltas.set_sapling(*sb.value_balance());
+        }
+        if let Some(ref ob) = orchard_bundle {
+            vp_deltas.set_orchard(*ob.value_balance());
+        }
+        if let Some(fee) = fee {
+            vp_deltas.set_fee(fee);
+        }
+        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
+        vp_deltas.set_zip233(self.zip233_amount);
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        // We don't support constructing Sprout bundles.
+        //
+        // # Consensus
+        //
+        // > A coinbase transaction MUST NOT have any JoinSplit descriptions.
+        //
+        // > A coinbase transaction MUST NOT have any Spend descriptions.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
+
         let unauthed_tx: TransactionData<A> = TransactionData {
             version: self.tx_version,
             consensus_branch_id: self.consensus_branch_id,
             lock_time: 0,
             expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle,
-            // We don't support constructing Sprout bundles.
-            //
-            // # Consensus
-            //
-            // > A coinbase transaction MUST NOT have any JoinSplit descriptions.
-            //
-            // > A coinbase transaction MUST NOT have any Spend descriptions.
-            //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
+            value_pool_deltas: vp_deltas,
             ironwood_bundle,
+            bundles,
         };
 
         //
@@ -1657,8 +1678,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
         let transparent_bundle = sighash_data
             .tx()
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| authorize_transparent(b, &sighash_data))
             .transpose()
             .map_err(Error::TransparentBuild)?;
@@ -1674,7 +1694,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map(|extsk| extsk.expsk().ask().clone())
             .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
-            .sapling_bundle
+            .sapling_bundle()
+            .cloned()
             .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
             .map_err(Error::SaplingBuild)?;
@@ -1685,7 +1706,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         // an Orchard or Ironwood bundle is actually present.
         let orchard_circuit_version = {
             let build_proving_key =
-                unauthed_tx.orchard_bundle.is_some() || unauthed_tx.ironwood_bundle.is_some();
+                unauthed_tx.orchard_bundle().is_some() || unauthed_tx.ironwood_bundle().is_some();
             build_proving_key.then(|| {
                 bundle_version_for_branch(
                     unauthed_tx.consensus_branch_id,
@@ -1712,7 +1733,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             orchard_proving_key_storage.as_ref();
 
         let orchard_bundle = unauthed_tx
-            .orchard_bundle
+            .orchard_bundle()
+            .cloned()
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
@@ -1746,18 +1768,26 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .transpose()
             .map_err(Error::IronwoodBuild)?;
 
+        let mut authorized_bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            authorized_bundles.insert_transparent(b);
+        }
+        // We don't support constructing Sprout bundles.
+        if let Some(b) = sapling_bundle {
+            authorized_bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            authorized_bundles.insert_orchard(b);
+        }
+
         let authorized_tx = TransactionData {
             version: unauthed_tx.version,
             consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: unauthed_tx.zip233_amount,
-            transparent_bundle,
-            sprout_bundle: unauthed_tx.sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
+            value_pool_deltas: unauthed_tx.value_pool_deltas,
             ironwood_bundle,
+            bundles: authorized_bundles,
         };
 
         // The unwrap() here is safe because the txid hashing
@@ -2845,7 +2875,7 @@ mod tests {
             .mock_build(&transparent_signing_set, &[], &[], UnwrapErr(SysRng))
             .unwrap();
         // No binding signature, because only t input and outputs
-        assert!(res.transaction().sapling_bundle.is_none());
+        assert!(res.transaction().sapling_bundle().is_none());
     }
 
     #[test]

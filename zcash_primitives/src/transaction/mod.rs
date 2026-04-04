@@ -8,11 +8,13 @@ mod sighash_v5;
 mod sighash_v6;
 
 pub mod txid;
+pub mod zip248;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -335,19 +337,19 @@ impl PartialEq for Transaction {
 }
 
 /// The information contained in a Zcash transaction.
+///
+/// The internal structure reflects [ZIP 248](https://zips.z.cash/zip-0248):
+/// - `value_pool_deltas`: Per-bundle value contributions to the transparent transaction value pool.
+/// - `bundles`: An ordered map of protocol bundles keyed by `(bundleType, bundleVariant)`.
 #[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-    zip233_amount: Zatoshis,
-    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-    sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+    value_pool_deltas: zip248::ValuePoolDeltas,
     ironwood_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+    bundles: zip248::BundleMap<A>,
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -357,13 +359,9 @@ impl Clone for TransactionData<Authorized> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: self.transparent_bundle.clone(),
-            sprout_bundle: self.sprout_bundle.clone(),
-            sapling_bundle: self.sapling_bundle.clone(),
-            orchard_bundle: self.orchard_bundle.clone(),
+            value_pool_deltas: self.value_pool_deltas.clone(),
             ironwood_bundle: self.ironwood_bundle.clone(),
+            bundles: self.bundles.clone(),
         }
     }
 }
@@ -381,6 +379,38 @@ impl Clone for Transaction {
 }
 
 impl<A: Authorization> TransactionData<A> {
+    /// Derives value pool deltas from the shielded bundle value balances and
+    /// collects the supplied bundles into a [`BundleMap`](zip248::BundleMap).
+    fn build_bundle_map(
+        value_pool_deltas: &mut zip248::ValuePoolDeltas,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sprout_bundle: Option<sprout::Bundle>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> zip248::BundleMap<A> {
+        if let Some(ref b) = sapling_bundle {
+            value_pool_deltas.set_sapling(*b.value_balance());
+        }
+        if let Some(ref b) = orchard_bundle {
+            value_pool_deltas.set_orchard(*b.value_balance());
+        }
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        if let Some(b) = sprout_bundle {
+            bundles.insert_sprout(b);
+        }
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
+        bundles
+    }
+
     /// Constructs a `TransactionData` from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -393,25 +423,24 @@ impl<A: Authorization> TransactionData<A> {
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
-        TransactionData {
+        Self::from_parts_inner(
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: Zatoshis::ZERO,
+            Zatoshis::ZERO,
             transparent_bundle,
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            ironwood_bundle: None,
-        }
+        )
     }
 
     /// Constructs a `TransactionData` containing a ZIP 233 amount from its constituent parts.
     ///
-    /// No implemented format supports a nonzero amount; [`Self::freeze`] rejects it
-    /// when this data is authorized. Zero preserves the ordinary transaction format.
+    /// The amount is carried as a ZIP 248 value pool delta. No implemented format
+    /// supports a nonzero amount; [`Self::freeze`] rejects it when this data is
+    /// authorized. Zero preserves the ordinary transaction format.
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_with_zip233(
@@ -425,7 +454,7 @@ impl<A: Authorization> TransactionData<A> {
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
-        TransactionData {
+        Self::from_parts_inner(
             version,
             consensus_branch_id,
             lock_time,
@@ -435,8 +464,39 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            ironwood_bundle: None,
-        }
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts_inner(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        zip233_amount: Zatoshis,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sprout_bundle: Option<sprout::Bundle>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> Self {
+        let mut value_pool_deltas = zip248::ValuePoolDeltas::empty();
+        value_pool_deltas.set_zip233(zip233_amount);
+
+        let bundles = Self::build_bundle_map(
+            &mut value_pool_deltas,
+            transparent_bundle,
+            sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
+        );
+        Self::from_parts_with_bundles(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            value_pool_deltas,
+            bundles,
+        )
     }
 
     /// Constructs a V6 [`TransactionData`] from its constituent parts,
@@ -570,30 +630,47 @@ impl<A: Authorization> TransactionData<A> {
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
-        debug_assert!(match version {
-            TxVersion::V6 => true,
-            #[cfg(zcash_unstable = "nutachyon")]
-            TxVersion::V7 => true,
-            _ => false,
-        });
-        TransactionData {
+        Self::from_parts_v6_or_v7_inner(
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: Zatoshis::ZERO,
+            Zatoshis::ZERO,
             transparent_bundle,
-            sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
             ironwood_bundle,
-        }
+        )
     }
 
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     #[allow(clippy::too_many_arguments)]
     fn from_parts_v6_or_v7_with_zip233(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        zip233_amount: Zatoshis,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+        ironwood_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> Self {
+        Self::from_parts_v6_or_v7_inner(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            zip233_amount,
+            transparent_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            ironwood_bundle,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts_v6_or_v7_inner(
         version: TxVersion,
         consensus_branch_id: BranchId,
         lock_time: u32,
@@ -610,17 +687,46 @@ impl<A: Authorization> TransactionData<A> {
             TxVersion::V7 => true,
             _ => false,
         });
+
+        let mut value_pool_deltas = zip248::ValuePoolDeltas::empty();
+        value_pool_deltas.set_zip233(zip233_amount);
+
+        let bundles = Self::build_bundle_map(
+            &mut value_pool_deltas,
+            transparent_bundle,
+            None,
+            sapling_bundle,
+            orchard_bundle,
+        );
+
         TransactionData {
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            zip233_amount,
-            transparent_bundle,
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
+            value_pool_deltas,
             ironwood_bundle,
+            bundles,
+        }
+    }
+
+    /// Constructs a `TransactionData` directly from a [`BundleMap`] and [`ValuePoolDeltas`].
+    pub fn from_parts_with_bundles(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        value_pool_deltas: zip248::ValuePoolDeltas,
+        bundles: zip248::BundleMap<A>,
+    ) -> Self {
+        TransactionData {
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            value_pool_deltas,
+            ironwood_bundle: None,
+            bundles,
         }
     }
 
@@ -643,19 +749,29 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
-        self.transparent_bundle.as_ref()
+        self.bundles.transparent()
     }
 
     pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
-        self.sprout_bundle.as_ref()
+        self.bundles.sprout()
     }
 
     pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
-        self.sapling_bundle.as_ref()
+        self.bundles.sapling()
     }
 
     pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
-        self.orchard_bundle.as_ref()
+        self.bundles.orchard()
+    }
+
+    /// Returns the ZIP 248 value pool deltas.
+    pub fn value_pool_deltas(&self) -> &zip248::ValuePoolDeltas {
+        &self.value_pool_deltas
+    }
+
+    /// Returns the ZIP 248 bundle map.
+    pub fn bundles(&self) -> &zip248::BundleMap<A> {
+        &self.bundles
     }
 
     pub fn ironwood_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
@@ -668,7 +784,14 @@ impl<A: Authorization> TransactionData<A> {
     /// rejects it when this data is authorized.
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     pub fn zip233_amount(&self) -> Zatoshis {
-        self.zip233_amount
+        self.value_pool_deltas
+            .zip233_amount()
+            .unwrap_or(Zatoshis::ZERO)
+    }
+
+    /// Returns the fee amount, if explicitly set (V6+).
+    pub fn fee_amount(&self) -> Option<Zatoshis> {
+        self.value_pool_deltas.fee()
     }
 
     /// Returns the total fees paid by the transaction, given a function that can be used to
@@ -679,7 +802,7 @@ impl<A: Authorization> TransactionData<A> {
         E: From<BalanceError>,
         F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
     {
-        let transparent_balance = self.transparent_bundle.as_ref().map_or_else(
+        let transparent_balance = self.bundles.transparent().map_or_else(
             || Ok(Some(ZatBalance::zero())),
             |b| b.value_balance(get_prevout),
         )?;
@@ -688,21 +811,21 @@ impl<A: Authorization> TransactionData<A> {
             .map(|transparent_balance| {
                 let value_balances = [
                     transparent_balance,
-                    self.sprout_bundle.as_ref().map_or_else(
+                    self.bundles.sprout().map_or_else(
                         || Ok(ZatBalance::zero()),
                         |b| b.value_balance().ok_or(BalanceError::Overflow),
                     )?,
-                    self.sapling_bundle
-                        .as_ref()
+                    self.bundles
+                        .sapling()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    self.orchard_bundle
-                        .as_ref()
+                    self.bundles
+                        .orchard()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
                     self.ironwood_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
                     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-                    -ZatBalance::from(self.zip233_amount),
+                    -ZatBalance::from(self.zip233_amount()),
                 ];
 
                 let overall_balance = value_balances
@@ -731,11 +854,38 @@ impl<A: Authorization> TransactionData<A> {
 
         digester.combine(
             header_digest,
-            digester.digest_transparent(self.transparent_bundle.as_ref()),
-            digester.digest_sapling(self.version, self.sapling_bundle.as_ref()),
-            digester.digest_orchard(self.version, self.orchard_bundle.as_ref()),
+            digester.digest_transparent(self.bundles.transparent()),
+            digester.digest_sapling(self.version, self.bundles.sapling()),
+            digester.digest_orchard(self.version, self.bundles.orchard()),
             digester.digest_ironwood(self.ironwood_bundle.as_ref()),
         )
+    }
+
+    /// Produces V6 (ZIP 248) transaction digests using the TxIdDigester.
+    pub fn digest_v6(&self) -> Zip244Digests<blake2b_simd::Hash> {
+        use txid::{
+            TxIdDigester, hash_v6_header, hash_v6_orchard_effects,
+            hash_v6_sapling_effects, hash_v6_value_pool_deltas,
+        };
+
+        let digester = TxIdDigester;
+        Zip244Digests {
+            header_digest: hash_v6_header(
+                self.version,
+                self.consensus_branch_id,
+                self.lock_time,
+                self.expiry_height,
+            ),
+            transparent_digests:
+                <TxIdDigester as TransactionDigest<A>>::digest_transparent(
+                    &digester,
+                    self.bundles.transparent(),
+                ),
+            sapling_digest: self.bundles.sapling().map(hash_v6_sapling_effects),
+            orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
+            ironwood_digest: None,
+            value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+        }
     }
 
     /// Changes the consensus branch ID stored in this transaction for pre-v5 transactions.
@@ -779,13 +929,11 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: f_transparent(self.transparent_bundle),
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle),
-            orchard_bundle: f_orchard(self.orchard_bundle),
-            ironwood_bundle: f_orchard(self.ironwood_bundle),
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self
+                .bundles
+                .map_authorization(f_transparent, f_sapling, |b| f_orchard(b)),
+            ironwood_bundle: self.ironwood_bundle.and_then(|b| f_orchard(Some(b))),
         }
     }
 
@@ -818,13 +966,14 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: f_transparent(self.transparent_bundle)?,
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle)?,
-            orchard_bundle: f_orchard(self.orchard_bundle)?,
-            ironwood_bundle: f_orchard(self.ironwood_bundle)?,
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self
+                .bundles
+                .try_map_authorization(f_transparent, f_sapling, |b| f_orchard(b))?,
+            ironwood_bundle: match self.ironwood_bundle {
+                Some(b) => f_orchard(Some(b))?,
+                None => None,
+            },
         })
     }
 
@@ -839,28 +988,30 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: self
-                .transparent_bundle
-                .map(|b| b.map_authorization(f_transparent)),
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: self.sapling_bundle.map(|b| {
-                b.map_authorization(
-                    &mut f_sapling,
-                    |f, p| f.map_spend_proof(p),
-                    |f, p| f.map_output_proof(p),
-                    |f, s| f.map_auth_sig(s),
-                    |f, a| f.map_authorization(a),
-                )
-            }),
-            orchard_bundle: self.orchard_bundle.map(|b| {
-                b.map_authorization(
-                    &mut f_orchard,
-                    |f, _, s| f.map_spend_auth(s),
-                    |f, a| f.map_authorization(a),
-                )
-            }),
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self.bundles.map_authorization(
+                |tb| tb.map(|b| b.map_authorization(f_transparent)),
+                |sb| {
+                    sb.map(|b| {
+                        b.map_authorization(
+                            &mut f_sapling,
+                            |f, p| f.map_spend_proof(p),
+                            |f, p| f.map_output_proof(p),
+                            |f, s| f.map_auth_sig(s),
+                            |f, a| f.map_authorization(a),
+                        )
+                    })
+                },
+                |ob| {
+                    ob.map(|b| {
+                        b.map_authorization(
+                            &mut f_orchard,
+                            |f, _, s| f.map_spend_auth(s),
+                            |f, a| f.map_authorization(a),
+                        )
+                    })
+                },
+            ),
             ironwood_bundle: self.ironwood_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_orchard,
@@ -874,8 +1025,8 @@ impl<A: Authorization> TransactionData<A> {
 
 impl<A: Authorization> TransactionData<A> {
     pub fn sapling_value_balance(&self) -> ZatBalance {
-        self.sapling_bundle
-            .as_ref()
+        self.bundles
+            .sapling()
             .map_or(ZatBalance::zero(), |b| *b.value_balance())
     }
 }
@@ -955,7 +1106,7 @@ impl Transaction {
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
-            &data.digest(TxIdDigester),
+            &data.digest_v6(),
         )
         .expect("is v6 tx");
 
@@ -1038,6 +1189,30 @@ impl Transaction {
         let hash_bytes = reader.into_hash();
         txid.copy_from_slice(&hash_bytes);
 
+        let sapling_bundle = binding_sig.and_then(|binding_sig| {
+            sapling::Bundle::from_parts(
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                sapling::bundle::Authorized { binding_sig },
+            )
+        });
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        if let Some(b) = sprout_bundle {
+            bundles.insert_sprout(b);
+        }
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        if let Some(ref b) = sapling_bundle {
+            vp.set_sapling(*b.value_balance());
+        }
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+
         Ok(Transaction {
             txid: TxId::from_bytes(txid),
             data: TransactionData {
@@ -1045,19 +1220,8 @@ impl Transaction {
                 consensus_branch_id,
                 lock_time,
                 expiry_height,
-                #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-                zip233_amount: Zatoshis::ZERO,
-                transparent_bundle,
-                sprout_bundle,
-                sapling_bundle: binding_sig.and_then(|binding_sig| {
-                    sapling::Bundle::from_parts(
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        sapling::bundle::Authorized { binding_sig },
-                    )
-                }),
-                orchard_bundle: None,
+                value_pool_deltas: vp,
+                bundles,
                 ironwood_bundle: None,
             },
         })
@@ -1090,25 +1254,36 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-        let zip233_amount = Zatoshis::ZERO;
-
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle =
             orchard_serialization::read_v5_bundle(&mut reader, consensus_branch_id)?;
+
+        let mut bundles = zip248::BundleMap::new();
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        if let Some(ref b) = sapling_bundle {
+            vp.set_sapling(*b.value_balance());
+        }
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(ref b) = orchard_bundle {
+            vp.set_orchard(*b.value_balance());
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
 
         let data = TransactionData {
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount,
-            transparent_bundle,
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
+            value_pool_deltas: vp,
+            bundles,
             ironwood_bundle: None,
         };
 
@@ -1116,33 +1291,99 @@ impl Transaction {
     }
 
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
+        // 1. Header (5 × u32)
+        let V6HeaderFragment {
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+        } = Self::read_v6_header_fragment(&mut reader)?;
 
-        let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v6_bundle(
-            &mut reader,
-            header_fragment.consensus_branch_id,
-            orchard::ValuePool::Orchard,
-        )?;
-        let ironwood_bundle = orchard_serialization::read_v6_bundle(
-            &mut reader,
-            header_fragment.consensus_branch_id,
-            orchard::ValuePool::Ironwood,
-        )?;
+        // 2. Value pool deltas map
+        let n_vp_deltas = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        for _ in 0..n_vp_deltas {
+            let entry = zip248::ValuePoolDeltaEntry::read(&mut reader)?;
+            let key = zip248::ValuePoolDeltaKey {
+                bundle_type: entry.bundle_type,
+                asset_class: entry.asset_class,
+                asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
+            };
+            vp.insert_raw(key, entry.bundle_variant, entry.value);
+        }
+
+        // 3. Effect bundles map
+        let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut bundles = zip248::BundleMap::new();
+        let mut sapling_effect_data: Option<Vec<u8>> = None;
+        let mut orchard_effect_data: Option<Vec<u8>> = None;
+        let mut transparent_effect_data: Option<Vec<u8>> = None;
+
+        for _ in 0..n_effect_bundles {
+            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            match id.bundle_type {
+                zip248::BUNDLE_TYPE_TRANSPARENT => {
+                    transparent_effect_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_SAPLING => {
+                    sapling_effect_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_ORCHARD => {
+                    orchard_effect_data = Some(data);
+                }
+                _ => {
+                    // Unknown bundle type — store opaque
+                    bundles.insert_unknown(id, zip248::UnknownBundle {
+                        effect_data: data,
+                        auth_data: None,
+                    });
+                }
+            }
+        }
+
+        // 4. Auth bundles map
+        let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut transparent_auth_data: Option<Vec<u8>> = None;
+        let mut sapling_auth_data: Option<Vec<u8>> = None;
+        let mut orchard_auth_data: Option<Vec<u8>> = None;
+
+        for _ in 0..n_auth_bundles {
+            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            match id.bundle_type {
+                zip248::BUNDLE_TYPE_TRANSPARENT => {
+                    transparent_auth_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_SAPLING => {
+                    sapling_auth_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_ORCHARD => {
+                    orchard_auth_data = Some(data);
+                }
+                _ => {
+                    // Attach auth data to matching unknown bundle
+                    if let Some(ub) = bundles.get_unknown_mut(&id) {
+                        ub.auth_data = Some(data);
+                    }
+                    // else: auth without effect is a validation error, skip for now
+                }
+            }
+        }
+
+        // 5. Reconstruct typed bundles from effect + auth data
+        // TODO: Parse transparent, sapling, orchard from their effect+auth byte vectors.
+        // For now, this is a stub that leaves the bundles empty.
+        // Full parsing will require reading from Cursor over the byte vectors.
+        let _ = (transparent_effect_data, transparent_auth_data);
+        let _ = (sapling_effect_data, sapling_auth_data);
+        let _ = (orchard_effect_data, orchard_auth_data);
 
         let data = TransactionData {
             version,
-            consensus_branch_id: header_fragment.consensus_branch_id,
-            lock_time: header_fragment.lock_time,
-            expiry_height: header_fragment.expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: header_fragment.zip233_amount,
-            transparent_bundle,
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            ironwood_bundle,
+            consensus_branch_id,
+            lock_time,
+            expiry_height: expiry_height.into(),
+            value_pool_deltas: vp,
+            bundles,
+            ironwood_bundle: None,
         };
 
         Ok(Self::from_data_v6(data))
@@ -1200,7 +1441,7 @@ impl Transaction {
     }
 
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.orchard_bundle.is_some() {
+        if self.bundles.orchard().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Orchard components cannot be present when serializing to the V4 transaction format.",
@@ -1217,12 +1458,12 @@ impl Transaction {
 
         sapling_serialization::write_v4_components(
             &mut writer,
-            self.sapling_bundle.as_ref(),
+            self.bundles.sapling(),
             self.version.has_sapling(),
         )?;
 
         if self.version.has_sprout() {
-            if let Some(bundle) = self.sprout_bundle.as_ref() {
+            if let Some(bundle) = self.bundles.sprout() {
                 Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
                 writer.write_all(&bundle.joinsplit_pubkey)?;
                 writer.write_all(&bundle.joinsplit_sig)?;
@@ -1232,7 +1473,7 @@ impl Transaction {
         }
 
         if self.version.has_sapling()
-            && let Some(bundle) = self.sapling_bundle.as_ref()
+            && let Some(bundle) = self.bundles.sapling()
         {
             writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
         }
@@ -1241,7 +1482,7 @@ impl Transaction {
     }
 
     pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.transparent_bundle {
+        if let Some(bundle) = self.bundles.transparent() {
             Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
             Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
         } else {
@@ -1253,7 +1494,7 @@ impl Transaction {
     }
 
     pub fn write_v5<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.sprout_bundle.is_some() {
+        if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Sprout components cannot be present when serializing to the V5 transaction format.",
@@ -1262,24 +1503,105 @@ impl Transaction {
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v5_bundle(self.bundles.orchard(), &mut writer)?;
 
         Ok(())
     }
 
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.sprout_bundle.is_some() {
+        if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Sprout components cannot be present when serializing to V6 or later transaction formats.",
             ));
         }
-        self.write_v6_header(&mut writer)?;
 
-        self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
+        // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
+        self.write_v5_header(&mut writer)?;
+
+        // 2. Value pool deltas map
+        let vp_entries: Vec<_> = self.value_pool_deltas.iter().map(|(k, &v)| {
+            zip248::ValuePoolDeltaEntry {
+                bundle_type: k.bundle_type,
+                bundle_variant: self.value_pool_deltas.bundle_variant(k.bundle_type)
+                    .unwrap_or(zip248::BUNDLE_VARIANT_DEFAULT),
+                asset_class: k.asset_class,
+                asset_uuid: if k.asset_class == zip248::ASSET_CLASS_ZEC {
+                    None
+                } else {
+                    Some(k.asset_uuid)
+                },
+                value: v,
+            }
+        }).collect();
+        CompactSize::write(&mut writer, vp_entries.len())?;
+        for entry in &vp_entries {
+            entry.write(&mut writer)?;
+        }
+
+        // 3. Effect bundles map
+        // Count bundles that have effect data (exclude value-only types 4, 5)
+        let mut effect_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            let mut buf = Vec::new();
+            zip248::write_v6_transparent_effects(&mut buf, tb)?;
+            effect_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_effects(&mut buf, sb)?;
+            effect_bundles.push((zip248::BundleId::SAPLING, buf));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_effects(&mut buf, ob)?;
+            effect_bundles.push((zip248::BundleId::ORCHARD, buf));
+        }
+        // Unknown bundles with effect data
+        for (id, ub) in self.bundles.unknown_bundles() {
+            effect_bundles.push((*id, ub.effect_data.clone()));
+        }
+        // Sort by bundle type (BTreeMap already gives us sorted order from iter())
+        effect_bundles.sort_by_key(|(id, _)| *id);
+
+        CompactSize::write(&mut writer, effect_bundles.len())?;
+        for (id, data) in &effect_bundles {
+            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        }
+
+        // 4. Auth bundles map
+        let mut auth_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            if !tb.vin.is_empty() {
+                let mut buf = Vec::new();
+                zip248::write_v6_transparent_auth(&mut buf, tb)?;
+                auth_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+            }
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_auth(&mut buf, sb)?;
+            auth_bundles.push((zip248::BundleId::SAPLING, buf));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_auth(&mut buf, ob)?;
+            auth_bundles.push((zip248::BundleId::ORCHARD, buf));
+        }
+        // Unknown bundles with auth data
+        for (id, ub) in self.bundles.unknown_bundles() {
+            if let Some(ref auth_data) = ub.auth_data {
+                auth_bundles.push((*id, auth_data.clone()));
+            }
+        }
+        auth_bundles.sort_by_key(|(id, _)| *id);
+
+        CompactSize::write(&mut writer, auth_bundles.len())?;
+        for (id, data) in &auth_bundles {
+            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        }
 
         Ok(())
     }
@@ -1310,12 +1632,48 @@ impl Transaction {
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
+        sapling_serialization::write_v5_bundle(writer, self.bundles.sapling())
     }
 
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
-        self.data.digest(BlockTxCommitmentDigester)
+        match self.data.version {
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6 => self.auth_commitment_v6(),
+            _ => self.data.digest(BlockTxCommitmentDigester),
+        }
+    }
+
+    /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    fn auth_commitment_v6(&self) -> Blake2bHash {
+        let digester = BlockTxCommitmentDigester;
+        let transparent_digest = digester.digest_transparent(self.data.bundles.transparent());
+        let sapling_digest = digester.digest_sapling(self.data.version, self.data.bundles.sapling());
+        let orchard_digest = digester.digest_orchard(self.data.version, self.data.bundles.orchard());
+
+        let auth_bundles_digest = txid::hash_v6_auth_bundles(
+            transparent_digest,
+            self.data.bundles.transparent().is_some(),
+            sapling_digest,
+            self.data.bundles.sapling().is_some(),
+            orchard_digest,
+            self.data.bundles.orchard().is_some(),
+        );
+
+        let mut personal = [0; 16];
+        personal[..12].copy_from_slice(b"ZTxAuthHash_");
+        use crate::encoding::WriteBytesExt;
+        (&mut personal[12..])
+            .write_u32_le(self.data.consensus_branch_id.into())
+            .unwrap();
+
+        let mut h = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(&personal)
+            .to_state();
+        h.update(auth_bundles_digest.as_bytes());
+        h.finalize()
     }
 }
 
@@ -1379,6 +1737,8 @@ pub struct Zip244Digests<A> {
     pub(crate) sapling_digest: Option<A>,
     pub(crate) orchard_digest: Option<A>,
     pub(crate) ironwood_digest: Option<A>,
+    /// V6 (ZIP 248): digest of the value pool deltas map.
+    pub(crate) value_pool_deltas_digest: Option<A>,
 }
 
 impl<A> Zip244Digests<A> {
@@ -1532,16 +1892,22 @@ pub mod testing {
             ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
+            let mut value_pool_deltas = super::zip248::ValuePoolDeltas::empty();
+            let bundles = TransactionData::<Authorized>::build_bundle_map(
+                &mut value_pool_deltas,
+                transparent_bundle,
+                None,
+                sapling_bundle,
+                orchard_bundle,
+            );
             TransactionData {
                 version,
                 consensus_branch_id,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                transparent_bundle,
-                sprout_bundle: None,
-                sapling_bundle,
-                orchard_bundle,
+                value_pool_deltas,
                 ironwood_bundle,
+                bundles,
             }
         }
     }
@@ -1560,21 +1926,27 @@ pub mod testing {
             ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
+            let mut value_pool_deltas = super::zip248::ValuePoolDeltas::empty();
+            value_pool_deltas.set_zip233(if version.has_zip233(consensus_branch_id) {
+                Zatoshis::from_u64(zip233_amount).unwrap()
+            } else {
+                Zatoshis::ZERO
+            });
+            let bundles = TransactionData::<Authorized>::build_bundle_map(
+                &mut value_pool_deltas,
+                transparent_bundle,
+                None,
+                sapling_bundle,
+                orchard_bundle,
+            );
             TransactionData {
                 version,
                 consensus_branch_id,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                zip233_amount: if version.has_zip233(consensus_branch_id) {
-                    Zatoshis::from_u64(zip233_amount).unwrap()
-                } else {
-                    Zatoshis::ZERO
-                },
-                transparent_bundle,
-                sprout_bundle: None,
-                sapling_bundle,
-                orchard_bundle,
+                value_pool_deltas,
                 ironwood_bundle,
+                bundles,
             }
         }
     }

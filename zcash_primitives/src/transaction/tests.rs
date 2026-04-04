@@ -979,14 +979,11 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 
     prop_assert_eq!(tx.version, txo.version);
     prop_assert_eq!(tx.lock_time, txo.lock_time);
-    prop_assert_eq!(
-        tx.transparent_bundle.as_ref(),
-        txo.transparent_bundle.as_ref()
-    );
+    prop_assert_eq!(tx.transparent_bundle(), txo.transparent_bundle());
     prop_assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     prop_assert_eq!(
-        tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
-        txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
+        tx.orchard_bundle().map(|v| *v.value_balance()),
+        txo.orchard_bundle().map(|v| *v.value_balance())
     );
     prop_assert_eq!(
         tx.ironwood_bundle.as_ref().map(|v| *v.value_balance()),
@@ -994,7 +991,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     );
     #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
     if tx.version.has_zip233(tx.consensus_branch_id) {
-        prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
+        prop_assert_eq!(tx.zip233_amount(), txo.zip233_amount());
     }
     Ok(())
 }
@@ -1255,8 +1252,7 @@ fn zip_0244() {
             .collect();
 
         let test_bundle = txdata
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| transparent::Bundle {
                 // we have to do this map/clone to make the types line up, since the
                 // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
@@ -1450,8 +1446,7 @@ fn zip_0233() {
             .collect();
 
         let test_bundle = txdata
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| transparent::Bundle {
                 // we have to do this map/clone to make the types line up, since the
                 // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
@@ -1493,5 +1488,115 @@ fn zip_0233() {
             v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts, None).as_ref(),
             tv.sighash_shielded
         );
+    }
+}
+
+#[cfg(test)]
+mod zip248_tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use super::super::zip248;
+    use zcash_protocol::value::{ZatBalance, Zatoshis};
+
+    #[test]
+    fn value_pool_deltas_write_read_roundtrip() {
+        // Build VP deltas with various entries
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_sapling(ZatBalance::from_i64(100_000).unwrap());
+        vp.set_orchard(ZatBalance::from_i64(-50_000).unwrap());
+        vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
+
+        // Serialize VP deltas
+        let entries: Vec<_> = vp
+            .iter()
+            .map(|(k, &v)| zip248::ValuePoolDeltaEntry {
+                bundle_type: k.bundle_type,
+                bundle_variant: vp
+                    .bundle_variant(k.bundle_type)
+                    .unwrap_or(zip248::BUNDLE_VARIANT_DEFAULT),
+                asset_class: k.asset_class,
+                asset_uuid: if k.asset_class == zip248::ASSET_CLASS_ZEC {
+                    None
+                } else {
+                    Some(k.asset_uuid)
+                },
+                value: v,
+            })
+            .collect();
+
+        let mut buf = Vec::new();
+        zcash_encoding::CompactSize::write(&mut buf, entries.len()).unwrap();
+        for entry in &entries {
+            entry.write(&mut buf).unwrap();
+        }
+
+        // Deserialize VP deltas
+        let mut cursor = &buf[..];
+        let n = zcash_encoding::CompactSize::read_t::<_, usize>(&mut cursor).unwrap();
+        let mut vp2 = zip248::ValuePoolDeltas::empty();
+        for _ in 0..n {
+            let entry = zip248::ValuePoolDeltaEntry::read(&mut cursor).unwrap();
+            let key = zip248::ValuePoolDeltaKey {
+                bundle_type: entry.bundle_type,
+                asset_class: entry.asset_class,
+                asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
+            };
+            vp2.insert_raw(key, entry.bundle_variant, entry.value);
+        }
+
+        // Verify round-trip
+        assert_eq!(
+            vp2.sapling_value(),
+            Some(ZatBalance::from_i64(100_000).unwrap())
+        );
+        assert_eq!(
+            vp2.orchard_value(),
+            Some(ZatBalance::from_i64(-50_000).unwrap())
+        );
+        assert_eq!(vp2.fee(), Some(Zatoshis::from_u64(1_000).unwrap()));
+    }
+
+    #[test]
+    fn bundle_data_framing_empty() {
+        let id = zip248::BundleId::new(0, 0);
+        let data: Vec<u8> = vec![];
+
+        let mut buf = Vec::new();
+        zip248::write_bundle_data_framing(&mut buf, &id, &data).unwrap();
+
+        let (parsed_id, parsed_data) = zip248::read_bundle_data_framing(&buf[..]).unwrap();
+        assert_eq!(parsed_id, id);
+        assert!(parsed_data.is_empty());
+    }
+
+    #[test]
+    fn bundle_map_iteration_order() {
+        use super::super::Authorized;
+
+        let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
+
+        // Insert in reverse order
+        map.insert_unknown(
+            zip248::BundleId::new(99, 0),
+            zip248::UnknownBundle {
+                effect_data: vec![],
+                auth_data: None,
+            },
+        );
+
+        // Verify iteration is in bundle_type order
+        let types: Vec<u64> = map.iter().map(|(id, _)| id.bundle_type).collect();
+        assert_eq!(types, vec![99]);
+
+        // Adding more bundles should maintain order
+        map.insert_unknown(
+            zip248::BundleId::new(50, 0),
+            zip248::UnknownBundle {
+                effect_data: vec![1],
+                auth_data: None,
+            },
+        );
+        let types: Vec<u64> = map.iter().map(|(id, _)| id.bundle_type).collect();
+        assert_eq!(types, vec![50, 99]);
     }
 }

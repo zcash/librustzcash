@@ -110,8 +110,7 @@ where
         let transparent_inputs_digests = match tx_digests {
             TxDigests::Zip143(_) => None,
             TxDigests::Zip244(_) => tx
-                .transparent_bundle
-                .as_ref()
+                .transparent_bundle()
                 .and_then(TransparentInputsDigests::for_bundle),
         };
         PrecomputedSighashData {
