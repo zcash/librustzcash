@@ -232,6 +232,98 @@ pub fn read_v6_bundle<R: Read>(
     read_bundle(reader, bundle_version_for_branch(consensus_branch_id, pool))
 }
 
+/// Reads the effecting data for an Orchard bundle in V6 format.
+/// Returns (actions_without_auth, flags, anchor) or None if nActions == 0.
+// ZIP 248 v6 bundle codec.
+pub fn read_v6_effects<R: Read>(
+    mut reader: R,
+) -> io::Result<Option<(Vec<Action<()>>, Flags, Anchor)>> {
+    #[allow(clippy::redundant_closure)]
+    let actions = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
+    if actions.is_empty() {
+        return Ok(None);
+    }
+    let flags = read_flags(&mut reader, BundleVersion::orchard_v3())?;
+    let anchor = read_anchor(&mut reader)?;
+    Ok(Some((actions, flags, anchor)))
+}
+
+/// Reads the authorizing data for an Orchard bundle in V6 format.
+/// `n_actions` must match the number of actions from the effecting data.
+// ZIP 248 v6 bundle codec.
+pub fn read_v6_auth<R: Read>(
+    mut reader: R,
+    n_actions: usize,
+) -> io::Result<(Vec<u8>, Vec<Signature<SpendAuth>>, Signature<redpallas::Binding>)> {
+    let proof_bytes = Vector::read(&mut reader, |mut r| {
+        let mut byte = [0u8; 1];
+        r.read_exact(&mut byte)?;
+        Ok(byte[0])
+    })?;
+    let mut spend_auth_sigs = Vec::with_capacity(n_actions);
+    for _ in 0..n_actions {
+        // Read sighashInfo prefix (version 0: CompactSize(1) || 0x00)
+        let info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut info = vec![0u8; info_len];
+        reader.read_exact(&mut info)?;
+        // Read 64-byte signature
+        spend_auth_sigs.push(read_signature::<_, SpendAuth>(&mut reader)?);
+    }
+    // Read binding sig with sighashInfo
+    let _binding_info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+    let mut _binding_info = vec![0u8; _binding_info_len];
+    reader.read_exact(&mut _binding_info)?;
+    let binding_sig = read_signature::<_, redpallas::Binding>(&mut reader)?;
+
+    Ok((proof_bytes, spend_auth_sigs, binding_sig))
+}
+
+/// Writes the effecting data for an Orchard bundle in V6 format.
+// ZIP 248 v6 bundle codec.
+pub fn write_v6_effects<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // nActionsOrchard + actions (820 bytes each)
+    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
+        write_action_without_auth(w, a)
+    })?;
+    // flagsOrchard + anchorOrchard (only if nActions > 0, which is always true here)
+    let flags_byte = u8::from(bundle.flags().spends_enabled())
+        | (u8::from(bundle.flags().outputs_enabled()) << 1);
+    writer.write_all(&[flags_byte])?;
+    writer.write_all(&bundle.anchor().to_bytes())?;
+    Ok(())
+}
+
+/// Writes the authorizing data for an Orchard bundle in V6 format.
+// ZIP 248 v6 bundle codec.
+pub fn write_v6_auth<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // sizeProofsOrchard + proofsOrchard
+    Vector::write(
+        &mut writer,
+        bundle.authorization().proof().as_ref(),
+        |w, b| w.write_all(&[*b]),
+    )?;
+    // vSpendAuthSigsOrchard with sighashInfo prefix
+    for auth in bundle.actions().iter().map(|a| a.authorization()) {
+        // sighashInfo: version 0, empty associated data
+        CompactSize::write(&mut writer, 1)?; // info length = 1
+        writer.write_all(&[0x00])?; // version 0
+        writer.write_all(&<[u8; 64]>::from(auth))?;
+    }
+    // bindingSigOrchard with sighashInfo prefix
+    CompactSize::write(&mut writer, 1)?;
+    writer.write_all(&[0x00])?;
+    writer.write_all(&<[u8; 64]>::from(
+        bundle.authorization().binding_signature(),
+    ))?;
+    Ok(())
+}
+
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
