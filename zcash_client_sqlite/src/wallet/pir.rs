@@ -20,7 +20,7 @@ pub mod testing {
     use secrecy::SecretVec;
     use zcash_protocol::consensus::Network;
 
-    use crate::{wallet::init::WalletMigrator, WalletDb};
+    use crate::{WalletDb, wallet::init::WalletMigrator};
 
     /// Runs the full wallet migration on `path`, then reopens a plain
     /// [`Connection`] with FK enforcement and prerequisite rows for PIR tests.
