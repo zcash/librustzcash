@@ -67,6 +67,14 @@ const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
 #[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
+// ZIP 248 V6-specific personalization strings
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) const ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBndHash\0";
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBndHash\0\0";
+
 fn hasher(personal: &[u8; 16]) -> StateWrite {
     StateWrite(Params::new().hash_length(32).personal(personal).to_state())
 }
@@ -302,6 +310,202 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
     h.finalize()
 }
 
+// ---------------------------------------------------------------------------
+// ZIP 248 V6-specific digest functions
+// ---------------------------------------------------------------------------
+
+/// V6 header digest: same fields as V5 but WITHOUT zip233_amount.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_header(
+    version: TxVersion,
+    consensus_branch_id: BranchId,
+    lock_time: u32,
+    expiry_height: BlockHeight,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
+    h.write_u32_le(version.header()).unwrap();
+    h.write_u32_le(version.version_group_id()).unwrap();
+    h.write_u32_le(consensus_branch_id.into()).unwrap();
+    h.write_u32_le(lock_time).unwrap();
+    h.write_u32_le(expiry_height.into()).unwrap();
+    h.finalize()
+}
+
+/// V6 value pool deltas digest.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> Blake2bHash {
+    use zcash_encoding::CompactSize;
+
+    let mut h = hasher(ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION);
+    for (key, &value) in vp.iter() {
+        let variant = vp
+            .bundle_variant(key.bundle_type)
+            .unwrap_or(super::zip248::BUNDLE_VARIANT_DEFAULT);
+        // bundleType (compactSize)
+        CompactSize::write(&mut h, key.bundle_type as usize).unwrap();
+        // bundleVariant (compactSize)
+        CompactSize::write(&mut h, variant as usize).unwrap();
+        // assetClass (1 byte)
+        h.write_all(&[key.asset_class]).unwrap();
+        // assetUuid (0 or 64 bytes)
+        if key.asset_class != super::zip248::ASSET_CLASS_ZEC {
+            h.write_all(&key.asset_uuid).unwrap();
+        }
+        // value (8-byte signed LE)
+        h.write_all(&value.to_le_bytes()).unwrap();
+    }
+    h.finalize()
+}
+
+/// V6 sapling effects digest: spends + outputs + anchor, WITHOUT value_balance.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
+    bundle: &sapling::Bundle<A, ZatBalance>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
+    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+        h.write_all(hash_sapling_spends(bundle.shielded_spends()).as_bytes())
+            .unwrap();
+        h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
+            .unwrap();
+        // Anchor (only if spends present)
+        if !bundle.shielded_spends().is_empty() {
+            h.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())
+                .unwrap();
+        }
+    }
+    h.finalize()
+}
+
+/// V6 orchard effects digest: actions + flags + anchor, WITHOUT value_balance.
+/// Computed from bundle accessors rather than delegating to the orchard crate's
+/// `commitment()` method (which includes value_balance).
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_orchard_effects(
+    bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
+) -> Blake2bHash {
+    // Use the same personalization as the orchard crate's commitment
+    const ZCASH_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardHash";
+    let mut h = hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION);
+
+    // Per ZIP 248 §T.3.3 the structure of orchard_effects_digest matches that of
+    // ZIP 244's orchard_digest, except that valueBalanceOrchard is not committed
+    // here (it lives in mValuePoolDeltas instead). The orchard crate's
+    // `hash_bundle_txid_data` is the ZIP 244 form and is not directly reusable;
+    // we re-implement the per-action sub-hashes inline using identical
+    // personalizations.
+    const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] =
+        b"ZTxIdOrcActCHash";
+    const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] =
+        b"ZTxIdOrcActMHash";
+    const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] =
+        b"ZTxIdOrcActNHash";
+
+    if !bundle.actions().is_empty() {
+        let mut compact_h = hasher(ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION);
+        let mut memos_h = hasher(ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION);
+        let mut noncompact_h = hasher(ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION);
+
+        for action in bundle.actions().iter() {
+            compact_h.write_all(&action.nullifier().to_bytes()).unwrap();
+            compact_h.write_all(&action.cmx().to_bytes()).unwrap();
+            compact_h.write_all(&action.encrypted_note().epk_bytes).unwrap();
+            compact_h
+                .write_all(&action.encrypted_note().enc_ciphertext[..52])
+                .unwrap();
+
+            memos_h
+                .write_all(&action.encrypted_note().enc_ciphertext[52..564])
+                .unwrap();
+
+            noncompact_h.write_all(&action.cv_net().to_bytes()).unwrap();
+            noncompact_h.write_all(&<[u8; 32]>::from(action.rk())).unwrap();
+            noncompact_h
+                .write_all(&action.encrypted_note().enc_ciphertext[564..])
+                .unwrap();
+            noncompact_h
+                .write_all(&action.encrypted_note().out_ciphertext)
+                .unwrap();
+        }
+
+        h.write_all(compact_h.finalize().as_bytes()).unwrap();
+        h.write_all(memos_h.finalize().as_bytes()).unwrap();
+        h.write_all(noncompact_h.finalize().as_bytes()).unwrap();
+        h.write_all(&[bundle.flags().to_byte()]).unwrap();
+        h.write_all(&bundle.anchor().to_bytes()).unwrap();
+        // Note: valueBalanceOrchard is deliberately NOT included; it lives in
+        // mValuePoolDeltas per ZIP 248.
+    }
+    h.finalize()
+}
+
+/// V6 effects bundles digest: wraps each per-bundle digest with bundleType || bundleVariant tags.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_effects_bundles(
+    transparent_digest: Blake2bHash,
+    has_transparent: bool,
+    sapling_digest: Option<Blake2bHash>,
+    orchard_digest: Option<Blake2bHash>,
+) -> Blake2bHash {
+    use zcash_encoding::CompactSize;
+
+    let mut h = hasher(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION);
+
+    // Each present bundle: bundleType (compactSize) || bundleVariant (compactSize) || digest (32 bytes)
+    if has_transparent {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(transparent_digest.as_bytes()).unwrap();
+    }
+    if let Some(ref d) = sapling_digest {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(d.as_bytes()).unwrap();
+    }
+    if let Some(ref d) = orchard_digest {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(d.as_bytes()).unwrap();
+    }
+
+    h.finalize()
+}
+
+/// V6 auth bundles digest: wraps each per-bundle auth digest with bundleType || bundleVariant tags.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_auth_bundles(
+    transparent_auth_digest: Blake2bHash,
+    has_transparent: bool,
+    sapling_auth_digest: Blake2bHash,
+    has_sapling: bool,
+    orchard_auth_digest: Blake2bHash,
+    has_orchard: bool,
+) -> Blake2bHash {
+    use zcash_encoding::CompactSize;
+
+    let mut h = hasher(ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION);
+
+    if has_transparent {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(transparent_auth_digest.as_bytes()).unwrap();
+    }
+    if has_sapling {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(sapling_auth_digest.as_bytes()).unwrap();
+    }
+    if has_orchard {
+        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
+        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
+        h.write_all(orchard_auth_digest.as_bytes()).unwrap();
+    }
+
+    h.finalize()
+}
+
+// ---------------------------------------------------------------------------
+
 /// A TransactionDigest implementation that commits to all of the effecting
 /// data of a transaction to produce a nonmalleable transaction identifier.
 ///
@@ -388,6 +592,9 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             orchard_digest,
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests,
+            // Populated by digest_v6() path, not via combine()
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            value_pool_deltas_digest: None,
         }
     }
 }
@@ -437,18 +644,55 @@ pub fn to_txid(
     consensus_branch_id: BranchId,
     digests: &TxDigests<Blake2bHash>,
 ) -> TxId {
-    let txid_digest = to_hash(
-        txversion,
-        consensus_branch_id,
-        digests.header_digest,
-        hash_transparent_txid_data(digests.transparent_digests.as_ref()),
-        digests.sapling_digest,
-        digests.orchard_digest,
-        #[cfg(zcash_unstable = "zfuture")]
-        digests.tze_digests.as_ref(),
-    );
+    let txid_digest = match txversion {
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V6 => to_hash_v6(consensus_branch_id, digests),
+        _ => to_hash(
+            txversion,
+            consensus_branch_id,
+            digests.header_digest,
+            hash_transparent_txid_data(digests.transparent_digests.as_ref()),
+            digests.sapling_digest,
+            digests.orchard_digest,
+            #[cfg(zcash_unstable = "zfuture")]
+            digests.tze_digests.as_ref(),
+        ),
+    };
 
     TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
+}
+
+/// V6 txid hash: header || value_pool_deltas || effects_bundles
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+fn to_hash_v6(
+    consensus_branch_id: BranchId,
+    digests: &TxDigests<Blake2bHash>,
+) -> Blake2bHash {
+    let mut personal = [0; 16];
+    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
+    (&mut personal[12..])
+        .write_u32_le(consensus_branch_id.into())
+        .unwrap();
+
+    let vp_deltas_digest = digests
+        .value_pool_deltas_digest
+        .unwrap_or_else(|| hasher(ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION).finalize());
+
+    let has_transparent = digests.transparent_digests.is_some();
+    let transparent_digest = hash_transparent_txid_data(digests.transparent_digests.as_ref());
+
+    let effects_bundles_digest = hash_v6_effects_bundles(
+        transparent_digest,
+        has_transparent,
+        digests.sapling_digest,
+        digests.orchard_digest,
+    );
+
+    let mut h = hasher(&personal);
+    h.write_all(digests.header_digest.as_bytes()).unwrap();
+    h.write_all(vp_deltas_digest.as_bytes()).unwrap();
+    h.write_all(effects_bundles_digest.as_bytes()).unwrap();
+    h.finalize()
 }
 
 /// Digester which constructs a digest of only the witness data.

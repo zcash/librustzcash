@@ -607,6 +607,38 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
+    /// Produces V6 (ZIP 248) transaction digests using the TxIdDigester.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
+        use txid::{
+            TxIdDigester, hash_v6_header, hash_v6_orchard_effects,
+            hash_v6_sapling_effects, hash_v6_value_pool_deltas,
+        };
+
+        let digester = TxIdDigester;
+        TxDigests {
+            header_digest: hash_v6_header(
+                self.version,
+                self.consensus_branch_id,
+                self.lock_time,
+                self.expiry_height,
+            ),
+            transparent_digests:
+                <TxIdDigester as TransactionDigest<A>>::digest_transparent(
+                    &digester,
+                    self.bundles.transparent(),
+                ),
+            sapling_digest: self.bundles.sapling().map(hash_v6_sapling_effects),
+            orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
+                &digester,
+                self.bundles.tze(),
+            ),
+            value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+        }
+    }
+
     /// Changes the consensus branch ID stored in this transaction for pre-v5 transactions.
     ///
     /// This can be used to fix an incorrect value passed to [`Transaction::read`]. Just
@@ -803,7 +835,7 @@ impl Transaction {
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
-            &data.digest(TxIdDigester),
+            &data.digest_v6(),
         );
 
         Transaction { txid, data }
@@ -1376,7 +1408,43 @@ impl Transaction {
 
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
-        self.data.digest(BlockTxCommitmentDigester)
+        match self.data.version {
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6 => self.auth_commitment_v6(),
+            _ => self.data.digest(BlockTxCommitmentDigester),
+        }
+    }
+
+    /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    fn auth_commitment_v6(&self) -> Blake2bHash {
+        let digester = BlockTxCommitmentDigester;
+        let transparent_digest = digester.digest_transparent(self.data.bundles.transparent());
+        let sapling_digest = digester.digest_sapling(self.data.bundles.sapling());
+        let orchard_digest = digester.digest_orchard(self.data.bundles.orchard());
+
+        let auth_bundles_digest = txid::hash_v6_auth_bundles(
+            transparent_digest,
+            self.data.bundles.transparent().is_some(),
+            sapling_digest,
+            self.data.bundles.sapling().is_some(),
+            orchard_digest,
+            self.data.bundles.orchard().is_some(),
+        );
+
+        let mut personal = [0; 16];
+        personal[..12].copy_from_slice(b"ZTxAuthHash_");
+        use crate::encoding::WriteBytesExt;
+        (&mut personal[12..])
+            .write_u32_le(self.data.consensus_branch_id.into())
+            .unwrap();
+
+        let mut h = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(&personal)
+            .to_state();
+        h.update(auth_bundles_digest.as_bytes());
+        h.finalize()
     }
 }
 
@@ -1402,6 +1470,9 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
+    /// V6 (ZIP 248): digest of the value pool deltas map.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    pub value_pool_deltas_digest: Option<A>,
 }
 
 pub trait TransactionDigest<A: Authorization> {
