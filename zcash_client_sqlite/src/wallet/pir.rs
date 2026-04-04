@@ -68,6 +68,13 @@ pub mod testing {
     }
 
     #[cfg(test)]
+    impl Default for PirTestDb {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[cfg(test)]
     impl PirTestDb {
         pub fn new() -> Self {
             let data_file = tempfile::NamedTempFile::new().unwrap();
