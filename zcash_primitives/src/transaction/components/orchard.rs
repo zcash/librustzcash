@@ -88,7 +88,95 @@ pub fn read_v5_bundle<R: Read>(
 pub fn read_v6_bundle<R: Read>(
     reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
+    // TODO: This is a temporary delegation. The actual V6 format separates
+    // effects from auth and is read via read_v6_effects + read_v6_auth.
     read_v5_bundle(reader)
+}
+
+/// Reads the effecting data for an Orchard bundle in V6 format.
+/// Returns (actions_without_auth, flags, anchor) or None if nActions == 0.
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn read_v6_effects<R: Read>(
+    mut reader: R,
+) -> io::Result<Option<(Vec<Action<()>>, Flags, Anchor)>> {
+    #[allow(clippy::redundant_closure)]
+    let actions = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
+    if actions.is_empty() {
+        return Ok(None);
+    }
+    let flags = read_flags(&mut reader)?;
+    let anchor = read_anchor(&mut reader)?;
+    Ok(Some((actions, flags, anchor)))
+}
+
+/// Reads the authorizing data for an Orchard bundle in V6 format.
+/// `n_actions` must match the number of actions from the effecting data.
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn read_v6_auth<R: Read>(
+    mut reader: R,
+    n_actions: usize,
+) -> io::Result<(Vec<u8>, Vec<Signature<SpendAuth>>, Signature<redpallas::Binding>)> {
+    let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    let mut spend_auth_sigs = Vec::with_capacity(n_actions);
+    for _ in 0..n_actions {
+        // Read sighashInfo prefix (version 0: CompactSize(1) || 0x00)
+        let info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut info = vec![0u8; info_len];
+        reader.read_exact(&mut info)?;
+        // Read 64-byte signature
+        spend_auth_sigs.push(read_signature::<_, SpendAuth>(&mut reader)?);
+    }
+    // Read binding sig with sighashInfo
+    let _binding_info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
+    let mut _binding_info = vec![0u8; _binding_info_len];
+    reader.read_exact(&mut _binding_info)?;
+    let binding_sig = read_signature::<_, redpallas::Binding>(&mut reader)?;
+
+    Ok((proof_bytes, spend_auth_sigs, binding_sig))
+}
+
+/// Writes the effecting data for an Orchard bundle in V6 format.
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn write_v6_effects<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // nActionsOrchard + actions (820 bytes each)
+    Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
+        write_action_without_auth(w, a)
+    })?;
+    // flagsOrchard + anchorOrchard (only if nActions > 0, which is always true here)
+    writer.write_all(&[bundle.flags().to_byte()])?;
+    writer.write_all(&bundle.anchor().to_bytes())?;
+    Ok(())
+}
+
+/// Writes the authorizing data for an Orchard bundle in V6 format.
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn write_v6_auth<W: Write>(
+    mut writer: W,
+    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+) -> io::Result<()> {
+    // sizeProofsOrchard + proofsOrchard
+    Vector::write(
+        &mut writer,
+        bundle.authorization().proof().as_ref(),
+        |w, b| w.write_all(&[*b]),
+    )?;
+    // vSpendAuthSigsOrchard with sighashInfo prefix
+    for auth in bundle.actions().iter().map(|a| a.authorization()) {
+        // sighashInfo: version 0, empty associated data
+        CompactSize::write(&mut writer, 1)?; // info length = 1
+        writer.write_all(&[0x00])?; // version 0
+        writer.write_all(&<[u8; 64]>::from(auth))?;
+    }
+    // bindingSigOrchard with sighashInfo prefix
+    CompactSize::write(&mut writer, 1)?;
+    writer.write_all(&[0x00])?;
+    writer.write_all(&<[u8; 64]>::from(
+        bundle.authorization().binding_signature(),
+    ))?;
+    Ok(())
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -228,6 +316,7 @@ pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,
 ) -> io::Result<()> {
+    // TODO: This is a temporary delegation for non-ZIP-248 code paths.
     write_v5_bundle(bundle, writer)
 }
 

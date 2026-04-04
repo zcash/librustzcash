@@ -15,6 +15,8 @@ pub mod zip248;
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -984,51 +986,96 @@ impl Transaction {
 
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
+        // 1. Header (5 × u32)
+        let V6HeaderFragment {
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+        } = Self::read_v6_header_fragment(&mut reader)?;
 
-        // TODO: This is a placeholder that reads V5 format.
-        // Phase 3 will rewrite this to read the ZIP 248 wire format
-        // (VP deltas map, effect bundles map, auth bundles map).
-        let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
-
-        #[cfg(zcash_unstable = "zfuture")]
-        let tze_bundle = version
-            .has_tze()
-            .then(|| Self::read_tze(&mut reader))
-            .transpose()?
-            .flatten();
-
-        let mut bundles = zip248::BundleMap::new();
+        // 2. Value pool deltas map
+        let n_vp_deltas = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut vp = zip248::ValuePoolDeltas::empty();
-        if let Some(b) = transparent_bundle {
-            bundles.insert_transparent(b);
+        for _ in 0..n_vp_deltas {
+            let entry = zip248::ValuePoolDeltaEntry::read(&mut reader)?;
+            let key = zip248::ValuePoolDeltaKey {
+                bundle_type: entry.bundle_type,
+                asset_class: entry.asset_class,
+                asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
+            };
+            vp.insert_raw(key, entry.bundle_variant, entry.value);
         }
-        if let Some(ref b) = sapling_bundle {
-            vp.set_sapling(*b.value_balance());
+
+        // 3. Effect bundles map
+        let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut bundles = zip248::BundleMap::new();
+        let mut sapling_effect_data: Option<Vec<u8>> = None;
+        let mut orchard_effect_data: Option<Vec<u8>> = None;
+        let mut transparent_effect_data: Option<Vec<u8>> = None;
+
+        for _ in 0..n_effect_bundles {
+            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            match id.bundle_type {
+                zip248::BUNDLE_TYPE_TRANSPARENT => {
+                    transparent_effect_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_SAPLING => {
+                    sapling_effect_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_ORCHARD => {
+                    orchard_effect_data = Some(data);
+                }
+                _ => {
+                    // Unknown bundle type — store opaque
+                    bundles.insert_unknown(id, zip248::UnknownBundle {
+                        effect_data: data,
+                        auth_data: None,
+                    });
+                }
+            }
         }
-        if let Some(b) = sapling_bundle {
-            bundles.insert_sapling(b);
+
+        // 4. Auth bundles map
+        let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut transparent_auth_data: Option<Vec<u8>> = None;
+        let mut sapling_auth_data: Option<Vec<u8>> = None;
+        let mut orchard_auth_data: Option<Vec<u8>> = None;
+
+        for _ in 0..n_auth_bundles {
+            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            match id.bundle_type {
+                zip248::BUNDLE_TYPE_TRANSPARENT => {
+                    transparent_auth_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_SAPLING => {
+                    sapling_auth_data = Some(data);
+                }
+                zip248::BUNDLE_TYPE_ORCHARD => {
+                    orchard_auth_data = Some(data);
+                }
+                _ => {
+                    // Attach auth data to matching unknown bundle
+                    if let Some(ub) = bundles.get_unknown_mut(&id) {
+                        ub.auth_data = Some(data);
+                    }
+                    // else: auth without effect is a validation error, skip for now
+                }
+            }
         }
-        if let Some(ref b) = orchard_bundle {
-            vp.set_orchard(*b.value_balance());
-        }
-        if let Some(b) = orchard_bundle {
-            bundles.insert_orchard(b);
-        }
-        #[cfg(zcash_unstable = "zfuture")]
-        if let Some(b) = tze_bundle {
-            bundles.insert_tze(b);
-        }
-        #[cfg(feature = "zip-233")]
-        vp.set_zip233(header_fragment.zip233_amount);
+
+        // 5. Reconstruct typed bundles from effect + auth data
+        // TODO: Parse transparent, sapling, orchard from their effect+auth byte vectors.
+        // For now, this is a stub that leaves the bundles empty.
+        // Full parsing will require reading from Cursor over the byte vectors.
+        let _ = (transparent_effect_data, transparent_auth_data);
+        let _ = (sapling_effect_data, sapling_auth_data);
+        let _ = (orchard_effect_data, orchard_auth_data);
 
         let data = TransactionData {
             version,
-            consensus_branch_id: header_fragment.consensus_branch_id,
-            lock_time: header_fragment.lock_time,
-            expiry_height: header_fragment.expiry_height,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
             value_pool_deltas: vp,
             bundles,
         };
@@ -1189,16 +1236,94 @@ impl Transaction {
                 "Sprout components cannot be present when serializing to the V6 transaction format.",
             ));
         }
-        // TODO: This is a placeholder that writes V5 format.
-        // Phase 3 will rewrite this to write the ZIP 248 wire format.
-        self.write_v6_header(&mut writer)?;
 
-        self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.bundles.orchard(), &mut writer)?;
+        // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
+        self.write_v5_header(&mut writer)?;
 
-        #[cfg(zcash_unstable = "zfuture")]
-        self.write_tze(&mut writer)?;
+        // 2. Value pool deltas map
+        let vp_entries: Vec<_> = self.value_pool_deltas.iter().map(|(k, &v)| {
+            zip248::ValuePoolDeltaEntry {
+                bundle_type: k.bundle_type,
+                bundle_variant: self.value_pool_deltas.bundle_variant(k.bundle_type)
+                    .unwrap_or(zip248::BUNDLE_VARIANT_DEFAULT),
+                asset_class: k.asset_class,
+                asset_uuid: if k.asset_class == zip248::ASSET_CLASS_ZEC {
+                    None
+                } else {
+                    Some(k.asset_uuid)
+                },
+                value: v,
+            }
+        }).collect();
+        CompactSize::write(&mut writer, vp_entries.len())?;
+        for entry in &vp_entries {
+            entry.write(&mut writer)?;
+        }
+
+        // 3. Effect bundles map
+        // Count bundles that have effect data (exclude value-only types 4, 5)
+        let mut effect_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            let mut buf = Vec::new();
+            zip248::write_v6_transparent_effects(&mut buf, tb)?;
+            effect_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_effects(&mut buf, sb)?;
+            effect_bundles.push((zip248::BundleId::SAPLING, buf));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_effects(&mut buf, ob)?;
+            effect_bundles.push((zip248::BundleId::ORCHARD, buf));
+        }
+        // Unknown bundles with effect data
+        for (id, ub) in self.bundles.unknown_bundles() {
+            effect_bundles.push((*id, ub.effect_data.clone()));
+        }
+        // Sort by bundle type (BTreeMap already gives us sorted order from iter())
+        effect_bundles.sort_by_key(|(id, _)| *id);
+
+        CompactSize::write(&mut writer, effect_bundles.len())?;
+        for (id, data) in &effect_bundles {
+            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        }
+
+        // 4. Auth bundles map
+        let mut auth_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            if !tb.vin.is_empty() {
+                let mut buf = Vec::new();
+                zip248::write_v6_transparent_auth(&mut buf, tb)?;
+                auth_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+            }
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_auth(&mut buf, sb)?;
+            auth_bundles.push((zip248::BundleId::SAPLING, buf));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_auth(&mut buf, ob)?;
+            auth_bundles.push((zip248::BundleId::ORCHARD, buf));
+        }
+        // Unknown bundles with auth data
+        for (id, ub) in self.bundles.unknown_bundles() {
+            if let Some(ref auth_data) = ub.auth_data {
+                auth_bundles.push((*id, auth_data.clone()));
+            }
+        }
+        auth_bundles.sort_by_key(|(id, _)| *id);
+
+        CompactSize::write(&mut writer, auth_bundles.len())?;
+        for (id, data) in &auth_bundles {
+            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        }
+
         Ok(())
     }
 

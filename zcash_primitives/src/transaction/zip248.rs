@@ -226,6 +226,14 @@ impl<A: Authorization> BundleMap<A> {
         self.inner.insert(id, TypedBundle::Unknown(bundle));
     }
 
+    /// Returns a mutable reference to an unknown bundle, if present.
+    pub fn get_unknown_mut(&mut self, id: &BundleId) -> Option<&mut UnknownBundle> {
+        self.inner.get_mut(id).and_then(|b| match b {
+            TypedBundle::Unknown(ub) => Some(ub),
+            _ => None,
+        })
+    }
+
     // -- Authorization mapping --
 
     pub fn map_authorization<B: Authorization>(
@@ -578,4 +586,184 @@ pub fn write_bundle_data_framing<W: Write>(
     CompactSize::write(&mut writer, data.len())?;
     writer.write_all(data)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Transparent V6 effect/auth helpers
+// ---------------------------------------------------------------------------
+
+/// Writes transparent effecting data in V6 format.
+/// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
+///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
+pub fn write_v6_transparent_effects<W: Write>(
+    mut writer: W,
+    bundle: &transparent::Bundle<transparent::Authorized>,
+) -> io::Result<()> {
+    // tx_in_count + TransparentInputEffecting (prevout_hash + prevout_index + nSequence)
+    CompactSize::write(&mut writer, bundle.vin.len())?;
+    for txin in &bundle.vin {
+        txin.prevout().write(&mut writer)?;
+        writer.write_all(&txin.sequence().to_le_bytes())?;
+    }
+
+    // tx_out_count + TransparentOutput (value + scriptPubKey)
+    CompactSize::write(&mut writer, bundle.vout.len())?;
+    for txout in &bundle.vout {
+        txout.write(&mut writer)?;
+    }
+
+    Ok(())
+}
+
+/// Writes transparent authorizing data in V6 format.
+/// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
+pub fn write_v6_transparent_auth<W: Write>(
+    mut writer: W,
+    bundle: &transparent::Bundle<transparent::Authorized>,
+) -> io::Result<()> {
+    for txin in &bundle.vin {
+        // TransparentSighashInfo: compactSize-prefixed byte array
+        // For sighash version 0: single byte 0x00
+        CompactSize::write(&mut writer, 1)?;
+        writer.write_all(&[0x00])?;
+        // scriptSig with compactSize length prefix
+        txin.script_sig().write(&mut writer)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundle_id_ordering() {
+        assert!(BundleId::TRANSPARENT < BundleId::SAPLING);
+        assert!(BundleId::SAPLING < BundleId::ORCHARD);
+        assert!(BundleId::ORCHARD < BundleId::FEE);
+        assert!(BundleId::FEE < BundleId::ZIP233_NSM);
+    }
+
+    #[test]
+    fn value_pool_deltas_basic() {
+        let mut vp = ValuePoolDeltas::empty();
+        assert!(vp.is_empty());
+        assert_eq!(vp.fee(), None);
+        assert_eq!(vp.zip233_amount(), None);
+
+        // Set fee
+        vp.set_fee(Zatoshis::from_u64(1000).unwrap());
+        assert!(!vp.is_empty());
+        assert_eq!(vp.fee(), Some(Zatoshis::from_u64(1000).unwrap()));
+
+        // Set zip233
+        vp.set_zip233(Zatoshis::from_u64(5000).unwrap());
+        assert_eq!(vp.zip233_amount(), Some(Zatoshis::from_u64(5000).unwrap()));
+
+        // Set sapling value balance
+        let sap_vb = ZatBalance::from_i64(100_000).unwrap();
+        vp.set_sapling(sap_vb);
+        assert_eq!(vp.sapling_value(), Some(sap_vb));
+
+        // Iteration order should be by bundle type
+        let types: Vec<u64> = vp.iter().map(|(k, _)| k.bundle_type).collect();
+        assert_eq!(types, vec![
+            BUNDLE_TYPE_SAPLING,
+            BUNDLE_TYPE_FEE,
+            BUNDLE_TYPE_ZIP233_NSM,
+        ]);
+    }
+
+    #[test]
+    fn value_pool_deltas_zero_omitted() {
+        let mut vp = ValuePoolDeltas::empty();
+        vp.set_sapling(ZatBalance::from_i64(0).unwrap());
+        // Zero values should not be stored
+        assert!(vp.is_empty());
+        assert_eq!(vp.sapling_value(), None);
+    }
+
+    #[test]
+    fn value_pool_delta_entry_roundtrip() {
+        let entry = ValuePoolDeltaEntry {
+            bundle_type: BUNDLE_TYPE_SAPLING,
+            bundle_variant: BUNDLE_VARIANT_DEFAULT,
+            asset_class: ASSET_CLASS_ZEC,
+            asset_uuid: None,
+            value: -50000,
+        };
+
+        let mut buf = Vec::new();
+        entry.write(&mut buf).unwrap();
+
+        let parsed = ValuePoolDeltaEntry::read(&buf[..]).unwrap();
+        assert_eq!(parsed.bundle_type, entry.bundle_type);
+        assert_eq!(parsed.bundle_variant, entry.bundle_variant);
+        assert_eq!(parsed.asset_class, entry.asset_class);
+        assert_eq!(parsed.asset_uuid, entry.asset_uuid);
+        assert_eq!(parsed.value, entry.value);
+    }
+
+    #[test]
+    fn value_pool_delta_entry_rejects_zero() {
+        let entry = ValuePoolDeltaEntry {
+            bundle_type: 0,
+            bundle_variant: 0,
+            asset_class: ASSET_CLASS_ZEC,
+            asset_uuid: None,
+            value: 0,
+        };
+        let mut buf = Vec::new();
+        // Write manually since write doesn't check for zero
+        CompactSize::write(&mut buf, 0).unwrap();
+        CompactSize::write(&mut buf, 0).unwrap();
+        buf.push(ASSET_CLASS_ZEC);
+        buf.extend_from_slice(&0i64.to_le_bytes());
+
+        let result = ValuePoolDeltaEntry::read(&buf[..]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn bundle_data_framing_roundtrip() {
+        let id = BundleId::new(3, 0);
+        let data = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+        let mut buf = Vec::new();
+        write_bundle_data_framing(&mut buf, &id, &data).unwrap();
+
+        let (parsed_id, parsed_data) = read_bundle_data_framing(&buf[..]).unwrap();
+        assert_eq!(parsed_id, id);
+        assert_eq!(parsed_data, data);
+    }
+
+    #[test]
+    fn bundle_map_typed_accessors() {
+        use super::super::Authorized;
+
+        let map: BundleMap<Authorized> = BundleMap::new();
+        assert!(map.transparent().is_none());
+        assert!(map.sapling().is_none());
+        assert!(map.orchard().is_none());
+        assert!(map.sprout().is_none());
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn bundle_map_unknown_bundles() {
+        use super::super::Authorized;
+
+        let mut map: BundleMap<Authorized> = BundleMap::new();
+        let id = BundleId::new(99, 0);
+        map.insert_unknown(id, UnknownBundle {
+            effect_data: vec![1, 2, 3],
+            auth_data: Some(vec![4, 5, 6]),
+        });
+
+        assert!(!map.is_empty());
+        let unknowns: Vec<_> = map.unknown_bundles().collect();
+        assert_eq!(unknowns.len(), 1);
+        assert_eq!(unknowns[0].0, &id);
+        assert_eq!(unknowns[0].1.effect_data, vec![1, 2, 3]);
+    }
 }
