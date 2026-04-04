@@ -46,22 +46,19 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     tx.write(&mut txn_bytes).unwrap();
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
-    prop_assert_eq!(tx.version, txo.version);
+    prop_assert_eq!(tx.version(), txo.version());
     #[cfg(zcash_unstable = "zfuture")]
-    prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
-    prop_assert_eq!(tx.lock_time, txo.lock_time);
-    prop_assert_eq!(
-        tx.transparent_bundle.as_ref(),
-        txo.transparent_bundle.as_ref()
-    );
+    prop_assert_eq!(tx.tze_bundle(), txo.tze_bundle());
+    prop_assert_eq!(tx.lock_time(), txo.lock_time());
+    prop_assert_eq!(tx.transparent_bundle(), txo.transparent_bundle());
     prop_assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     prop_assert_eq!(
-        tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
-        txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
+        tx.orchard_bundle().map(|v| *v.value_balance()),
+        txo.orchard_bundle().map(|v| *v.value_balance())
     );
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    if tx.version.has_zip233() {
-        prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
+    if tx.version().has_zip233() {
+        prop_assert_eq!(tx.zip233_amount(), txo.zip233_amount());
     }
     Ok(())
 }
@@ -250,8 +247,7 @@ fn zip_0244() {
             .collect();
 
         let test_bundle = txdata
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| transparent::Bundle {
                 // we have to do this map/clone to make the types line up, since the
                 // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
@@ -280,8 +276,7 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            txdata.zip233_amount,
+            txdata.value_pool_deltas().clone(),
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
@@ -293,8 +288,7 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
-            #[cfg(feature = "zip-233")]
-            txdata.zip233_amount,
+            txdata.value_pool_deltas().clone(),
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
@@ -411,8 +405,7 @@ fn zip_0233() {
             .collect();
 
         let test_bundle = txdata
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| transparent::Bundle {
                 // we have to do this map/clone to make the types line up, since the
                 // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
