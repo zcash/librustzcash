@@ -1471,6 +1471,22 @@ impl NoteFilter {
     }
 }
 
+/// Controls which transparent outputs are eligible for selection.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransparentOutputFilter {
+    /// Select all spendable transparent outputs.
+    #[default]
+    All,
+    /// Select only coinbase transparent outputs.
+    ///
+    /// Coinbase transactions are identified by having `tx_index == 0` within
+    /// their containing block. Outputs for which the transaction index is
+    /// unknown are conservatively treated as non-coinbase and will be excluded
+    /// when this filter is active.
+    CoinbaseOnly,
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a account.
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
@@ -1567,6 +1583,10 @@ pub trait InputSource {
     /// * the output can potentially be spent in a transaction mined in a block at the given
     ///   `target_height` (also taking into consideration the coinbase maturity rule).
     ///
+    /// The `output_filter` parameter controls which transparent outputs are eligible. When set
+    /// to [`TransparentOutputFilter::CoinbaseOnly`], only outputs from coinbase transactions
+    /// should be returned.
+    ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
@@ -1575,6 +1595,7 @@ pub trait InputSource {
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
+        _output_filter: TransparentOutputFilter,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"

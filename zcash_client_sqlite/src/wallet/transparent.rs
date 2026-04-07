@@ -23,7 +23,7 @@ use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, WalletUtxo,
+        TransactionStatusFilter, TransparentBalances, TransparentOutputFilter, WalletUtxo,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{
@@ -1167,7 +1167,13 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
+    output_filter: TransparentOutputFilter,
 ) -> Result<Vec<WalletUtxo>, SqliteClientError> {
+    let coinbase_only = match output_filter {
+        TransparentOutputFilter::All => 0i32,
+        TransparentOutputFilter::CoinbaseOnly => 1i32,
+    };
+
     let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
@@ -1182,7 +1188,8 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs",
+         AND ({}) -- exclude immature coinbase outputs
+         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
@@ -1204,6 +1211,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
+        ":coinbase_only": coinbase_only,
     ])?;
 
     let mut utxos = Vec::<WalletUtxo>::new();

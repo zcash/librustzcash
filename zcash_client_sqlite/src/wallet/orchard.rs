@@ -633,4 +633,10 @@ pub(crate) mod tests {
             OrchardPoolTester,
         >();
     }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn coinbase_only_filtering() {
+        testing::pool::coinbase_only_filtering::<OrchardPoolTester>();
+    }
 }

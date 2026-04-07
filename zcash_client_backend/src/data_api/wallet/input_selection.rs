@@ -7,7 +7,7 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
-use ::transparent::bundle::TxOut;
+use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
@@ -38,12 +38,13 @@ use super::ConfirmationsPolicy;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
+        data_api::TransparentOutputFilter,
         fees::ChangeValue,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
+    transparent::{address::TransparentAddress, bundle::OutPoint},
     zip321::Payment,
 };
 
@@ -238,6 +239,9 @@ pub trait ShieldingSelector {
     /// specified source addresses. If insufficient funds are available to satisfy the required
     /// outputs for the shielding request, this operation must fail and return
     /// [`InputSelectorError::InsufficientFunds`].
+    ///
+    /// The `output_filter` parameter controls which transparent outputs are eligible for
+    /// inclusion in the proposal. See [`TransparentOutputFilter`] for details.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_shielding<ParamsT, ChangeT>(
@@ -250,6 +254,7 @@ pub trait ShieldingSelector {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -1074,6 +1079,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -1092,7 +1098,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 use transparent::keys::TransparentKeyScope;
 
                 let utxos = wallet_db
-                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+                    .get_spendable_transparent_outputs(
+                        taddr,
+                        target_height,
+                        confirmations_policy,
+                        output_filter,
+                    )
                     .map_err(InputSelectorError::DataSource)?;
 
                 // `InputSource::get_spendable_transparent_outputs` is required to return

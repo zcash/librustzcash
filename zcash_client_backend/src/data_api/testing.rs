@@ -77,7 +77,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{
-        TransactionsInvolvingAddress, TransparentBalances,
+        TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
         wallet::input_selection::ShieldingSelector,
     },
     crate::wallet::TransparentAddressMetadata,
@@ -1100,6 +1100,7 @@ where
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn propose_shielding<InputsT, ChangeT>(
         &mut self,
@@ -1109,6 +1110,7 @@ where
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1129,6 +1131,7 @@ where
             from_addrs,
             to_account,
             confirmations_policy,
+            output_filter,
         )
     }
 

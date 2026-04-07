@@ -116,7 +116,7 @@ use {
     std::{collections::HashSet, time::SystemTime},
     zcash_client_backend::{
         data_api::{
-            TransactionsInvolvingAddress, TransparentBalances, WalletUtxo,
+            TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter, WalletUtxo,
             ll::wallet::generate_transparent_gap_addresses,
         },
         wallet::TransparentAddressMetadata,
@@ -596,6 +596,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -603,6 +604,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             address,
             target_height,
             confirmations_policy,
+            output_filter,
         )
     }
 

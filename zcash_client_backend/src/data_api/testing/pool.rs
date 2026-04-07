@@ -60,7 +60,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::TransactionDataRequest,
+        data_api::{TransactionDataRequest, TransparentOutputFilter},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::WalletTransparentOutput,
@@ -5197,6 +5197,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             &[to],
             dest_account_id,
             ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
         )
         .unwrap();
     let result1 = st
@@ -5377,6 +5378,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 &t_addr,
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
+                TransparentOutputFilter::All,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -5395,7 +5397,12 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     let target_height = TargetHeight::from(latest_height + 1);
     let spendable_utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&t_addr, target_height, ConfirmationsPolicy::default())
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            TransparentOutputFilter::All,
+        )
         .unwrap();
     assert!(
         !spendable_utxos.is_empty(),
@@ -5415,6 +5422,136 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
+            TransparentOutputFilter::All,
         )
         .unwrap();
+}
+
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+/// Tests that `TransparentOutputFilter::CoinbaseOnly` excludes non-coinbase outputs from
+/// UTXO selection and shielding proposals, and that `CoinbaseOnly` still allows proposing
+/// shielding when only coinbase UTXOs are available.
+pub fn coinbase_only_filtering<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+    let account = st.get_account().id();
+
+    // 1. Create a coinbase UTXO (50,000 zats)
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_height = st.sapling_activation_height();
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(coinbase_height),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+
+    // 2. Create a non-coinbase UTXO (60,000 zats)
+    // Inserted via put_received_transparent_utxo, which sets tx_index = NULL.
+    // NULL tx_index is treated as non-coinbase by the filter.
+    let non_coinbase_value = Zatoshis::const_from_u64(60000);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(non_coinbase_value, t_addr.script().into()),
+        Some(h),
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // 3. Wait for coinbase maturity (100 confirmations)
+    st.add_empty_blocks(100);
+    let target_height = TargetHeight::from(h + 101);
+
+    // 4. TransparentOutputFilter::All returns both UTXOs
+    let all_utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(
+        all_utxos.len(),
+        2,
+        "Expected both coinbase and non-coinbase UTXOs with TransparentOutputFilter::All"
+    );
+    let all_utxos_value = all_utxos
+        .iter()
+        .map(|utxo| utxo.value().into_u64())
+        .sum::<u64>();
+    assert_eq!(
+        all_utxos_value,
+        coinbase_value.into_u64() + non_coinbase_value.into_u64(),
+        "Unexpected total UTXO value when querying for all transparent transactions"
+    );
+
+    // 5. TransparentOutputFilter::CoinbaseOnly returns only the coinbase UTXO
+    let coinbase_utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            TransparentOutputFilter::CoinbaseOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        coinbase_utxos.len(),
+        1,
+        "Expected only the coinbase UTXO with TransparentOutputFilter::CoinbaseOnly"
+    );
+    assert_eq!(coinbase_utxos[0].value(), coinbase_value);
+
+    // 6. propose_shielding with CoinbaseOnly includes only the coinbase input
+    let proposal = st
+        .propose_shielding(
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            Zatoshis::from_u64(10000).unwrap(),
+            &[t_addr],
+            account,
+            ConfirmationsPolicy::default(),
+            TransparentOutputFilter::CoinbaseOnly,
+        )
+        .unwrap();
+    let coinbase_inputs = proposal.steps().first().transparent_inputs();
+    assert_eq!(
+        coinbase_inputs.len(),
+        1,
+        "CoinbaseOnly proposal should contain exactly one transparent input"
+    );
+    assert_eq!(coinbase_inputs[0].value(), coinbase_value);
+
+    // 7. propose_shielding with All includes both inputs
+    let proposal_all = st
+        .propose_shielding(
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            Zatoshis::from_u64(10000).unwrap(),
+            &[t_addr],
+            account,
+            ConfirmationsPolicy::default(),
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    let all_inputs = proposal_all.steps().first().transparent_inputs();
+    assert_eq!(
+        all_inputs.len(),
+        2,
+        "All proposal should contain both transparent inputs"
+    );
 }
