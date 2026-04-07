@@ -173,7 +173,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
                 // (None), conservatively treat it as **non-coinbase**, matching the SQL
                 // implementation's IFNULL(tx_index, 1) == 0 behavior.
                 TransparentOutputFilter::CoinbaseOnly => {
-                    tx.map_or(false, |tx| tx.tx_index().unwrap_or(1) == 0)
+                    tx.is_some_and(|tx| tx.tx_index().unwrap_or(1) == 0)
                 }
             })
             .filter_map(|(outpoint, txo, tx)| {

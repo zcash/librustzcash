@@ -190,10 +190,7 @@ impl Block {
         // individually read the coinbase transaction before the rest.
         let n_tx: usize = CompactSize::read_t(&mut reader)?;
         if n_tx == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "block has no coinbase tx",
-            ));
+            return Err(io::Error::other("block has no coinbase tx"));
         }
 
         // Parse with an arbitrary consensus branch ID initially; we will fix it later.
@@ -204,16 +201,11 @@ impl Block {
             let coinbase_transparent = coinbase
                 .transparent_bundle()
                 .filter(|b| b.is_coinbase())
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, "first tx of block is not coinbase")
-                })?;
+                .ok_or_else(|| io::Error::other("first tx of block is not coinbase"))?;
 
             // Verify some simple structural consensus rules on the coinbase transaction.
             if coinbase.sprout_bundle().is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "coinbase tx has sprout data",
-                ));
+                return Err(io::Error::other("coinbase tx has sprout data"));
             }
 
             let coinbase_txin = coinbase_transparent.vin.first().expect("checked above");
@@ -222,25 +214,16 @@ impl Block {
                 Some(Ok(PossiblyBad::Good(Opcode::PushValue(height)))) => height
                     .to_num()
                     .map_err(|_| {
-                        io::Error::new(
-                            io::ErrorKind::Other,
-                            "coinbase input specifies an invalid block height",
-                        )
+                        io::Error::other("coinbase input specifies an invalid block height")
                     })
                     .and_then(|h| {
                         BlockHeight::try_from(h).map_err(|_| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                "coinbase input specifies an invalid block height",
-                            )
+                            io::Error::other("coinbase input specifies an invalid block height")
                         })
                     }),
                 // TODO: Permit missing height in genesis blocks by matching their block
                 // hash against the provided params.
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "coinbase scriptSig missing height",
-                )),
+                _ => Err(io::Error::other("coinbase scriptSig missing height")),
             }?
         };
 
@@ -255,8 +238,7 @@ impl Block {
             // All later tx versions directly commit to the consensus branch ID.
             _ => {
                 if coinbase.consensus_branch_id() != consensus_branch_id {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Err(io::Error::other(
                         "coinbase tx's claimed height doesn't match its consensus branch ID for given network parameters",
                     ));
                 }
@@ -276,8 +258,7 @@ impl Block {
             .flat_map(|b| &b.vin)
             .any(|txin| txin.prevout() == &OutPoint::NULL)
         {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "non-coinbase tx has null transparent input",
             ));
         }
