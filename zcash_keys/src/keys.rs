@@ -1800,7 +1800,9 @@ impl UnifiedIncomingViewingKey {
     ///
     /// Returns an error if the resulting request would not include a shielded receiver.
     #[allow(unused_mut)]
-    pub fn to_receiver_requirements(&self) -> Result<ReceiverRequirements, ReceiverRequirementError> {
+    pub fn to_receiver_requirements(
+        &self,
+    ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
         use ReceiverRequirement::*;
 
         let mut orchard = Omit;

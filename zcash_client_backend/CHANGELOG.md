@@ -19,6 +19,8 @@ workspace.
   - `DecryptableTransaction`
   - `ReceivedTransactionOutput`
   - `impl From<zcash_client_backend::proposal::ProposalError> for wallet::input_selection::InputSelectorError<...>`
+  - `wallet::ConfirmationsPolicyError`
+- `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:
   - `CompactTx` has added fields `vin` and `vout`
   - Added types `CompactTxIn`, `OutPoint`, `TxOut`
@@ -79,7 +81,11 @@ workspace.
       version.
     - `input_selection::InputSelector::propose_transaction` trait method.
   - Trait `Account` has added method `birthday_height`
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::new` now returns
+  `Result<Self, ConfirmationsPolicyError>` instead of `Result<Self, ()>`.
 - `zcash_client_backend::fees`:
+  - `TransactionBalance::new` now returns `Result<Self, BalanceError>` instead of
+    `Result<Self, ()>`.
   - The associated type `ChangeStrategy::MetaSource` is now bounded on the newly
     added `MetaSource` type instead of `zcash_client_backend::data_api::InputSource`.
 - `zcash_client_backend::proposal`:
@@ -91,6 +97,13 @@ workspace.
   - `service::Exclude` has been renamed to `GetMempoolTxRequest`
   - `service::Exclude::txid` has been renamed to
     `GetMempoolTxRequest::exclude_txid_suffixes`
+- `zcash_client_backend::proto::compact_formats::`:
+  - `CompactSaplingOutput::{cmu, ephemeral_key}`, `CompactSaplingSpend::nf` and
+    `CompactOrchardAction::{nf, cmx, ephemeral_key}` now return `CompactFormatError`
+    for the errors in their results instead of `()`. In addition, the `TryFrom`
+    impls that are used to convert from these wire types into their domain
+    types similarly use `CompactFormatError` for their `Error` type instead
+    of `()`.
 - `zcash_client_backend::scanning`:
   - `ScanningKeys` now stores `Box<dyn ScanningKeyOps<_, _, _> + Send + Sync>`
     in its maps instead of `Box<dyn ScanningKeyOps<_, _, _>>`, enabling their

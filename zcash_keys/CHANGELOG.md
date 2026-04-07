@@ -14,6 +14,9 @@ workspace.
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_uivk`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::subsumes`
 - `impl {PartialEq, Eq} for zcash_keys::keys::UnifiedIncomingViewingKey`
+- `zcash_keys::keys::ReceiverRequirementError`
+- `zcash_keys::keys::transparent::DerDecodeError` (behind the
+  `transparent-key-encoding` feature flag)
 - `zcash_keys::keys::OutgoingViewingKey`
 - `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::transparent::gap_limits` module (behind the
@@ -26,6 +29,14 @@ workspace.
   - `GapAddressesError`
 
 ### Changed
+- `zcash_keys::keys::ReceiverRequirement::intersect`,
+  `UnifiedAddressRequest::new`, `ReceiverRequirements::new`,
+  `ReceiverRequirements::intersect`, and
+  `UnifiedIncomingViewingKey::to_receiver_requirements` now return
+  `Result<_, ReceiverRequirementError>` instead of `Result<_, ()>`.
+- `zcash_keys::keys::transparent::Key::der_decode` now returns
+  `Result<Self, DerDecodeError>` instead of `Result<Self, ()>` (behind the
+  `transparent-key-encoding` feature flag).
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - The `std` feature flag now enables the equivalent flag on the dependencies
