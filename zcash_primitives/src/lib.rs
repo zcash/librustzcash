@@ -11,8 +11,6 @@
 #![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
-// Temporary until we have addressed all Result<T, ()> cases.
-#![allow(clippy::result_unit_err)]
 // Present to reduce refactoring noise from changing all the imports inside this crate for
 // the `sapling` crate extraction.
 #![allow(clippy::single_component_path_imports)]

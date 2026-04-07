@@ -14,7 +14,7 @@ use zcash_protocol::{
     PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    value::{BalanceError, Zatoshis},
 };
 
 use crate::data_api::{InputSource, wallet::TargetHeight};
@@ -163,13 +163,16 @@ pub struct TransactionBalance {
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
-    pub fn new(proposed_change: Vec<ChangeValue>, fee_required: Zatoshis) -> Result<Self, ()> {
+    pub fn new(
+        proposed_change: Vec<ChangeValue>,
+        fee_required: Zatoshis,
+    ) -> Result<Self, BalanceError> {
         let total = proposed_change
             .iter()
             .map(|c| c.value())
             .chain(Some(fee_required).into_iter())
             .sum::<Option<Zatoshis>>()
-            .ok_or(())?;
+            .ok_or(BalanceError::Overflow)?;
 
         Ok(Self {
             proposed_change,
