@@ -23,6 +23,7 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod ivk_item_cache;
 mod nullifier_map;
 mod orchard_received_notes;
 mod orchard_shardtree;
@@ -134,6 +135,8 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                                              /               \
     //                               v_tx_outputs_key_scopes    standalone_p2sh
+    //                                                                  |
+    //                                                           ivk_item_cache
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -221,6 +224,9 @@ pub(super) fn all_migrations<
         Box::new(account_delete_cascade::Migration),
         Box::new(v_tx_outputs_key_scopes::Migration),
         Box::new(standalone_p2sh::Migration),
+        Box::new(ivk_item_cache::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 
@@ -363,7 +369,7 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     v_tx_outputs_key_scopes::MIGRATION_ID,
-    standalone_p2sh::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

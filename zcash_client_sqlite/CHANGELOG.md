@@ -32,6 +32,13 @@ workspace.
   database transaction overhead).
 
 ### Changed
+- The `accounts` table now stores IVK item caches instead of FVK item caches for
+  collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
+  ZIP 316 Revision 2 P2SH support.
+- Account collision detection now uses IVK-based matching, which catches collisions
+  between FVK-imported and IVK-imported accounts. Importing an FVK over an existing
+  IVK-only account is treated as a capability upgrade if the existing IVK items are
+  a subset of those derivable from the new FVK.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`

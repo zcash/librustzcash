@@ -46,12 +46,15 @@ use crate::wallet::scanning::priority_code;
 ///   `hd_seed_fingerprint` must also be non-null.
 /// - `ufvk`: The unified full viewing key for the account, if known.
 /// - `uivk`: The unified incoming viewing key for the account.
-/// - `orchard_fvk_item_cache`: The serialized representation of the Orchard item of the `ufvk`,
-///   if any.
-/// - `sapling_fvk_item_cache`: The serialized representation of the Sapling item of the `ufvk`,
-///   if any.
-/// - `p2pkh_fvk_item_cache`: The serialized representation of the P2PKH item of the `ufvk`,
-///   if any.
+/// - `orchard_ivk_item_cache`: The serialized representation of the Orchard IVK item derived
+///   from the account's viewing key, if any. Used for collision detection.
+/// - `sapling_ivk_item_cache`: The serialized representation of the Sapling IVK item derived
+///   from the account's viewing key, if any. Used for collision detection.
+/// - `p2pkh_ivk_item_cache`: The serialized representation of the transparent P2PKH IVK item
+///   derived from the account's viewing key, if any. Used for collision detection.
+/// - `p2sh_ivk_item_cache`: The serialized representation of a P2SH IVK item derived from
+///   the account's viewing key, if any. At most one of `p2pkh_ivk_item_cache` and
+///   `p2sh_ivk_item_cache` may be non-NULL.
 /// - `birthday_height`: The minimum block height among blocks that may potentially contain
 ///   shielded funds belonging to the account.
 /// - `birthday_sapling_tree_size`: A cache of the size of the Sapling note commitment tree
@@ -86,9 +89,10 @@ CREATE TABLE "accounts" (
     hd_account_index INTEGER,
     ufvk TEXT,
     uivk TEXT NOT NULL,
-    orchard_fvk_item_cache BLOB,
-    sapling_fvk_item_cache BLOB,
-    p2pkh_fvk_item_cache BLOB,
+    orchard_ivk_item_cache BLOB,
+    sapling_ivk_item_cache BLOB,
+    p2pkh_ivk_item_cache BLOB,
+    p2sh_ivk_item_cache BLOB,
     birthday_height INTEGER NOT NULL,
     birthday_sapling_tree_size INTEGER,
     birthday_orchard_tree_size INTEGER,
@@ -107,6 +111,9 @@ CREATE TABLE "accounts" (
         account_kind = 1
         AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
       )
+    ),
+    CHECK (
+      NOT (p2pkh_ivk_item_cache IS NOT NULL AND p2sh_ivk_item_cache IS NOT NULL)
     )
 )"#;
 pub(super) const INDEX_ACCOUNTS_UUID: &str =
@@ -116,6 +123,14 @@ pub(super) const INDEX_ACCOUNTS_UFVK: &str =
 pub(super) const INDEX_ACCOUNTS_UIVK: &str =
     r#"CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk)"#;
 pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index)"#;
+pub(super) const INDEX_ACCOUNTS_ORCHARD_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_orchard_ivk ON accounts (orchard_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_SAPLING_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_sapling_ivk ON accounts (sapling_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_P2PKH_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_p2pkh_ivk ON accounts (p2pkh_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_p2sh_ivk ON accounts (p2sh_ivk_item_cache)"#;
 
 /// Stores addresses that have been generated from accounts in the wallet.
 ///

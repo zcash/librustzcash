@@ -2863,14 +2863,16 @@ mod tests {
     ) where
         DbT::Account: core::fmt::Debug,
     {
+        // Re-importing the same UFVK is a duplicate (no new capability added), so
+        // it should produce an AccountCollision error.
         assert_matches!(
             st.wallet_mut()
                 .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
             Err(e) if is_account_collision(&e)
         );
 
-        // Remove the transparent component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Importing a UFVK with fewer components than the existing account should fail:
+        // the existing IVK items are not a subset of the new (smaller) FVK's items.
         #[cfg(feature = "transparent-inputs")]
         {
             assert!(ufvk.transparent().is_some());
@@ -2893,8 +2895,7 @@ mod tests {
             );
         }
 
-        // Remove the Orchard component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Remove the Orchard component: still a collision since existing has Orchard.
         #[cfg(feature = "orchard")]
         {
             assert!(ufvk.orchard().is_some());
@@ -3032,6 +3033,195 @@ mod tests {
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == seed_based.0),
         );
+    }
+
+    #[test]
+    pub(crate) fn ivk_only_account_upgrade_paths() {
+        use zcash_keys::keys::UnifiedIncomingViewingKey;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+
+        // Create a UIVK with only the Sapling component (a subset of the full UIVK).
+        let sapling_only_uivk = UnifiedIncomingViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            full_uivk.sapling().clone(),
+            #[cfg(feature = "orchard")]
+            None,
+        );
+
+        // Import the sapling-only IVK as an IVK-only account.
+        let network = *st.network();
+        let ivk_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "ivk-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        // (a) Same IVK import should fail (duplicate, no new capability).
+        assert_matches!(
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "duplicate",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            }),
+            Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
+        );
+
+        // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
+        let ufvk_upgraded = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+        // Should return the same account, now with the UFVK.
+        assert_eq!(ufvk_upgraded.id(), ivk_account.id());
+        assert!(ufvk_upgraded.ufvk().is_some());
+        assert_eq!(
+            ufvk_upgraded.ufvk().unwrap().encode(&network),
+            ufvk.encode(&network),
+        );
+
+        // (c) IVK import over an account that now has a UFVK should fail.
+        assert_matches!(
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "downgrade",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            }),
+            Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
+        );
+    }
+
+    /// Tests that importing a UIVK with additional items over an existing IVK-only
+    /// account succeeds as an additive upgrade. Only meaningful when features provide
+    /// more than one shielded pool (e.g. `orchard`).
+    #[cfg(feature = "orchard")]
+    #[test]
+    pub(crate) fn ivk_over_ivk_additive_upgrade() {
+        use zcash_keys::keys::UnifiedIncomingViewingKey;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+        let network = *st.network();
+
+        // Create a UIVK with only Sapling (a strict subset of the full UIVK).
+        let sapling_only_uivk = UnifiedIncomingViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            full_uivk.sapling().clone(),
+            None, // no Orchard
+        );
+
+        // Import the sapling-only IVK.
+        let ivk_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "sapling-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        // Import the full UIVK (sapling + orchard) — should upgrade.
+        let upgraded = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "upgraded",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(upgraded.id(), ivk_account.id());
+        assert!(upgraded.ufvk().is_none());
+        assert!(upgraded.uivk().encode(&network) != ivk_account.uivk().encode(&network));
     }
 
     #[cfg(feature = "transparent-inputs")]

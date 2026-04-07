@@ -1110,6 +1110,61 @@ impl UnifiedFullViewingKey {
         self.orchard.as_ref()
     }
 
+    /// Returns `true` if this UFVK subsumes the given UIVK: every IVK item present in
+    /// `other` has a matching item derivable from `self`. The UFVK may have additional
+    /// items representing capabilities not present in the UIVK.
+    pub fn subsumes_uivk(&self, other: &UnifiedIncomingViewingKey) -> bool {
+        self.to_unified_incoming_viewing_key().subsumes(other)
+    }
+
+    /// Returns `true` if this UFVK subsumes `other`: every FVK item in `other` has a
+    /// matching item in `self`, including both incoming and outgoing viewing capability.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required.
+    pub fn subsumes_ufvk(&self, other: &UnifiedFullViewingKey) -> bool {
+        #[cfg(feature = "orchard")]
+        match (&other.orchard, &self.orchard) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "sapling")]
+        match (&other.sapling, &self.sapling) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        match (&other.transparent, &self.transparent) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
@@ -1237,6 +1292,14 @@ pub struct UnifiedIncomingViewingKey {
     /// Stores the unrecognized elements of the unified encoding.
     unknown: Vec<(u32, Vec<u8>)>,
 }
+
+impl PartialEq for UnifiedIncomingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.subsumes(other) && other.subsumes(self)
+    }
+}
+
+impl Eq for UnifiedIncomingViewingKey {}
 
 impl core::fmt::Debug for UnifiedIncomingViewingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -1455,6 +1518,56 @@ impl UnifiedIncomingViewingKey {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &Option<orchard::keys::IncomingViewingKey> {
         &self.orchard
+    }
+
+    /// Returns `true` if this UIVK subsumes `other`: every IVK item present in `other`
+    /// has a matching item in `self`. This key may have additional items representing
+    /// capabilities not present in `other`.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required. Future
+    /// revisions may apply more specific semantics for known metadata typecodes.
+    pub fn subsumes(&self, other: &UnifiedIncomingViewingKey) -> bool {
+        #[cfg(feature = "orchard")]
+        match (other.orchard(), &self.orchard) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "sapling")]
+        match (other.sapling(), &self.sapling) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        match (other.transparent(), &self.transparent) {
+            (Some(e), Some(n)) => {
+                if e != n {
+                    return false;
+                }
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
@@ -2297,5 +2410,68 @@ mod tests {
             format!("{:?}", super::OutgoingViewingKey::from([0u8; 32])),
             "OutgoingViewingKey(\"...\")"
         );
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_same_key() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        // A UFVK subsumes itself.
+        assert!(ufvk.subsumes_ufvk(&ufvk));
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_uivk_from_same_ufvk() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+
+        // A UFVK subsumes the UIVK derived from it.
+        assert!(ufvk.subsumes_uivk(&uivk));
+    }
+
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_subset() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        // A UFVK with all components subsumes one with fewer components.
+        let subset_ufvk = UnifiedFullViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            ufvk.sapling().cloned(),
+            None, // no Orchard
+        )
+        .unwrap();
+        assert!(ufvk.subsumes_ufvk(&subset_ufvk));
+        // The subset does not subsume the full key.
+        assert!(!subset_ufvk.subsumes_ufvk(&ufvk));
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_different_keys() {
+        let seed0 = vec![0u8; 32];
+        let seed1 = vec![1u8; 32];
+        let usk0 =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed0, AccountId::ZERO).unwrap();
+        let usk1 =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed1, AccountId::ZERO).unwrap();
+        let ufvk0 = usk0.to_unified_full_viewing_key();
+        let ufvk1 = usk1.to_unified_full_viewing_key();
+
+        // UFVKs from different seeds do not subsume each other.
+        assert!(!ufvk0.subsumes_ufvk(&ufvk1));
+        assert!(!ufvk1.subsumes_ufvk(&ufvk0));
     }
 }

@@ -10,6 +10,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_keys::keys::UnifiedFullViewingKey::subsumes_ufvk`
+- `zcash_keys::keys::UnifiedFullViewingKey::subsumes_uivk`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::subsumes`
+- `impl {PartialEq, Eq} for zcash_keys::keys::UnifiedIncomingViewingKey`
 - `zcash_keys::keys::OutgoingViewingKey`
 - `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::transparent::gap_limits` module (behind the
