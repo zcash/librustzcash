@@ -1259,6 +1259,14 @@ impl Transaction {
                 "Sprout components cannot be present when serializing to the V6 transaction format.",
             ));
         }
+        #[cfg(zcash_unstable = "zfuture")]
+        if self.bundles.tze().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "TZE components cannot be present when serializing to the V6 transaction format \
+                 until a bundleType is registered for them in ZIP 248.",
+            ));
+        }
 
         // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
         self.write_v6_header(&mut writer)?;
