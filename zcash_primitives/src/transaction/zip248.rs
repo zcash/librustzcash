@@ -86,11 +86,21 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized and its txid computed.
+/// the transaction can still be serialized. To compute the V6 transaction
+/// identifier (and the authorizing data commitment) over a transaction
+/// containing an unknown bundle, the caller must also supply the
+/// `bundle_effects_digest` (and, when `auth_data` is present, the
+/// `bundle_auth_digest`) computed by whatever algorithm the defining ZIP
+/// for the bundle type specifies. ZIP 248 §"Implications for Wallets"
+/// expects these to be supplied externally; they cannot be derived from
+/// the opaque bytes alone.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
     pub effect_data: Vec<u8>,
+    pub effect_digest: blake2b_simd::Hash,
     pub auth_data: Option<Vec<u8>>,
+    /// Required to be `Some(_)` if and only if `auth_data` is `Some(_)`.
+    pub auth_digest: Option<blake2b_simd::Hash>,
 }
 
 // ---------------------------------------------------------------------------
@@ -757,7 +767,17 @@ mod tests {
         let id = BundleId::new(99, 0);
         map.insert_unknown(id, UnknownBundle {
             effect_data: vec![1, 2, 3],
+            effect_digest: blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"test_unknown_efx")
+                .hash(&[1, 2, 3]),
             auth_data: Some(vec![4, 5, 6]),
+            auth_digest: Some(
+                blake2b_simd::Params::new()
+                    .hash_length(32)
+                    .personal(b"test_unknown_aut")
+                    .hash(&[4, 5, 6]),
+            ),
         });
 
         assert!(!map.is_empty());

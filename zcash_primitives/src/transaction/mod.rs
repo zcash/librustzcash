@@ -616,6 +616,23 @@ impl<A: Authorization> TransactionData<A> {
         };
 
         let digester = TxIdDigester;
+
+        // Per-unknown-bundle effect and auth digests, in (bundleType, bundleVariant)
+        // order. `BundleMap.unknown_bundles()` already iterates in BTreeMap key
+        // order. The digests are taken from the `UnknownBundle` itself; the
+        // caller is required to have supplied them at construction time, since
+        // for unknown bundle types we don't have the bundle's digest algorithm.
+        let unknown_effect_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = self
+            .bundles
+            .unknown_bundles()
+            .map(|(id, ub)| (*id, ub.effect_digest))
+            .collect();
+        let unknown_auth_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = self
+            .bundles
+            .unknown_bundles()
+            .filter_map(|(id, ub)| ub.auth_digest.map(|digest| (*id, digest)))
+            .collect();
+
         TxDigests {
             header_digest: hash_v6_header(
                 self.version,
@@ -636,6 +653,8 @@ impl<A: Authorization> TransactionData<A> {
                 self.bundles.tze(),
             ),
             value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+            unknown_effect_digests,
+            unknown_auth_digests,
         }
     }
 
@@ -1038,7 +1057,7 @@ impl Transaction {
 
         // 3. Effect bundles map
         let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let mut bundles = zip248::BundleMap::new();
+        let bundles = zip248::BundleMap::new();
         let mut sapling_effect_data: Option<Vec<u8>> = None;
         let mut orchard_effect_data: Option<Vec<u8>> = None;
         let mut transparent_effect_data: Option<Vec<u8>> = None;
@@ -1056,11 +1075,19 @@ impl Transaction {
                     orchard_effect_data = Some(data);
                 }
                 _ => {
-                    // Unknown bundle type — store opaque
-                    bundles.insert_unknown(id, zip248::UnknownBundle {
-                        effect_data: data,
-                        auth_data: None,
-                    });
+                    // ZIP 248 §"Implications for Wallets" requires the
+                    // bundle_effects_digest to be supplied externally for
+                    // unknown bundle types; we cannot derive it from the
+                    // opaque bytes alone, so without a digest registry
+                    // callback we cannot safely accept unknown bundles
+                    // here. Refuse the transaction. A future revision of
+                    // this reader that takes a `BundleId -> digest`
+                    // registry from the caller can lift this restriction.
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction contains an unknown effect bundle type \
+                         and no digest registry was supplied",
+                    ));
                 }
             }
         }
@@ -1084,11 +1111,11 @@ impl Transaction {
                     orchard_auth_data = Some(data);
                 }
                 _ => {
-                    // Attach auth data to matching unknown bundle
-                    if let Some(ub) = bundles.get_unknown_mut(&id) {
-                        ub.auth_data = Some(data);
-                    }
-                    // else: auth without effect is a validation error, skip for now
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction contains an unknown auth bundle type \
+                         and no digest registry was supplied",
+                    ));
                 }
             }
         }
@@ -1416,19 +1443,43 @@ impl Transaction {
     /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn auth_commitment_v6(&self) -> Blake2bHash {
-        let digester = BlockTxCommitmentDigester;
-        let transparent_digest = digester.digest_transparent(self.data.bundles.transparent());
-        let sapling_digest = digester.digest_sapling(self.data.bundles.sapling());
-        let orchard_digest = digester.digest_orchard(self.data.bundles.orchard());
+        use txid::{hash_v6_auth_bundles, v6_auth_digest_entries};
 
-        let auth_bundles_digest = txid::hash_v6_auth_bundles(
-            transparent_digest,
-            self.data.bundles.transparent().is_some(),
-            sapling_digest,
-            self.data.bundles.sapling().is_some(),
-            orchard_digest,
-            self.data.bundles.orchard().is_some(),
-        );
+        // TODO: the per-bundle sub-digesters reused here are the ZIP 244
+        // (V5) auth digesters, which omit the new sighashInfo framing
+        // required by ZIP 248 §A.1.0/§A.1.2/§A.1.3. Replace with
+        // V6-specific digesters that hash TransparentSighashInfo /
+        // SaplingSignature / OrchardSignature framing.
+        let digester = BlockTxCommitmentDigester;
+        let transparent_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .transparent()
+            .map(|b| digester.digest_transparent(Some(b)));
+        let sapling_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .sapling()
+            .map(|b| digester.digest_sapling(Some(b)));
+        let orchard_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .orchard()
+            .map(|b| digester.digest_orchard(Some(b)));
+
+        let unknown_auth_digests: Vec<(zip248::BundleId, Blake2bHash)> = self
+            .data
+            .bundles
+            .unknown_bundles()
+            .filter_map(|(id, ub)| ub.auth_digest.map(|digest| (*id, digest)))
+            .collect();
+
+        let auth_bundles_digest = hash_v6_auth_bundles(v6_auth_digest_entries(
+            transparent_auth_digest.as_ref(),
+            sapling_auth_digest.as_ref(),
+            orchard_auth_digest.as_ref(),
+            &unknown_auth_digests,
+        ));
 
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(b"ZTxAuthHash_");
@@ -1471,6 +1522,16 @@ pub struct TxDigests<A> {
     /// V6 (ZIP 248): digest of the value pool deltas map.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub value_pool_deltas_digest: Option<A>,
+    /// V6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
+    /// in `(bundleType, bundleVariant)` order. These are folded into
+    /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    pub unknown_effect_digests: Vec<(zip248::BundleId, A)>,
+    /// V6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
+    /// in `(bundleType, bundleVariant)` order. These are folded into
+    /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    pub unknown_auth_digests: Vec<(zip248::BundleId, A)>,
 }
 
 pub trait TransactionDigest<A: Authorization> {

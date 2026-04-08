@@ -444,70 +444,56 @@ pub(crate) fn hash_v6_orchard_effects(
     h.finalize()
 }
 
-/// V6 effects bundles digest: wraps each per-bundle digest with bundleType || bundleVariant tags.
+/// Hashes a sequence of tagged per-bundle digests under the given personalization,
+/// where each entry is `(bundleType compactSize || bundleVariant compactSize || digest)`.
+///
+/// The caller is responsible for providing entries in the order required by ZIP 248
+/// (strictly increasing `(bundleType, bundleVariant)`), including any unknown bundles.
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) fn hash_v6_effects_bundles(
-    transparent_digest: Blake2bHash,
-    has_transparent: bool,
-    sapling_digest: Option<Blake2bHash>,
-    orchard_digest: Option<Blake2bHash>,
-) -> Blake2bHash {
+fn hash_v6_tagged_bundle_digests<'a, I>(
+    personalization: &[u8; 16],
+    entries: I,
+) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
     use zcash_encoding::CompactSize;
 
-    let mut h = hasher(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION);
-
-    // Each present bundle: bundleType (compactSize) || bundleVariant (compactSize) || digest (32 bytes)
-    if has_transparent {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(transparent_digest.as_bytes()).unwrap();
+    let mut h = hasher(personalization);
+    for (id, digest) in entries {
+        CompactSize::write(&mut h, id.bundle_type as usize).unwrap();
+        CompactSize::write(&mut h, id.bundle_variant as usize).unwrap();
+        h.write_all(digest.as_bytes()).unwrap();
     }
-    if let Some(ref d) = sapling_digest {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(d.as_bytes()).unwrap();
-    }
-    if let Some(ref d) = orchard_digest {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(d.as_bytes()).unwrap();
-    }
-
     h.finalize()
 }
 
-/// V6 auth bundles digest: wraps each per-bundle auth digest with bundleType || bundleVariant tags.
+/// V6 effects bundles digest per ZIP 248 §T.3 `effects_bundles_digest`.
+///
+/// Wraps each per-bundle effecting-data digest with `(bundleType, bundleVariant)`
+/// tags and hashes them in increasing `bundleType` order under the
+/// `ZTxIdEffBnd_Hash` personalization.
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) fn hash_v6_auth_bundles(
-    transparent_auth_digest: Blake2bHash,
-    has_transparent: bool,
-    sapling_auth_digest: Blake2bHash,
-    has_sapling: bool,
-    orchard_auth_digest: Blake2bHash,
-    has_orchard: bool,
-) -> Blake2bHash {
-    use zcash_encoding::CompactSize;
-
-    let mut h = hasher(ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION);
-
-    if has_transparent {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(transparent_auth_digest.as_bytes()).unwrap();
-    }
-    if has_sapling {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(sapling_auth_digest.as_bytes()).unwrap();
-    }
-    if has_orchard {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(orchard_auth_digest.as_bytes()).unwrap();
-    }
-
-    h.finalize()
+pub(crate) fn hash_v6_effects_bundles<'a, I>(entries: I) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
+    hash_v6_tagged_bundle_digests(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION, entries)
 }
+
+/// V6 auth bundles digest per ZIP 248 §A.1 `auth_bundles_digest`.
+///
+/// Wraps each per-bundle authorizing-data digest with `(bundleType, bundleVariant)`
+/// tags and hashes them in increasing `bundleType` order under the
+/// `ZTxAuthBnd__Hash` personalization.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_auth_bundles<'a, I>(entries: I) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
+    hash_v6_tagged_bundle_digests(ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION, entries)
+}
+
 
 // ---------------------------------------------------------------------------
 
@@ -597,9 +583,15 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             orchard_digest,
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests,
-            // Populated by digest_v6() path, not via combine()
+            // The fields below are populated by the V6-specific `digest_v6()`
+            // path; the legacy `TransactionDigest::combine` path used for
+            // pre-v6 transactions leaves them empty.
             #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
             value_pool_deltas_digest: None,
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            unknown_effect_digests: alloc::vec::Vec::new(),
+            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            unknown_auth_digests: alloc::vec::Vec::new(),
         }
     }
 }
@@ -667,7 +659,9 @@ pub fn to_txid(
     TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
 }
 
-/// V6 txid hash: header || value_pool_deltas || effects_bundles
+/// V6 txid hash per ZIP 248 §T: header_digest || value_pool_deltas_digest ||
+/// effects_bundles_digest, all under the consensus-branch-id-personalized
+/// "ZcashTxHash_" hash.
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 fn to_hash_v6(
     consensus_branch_id: BranchId,
@@ -683,21 +677,78 @@ fn to_hash_v6(
         .value_pool_deltas_digest
         .unwrap_or_else(|| hasher(ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION).finalize());
 
-    let has_transparent = digests.transparent_digests.is_some();
     let transparent_digest = hash_transparent_txid_data(digests.transparent_digests.as_ref());
 
-    let effects_bundles_digest = hash_v6_effects_bundles(
-        transparent_digest,
-        has_transparent,
-        digests.sapling_digest,
-        digests.orchard_digest,
-    );
+    let effects_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
+        digests.transparent_digests.is_some().then_some(&transparent_digest),
+        digests.sapling_digest.as_ref(),
+        digests.orchard_digest.as_ref(),
+        &digests.unknown_effect_digests,
+    ));
 
     let mut h = hasher(&personal);
     h.write_all(digests.header_digest.as_bytes()).unwrap();
     h.write_all(vp_deltas_digest.as_bytes()).unwrap();
     h.write_all(effects_bundles_digest.as_bytes()).unwrap();
     h.finalize()
+}
+
+/// Builds the (BundleId, &Blake2bHash) entries for `effects_bundles_digest` /
+/// `signature_bundles_digest`, merging the known transparent/sapling/orchard
+/// per-bundle digests with any unknown-bundle digests in strictly increasing
+/// `(bundleType, bundleVariant)` order. Returns a `Vec` so the caller can pass
+/// it directly into `hash_v6_effects_bundles`.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn v6_effect_digest_entries<'a>(
+    transparent_digest: Option<&'a Blake2bHash>,
+    sapling_digest: Option<&'a Blake2bHash>,
+    orchard_digest: Option<&'a Blake2bHash>,
+    unknown: &'a [(super::zip248::BundleId, Blake2bHash)],
+) -> alloc::vec::Vec<(super::zip248::BundleId, &'a Blake2bHash)> {
+    use super::zip248::BundleId;
+    let mut entries: alloc::vec::Vec<(BundleId, &'a Blake2bHash)> = alloc::vec::Vec::new();
+    if let Some(d) = transparent_digest {
+        entries.push((BundleId::TRANSPARENT, d));
+    }
+    if let Some(d) = sapling_digest {
+        entries.push((BundleId::SAPLING, d));
+    }
+    if let Some(d) = orchard_digest {
+        entries.push((BundleId::ORCHARD, d));
+    }
+    for (id, digest) in unknown {
+        entries.push((*id, digest));
+    }
+    entries.sort_by_key(|(id, _)| *id);
+    entries
+}
+
+/// Builds the (BundleId, &Blake2bHash) entries for `auth_bundles_digest`,
+/// merging known and unknown per-bundle authorizing-data digests in strictly
+/// increasing `(bundleType, bundleVariant)` order.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn v6_auth_digest_entries<'a>(
+    transparent_auth_digest: Option<&'a Blake2bHash>,
+    sapling_auth_digest: Option<&'a Blake2bHash>,
+    orchard_auth_digest: Option<&'a Blake2bHash>,
+    unknown: &'a [(super::zip248::BundleId, Blake2bHash)],
+) -> alloc::vec::Vec<(super::zip248::BundleId, &'a Blake2bHash)> {
+    use super::zip248::BundleId;
+    let mut entries: alloc::vec::Vec<(BundleId, &'a Blake2bHash)> = alloc::vec::Vec::new();
+    if let Some(d) = transparent_auth_digest {
+        entries.push((BundleId::TRANSPARENT, d));
+    }
+    if let Some(d) = sapling_auth_digest {
+        entries.push((BundleId::SAPLING, d));
+    }
+    if let Some(d) = orchard_auth_digest {
+        entries.push((BundleId::ORCHARD, d));
+    }
+    for (id, digest) in unknown {
+        entries.push((*id, digest));
+    }
+    entries.sort_by_key(|(id, _)| *id);
+    entries
 }
 
 /// Digester which constructs a digest of only the witness data.
