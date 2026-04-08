@@ -543,6 +543,11 @@ mod zip248_tests {
     fn bundle_map_iteration_order() {
         use super::super::Authorized;
 
+        let placeholder_digest = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(b"test_unknown_efx")
+            .hash(&[]);
+
         let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
 
         // Insert in reverse order
@@ -550,7 +555,9 @@ mod zip248_tests {
             zip248::BundleId::new(99, 0),
             zip248::UnknownBundle {
                 effect_data: vec![],
+                effect_digest: placeholder_digest,
                 auth_data: None,
+                auth_digest: None,
             },
         );
 
@@ -563,7 +570,9 @@ mod zip248_tests {
             zip248::BundleId::new(50, 0),
             zip248::UnknownBundle {
                 effect_data: vec![1],
+                effect_digest: placeholder_digest,
                 auth_data: None,
+                auth_digest: None,
             },
         );
         let types: Vec<u64> = map.iter().map(|(id, _)| id.bundle_type).collect();

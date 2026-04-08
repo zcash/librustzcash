@@ -9,7 +9,10 @@ use crate::{
         Authorization, TransactionData, TxDigests,
         sighash::SignableInput,
         sighash_v5::transparent_sig_digest,
-        txid::{hash_v6_effects_bundles, ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION},
+        txid::{
+            hash_v6_effects_bundles, v6_effect_digest_entries,
+            ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
+        },
     },
 };
 
@@ -60,14 +63,13 @@ pub fn v6_signature_hash<
             .zip(txid_parts.transparent_digests.as_ref()),
         signable_input,
     );
-    let has_transparent = tx.transparent_bundle().is_some();
 
-    let signature_bundles_digest = hash_v6_effects_bundles(
-        transparent_sig,
-        has_transparent,
-        txid_parts.sapling_digest,
-        txid_parts.orchard_digest,
-    );
+    let signature_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
+        tx.transparent_bundle().is_some().then_some(&transparent_sig),
+        txid_parts.sapling_digest.as_ref(),
+        txid_parts.orchard_digest.as_ref(),
+        &txid_parts.unknown_effect_digests,
+    ));
 
     let mut h = hasher(&personal);
     h.write_all(txid_parts.header_digest.as_bytes()).unwrap();
