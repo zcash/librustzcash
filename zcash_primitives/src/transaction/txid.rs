@@ -71,9 +71,9 @@ const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub(crate) const ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBndHash\0";
+pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBnd_Hash";
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBndHash\0\0";
+pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBnd__Hash";
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
     StateWrite(Params::new().hash_length(32).personal(personal).to_state())
