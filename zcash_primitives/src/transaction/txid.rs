@@ -64,6 +64,8 @@ const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxId
 const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuthHash_";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+const ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaHash";
 #[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
@@ -440,6 +442,97 @@ pub(crate) fn hash_v6_orchard_effects(
         h.write_all(&bundle.anchor().to_bytes()).unwrap();
         // Note: valueBalanceOrchard is deliberately NOT included; it lives in
         // mValuePoolDeltas per ZIP 248.
+    }
+    h.finalize()
+}
+
+/// The wire encoding of a sighash version 0 `TransparentSighashInfo` /
+/// `SaplingSignature` / `OrchardSignature` sighashInfo prefix.
+///
+/// Per ZIP 248 §"Sighash Versioning", sighash version 0 has empty
+/// `associatedData` for every bundle type, so `sighashInfo = [0x00]` (a single
+/// version byte) and the wire encoding is `compactSize(1) || [0x00]` =
+/// `[0x01, 0x00]`. Sighash version 0 is currently the only defined version.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+const V6_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
+
+/// V6 transparent authorizing-data digest per ZIP 248 §A.1.0.
+///
+/// Hashes, for each transparent input, the `TransparentSighashInfo` field
+/// encoding (sighash version 0: `[0x01, 0x00]`) followed by the `scriptSig`
+/// field encoding (a `compactSize`-prefixed byte array). When there are no
+/// transparent inputs, returns `BLAKE2b-256("ZTxAuthTransHash", [])`.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_transparent_auth(
+    transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
+    if let Some(bundle) = transparent_bundle {
+        for txin in &bundle.vin {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            txin.script_sig().write(&mut h).expect("infallible");
+        }
+    }
+    h.finalize()
+}
+
+/// V6 sapling authorizing-data digest per ZIP 248 §A.1.2.
+///
+/// Hashes the spend proofs, the spend auth signatures (each wrapped as a
+/// sighash version 0 `SaplingSignature`), the output proofs, and the binding
+/// signature (also as a `SaplingSignature`). When there are no spends and no
+/// outputs, returns `BLAKE2b-256("ZTxAuthSapliHash", [])`.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_sapling_auth(
+    sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = sapling_bundle {
+        for spend in bundle.shielded_spends() {
+            h.write_all(spend.zkproof()).expect("infallible");
+        }
+        for spend in bundle.shielded_spends() {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+                .expect("infallible");
+        }
+        for output in bundle.shielded_outputs() {
+            h.write_all(output.zkproof()).expect("infallible");
+        }
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
+                .expect("infallible");
+        }
+    }
+    h.finalize()
+}
+
+/// V6 orchard authorizing-data digest per ZIP 248 §A.1.3.
+///
+/// Hashes `proofsOrchard` (the aggregated zk-SNARK proof bytes), then each
+/// per-action spend-auth signature wrapped as a sighash version 0
+/// `OrchardSignature`, then the binding signature (also as an
+/// `OrchardSignature`). When there are no actions, returns
+/// `BLAKE2b-256("ZTxAuthOrchaHash", [])`.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn hash_v6_orchard_auth(
+    orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = orchard_bundle {
+        h.write_all(bundle.authorization().proof().as_ref())
+            .expect("infallible");
+        for action in bundle.actions().iter() {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(action.authorization()))
+                .expect("infallible");
+        }
+        h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+        h.write_all(&<[u8; 64]>::from(
+            bundle.authorization().binding_signature(),
+        ))
+        .expect("infallible");
     }
     h.finalize()
 }
