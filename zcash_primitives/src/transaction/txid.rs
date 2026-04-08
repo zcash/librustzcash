@@ -101,14 +101,15 @@ fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion
 fn ironwood_v6_domain() -> (ValuePool, OrchardTxVersion) {
     (ValuePool::Ironwood, OrchardTxVersion::V6)
 }
+const ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaHash";
 
 // ZIP 248 V6-specific personalization strings
 // ZIP 248 v6 personalizations.
 pub(crate) const ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
 // ZIP 248 v6 personalizations.
-pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBndHash\0";
+pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBnd_Hash";
 // ZIP 248 v6 personalizations.
-pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBndHash\0\0";
+pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBnd__Hash";
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
     StateWrite(Params::new().hash_length(32).personal(personal).to_state())
@@ -358,7 +359,12 @@ pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
     h.finalize()
 }
 
-/// V6 sapling effects digest: spends + outputs + anchor, WITHOUT value_balance.
+/// V6 sapling effects digest per ZIP 248 §T.3.2: spends_digest || outputs_digest
+/// || anchorSapling, with valueBalance excluded (it lives in mValuePoolDeltas).
+///
+/// When `nSpendsSapling = 0` the wire format omits `anchorSapling`; per the
+/// clarified ZIP 248 §T.3.2 the digest still includes 32 bytes at position
+/// T.3.2c, which are hashed as 32 zero bytes in that case.
 // ZIP 248 v6 digest helpers are always compiled.
 pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
@@ -369,10 +375,10 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
             .unwrap();
         h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
             .unwrap();
-        // Anchor (only if spends present)
-        if !bundle.shielded_spends().is_empty() {
-            h.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())
-                .unwrap();
+        if let Some(spend) = bundle.shielded_spends().first() {
+            h.write_all(spend.anchor().to_repr().as_ref()).unwrap();
+        } else {
+            h.write_all(&[0u8; 32]).unwrap();
         }
     }
     h.finalize()
@@ -442,70 +448,146 @@ pub(crate) fn hash_v6_orchard_effects(
     h.finalize()
 }
 
-/// V6 effects bundles digest: wraps each per-bundle digest with bundleType || bundleVariant tags.
+/// The wire encoding of a sighash version 0 `TransparentSighashInfo` /
+/// `SaplingSignature` / `OrchardSignature` sighashInfo prefix.
+///
+/// Per ZIP 248 §"Sighash Versioning", sighash version 0 has empty
+/// `associatedData` for every bundle type, so `sighashInfo = [0x00]` (a single
+/// version byte) and the wire encoding is `compactSize(1) || [0x00]` =
+/// `[0x01, 0x00]`. Sighash version 0 is currently the only defined version.
+const V6_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
+
+/// V6 transparent authorizing-data digest per ZIP 248 §A.1.0.
+///
+/// Hashes, for each transparent input, the `TransparentSighashInfo` field
+/// encoding (sighash version 0: `[0x01, 0x00]`) followed by the `scriptSig`
+/// field encoding (a `compactSize`-prefixed byte array). When there are no
+/// transparent inputs, returns `BLAKE2b-256("ZTxAuthTransHash", [])`.
 // ZIP 248 v6 digest helpers are always compiled.
-pub(crate) fn hash_v6_effects_bundles(
-    transparent_digest: Blake2bHash,
-    has_transparent: bool,
-    sapling_digest: Option<Blake2bHash>,
-    orchard_digest: Option<Blake2bHash>,
+pub(crate) fn hash_v6_transparent_auth(
+    transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
 ) -> Blake2bHash {
-    use zcash_encoding::CompactSize;
-
-    let mut h = hasher(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION);
-
-    // Each present bundle: bundleType (compactSize) || bundleVariant (compactSize) || digest (32 bytes)
-    if has_transparent {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(transparent_digest.as_bytes()).unwrap();
+    let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
+    if let Some(bundle) = transparent_bundle {
+        for txin in &bundle.vin {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            txin.script_sig().write(&mut h).expect("infallible");
+        }
     }
-    if let Some(ref d) = sapling_digest {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(d.as_bytes()).unwrap();
-    }
-    if let Some(ref d) = orchard_digest {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(d.as_bytes()).unwrap();
-    }
-
     h.finalize()
 }
 
-/// V6 auth bundles digest: wraps each per-bundle auth digest with bundleType || bundleVariant tags.
+/// V6 sapling authorizing-data digest per ZIP 248 §A.1.2.
+///
+/// Hashes the spend proofs, the spend auth signatures (each wrapped as a
+/// sighash version 0 `SaplingSignature`), the output proofs, and the binding
+/// signature (also as a `SaplingSignature`). When there are no spends and no
+/// outputs, returns `BLAKE2b-256("ZTxAuthSapliHash", [])`.
 // ZIP 248 v6 digest helpers are always compiled.
-pub(crate) fn hash_v6_auth_bundles(
-    transparent_auth_digest: Blake2bHash,
-    has_transparent: bool,
-    sapling_auth_digest: Blake2bHash,
-    has_sapling: bool,
-    orchard_auth_digest: Blake2bHash,
-    has_orchard: bool,
+pub(crate) fn hash_v6_sapling_auth(
+    sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
-    use zcash_encoding::CompactSize;
-
-    let mut h = hasher(ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION);
-
-    if has_transparent {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_TRANSPARENT as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(transparent_auth_digest.as_bytes()).unwrap();
+    let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = sapling_bundle {
+        for spend in bundle.shielded_spends() {
+            h.write_all(spend.zkproof()).expect("infallible");
+        }
+        for spend in bundle.shielded_spends() {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+                .expect("infallible");
+        }
+        for output in bundle.shielded_outputs() {
+            h.write_all(output.zkproof()).expect("infallible");
+        }
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
+                .expect("infallible");
+        }
     }
-    if has_sapling {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_SAPLING as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(sapling_auth_digest.as_bytes()).unwrap();
-    }
-    if has_orchard {
-        CompactSize::write(&mut h, super::zip248::BUNDLE_TYPE_ORCHARD as usize).unwrap();
-        CompactSize::write(&mut h, super::zip248::BUNDLE_VARIANT_DEFAULT as usize).unwrap();
-        h.write_all(orchard_auth_digest.as_bytes()).unwrap();
-    }
-
     h.finalize()
 }
+
+/// V6 orchard authorizing-data digest per ZIP 248 §A.1.3.
+///
+/// Hashes `proofsOrchard` (the aggregated zk-SNARK proof bytes), then each
+/// per-action spend-auth signature wrapped as a sighash version 0
+/// `OrchardSignature`, then the binding signature (also as an
+/// `OrchardSignature`). When there are no actions, returns
+/// `BLAKE2b-256("ZTxAuthOrchaHash", [])`.
+// ZIP 248 v6 digest helpers are always compiled.
+pub(crate) fn hash_v6_orchard_auth(
+    orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = orchard_bundle {
+        h.write_all(bundle.authorization().proof().as_ref())
+            .expect("infallible");
+        for action in bundle.actions().iter() {
+            h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+            h.write_all(&<[u8; 64]>::from(action.authorization()))
+                .expect("infallible");
+        }
+        h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
+        h.write_all(&<[u8; 64]>::from(
+            bundle.authorization().binding_signature(),
+        ))
+        .expect("infallible");
+    }
+    h.finalize()
+}
+
+/// Hashes a sequence of tagged per-bundle digests under the given personalization,
+/// where each entry is `(bundleType compactSize || bundleVariant compactSize || digest)`.
+///
+/// The caller is responsible for providing entries in the order required by ZIP 248
+/// (strictly increasing `(bundleType, bundleVariant)`), including any unknown bundles.
+// ZIP 248 v6 digest helpers are always compiled.
+fn hash_v6_tagged_bundle_digests<'a, I>(
+    personalization: &[u8; 16],
+    entries: I,
+) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
+    use zcash_encoding::CompactSize;
+
+    let mut h = hasher(personalization);
+    for (id, digest) in entries {
+        CompactSize::write(&mut h, id.bundle_type as usize).unwrap();
+        CompactSize::write(&mut h, id.bundle_variant as usize).unwrap();
+        h.write_all(digest.as_bytes()).unwrap();
+    }
+    h.finalize()
+}
+
+/// V6 effects bundles digest per ZIP 248 §T.3 `effects_bundles_digest`.
+///
+/// Wraps each per-bundle effecting-data digest with `(bundleType, bundleVariant)`
+/// tags and hashes them in increasing `bundleType` order under the
+/// `ZTxIdEffBnd_Hash` personalization.
+// ZIP 248 v6 digest helpers are always compiled.
+pub(crate) fn hash_v6_effects_bundles<'a, I>(entries: I) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
+    hash_v6_tagged_bundle_digests(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION, entries)
+}
+
+/// V6 auth bundles digest per ZIP 248 §A.1 `auth_bundles_digest`.
+///
+/// Wraps each per-bundle authorizing-data digest with `(bundleType, bundleVariant)`
+/// tags and hashes them in increasing `bundleType` order under the
+/// `ZTxAuthBnd__Hash` personalization.
+// ZIP 248 v6 digest helpers are always compiled.
+pub(crate) fn hash_v6_auth_bundles<'a, I>(entries: I) -> Blake2bHash
+where
+    I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
+{
+    hash_v6_tagged_bundle_digests(ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION, entries)
+}
+
 
 // ---------------------------------------------------------------------------
 
@@ -599,6 +681,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             ironwood_digest,
             // Populated by digest_v6() path, not via combine()
             value_pool_deltas_digest: None,
+            unknown_effect_digests: alloc::vec::Vec::new(),
+            unknown_auth_digests: alloc::vec::Vec::new(),
         }
     }
 }
@@ -737,7 +821,9 @@ pub fn to_txid(
     ))
 }
 
-/// V6 txid hash: header || value_pool_deltas || effects_bundles
+/// V6 txid hash per ZIP 248 §T: header_digest || value_pool_deltas_digest ||
+/// effects_bundles_digest, all under the consensus-branch-id-personalized
+/// "ZcashTxHash_" hash.
 // ZIP 248 v6 digest helpers are always compiled.
 fn to_hash_v6_zip248(
     consensus_branch_id: BranchId,
@@ -753,21 +839,76 @@ fn to_hash_v6_zip248(
         .value_pool_deltas_digest
         .unwrap_or_else(|| hasher(ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION).finalize());
 
-    let has_transparent = digests.transparent_digests.is_some();
     let transparent_digest = hash_transparent_txid_data(digests.transparent_digests.as_ref());
 
-    let effects_bundles_digest = hash_v6_effects_bundles(
-        transparent_digest,
-        has_transparent,
-        digests.sapling_digest,
-        digests.orchard_digest,
-    );
+    let effects_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
+        digests.transparent_digests.is_some().then_some(&transparent_digest),
+        digests.sapling_digest.as_ref(),
+        digests.orchard_digest.as_ref(),
+        &digests.unknown_effect_digests,
+    ));
 
     let mut h = hasher(&personal);
     h.write_all(digests.header_digest.as_bytes()).unwrap();
     h.write_all(vp_deltas_digest.as_bytes()).unwrap();
     h.write_all(effects_bundles_digest.as_bytes()).unwrap();
     h.finalize()
+}
+
+/// Builds the (BundleId, &Blake2bHash) entries for `effects_bundles_digest` /
+/// `signature_bundles_digest`, merging the known transparent/sapling/orchard
+/// per-bundle digests with any unknown-bundle digests in strictly increasing
+/// `(bundleType, bundleVariant)` order. Returns a `Vec` so the caller can pass
+/// it directly into `hash_v6_effects_bundles`.
+pub(crate) fn v6_effect_digest_entries<'a>(
+    transparent_digest: Option<&'a Blake2bHash>,
+    sapling_digest: Option<&'a Blake2bHash>,
+    orchard_digest: Option<&'a Blake2bHash>,
+    unknown: &'a [(super::zip248::BundleId, Blake2bHash)],
+) -> alloc::vec::Vec<(super::zip248::BundleId, &'a Blake2bHash)> {
+    use super::zip248::BundleId;
+    let mut entries: alloc::vec::Vec<(BundleId, &'a Blake2bHash)> = alloc::vec::Vec::new();
+    if let Some(d) = transparent_digest {
+        entries.push((BundleId::TRANSPARENT, d));
+    }
+    if let Some(d) = sapling_digest {
+        entries.push((BundleId::SAPLING, d));
+    }
+    if let Some(d) = orchard_digest {
+        entries.push((BundleId::ORCHARD, d));
+    }
+    for (id, digest) in unknown {
+        entries.push((*id, digest));
+    }
+    entries.sort_by_key(|(id, _)| *id);
+    entries
+}
+
+/// Builds the (BundleId, &Blake2bHash) entries for `auth_bundles_digest`,
+/// merging known and unknown per-bundle authorizing-data digests in strictly
+/// increasing `(bundleType, bundleVariant)` order.
+pub(crate) fn v6_auth_digest_entries<'a>(
+    transparent_auth_digest: Option<&'a Blake2bHash>,
+    sapling_auth_digest: Option<&'a Blake2bHash>,
+    orchard_auth_digest: Option<&'a Blake2bHash>,
+    unknown: &'a [(super::zip248::BundleId, Blake2bHash)],
+) -> alloc::vec::Vec<(super::zip248::BundleId, &'a Blake2bHash)> {
+    use super::zip248::BundleId;
+    let mut entries: alloc::vec::Vec<(BundleId, &'a Blake2bHash)> = alloc::vec::Vec::new();
+    if let Some(d) = transparent_auth_digest {
+        entries.push((BundleId::TRANSPARENT, d));
+    }
+    if let Some(d) = sapling_auth_digest {
+        entries.push((BundleId::SAPLING, d));
+    }
+    if let Some(d) = orchard_auth_digest {
+        entries.push((BundleId::ORCHARD, d));
+    }
+    for (id, digest) in unknown {
+        entries.push((*id, digest));
+    }
+    entries.sort_by_key(|(id, _)| *id);
+    entries
 }
 
 /// Digester which constructs a digest of only the witness data.

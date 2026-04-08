@@ -869,6 +869,23 @@ impl<A: Authorization> TransactionData<A> {
         };
 
         let digester = TxIdDigester;
+
+        // Per-unknown-bundle effect and auth digests, in (bundleType, bundleVariant)
+        // order. `BundleMap.unknown_bundles()` already iterates in BTreeMap key
+        // order. The digests are taken from the `UnknownBundle` itself; the
+        // caller is required to have supplied them at construction time, since
+        // for unknown bundle types we don't have the bundle's digest algorithm.
+        let unknown_effect_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = self
+            .bundles
+            .unknown_bundles()
+            .map(|(id, ub)| (*id, ub.effect_digest))
+            .collect();
+        let unknown_auth_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = self
+            .bundles
+            .unknown_bundles()
+            .filter_map(|(id, ub)| ub.auth_digest.map(|digest| (*id, digest)))
+            .collect();
+
         Zip244Digests {
             header_digest: hash_v6_header(
                 self.version,
@@ -885,6 +902,8 @@ impl<A: Authorization> TransactionData<A> {
             orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
             ironwood_digest: None,
             value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+            unknown_effect_digests,
+            unknown_auth_digests,
         }
     }
 
@@ -1058,8 +1077,6 @@ struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-    zip233_amount: Zatoshis,
 }
 
 impl Transaction {
@@ -1313,7 +1330,7 @@ impl Transaction {
 
         // 3. Effect bundles map
         let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let mut bundles = zip248::BundleMap::new();
+        let bundles = zip248::BundleMap::new();
         let mut sapling_effect_data: Option<Vec<u8>> = None;
         let mut orchard_effect_data: Option<Vec<u8>> = None;
         let mut transparent_effect_data: Option<Vec<u8>> = None;
@@ -1331,11 +1348,19 @@ impl Transaction {
                     orchard_effect_data = Some(data);
                 }
                 _ => {
-                    // Unknown bundle type — store opaque
-                    bundles.insert_unknown(id, zip248::UnknownBundle {
-                        effect_data: data,
-                        auth_data: None,
-                    });
+                    // ZIP 248 §"Implications for Wallets" requires the
+                    // bundle_effects_digest to be supplied externally for
+                    // unknown bundle types; we cannot derive it from the
+                    // opaque bytes alone, so without a digest registry
+                    // callback we cannot safely accept unknown bundles
+                    // here. Refuse the transaction. A future revision of
+                    // this reader that takes a `BundleId -> digest`
+                    // registry from the caller can lift this restriction.
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction contains an unknown effect bundle type \
+                         and no digest registry was supplied",
+                    ));
                 }
             }
         }
@@ -1359,11 +1384,11 @@ impl Transaction {
                     orchard_auth_data = Some(data);
                 }
                 _ => {
-                    // Attach auth data to matching unknown bundle
-                    if let Some(ub) = bundles.get_unknown_mut(&id) {
-                        ub.auth_data = Some(data);
-                    }
-                    // else: auth without effect is a validation error, skip for now
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction contains an unknown auth bundle type \
+                         and no digest registry was supplied",
+                    ));
                 }
             }
         }
@@ -1410,6 +1435,10 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
+    /// Reads the V6 (ZIP 248) common transaction header fields after the
+    /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
+    /// V6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
+    /// `mValuePoolDeltas`.
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1418,8 +1447,6 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(feature = "zip-233", zcash_unstable = "zip233"))]
-            zip233_amount: Zatoshis::ZERO,
         })
     }
 
@@ -1428,6 +1455,21 @@ impl Transaction {
         reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>> {
         sapling_serialization::read_v5_bundle(reader)
+    }
+
+    #[cfg(zcash_unstable = "zfuture")]
+    fn read_tze<R: Read>(mut reader: &mut R) -> io::Result<Option<tze::Bundle<tze::Authorized>>> {
+        let vin = Vector::read(&mut reader, TzeIn::read)?;
+        let vout = Vector::read(&mut reader, TzeOut::read)?;
+        Ok(if vin.is_empty() && vout.is_empty() {
+            None
+        } else {
+            Some(tze::Bundle {
+                vin,
+                vout,
+                authorization: tze::Authorized,
+            })
+        })
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -1515,9 +1557,17 @@ impl Transaction {
                 "Sprout components cannot be present when serializing to V6 or later transaction formats.",
             ));
         }
+        #[cfg(zcash_unstable = "zfuture")]
+        if self.bundles.tze().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "TZE components cannot be present when serializing to the V6 transaction format \
+                 until a bundleType is registered for them in ZIP 248.",
+            ));
+        }
 
         // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
-        self.write_v5_header(&mut writer)?;
+        self.write_v6_header(&mut writer)?;
 
         // 2. Value pool deltas map
         let vp_entries: Vec<_> = self.value_pool_deltas.iter().map(|(k, &v)| {
@@ -1614,12 +1664,15 @@ impl Transaction {
         Ok(())
     }
 
+    /// Writes the V6 (ZIP 248) common transaction header: header, nVersionGroupId,
+    /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
+    /// amount is not included here; it lives in `mValuePoolDeltas` under
+    /// `bundleType = 5`.
     pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
         writer.write_u32_le(self.lock_time)?;
         writer.write_u32_le(u32::from(self.expiry_height))?;
-
         Ok(())
     }
 
@@ -1647,19 +1700,43 @@ impl Transaction {
     /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn auth_commitment_v6(&self) -> Blake2bHash {
-        let digester = BlockTxCommitmentDigester;
-        let transparent_digest = digester.digest_transparent(self.data.bundles.transparent());
-        let sapling_digest = digester.digest_sapling(self.data.version, self.data.bundles.sapling());
-        let orchard_digest = digester.digest_orchard(self.data.version, self.data.bundles.orchard());
+        use txid::{
+            hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
+            hash_v6_transparent_auth, v6_auth_digest_entries,
+        };
 
-        let auth_bundles_digest = txid::hash_v6_auth_bundles(
-            transparent_digest,
-            self.data.bundles.transparent().is_some(),
-            sapling_digest,
-            self.data.bundles.sapling().is_some(),
-            orchard_digest,
-            self.data.bundles.orchard().is_some(),
-        );
+        let transparent_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .transparent()
+            .map(Some)
+            .map(hash_v6_transparent_auth);
+        let sapling_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .sapling()
+            .map(Some)
+            .map(hash_v6_sapling_auth);
+        let orchard_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .orchard()
+            .map(Some)
+            .map(hash_v6_orchard_auth);
+
+        let unknown_auth_digests: Vec<(zip248::BundleId, Blake2bHash)> = self
+            .data
+            .bundles
+            .unknown_bundles()
+            .filter_map(|(id, ub)| ub.auth_digest.map(|digest| (*id, digest)))
+            .collect();
+
+        let auth_bundles_digest = hash_v6_auth_bundles(v6_auth_digest_entries(
+            transparent_auth_digest.as_ref(),
+            sapling_auth_digest.as_ref(),
+            orchard_auth_digest.as_ref(),
+            &unknown_auth_digests,
+        ));
 
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(b"ZTxAuthHash_");
@@ -1739,6 +1816,10 @@ pub struct Zip244Digests<A> {
     pub(crate) ironwood_digest: Option<A>,
     /// V6 (ZIP 248): digest of the value pool deltas map.
     pub(crate) value_pool_deltas_digest: Option<A>,
+    /// Per-unknown-bundle effect digests, in `(bundleType, bundleVariant)` order.
+    pub(crate) unknown_effect_digests: Vec<(zip248::BundleId, A)>,
+    /// Per-unknown-bundle authorizing data digests, in `(bundleType, bundleVariant)` order.
+    pub(crate) unknown_auth_digests: Vec<(zip248::BundleId, A)>,
 }
 
 impl<A> Zip244Digests<A> {
