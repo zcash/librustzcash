@@ -1443,29 +1443,29 @@ impl Transaction {
     /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn auth_commitment_v6(&self) -> Blake2bHash {
-        use txid::{hash_v6_auth_bundles, v6_auth_digest_entries};
+        use txid::{
+            hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
+            hash_v6_transparent_auth, v6_auth_digest_entries,
+        };
 
-        // TODO: the per-bundle sub-digesters reused here are the ZIP 244
-        // (V5) auth digesters, which omit the new sighashInfo framing
-        // required by ZIP 248 §A.1.0/§A.1.2/§A.1.3. Replace with
-        // V6-specific digesters that hash TransparentSighashInfo /
-        // SaplingSignature / OrchardSignature framing.
-        let digester = BlockTxCommitmentDigester;
         let transparent_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .transparent()
-            .map(|b| digester.digest_transparent(Some(b)));
+            .map(Some)
+            .map(hash_v6_transparent_auth);
         let sapling_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .sapling()
-            .map(|b| digester.digest_sapling(Some(b)));
+            .map(Some)
+            .map(hash_v6_sapling_auth);
         let orchard_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .orchard()
-            .map(|b| digester.digest_orchard(Some(b)));
+            .map(Some)
+            .map(hash_v6_orchard_auth);
 
         let unknown_auth_digests: Vec<(zip248::BundleId, Blake2bHash)> = self
             .data
