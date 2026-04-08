@@ -793,8 +793,6 @@ struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(feature = "zip-233")]
-    zip233_amount: Zatoshis,
 }
 
 impl Transaction {
@@ -1136,6 +1134,10 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
+    /// Reads the V6 (ZIP 248) common transaction header fields after the
+    /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
+    /// V6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
+    /// `mValuePoolDeltas`.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
@@ -1145,8 +1147,6 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
-            zip233_amount: Self::read_zip233_amount(&mut reader)?,
         })
     }
 
@@ -1155,15 +1155,6 @@ impl Transaction {
         reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>> {
         sapling_serialization::read_v5_bundle(reader)
-    }
-
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    fn read_zip233_amount<R: Read>(mut reader: R) -> io::Result<Zatoshis> {
-        Zatoshis::from_u64(reader.read_u64_le()?)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip233Amount out of range"))
     }
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1270,7 +1261,7 @@ impl Transaction {
         }
 
         // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
-        self.write_v5_header(&mut writer)?;
+        self.write_v6_header(&mut writer)?;
 
         // 2. Value pool deltas map
         let vp_entries: Vec<_> = self.value_pool_deltas.iter().map(|(k, &v)| {
@@ -1367,17 +1358,16 @@ impl Transaction {
         Ok(())
     }
 
+    /// Writes the V6 (ZIP 248) common transaction header: header, nVersionGroupId,
+    /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
+    /// amount is not included here; it lives in `mValuePoolDeltas` under
+    /// `bundleType = 5`.
     #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
         writer.write_u32_le(self.lock_time)?;
         writer.write_u32_le(u32::from(self.expiry_height))?;
-
-        // TODO: In ZIP 248, zip233_amount moves to value pool deltas.
-        // For now, keep writing it in the header for V6 compat during transition.
-        #[cfg(feature = "zip-233")]
-        writer.write_u64_le(u64::from(self.zip233_amount()))?;
         Ok(())
     }
 
