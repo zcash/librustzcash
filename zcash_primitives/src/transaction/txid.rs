@@ -357,7 +357,12 @@ pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
     h.finalize()
 }
 
-/// V6 sapling effects digest: spends + outputs + anchor, WITHOUT value_balance.
+/// V6 sapling effects digest per ZIP 248 §T.3.2: spends_digest || outputs_digest
+/// || anchorSapling, with valueBalance excluded (it lives in mValuePoolDeltas).
+///
+/// When `nSpendsSapling = 0` the wire format omits `anchorSapling`; per the
+/// clarified ZIP 248 §T.3.2 the digest still includes 32 bytes at position
+/// T.3.2c, which are hashed as 32 zero bytes in that case.
 #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
@@ -368,10 +373,10 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
             .unwrap();
         h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
             .unwrap();
-        // Anchor (only if spends present)
-        if !bundle.shielded_spends().is_empty() {
-            h.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())
-                .unwrap();
+        if let Some(spend) = bundle.shielded_spends().first() {
+            h.write_all(spend.anchor().to_repr().as_ref()).unwrap();
+        } else {
+            h.write_all(&[0u8; 32]).unwrap();
         }
     }
     h.finalize()
