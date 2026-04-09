@@ -10,6 +10,19 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::components::sprout::JsDescription`:
+  - `vpub_old` and `vpub_new` accessors for Sprout value pool changes.
+  - `anchor` accessor for the note commitment tree anchor.
+  - `nullifiers` and `commitments` accessors for input/output note data.
+  - `random_seed` and `macs` accessors for the random seed and MACs.
+  - `groth_proof_bytes` accessor that returns Groth16 proof bytes
+    (returns `None` for PHGR proofs).
+- `zcash_primitives::transaction::Authorized` now implements `Clone`.
+- `zcash_primitives::transaction::TransactionData<Authorized>` now
+  implements `Clone`.
+- `zcash_primitives::transaction::Transaction` now implements `Clone`.
+
 ## [0.26.4] - 2025-12-17
 
 ### Changed
