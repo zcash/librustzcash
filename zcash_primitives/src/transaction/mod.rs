@@ -1790,6 +1790,184 @@ pub enum DigestError {
     NotSigned,
 }
 
+/// Errors that can be returned by [`TransactionData::check_v6_consensus_rules`].
+///
+/// Each variant corresponds to a transaction-local consensus rule from the
+/// "Consensus Rules" section of [ZIP 248]. Rules that require block context
+/// (the per-block fee bundle sum, and the coinbase ZEC value pool delta sum
+/// equal to `-BlockSubsidy(height)`) are not checked by this method and must
+/// be enforced by the consumer when validating a block.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
+#[cfg(zcash_v6)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum V6ConsensusError {
+    /// `mValuePoolDeltas` contains an entry with `bundleType = FeeBundleId`
+    /// and a non-ZEC `assetClass`. (Bundle-local rule: fee amounts are
+    /// denominated in ZEC and no other asset.)
+    FeeAssetClassNotZec { asset_class: u8 },
+    /// A coinbase transaction has the `enableSpendsOrchard` bit of
+    /// `flagsOrchard` set. (Bundle-local rule.)
+    CoinbaseEnableSpendsOrchardSet,
+    /// A coinbase transaction has a negative fee delta in
+    /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. The coinbase fee delta
+    /// represents fees collected from other transactions in the block and
+    /// must be nonnegative.
+    CoinbaseFeeDeltaNegative { value: i64 },
+    /// A non-coinbase transaction has a positive fee delta in
+    /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. Fees paid are encoded as
+    /// negative deltas (value removed from the transparent transaction
+    /// value pool), so the fee delta must be nonpositive.
+    NonCoinbaseFeeDeltaPositive { value: i64 },
+    /// For a non-coinbase transaction, the per-asset sum of all entries in
+    /// `mValuePoolDeltas` must be zero. This variant is returned when the
+    /// sum for some asset is nonzero, indicating that value would be
+    /// created or destroyed by the transaction.
+    NonCoinbaseValueImbalance {
+        bundle_type_for_asset: u64,
+        asset_class: u8,
+        sum: i64,
+    },
+    /// A v6 transaction's per-asset value pool delta sum overflowed `i64`
+    /// while being computed. This is itself a consensus failure because a
+    /// well-formed sum must fit in `i64` after the deltas are constrained
+    /// to balance.
+    ValueDeltaSumOverflow,
+}
+
+#[cfg(zcash_v6)]
+impl core::fmt::Display for V6ConsensusError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            V6ConsensusError::FeeAssetClassNotZec { asset_class } => write!(
+                f,
+                "fee bundle value pool delta has non-ZEC assetClass {:#x}",
+                asset_class
+            ),
+            V6ConsensusError::CoinbaseEnableSpendsOrchardSet => write!(
+                f,
+                "coinbase transaction has enableSpendsOrchard set in Orchard flags"
+            ),
+            V6ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
+                f,
+                "coinbase fee bundle value pool delta is negative ({})",
+                value
+            ),
+            V6ConsensusError::NonCoinbaseFeeDeltaPositive { value } => write!(
+                f,
+                "non-coinbase fee bundle value pool delta is positive ({}); fees are encoded as negative deltas",
+                value
+            ),
+            V6ConsensusError::NonCoinbaseValueImbalance {
+                bundle_type_for_asset,
+                asset_class,
+                sum,
+            } => write!(
+                f,
+                "non-coinbase value pool deltas do not sum to zero for assetClass={:#x} (any-bundleType={}): sum={}",
+                asset_class, bundle_type_for_asset, sum
+            ),
+            V6ConsensusError::ValueDeltaSumOverflow => {
+                write!(f, "value pool delta sum overflowed i64")
+            }
+        }
+    }
+}
+
+#[cfg(all(zcash_v6, feature = "std"))]
+impl std::error::Error for V6ConsensusError {}
+
+#[cfg(zcash_v6)]
+impl<A: Authorization> TransactionData<A> {
+    /// Checks the transaction-local consensus rules from the "Consensus
+    /// Rules" section of ZIP 248. Returns `Ok(())` if all transaction-local
+    /// rules are satisfied, otherwise returns the first violation found.
+    ///
+    /// `is_coinbase` selects the rules that apply only to coinbase
+    /// transactions (`enableSpendsOrchard = 0`, fee delta nonnegative)
+    /// versus non-coinbase ones (fee delta nonpositive, per-asset sum
+    /// equals zero).
+    ///
+    /// Rules that require block context — the per-block sum of fee bundle
+    /// values being zero, and the coinbase ZEC sum equal to
+    /// `-BlockSubsidy(height)` — are *not* checked here and must be
+    /// enforced by the consumer when validating the containing block.
+    pub fn check_v6_consensus_rules(
+        &self,
+        is_coinbase: bool,
+    ) -> Result<(), V6ConsensusError> {
+        // Bundle-local rule: every fee bundle entry in mValuePoolDeltas must
+        // have assetClass = 0 (ZEC).
+        for (key, _) in self.value_pool_deltas.iter() {
+            if key.bundle_type == zip248::BUNDLE_TYPE_FEE
+                && key.asset_class != zip248::ASSET_CLASS_ZEC
+            {
+                return Err(V6ConsensusError::FeeAssetClassNotZec {
+                    asset_class: key.asset_class,
+                });
+            }
+        }
+
+        // Bundle-local rule: for coinbase transactions, the
+        // enableSpendsOrchard bit of flagsOrchard MUST be 0.
+        if is_coinbase {
+            if let Some(orchard_bundle) = self.bundles.orchard() {
+                if orchard_bundle.flags().spends_enabled() {
+                    return Err(V6ConsensusError::CoinbaseEnableSpendsOrchardSet);
+                }
+            }
+        }
+
+        // Cross-bundle rule (transaction-local): fee delta sign.
+        let fee_delta = self
+            .value_pool_deltas
+            .iter()
+            .find_map(|(key, &value)| {
+                (key.bundle_type == zip248::BUNDLE_TYPE_FEE
+                    && key.asset_class == zip248::ASSET_CLASS_ZEC)
+                    .then_some(value)
+            })
+            .unwrap_or(0);
+        if is_coinbase {
+            if fee_delta < 0 {
+                return Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: fee_delta });
+            }
+        } else if fee_delta > 0 {
+            return Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
+        }
+
+        // Cross-bundle rule (transaction-local): non-coinbase per-asset sum
+        // of value pool deltas must equal zero. (For coinbase, the analogous
+        // rule is "ZEC sum equals -BlockSubsidy(height)" which requires
+        // block context and is the consumer's responsibility.)
+        if !is_coinbase {
+            // Group entries by (assetClass, assetUuid). The
+            // ValuePoolDeltaKey orders by (bundleType, assetClass,
+            // assetUuid), so we walk it once and accumulate.
+            let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, i64)> = BTreeMap::new();
+            for (key, &value) in self.value_pool_deltas.iter() {
+                let asset_key = (key.asset_class, key.asset_uuid);
+                let entry = by_asset.entry(asset_key).or_insert((key.bundle_type, 0));
+                entry.1 = entry
+                    .1
+                    .checked_add(value)
+                    .ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
+            }
+            for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
+                if sum != 0 {
+                    return Err(V6ConsensusError::NonCoinbaseValueImbalance {
+                        bundle_type_for_asset: any_bundle_type,
+                        asset_class,
+                        sum,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
