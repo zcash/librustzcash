@@ -535,7 +535,7 @@ impl<A: Authorization> TransactionData<A> {
             .unwrap_or(Zatoshis::ZERO)
     }
 
-    /// Returns the fee amount, if explicitly set (V6+).
+    /// Returns the fee amount, if explicitly set (v6+).
     pub fn fee_amount(&self) -> Option<Zatoshis> {
         self.value_pool_deltas.fee()
     }
@@ -611,7 +611,7 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
-    /// Produces V6 (ZIP 248) transaction digests using the TxIdDigester.
+    /// Produces v6 (ZIP 248) transaction digests using the TxIdDigester.
     #[cfg(zcash_v6)]
     pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
@@ -976,7 +976,7 @@ impl Transaction {
         })
     }
 
-    /// Reads a V6 transparent bundle from its `mEffectBundles[0]` and
+    /// Reads a v6 transparent bundle from its `mEffectBundles[0]` and
     /// `mAuthBundles[0]` byte payloads per ZIP 248. The effecting layout is
     /// `tx_in_count || (prevout || nSequence)* || tx_out_count || (value, scriptPubKey)*`,
     /// and the authorizing layout is `(TransparentSighashInfo, scriptSig)*`
@@ -1001,7 +1001,7 @@ impl Transaction {
         if !effects_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in V6 transparent effecting data",
+                "trailing bytes in v6 transparent effecting data",
             ));
         }
 
@@ -1009,7 +1009,7 @@ impl Transaction {
             if auth.is_some_and(|a| !a.is_empty()) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "V6 transparent auth bundle present for an empty effecting bundle",
+                    "v6 transparent auth bundle present for an empty effecting bundle",
                 ));
             }
             return Ok(None);
@@ -1023,7 +1023,7 @@ impl Transaction {
             auth.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "V6 transparent effecting bundle has inputs but no auth bundle",
+                    "v6 transparent effecting bundle has inputs but no auth bundle",
                 )
             })?
         };
@@ -1041,7 +1041,7 @@ impl Transaction {
         if !auth_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in V6 transparent authorizing data",
+                "trailing bytes in v6 transparent authorizing data",
             ));
         }
 
@@ -1178,7 +1178,7 @@ impl Transaction {
                 if id.bundle_type <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 mEffectBundles is not in strictly increasing bundleType order",
+                        "v6 mEffectBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
@@ -1196,7 +1196,7 @@ impl Transaction {
                 if id.bundle_type <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 mAuthBundles is not in strictly increasing bundleType order",
+                        "v6 mAuthBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
@@ -1212,14 +1212,14 @@ impl Transaction {
                 Some(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 transaction has mAuthBundles entry with a bundleVariant \
+                        "v6 transaction has mAuthBundles entry with a bundleVariant \
                          that does not match the corresponding mEffectBundles entry",
                     ));
                 }
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 transaction has mAuthBundles entry with no matching \
+                        "v6 transaction has mAuthBundles entry with no matching \
                          mEffectBundles entry",
                     ));
                 }
@@ -1328,7 +1328,7 @@ impl Transaction {
         if !effect_data_by_type.is_empty() || !auth_data_by_type.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "V6 transaction contains an unknown bundle type and no digest \
+                "v6 transaction contains an unknown bundle type and no digest \
                  registry was supplied",
             ));
         }
@@ -1366,9 +1366,9 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    /// Reads the V6 (ZIP 248) common transaction header fields after the
+    /// Reads the v6 (ZIP 248) common transaction header fields after the
     /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
-    /// V6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
+    /// v6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
     /// `mValuePoolDeltas`.
     #[cfg(zcash_v6)]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
@@ -1389,9 +1389,9 @@ impl Transaction {
         sapling_serialization::read_v5_bundle(reader)
     }
 
-    // `read_tze` is currently unused: V6 transactions reject TZE bundles in
+    // `read_tze` is currently unused: v6 transactions reject TZE bundles in
     // `read_v6` (since ZIP 248 has not yet assigned a bundleType for them),
-    // and pre-V6 transactions never carry TZE. The function is retained for
+    // and pre-v6 transactions never carry TZE. The function is retained for
     // symmetry with `write_tze` and so that a future read_v6 revision that
     // accepts a TZE bundleType can easily call it.
     #[cfg(zcash_unstable = "zfuture")]
@@ -1494,14 +1494,14 @@ impl Transaction {
         if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to the V6 transaction format.",
+                "Sprout components cannot be present when serializing to the v6 transaction format.",
             ));
         }
         #[cfg(zcash_unstable = "zfuture")]
         if self.bundles.tze().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "TZE components cannot be present when serializing to the V6 transaction format \
+                "TZE components cannot be present when serializing to the v6 transaction format \
                  until a bundleType is registered for them in ZIP 248.",
             ));
         }
@@ -1604,7 +1604,7 @@ impl Transaction {
         Ok(())
     }
 
-    /// Writes the V6 (ZIP 248) common transaction header: header, nVersionGroupId,
+    /// Writes the v6 (ZIP 248) common transaction header: header, nVersionGroupId,
     /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
     /// amount is not included here; it lives in `mValuePoolDeltas` under
     /// `bundleType = 5`.
@@ -1651,7 +1651,7 @@ impl Transaction {
         }
     }
 
-    /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
+    /// v6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
     #[cfg(zcash_v6)]
     fn auth_commitment_v6(&self) -> Blake2bHash {
         use txid::{
@@ -1730,15 +1730,15 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
-    /// V6 (ZIP 248): digest of the value pool deltas map.
+    /// v6 (ZIP 248): digest of the value pool deltas map.
     #[cfg(zcash_v6)]
     pub value_pool_deltas_digest: Option<A>,
-    /// V6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
+    /// v6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
     #[cfg(zcash_v6)]
     pub unknown_effect_digests: Vec<(zip248::BundleId, A)>,
-    /// V6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
+    /// v6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
     #[cfg(zcash_v6)]

@@ -499,7 +499,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-/// Reads a [`Bundle`] from V6 effecting + authorizing byte vectors per ZIP 248.
+/// Reads a [`Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
@@ -529,7 +529,7 @@ pub(crate) fn read_v6_bundle(
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in V6 Sapling effecting data",
+            "trailing bytes in v6 Sapling effecting data",
         ));
     }
 
@@ -538,7 +538,7 @@ pub(crate) fn read_v6_bundle(
         if auth.is_some_and(|a| !a.is_empty()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "V6 Sapling auth bundle present for an empty effecting bundle",
+                "v6 Sapling auth bundle present for an empty effecting bundle",
             ));
         }
         return Ok(None);
@@ -547,7 +547,7 @@ pub(crate) fn read_v6_bundle(
     let auth_bytes = auth.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "V6 Sapling effecting bundle present without matching auth bundle",
+            "v6 Sapling effecting bundle present without matching auth bundle",
         )
     })?;
     let mut auth_reader = auth_bytes;
@@ -579,7 +579,7 @@ pub(crate) fn read_v6_bundle(
     if !auth_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in V6 Sapling authorizing data",
+            "trailing bytes in v6 Sapling authorizing data",
         ));
     }
 
@@ -610,7 +610,7 @@ pub(crate) fn read_v6_bundle(
     ))
 }
 
-/// Writes the effecting data for a Sapling bundle in V6 format.
+/// Writes the effecting data for a Sapling bundle in v6 format.
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
 ///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
 ///         anchorSapling (32 bytes, present if nSpends > 0).
@@ -640,7 +640,7 @@ pub(crate) fn write_v6_effects<W: Write>(
     Ok(())
 }
 
-/// Writes the authorizing data for a Sapling bundle in V6 format.
+/// Writes the authorizing data for a Sapling bundle in v6 format.
 /// Layout: vSpendProofsSapling (192*nSpends),
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),

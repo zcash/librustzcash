@@ -28,7 +28,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
     )
 }
 
-/// V6 signature hash per ZIP 248.
+/// v6 signature hash per ZIP 248.
 ///
 /// For transactions with no transparent inputs, the signature digest is
 /// identical to the transaction identifier digest (since `transparent_sig_digest`

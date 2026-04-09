@@ -26,7 +26,7 @@ use super::components::tze;
 use super::Authorization;
 
 // ---------------------------------------------------------------------------
-// Bundle type constants (ZIP 248 registry for V6 transactions)
+// Bundle type constants (ZIP 248 registry for v6 transactions)
 // ---------------------------------------------------------------------------
 
 /// Transparent bundle type.
@@ -86,7 +86,7 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized. To compute the V6 transaction
+/// the transaction can still be serialized. To compute the v6 transaction
 /// identifier (and the authorizing data commitment) over a transaction
 /// containing an unknown bundle, the caller must also supply the
 /// `bundle_effects_digest` (and, when `auth_data` is present, the
@@ -403,7 +403,7 @@ impl ValuePoolDeltaKey {
 /// The value pool delta map from ZIP 248.
 ///
 /// Records per-bundle net contributions to the transparent transaction value pool.
-/// For V6 transactions this is the authoritative source of value balance information.
+/// For v6 transactions this is the authoritative source of value balance information.
 /// For V1-V5 transactions it is derived from per-bundle value_balance fields.
 #[derive(Clone, Debug, Default)]
 pub struct ValuePoolDeltas {
@@ -504,7 +504,7 @@ impl ValuePoolDeltas {
         self.set_zec(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT, neg);
     }
 
-    /// Insert a raw entry. Used during V6 deserialization.
+    /// Insert a raw entry. Used during v6 deserialization.
     pub fn insert_raw(
         &mut self,
         key: ValuePoolDeltaKey,
@@ -518,7 +518,7 @@ impl ValuePoolDeltas {
 }
 
 // ---------------------------------------------------------------------------
-// V6 wire format helpers
+// v6 wire format helpers
 // ---------------------------------------------------------------------------
 
 /// A single value pool delta entry as it appears on the wire.
@@ -641,10 +641,10 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
 }
 
 // ---------------------------------------------------------------------------
-// Transparent V6 effect/auth helpers
+// Transparent v6 effect/auth helpers
 // ---------------------------------------------------------------------------
 
-/// Writes transparent effecting data in V6 format.
+/// Writes transparent effecting data in v6 format.
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
 pub fn write_v6_transparent_effects<W: Write>(
@@ -667,7 +667,7 @@ pub fn write_v6_transparent_effects<W: Write>(
     Ok(())
 }
 
-/// Writes transparent authorizing data in V6 format.
+/// Writes transparent authorizing data in v6 format.
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
 pub fn write_v6_transparent_auth<W: Write>(
     mut writer: W,

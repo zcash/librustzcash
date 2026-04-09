@@ -86,7 +86,7 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
-/// Reads an [`orchard::Bundle`] from V6 effecting + authorizing byte vectors per ZIP 248.
+/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
@@ -110,13 +110,13 @@ pub fn read_v6_bundle(
         if !effects_reader.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "trailing bytes in V6 Orchard effecting data",
+                "trailing bytes in v6 Orchard effecting data",
             ));
         }
         if auth.is_some_and(|a| !a.is_empty()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "V6 Orchard auth bundle present for an empty effecting bundle",
+                "v6 Orchard auth bundle present for an empty effecting bundle",
             ));
         }
         return Ok(None);
@@ -127,14 +127,14 @@ pub fn read_v6_bundle(
     if !effects_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in V6 Orchard effecting data",
+            "trailing bytes in v6 Orchard effecting data",
         ));
     }
 
     let auth_bytes = auth.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "V6 Orchard effecting bundle present without matching auth bundle",
+            "v6 Orchard effecting bundle present without matching auth bundle",
         )
     })?;
     let mut auth_reader = auth_bytes;
@@ -160,7 +160,7 @@ pub fn read_v6_bundle(
     if !auth_reader.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "trailing bytes in V6 Orchard authorizing data",
+            "trailing bytes in v6 Orchard authorizing data",
         ));
     }
 
@@ -179,7 +179,7 @@ pub fn read_v6_bundle(
 }
 
 
-/// Writes the effecting data for an Orchard bundle in V6 format.
+/// Writes the effecting data for an Orchard bundle in v6 format.
 #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
 pub fn write_v6_effects<W: Write>(
     mut writer: W,
@@ -195,7 +195,7 @@ pub fn write_v6_effects<W: Write>(
     Ok(())
 }
 
-/// Writes the authorizing data for an Orchard bundle in V6 format.
+/// Writes the authorizing data for an Orchard bundle in v6 format.
 #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
 pub fn write_v6_auth<W: Write>(
     mut writer: W,
