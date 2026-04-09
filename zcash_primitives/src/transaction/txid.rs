@@ -735,7 +735,7 @@ pub fn to_txid(
     digests: &TxDigests<Blake2bHash>,
 ) -> TxId {
     let txid_digest = match txversion {
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(zcash_v6)]
         TxVersion::V6 => to_hash_v6(consensus_branch_id, digests),
         _ => to_hash(
             txversion,
