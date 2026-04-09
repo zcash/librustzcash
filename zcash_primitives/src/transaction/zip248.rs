@@ -545,12 +545,15 @@ impl ValuePoolDeltaEntry {
                 reader.read_exact(&mut uuid)?;
                 Some(uuid)
             }
-            other => {
+            _other => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
+                    #[cfg(not(feature = "std"))]
+                    "ValuePoolDelta assetClass must be 0 or 1",
+                    #[cfg(feature = "std")]
                     alloc::format!(
                         "ValuePoolDelta assetClass must be 0 or 1, got {:#x}",
-                        other,
+                        _other,
                     ),
                 ));
             }
@@ -620,6 +623,9 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
     if info_len != 1 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
+            #[cfg(not(feature = "std"))]
+            "unexpected sighashInfo length; only sighash version 0 is supported",
+            #[cfg(feature = "std")]
             alloc::format!(
                 "unexpected sighashInfo length {} for {}; only sighash version 0 is supported",
                 info_len, context,
@@ -631,12 +637,16 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
     if version[0] != 0x00 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
+            #[cfg(not(feature = "std"))]
+            "unsupported sighash version",
+            #[cfg(feature = "std")]
             alloc::format!(
                 "unsupported sighash version {:#x} for {}",
                 version[0], context,
             ),
         ));
     }
+    let _ = context;
     Ok(())
 }
 

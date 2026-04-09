@@ -18,12 +18,14 @@ use zcash_protocol::{
 use zcash_script::opcode::PushValue;
 
 use crate::transaction::{
-    Transaction, TxVersion, zip248,
+    Transaction, TxVersion,
     fees::{
         FeeRule,
         transparent::{InputView, OutputView},
     },
 };
+#[cfg(feature = "circuits")]
+use crate::transaction::zip248;
 
 #[cfg(feature = "std")]
 use std::sync::mpsc::Sender;
