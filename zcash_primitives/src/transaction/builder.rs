@@ -24,7 +24,6 @@ use crate::transaction::{
         transparent::{InputView, OutputView},
     },
 };
-
 #[cfg(feature = "std")]
 use std::sync::mpsc::Sender;
 
@@ -1789,6 +1788,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             ironwood_bundle,
             bundles: authorized_bundles,
         };
+
+        #[cfg(zcash_unstable = "zfuture")]
+        let authorized_tx = TransactionData::from_parts_zfuture(
+            unauthed_tx.version(),
+            unauthed_tx.consensus_branch_id(),
+            unauthed_tx.lock_time(),
+            unauthed_tx.expiry_height(),
+            unauthed_tx.value_pool_deltas().clone(),
+            transparent_bundle,
+            None, // sprout
+            sapling_bundle,
+            orchard_bundle,
+            tze_bundle,
+        );
 
         // The unwrap() here is safe because the txid hashing
         // of freeze() should be infalliable.

@@ -18,6 +18,9 @@ categories.workspace = true
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[build-dependencies]
+cfg_aliases = "0.2"
+
 [dependencies]
 equihash.workspace = true
 zcash_encoding.workspace = true
