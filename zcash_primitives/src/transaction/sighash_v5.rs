@@ -197,8 +197,7 @@ pub fn v5_signature_hash<
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(zcash_unstable = "zfuture")]
-        tx.tze_bundle
-            .as_ref()
+        tx.tze_bundle()
             .zip(txid_parts.tze_digests.as_ref())
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
             .as_ref(),

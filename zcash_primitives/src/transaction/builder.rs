@@ -1176,6 +1176,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .transpose()
             .map_err(Error::OrchardBuild)?;
 
+        #[cfg(not(zcash_unstable = "zfuture"))]
         let authorized_tx = TransactionData::from_parts(
             unauthed_tx.version(),
             unauthed_tx.consensus_branch_id(),
@@ -1186,6 +1187,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             None, // sprout
             sapling_bundle,
             orchard_bundle,
+        );
+
+        #[cfg(zcash_unstable = "zfuture")]
+        let authorized_tx = TransactionData::from_parts_zfuture(
+            unauthed_tx.version(),
+            unauthed_tx.consensus_branch_id(),
+            unauthed_tx.lock_time(),
+            unauthed_tx.expiry_height(),
+            unauthed_tx.value_pool_deltas().clone(),
+            transparent_bundle,
+            None, // sprout
+            sapling_bundle,
+            orchard_bundle,
+            tze_bundle,
         );
 
         // The unwrap() here is safe because the txid hashing
