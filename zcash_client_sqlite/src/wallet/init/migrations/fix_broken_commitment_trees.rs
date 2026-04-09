@@ -9,9 +9,10 @@ use zcash_client_backend::data_api::WalletCommitmentTrees;
 use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
+    PRUNING_DEPTH,
     error::SqliteClientError,
     wallet::{
-        SqlTransaction, WalletDb,
+        SqlTransaction, WalletDb, chain_tip_height,
         init::{WalletMigrationError, migrations::support_legacy_sqlite},
     },
 };
@@ -100,6 +101,9 @@ fn truncate_to_height<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?
+    let stable_height = chain_tip.ok_or(SqliteClientError::ChainHeightUnknown)? - PRUNING_DEPTH;
+
     // Determine a checkpoint to which we can rewind, if any.
     #[cfg(not(feature = "orchard"))]
     let truncation_height_query = r#"
@@ -198,13 +202,26 @@ fn truncate_to_height<P: consensus::Parameters>(
         named_params![":height": u32::from(truncation_height)],
     )?;
 
-    // Un-mine transactions. This must be done outside of the last_scanned_height check because
-    // transaction entries may be created as a consequence of receiving transparent TXOs.
+    // Disassociate mined transactions with blocks, as the blocks table entries will be deleted.
     conn.execute(
         "UPDATE transactions
-         SET block = NULL, mined_height = NULL, tx_index = NULL
-         WHERE mined_height > :height",
-        named_params![":height": u32::from(truncation_height)],
+         SET block = NULL
+         WHERE mined_height > :truncation_height",
+        named_params![":truncation_height": u32::from(truncation_height)],
+    )?;
+
+    // Un-mine transactions if the mined height is in the "unstable" range. This must be done
+    // outside of the last_scanned_height check because transaction entries may be created as a
+    // consequence of receiving transparent TXOs.
+    conn.execute(
+        "UPDATE transactions
+         SET mined_height = NULL, tx_index = NULL
+         WHERE mined_height > :truncation_height
+         AND mined_height > :stable_height",
+        named_params![
+            ":truncation_height": u32::from(truncation_height),
+            ":stable_height": u32::from(stable_height)
+        ],
     )?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
@@ -220,12 +237,12 @@ fn truncate_to_height<P: consensus::Parameters>(
             gap_limits: *gap_limits,
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&std::cmp::max(truncation_height, stable_height))?;
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&std::cmp::max(truncation_height, stable_height))?;
             Ok::<_, SqliteClientError>(())
         })?;
 
