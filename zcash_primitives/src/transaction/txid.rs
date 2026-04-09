@@ -314,7 +314,7 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
 }
 
 // ---------------------------------------------------------------------------
-// ZIP 248 V6-specific digest functions
+// ZIP 248 v6-specific digest functions
 // ---------------------------------------------------------------------------
 
 /// V6 header digest: same fields as V5 but WITHOUT zip233_amount.
@@ -360,7 +360,7 @@ pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
     h.finalize()
 }
 
-/// V6 sapling effects digest per ZIP 248 §T.3.2: spends_digest || outputs_digest
+/// v6 sapling effects digest per ZIP 248 §T.3.2: spends_digest || outputs_digest
 /// || anchorSapling, with valueBalance excluded (it lives in mValuePoolDeltas).
 ///
 /// When `nSpendsSapling = 0` the wire format omits `anchorSapling`; per the
@@ -385,7 +385,7 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
     h.finalize()
 }
 
-/// V6 orchard effects digest: actions + flags + anchor, WITHOUT value_balance.
+/// v6 orchard effects digest: actions + flags + anchor, WITHOUT value_balance.
 /// Computed from bundle accessors rather than delegating to the orchard crate's
 /// `commitment()` method (which includes value_balance).
 // ZIP 248 v6 digest helpers are always compiled.
@@ -458,7 +458,7 @@ pub(crate) fn hash_v6_orchard_effects(
 /// `[0x01, 0x00]`. Sighash version 0 is currently the only defined version.
 const V6_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 
-/// V6 transparent authorizing-data digest per ZIP 248 §A.1.0.
+/// v6 transparent authorizing-data digest per ZIP 248 §A.1.0.
 ///
 /// Hashes, for each transparent input, the `TransparentSighashInfo` field
 /// encoding (sighash version 0: `[0x01, 0x00]`) followed by the `scriptSig`
@@ -478,7 +478,7 @@ pub(crate) fn hash_v6_transparent_auth(
     h.finalize()
 }
 
-/// V6 sapling authorizing-data digest per ZIP 248 §A.1.2.
+/// v6 sapling authorizing-data digest per ZIP 248 §A.1.2.
 ///
 /// Hashes the spend proofs, the spend auth signatures (each wrapped as a
 /// sighash version 0 `SaplingSignature`), the output proofs, and the binding
@@ -510,7 +510,7 @@ pub(crate) fn hash_v6_sapling_auth(
     h.finalize()
 }
 
-/// V6 orchard authorizing-data digest per ZIP 248 §A.1.3.
+/// v6 orchard authorizing-data digest per ZIP 248 §A.1.3.
 ///
 /// Hashes `proofsOrchard` (the aggregated zk-SNARK proof bytes), then each
 /// per-action spend-auth signature wrapped as a sighash version 0
@@ -563,7 +563,7 @@ where
     h.finalize()
 }
 
-/// V6 effects bundles digest per ZIP 248 §T.3 `effects_bundles_digest`.
+/// v6 effects bundles digest per ZIP 248 §T.3 `effects_bundles_digest`.
 ///
 /// Wraps each per-bundle effecting-data digest with `(bundleType, bundleVariant)`
 /// tags and hashes them in increasing `bundleType` order under the
@@ -576,7 +576,7 @@ where
     hash_v6_tagged_bundle_digests(ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION, entries)
 }
 
-/// V6 auth bundles digest per ZIP 248 §A.1 `auth_bundles_digest`.
+/// v6 auth bundles digest per ZIP 248 §A.1 `auth_bundles_digest`.
 ///
 /// Wraps each per-bundle authorizing-data digest with `(bundleType, bundleVariant)`
 /// tags and hashes them in increasing `bundleType` order under the
@@ -822,7 +822,7 @@ pub fn to_txid(
     ))
 }
 
-/// V6 txid hash per ZIP 248 §T: header_digest || value_pool_deltas_digest ||
+/// v6 txid hash per ZIP 248 §T: header_digest || value_pool_deltas_digest ||
 /// effects_bundles_digest, all under the consensus-branch-id-personalized
 /// "ZcashTxHash_" hash.
 // ZIP 248 v6 digest helpers are always compiled.

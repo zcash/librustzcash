@@ -26,7 +26,7 @@ use super::components::tze;
 use super::Authorization;
 
 // ---------------------------------------------------------------------------
-// Bundle type constants (ZIP 248 registry for V6 transactions)
+// Bundle type constants (ZIP 248 registry for v6 transactions)
 // ---------------------------------------------------------------------------
 
 /// Transparent bundle type.
@@ -86,7 +86,7 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized. To compute the V6 transaction
+/// the transaction can still be serialized. To compute the v6 transaction
 /// identifier (and the authorizing data commitment) over a transaction
 /// containing an unknown bundle, the caller must also supply the
 /// `bundle_effects_digest` (and, when `auth_data` is present, the
@@ -425,7 +425,7 @@ impl ValuePoolDeltaKey {
 /// The value pool delta map from ZIP 248.
 ///
 /// Records per-bundle net contributions to the transparent transaction value pool.
-/// For V6 transactions this is the authoritative source of value balance information.
+/// For v6 transactions this is the authoritative source of value balance information.
 /// For V1-V5 transactions it is derived from per-bundle value_balance fields.
 #[derive(Clone, Debug, Default)]
 pub struct ValuePoolDeltas {
@@ -526,7 +526,7 @@ impl ValuePoolDeltas {
         self.set_zec(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT, neg);
     }
 
-    /// Insert a raw entry. Used during V6 deserialization.
+    /// Insert a raw entry. Used during v6 deserialization.
     pub fn insert_raw(
         &mut self,
         key: ValuePoolDeltaKey,
@@ -540,7 +540,7 @@ impl ValuePoolDeltas {
 }
 
 // ---------------------------------------------------------------------------
-// V6 wire format helpers
+// v6 wire format helpers
 // ---------------------------------------------------------------------------
 
 /// A single value pool delta entry as it appears on the wire.
@@ -560,12 +560,25 @@ impl ValuePoolDeltaEntry {
         let mut asset_class_buf = [0u8; 1];
         reader.read_exact(&mut asset_class_buf)?;
         let asset_class = asset_class_buf[0];
-        let asset_uuid = if asset_class == ASSET_CLASS_ZEC {
-            None
-        } else {
-            let mut uuid = [0u8; 64];
-            reader.read_exact(&mut uuid)?;
-            Some(uuid)
+        let asset_uuid = match asset_class {
+            ASSET_CLASS_ZEC => None,
+            ASSET_CLASS_OTHER => {
+                let mut uuid = [0u8; 64];
+                reader.read_exact(&mut uuid)?;
+                Some(uuid)
+            }
+            _other => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    #[cfg(not(feature = "std"))]
+                    "ValuePoolDelta assetClass must be 0 or 1",
+                    #[cfg(feature = "std")]
+                    alloc::format!(
+                        "ValuePoolDelta assetClass must be 0 or 1, got {:#x}",
+                        _other,
+                    ),
+                ));
+            }
         };
         let mut value_buf = [0u8; 8];
         reader.read_exact(&mut value_buf)?;
@@ -620,11 +633,49 @@ pub fn write_bundle_data_framing<W: Write>(
     Ok(())
 }
 
+/// Reads and validates a sighash version 0 `sighashInfo` prefix
+/// (`compactSize(1) || 0x00`) per ZIP 248 §"Sighash Versioning". Sighash
+/// version 0 is currently the only defined version.
+pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
+    reader: &mut R,
+    context: &'static str,
+) -> io::Result<()> {
+    let info_len = CompactSize::read_t::<_, usize>(&mut *reader)?;
+    if info_len != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            #[cfg(not(feature = "std"))]
+            "unexpected sighashInfo length; only sighash version 0 is supported",
+            #[cfg(feature = "std")]
+            alloc::format!(
+                "unexpected sighashInfo length {} for {}; only sighash version 0 is supported",
+                info_len, context,
+            ),
+        ));
+    }
+    let mut version = [0u8; 1];
+    reader.read_exact(&mut version)?;
+    if version[0] != 0x00 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            #[cfg(not(feature = "std"))]
+            "unsupported sighash version",
+            #[cfg(feature = "std")]
+            alloc::format!(
+                "unsupported sighash version {:#x} for {}",
+                version[0], context,
+            ),
+        ));
+    }
+    let _ = context;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
-// Transparent V6 effect/auth helpers
+// Transparent v6 effect/auth helpers
 // ---------------------------------------------------------------------------
 
-/// Writes transparent effecting data in V6 format.
+/// Writes transparent effecting data in v6 format.
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
 pub fn write_v6_transparent_effects<W: Write>(
@@ -647,7 +698,7 @@ pub fn write_v6_transparent_effects<W: Write>(
     Ok(())
 }
 
-/// Writes transparent authorizing data in V6 format.
+/// Writes transparent authorizing data in v6 format.
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
 pub fn write_v6_transparent_auth<W: Write>(
     mut writer: W,

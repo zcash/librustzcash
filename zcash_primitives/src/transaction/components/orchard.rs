@@ -22,6 +22,7 @@ use zcash_protocol::{
 };
 
 use crate::transaction::Transaction;
+use crate::transaction::zip248::consume_v6_sighash_v0_info;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
@@ -217,69 +218,106 @@ fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
     }
 }
 
-/// Reads an [`orchard::Bundle`] from a v6 transaction format. `pool` selects the bundle
-/// slot to read: the Orchard slot ([`ValuePool::Orchard`]) or the Ironwood slot
-/// ([`ValuePool::Ironwood`], whose flag-byte encoding permits the cross-address bit,
-/// unlike the Orchard v6 pool). The slot's [`BundleVersion`] is derived from
-/// `consensus_branch_id` (see [`bundle_version_for_branch`]); a non-empty bundle in a
-/// slot whose value pool is not supported under the transaction's consensus branch is
-/// rejected as invalid data.
-pub fn read_v6_bundle<R: Read>(
-    reader: R,
-    consensus_branch_id: BranchId,
-    pool: ValuePool,
+/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
+///
+/// `effects` and `auth` are the raw `vBundleData` payloads from the
+/// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
+/// value balance is *not* read from these bytes — it lives in
+/// `mValuePoolDeltas` and must be supplied by the caller.
+pub fn read_v6_bundle(
+    effects: &[u8],
+    auth: Option<&[u8]>,
+    value_balance: ZatBalance,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    read_bundle(reader, bundle_version_for_branch(consensus_branch_id, pool))
-}
+    let mut effects_reader = effects;
 
-/// Reads the effecting data for an Orchard bundle in V6 format.
-/// Returns (actions_without_auth, flags, anchor) or None if nActions == 0.
-// ZIP 248 v6 bundle codec.
-pub fn read_v6_effects<R: Read>(
-    mut reader: R,
-) -> io::Result<Option<(Vec<Action<()>>, Flags, Anchor)>> {
+    // Effecting data: nActions || OrchardActionEffecting* ||
+    //                 (flags || anchor)?  (present iff nActions > 0)
     #[allow(clippy::redundant_closure)]
-    let actions = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
-    if actions.is_empty() {
+    let actions_without_auth =
+        Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
+
+    if actions_without_auth.is_empty() {
+        if !effects_reader.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "trailing bytes in v6 Orchard effecting data",
+            ));
+        }
+        if auth.is_some_and(|a| !a.is_empty()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v6 Orchard auth bundle present for an empty effecting bundle",
+            ));
+        }
         return Ok(None);
     }
-    let flags = read_flags(&mut reader, BundleVersion::orchard_v3())?;
-    let anchor = read_anchor(&mut reader)?;
-    Ok(Some((actions, flags, anchor)))
-}
 
-/// Reads the authorizing data for an Orchard bundle in V6 format.
-/// `n_actions` must match the number of actions from the effecting data.
-// ZIP 248 v6 bundle codec.
-pub fn read_v6_auth<R: Read>(
-    mut reader: R,
-    n_actions: usize,
-) -> io::Result<(Vec<u8>, Vec<Signature<SpendAuth>>, Signature<redpallas::Binding>)> {
-    let proof_bytes = Vector::read(&mut reader, |mut r| {
+    let flags = read_flags(&mut effects_reader, BundleVersion::orchard_v3())?;
+    let anchor = read_anchor(&mut effects_reader)?;
+    if !effects_reader.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes in v6 Orchard effecting data",
+        ));
+    }
+
+    let auth_bytes = auth.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "v6 Orchard effecting bundle present without matching auth bundle",
+        )
+    })?;
+    let mut auth_reader = auth_bytes;
+
+    // Authorizing data: sizeProofsOrchard || proofsOrchard ||
+    //                   vSpendAuthSigsOrchard (OrchardSignature per action) ||
+    //                   bindingSigOrchard (OrchardSignature).
+    let proof_bytes = Vector::read(&mut auth_reader, |mut r| {
         let mut byte = [0u8; 1];
         r.read_exact(&mut byte)?;
         Ok(byte[0])
     })?;
-    let mut spend_auth_sigs = Vec::with_capacity(n_actions);
-    for _ in 0..n_actions {
-        // Read sighashInfo prefix (version 0: CompactSize(1) || 0x00)
-        let info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let mut info = vec![0u8; info_len];
-        reader.read_exact(&mut info)?;
-        // Read 64-byte signature
-        spend_auth_sigs.push(read_signature::<_, SpendAuth>(&mut reader)?);
-    }
-    // Read binding sig with sighashInfo
-    let _binding_info_len = CompactSize::read_t::<_, usize>(&mut reader)?;
-    let mut _binding_info = vec![0u8; _binding_info_len];
-    reader.read_exact(&mut _binding_info)?;
-    let binding_sig = read_signature::<_, redpallas::Binding>(&mut reader)?;
+    let actions = NonEmpty::from_vec(
+        actions_without_auth
+            .into_iter()
+            .map(|action| {
+                consume_v6_sighash_v0_info(&mut auth_reader, "Orchard spend auth sig")?;
+                action.try_map(|_| read_signature::<_, SpendAuth>(&mut auth_reader))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    )
+    .expect("nonempty by construction");
 
-    Ok((proof_bytes, spend_auth_sigs, binding_sig))
+    consume_v6_sighash_v0_info(&mut auth_reader, "Orchard binding sig")?;
+    let binding_signature = read_signature::<_, redpallas::Binding>(&mut auth_reader)?;
+
+    if !auth_reader.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes in v6 Orchard authorizing data",
+        ));
+    }
+
+    let authorization = orchard::bundle::Authorized::from_parts(
+        orchard::Proof::new(proof_bytes),
+        binding_signature,
+    );
+
+    orchard::Bundle::try_from_parts(
+        actions,
+        flags,
+        value_balance,
+        anchor,
+        authorization,
+        BundleVersion::orchard_v3(),
+    )
+    .map(Some)
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Writes the effecting data for an Orchard bundle in V6 format.
-// ZIP 248 v6 bundle codec.
+
+/// Writes the effecting data for an Orchard bundle in v6 format.
 pub fn write_v6_effects<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
@@ -296,8 +334,7 @@ pub fn write_v6_effects<W: Write>(
     Ok(())
 }
 
-/// Writes the authorizing data for an Orchard bundle in V6 format.
-// ZIP 248 v6 bundle codec.
+/// Writes the authorizing data for an Orchard bundle in v6 format.
 pub fn write_v6_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
