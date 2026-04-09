@@ -5,7 +5,7 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub mod sighash_v6;
 
 pub mod txid;
@@ -15,7 +15,7 @@ pub mod zip248;
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
@@ -209,10 +209,7 @@ impl TxVersion {
         }
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn has_zip233(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
@@ -548,10 +545,7 @@ impl<A: Authorization> TransactionData<A> {
         &self.bundles
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn zip233_amount(&self) -> Zatoshis {
         self.value_pool_deltas
             .zip233_amount()
@@ -595,10 +589,7 @@ impl<A: Authorization> TransactionData<A> {
                     self.bundles
                         .orchard()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(all(
-                        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                        feature = "zip-233"
-                    ))]
+                    #[cfg(all(zcash_v6, feature = "zip-233"))]
                     -ZatBalance::from(self.zip233_amount()),
                 ];
 
@@ -620,10 +611,7 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
-                #[cfg(all(
-                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                    feature = "zip-233"
-                ))]
+                #[cfg(all(zcash_v6, feature = "zip-233"))]
                 &self.zip233_amount(),
             ),
             digester.digest_transparent(self.bundles.transparent()),
@@ -635,7 +623,7 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     /// Produces V6 (ZIP 248) transaction digests using the TxIdDigester.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
             TxIdDigester, hash_v6_header, hash_v6_orchard_effects,
@@ -834,7 +822,7 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
@@ -874,7 +862,7 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
         let txid = to_txid(
             data.version,
@@ -1078,7 +1066,7 @@ impl Transaction {
         Ok(Self::from_data_v5(data))
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         // 1. Header (5 × u32)
         let V6HeaderFragment {
@@ -1210,7 +1198,7 @@ impl Transaction {
     /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
     /// V6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
     /// `mValuePoolDeltas`.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1323,7 +1311,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
@@ -1442,7 +1430,7 @@ impl Transaction {
     /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
     /// amount is not included here; it lives in `mValuePoolDeltas` under
     /// `bundleType = 5`.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
@@ -1486,7 +1474,7 @@ impl Transaction {
     }
 
     /// V6 auth commitment using the ZIP 248 tagged auth_bundles_digest structure.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     fn auth_commitment_v6(&self) -> Blake2bHash {
         use txid::{
             hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
@@ -1565,17 +1553,17 @@ pub struct TxDigests<A> {
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
     /// V6 (ZIP 248): digest of the value pool deltas map.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub value_pool_deltas_digest: Option<A>,
     /// V6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub unknown_effect_digests: Vec<(zip248::BundleId, A)>,
     /// V6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     pub unknown_auth_digests: Vec<(zip248::BundleId, A)>,
 }
 
@@ -1596,10 +1584,7 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
+        #[cfg(all(zcash_v6, feature = "zip-233"))]
         zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest;
 
@@ -1650,10 +1635,7 @@ pub mod testing {
         },
     };
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     #[cfg(zcash_unstable = "zfuture")]
