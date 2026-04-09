@@ -219,4 +219,23 @@ impl JsDescription {
     pub fn commitments(&self) -> &[[u8; 32]; ZC_NUM_JS_OUTPUTS] {
         &self.commitments
     }
+
+    /// Returns the random seed for this JoinSplit.
+    pub fn random_seed(&self) -> &[u8; 32] {
+        &self.random_seed
+    }
+
+    /// Returns the message authentication codes for this JoinSplit.
+    pub fn macs(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
+        &self.macs
+    }
+
+    /// Returns the Groth16 proof bytes for this JoinSplit, if it uses Groth16.
+    /// Returns `None` for PHGR proofs (pre-Sapling).
+    pub fn groth_proof_bytes(&self) -> Option<&[u8; GROTH_PROOF_SIZE]> {
+        match &self.proof {
+            SproutProof::Groth(bytes) => Some(bytes),
+            SproutProof::PHGR(_) => None,
+        }
+    }
 }
