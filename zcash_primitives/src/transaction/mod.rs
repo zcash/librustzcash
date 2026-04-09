@@ -1117,9 +1117,15 @@ impl Transaction {
             expiry_height,
         } = Self::read_v6_header_fragment(&mut reader)?;
 
-        // 2. Value pool deltas map
+        // 2. Value pool deltas map. ZIP 248 requires entries in strictly
+        //    increasing `(bundleType, assetClass, assetUuid)` order, with no
+        //    duplicates, and requires every `(bundleType, ...)` group to share
+        //    a single `bundleVariant`. We track the previous key and the
+        //    per-bundleType variant as we read.
         let n_vp_deltas = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut vp = zip248::ValuePoolDeltas::empty();
+        let mut last_vp_key: Option<zip248::ValuePoolDeltaKey> = None;
+        let mut vp_variants_by_type: BTreeMap<u64, u64> = BTreeMap::new();
         for _ in 0..n_vp_deltas {
             let entry = zip248::ValuePoolDeltaEntry::read(&mut reader)?;
             let key = zip248::ValuePoolDeltaKey {
@@ -1127,6 +1133,29 @@ impl Transaction {
                 asset_class: entry.asset_class,
                 asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
             };
+            if let Some(prev) = &last_vp_key {
+                if &key <= prev {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mValuePoolDeltas is not in strictly increasing \
+                         (bundleType, assetClass, assetUuid) order",
+                    ));
+                }
+            }
+            last_vp_key = Some(key.clone());
+            // Per ZIP 248: all entries with the same bundleType must share a
+            // single bundleVariant.
+            match vp_variants_by_type.get(&entry.bundle_type) {
+                Some(&existing) if existing != entry.bundle_variant => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mValuePoolDeltas has multiple bundleVariants for the same bundleType",
+                    ));
+                }
+                _ => {
+                    vp_variants_by_type.insert(entry.bundle_type, entry.bundle_variant);
+                }
+            }
             vp.insert_raw(key, entry.bundle_variant, entry.value);
         }
 
@@ -1190,6 +1219,53 @@ impl Transaction {
                     ));
                 }
             }
+        }
+
+        // ZIP 248: for each bundleType that appears in any of the three maps,
+        // every entry across all three maps must encode the same bundleVariant.
+        // (mEffectBundles ↔ mAuthBundles consistency was checked above; here
+        // we additionally check that mValuePoolDeltas variants agree with
+        // whichever effect/auth entry exists.)
+        for (bundle_type, vp_variant) in &vp_variants_by_type {
+            if let Some((effect_variant, _)) = effect_data_by_type.get(bundle_type) {
+                if effect_variant != vp_variant {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 transaction has an mValuePoolDeltas bundleVariant that \
+                         does not match the corresponding mEffectBundles entry",
+                    ));
+                }
+            }
+        }
+
+        // ZIP 248 v6 Transaction Bundle Type Registry:
+        // - bundleType 1 is Reserved and MUST NOT appear in any of the three maps.
+        // - bundleType 4 (transaction fee) and 5 (ZIP 233 NSM field) MUST NOT
+        //   appear in mEffectBundles or mAuthBundles (the registry marks both
+        //   columns ❌).
+        for &value_only_bundle in &[
+            zip248::BUNDLE_TYPE_FEE,
+            zip248::BUNDLE_TYPE_ZIP233_NSM,
+        ] {
+            if effect_data_by_type.contains_key(&value_only_bundle)
+                || auth_data_by_type.contains_key(&value_only_bundle)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "v6 transaction has a value-only bundle type (fee or ZIP 233 NSM) \
+                     in mEffectBundles or mAuthBundles",
+                ));
+            }
+        }
+        const RESERVED_BUNDLE_TYPE: u64 = 1;
+        if vp_variants_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
+            || effect_data_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
+            || auth_data_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v6 transaction references the reserved bundleType 1",
+            ));
         }
 
         // 5. Reconstruct typed bundles from effect + auth data.

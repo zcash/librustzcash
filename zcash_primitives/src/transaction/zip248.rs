@@ -538,12 +538,22 @@ impl ValuePoolDeltaEntry {
         let mut asset_class_buf = [0u8; 1];
         reader.read_exact(&mut asset_class_buf)?;
         let asset_class = asset_class_buf[0];
-        let asset_uuid = if asset_class == ASSET_CLASS_ZEC {
-            None
-        } else {
-            let mut uuid = [0u8; 64];
-            reader.read_exact(&mut uuid)?;
-            Some(uuid)
+        let asset_uuid = match asset_class {
+            ASSET_CLASS_ZEC => None,
+            ASSET_CLASS_OTHER => {
+                let mut uuid = [0u8; 64];
+                reader.read_exact(&mut uuid)?;
+                Some(uuid)
+            }
+            other => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    alloc::format!(
+                        "ValuePoolDelta assetClass must be 0 or 1, got {:#x}",
+                        other,
+                    ),
+                ));
+            }
         };
         let mut value_buf = [0u8; 8];
         reader.read_exact(&mut value_buf)?;
