@@ -598,6 +598,38 @@ pub fn write_bundle_data_framing<W: Write>(
     Ok(())
 }
 
+/// Reads and validates a sighash version 0 `sighashInfo` prefix
+/// (`compactSize(1) || 0x00`) per ZIP 248 §"Sighash Versioning". Sighash
+/// version 0 is currently the only defined version.
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
+    reader: &mut R,
+    context: &'static str,
+) -> io::Result<()> {
+    let info_len = CompactSize::read_t::<_, usize>(&mut *reader)?;
+    if info_len != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            alloc::format!(
+                "unexpected sighashInfo length {} for {}; only sighash version 0 is supported",
+                info_len, context,
+            ),
+        ));
+    }
+    let mut version = [0u8; 1];
+    reader.read_exact(&mut version)?;
+    if version[0] != 0x00 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            alloc::format!(
+                "unsupported sighash version {:#x} for {}",
+                version[0], context,
+            ),
+        ));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Transparent V6 effect/auth helpers
 // ---------------------------------------------------------------------------

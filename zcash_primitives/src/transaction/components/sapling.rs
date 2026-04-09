@@ -22,6 +22,8 @@ use zcash_protocol::{
 
 use super::GROTH_PROOF_SIZE;
 use crate::transaction::Transaction;
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+use crate::transaction::zip248::consume_v6_sighash_v0_info;
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
@@ -495,6 +497,117 @@ pub(crate) fn write_v5_bundle<W: Write>(
     }
 
     Ok(())
+}
+
+/// Reads a [`Bundle`] from V6 effecting + authorizing byte vectors per ZIP 248.
+///
+/// `effects` and `auth` are the raw `vBundleData` payloads from the
+/// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
+/// value balance is *not* read from these bytes — it lives in
+/// `mValuePoolDeltas` and must be supplied by the caller.
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub(crate) fn read_v6_bundle(
+    effects: &[u8],
+    auth: Option<&[u8]>,
+    value_balance: ZatBalance,
+) -> io::Result<Option<Bundle<Authorized, ZatBalance>>> {
+    let mut effects_reader = effects;
+
+    // Effecting data: nSpends || SaplingSpendEffecting* || nOutputs ||
+    // SaplingOutput* || anchorSapling (only if nSpends > 0).
+    let spend_descs = Vector::read(&mut effects_reader, read_spend_v5)?;
+    let output_descs = Vector::read(&mut effects_reader, read_output_v5)?;
+    let n_spends = spend_descs.len();
+    let n_outputs = output_descs.len();
+
+    let anchor = if n_spends > 0 {
+        Some(read_base(&mut effects_reader, "anchor")?)
+    } else {
+        None
+    };
+
+    if !effects_reader.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes in V6 Sapling effecting data",
+        ));
+    }
+
+    if n_spends == 0 && n_outputs == 0 {
+        // Empty Sapling bundle: there should be no auth bundle either.
+        if auth.is_some_and(|a| !a.is_empty()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "V6 Sapling auth bundle present for an empty effecting bundle",
+            ));
+        }
+        return Ok(None);
+    }
+
+    let auth_bytes = auth.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "V6 Sapling effecting bundle present without matching auth bundle",
+        )
+    })?;
+    let mut auth_reader = auth_bytes;
+
+    // Authorizing data: vSpendProofsSapling (192 bytes per spend) ||
+    // vSpendAuthSigsSapling (SaplingSignature per spend) ||
+    // vOutputProofsSapling (192 bytes per output) ||
+    // bindingSigSapling (SaplingSignature).
+    let v_spend_proofs = Array::read(&mut auth_reader, n_spends, |r| read_zkproof(r))?;
+    let mut v_spend_auth_sigs: Vec<redjubjub::Signature<SpendAuth>> =
+        Vec::with_capacity(n_spends);
+    for _ in 0..n_spends {
+        consume_v6_sighash_v0_info(
+            &mut auth_reader,
+            "Sapling spend auth sig",
+        )?;
+        v_spend_auth_sigs.push(read_spend_auth_sig(&mut auth_reader)?);
+    }
+    let v_output_proofs = Array::read(&mut auth_reader, n_outputs, |r| read_zkproof(r))?;
+
+    consume_v6_sighash_v0_info(
+        &mut auth_reader,
+        "Sapling binding sig",
+    )?;
+    let mut binding_sig_bytes = [0u8; 64];
+    auth_reader.read_exact(&mut binding_sig_bytes)?;
+    let binding_sig = redjubjub::Signature::from(binding_sig_bytes);
+
+    if !auth_reader.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes in V6 Sapling authorizing data",
+        ));
+    }
+
+    let shielded_spends = spend_descs
+        .into_iter()
+        .zip(v_spend_proofs.into_iter().zip(v_spend_auth_sigs))
+        .map(|(spend, (zkproof, spend_auth_sig))| {
+            // Safe: n_spends > 0 implies anchor.is_some().
+            spend.into_spend_description(
+                anchor.expect("nonempty spends"),
+                zkproof,
+                spend_auth_sig,
+            )
+        })
+        .collect();
+
+    let shielded_outputs = output_descs
+        .into_iter()
+        .zip(v_output_proofs)
+        .map(|(output, zkproof)| output.into_output_description(zkproof))
+        .collect();
+
+    Ok(Bundle::from_parts(
+        shielded_spends,
+        shielded_outputs,
+        value_balance,
+        Authorized { binding_sig },
+    ))
 }
 
 /// Writes the effecting data for a Sapling bundle in V6 format.

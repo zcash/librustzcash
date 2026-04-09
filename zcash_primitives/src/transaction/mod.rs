@@ -16,6 +16,8 @@ pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 #[cfg(zcash_v6)]
+use alloc::collections::BTreeMap;
+#[cfg(zcash_v6)]
 use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
@@ -518,7 +520,10 @@ impl<A: Authorization> TransactionData<A> {
         &self.bundles
     }
 
-    #[cfg(all(zcash_v6, feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     pub fn zip233_amount(&self) -> Zatoshis {
         self.value_pool_deltas
             .zip233_amount()
@@ -562,7 +567,10 @@ impl<A: Authorization> TransactionData<A> {
                     self.bundles
                         .orchard()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(all(zcash_v6, feature = "zip-233"))]
+                    #[cfg(all(
+                        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                        feature = "zip-233"
+                    ))]
                     -ZatBalance::from(self.zip233_amount()),
                 ];
 
@@ -584,7 +592,10 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
-                #[cfg(all(zcash_v6, feature = "zip-233"))]
+                #[cfg(all(
+                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                    feature = "zip-233"
+                ))]
                 &self.zip233_amount(),
             ),
             digester.digest_transparent(self.bundles.transparent()),
@@ -960,6 +971,82 @@ impl Transaction {
         })
     }
 
+    /// Reads a V6 transparent bundle from its `mEffectBundles[0]` and
+    /// `mAuthBundles[0]` byte payloads per ZIP 248. The effecting layout is
+    /// `tx_in_count || (prevout || nSequence)* || tx_out_count || (value, scriptPubKey)*`,
+    /// and the authorizing layout is `(TransparentSighashInfo, scriptSig)*`
+    /// (one entry per input, no leading length).
+    #[cfg(zcash_v6)]
+    fn read_v6_transparent_bundle(
+        effects: &[u8],
+        auth: Option<&[u8]>,
+    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
+        use ::transparent::address::Script;
+
+        let mut effects_reader = effects;
+        let n_in = CompactSize::read_t::<_, usize>(&mut effects_reader)?;
+        let mut prevouts_and_sequences: Vec<(OutPoint, u32)> = Vec::with_capacity(n_in);
+        for _ in 0..n_in {
+            let prevout = OutPoint::read(&mut effects_reader)?;
+            let mut seq_bytes = [0u8; 4];
+            effects_reader.read_exact(&mut seq_bytes)?;
+            prevouts_and_sequences.push((prevout, u32::from_le_bytes(seq_bytes)));
+        }
+        let vout = Vector::read(&mut effects_reader, TxOut::read)?;
+        if !effects_reader.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "trailing bytes in V6 transparent effecting data",
+            ));
+        }
+
+        if n_in == 0 && vout.is_empty() {
+            if auth.is_some_and(|a| !a.is_empty()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "V6 transparent auth bundle present for an empty effecting bundle",
+                ));
+            }
+            return Ok(None);
+        }
+
+        let auth_bytes = if n_in == 0 {
+            // No inputs ⇒ no authorizing data, but the auth bundle entry may
+            // legally be omitted entirely or present-and-empty. We accept both.
+            auth.unwrap_or(&[])
+        } else {
+            auth.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "V6 transparent effecting bundle has inputs but no auth bundle",
+                )
+            })?
+        };
+        let mut auth_reader = auth_bytes;
+
+        let mut vin: Vec<TxIn<transparent::Authorized>> = Vec::with_capacity(n_in);
+        for (prevout, sequence) in prevouts_and_sequences {
+            // TransparentSighashInfo: compactSize-prefixed bytes; sighash
+            // version 0 has empty associatedData, so the wire form is
+            // [0x01, 0x00].
+            zip248::consume_v6_sighash_v0_info(&mut auth_reader, "transparent input")?;
+            let script_sig = Script::read(&mut auth_reader)?;
+            vin.push(TxIn::from_parts(prevout, script_sig, sequence));
+        }
+        if !auth_reader.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "trailing bytes in V6 transparent authorizing data",
+            ));
+        }
+
+        Ok(Some(transparent::Bundle {
+            vin,
+            vout,
+            authorization: transparent::Authorized,
+        }))
+    }
+
     fn read_transparent<R: Read>(
         mut reader: R,
     ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
@@ -1043,78 +1130,127 @@ impl Transaction {
             vp.insert_raw(key, entry.bundle_variant, entry.value);
         }
 
-        // 3. Effect bundles map
+        // 3. Effect bundles map. ZIP 248 requires entries in strictly
+        //    increasing bundleType order; we collect into a BTreeMap which
+        //    enforces uniqueness, and additionally check the on-wire ordering
+        //    so that the transaction is rejected if the encoder produced an
+        //    out-of-order map.
         let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let bundles = zip248::BundleMap::new();
-        let mut sapling_effect_data: Option<Vec<u8>> = None;
-        let mut orchard_effect_data: Option<Vec<u8>> = None;
-        let mut transparent_effect_data: Option<Vec<u8>> = None;
-
+        let mut effect_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
+        let mut last_effect_type: Option<u64> = None;
         for _ in 0..n_effect_bundles {
             let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
-            match id.bundle_type {
-                zip248::BUNDLE_TYPE_TRANSPARENT => {
-                    transparent_effect_data = Some(data);
-                }
-                zip248::BUNDLE_TYPE_SAPLING => {
-                    sapling_effect_data = Some(data);
-                }
-                zip248::BUNDLE_TYPE_ORCHARD => {
-                    orchard_effect_data = Some(data);
-                }
-                _ => {
-                    // ZIP 248 §"Implications for Wallets" requires the
-                    // bundle_effects_digest to be supplied externally for
-                    // unknown bundle types; we cannot derive it from the
-                    // opaque bytes alone, so without a digest registry
-                    // callback we cannot safely accept unknown bundles
-                    // here. Refuse the transaction. A future revision of
-                    // this reader that takes a `BundleId -> digest`
-                    // registry from the caller can lift this restriction.
+            if let Some(prev) = last_effect_type {
+                if id.bundle_type <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 transaction contains an unknown effect bundle type \
-                         and no digest registry was supplied",
+                        "V6 mEffectBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
+            last_effect_type = Some(id.bundle_type);
+            effect_data_by_type.insert(id.bundle_type, (id.bundle_variant, data));
         }
 
-        // 4. Auth bundles map
+        // 4. Auth bundles map (same ordering rules).
         let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let mut transparent_auth_data: Option<Vec<u8>> = None;
-        let mut sapling_auth_data: Option<Vec<u8>> = None;
-        let mut orchard_auth_data: Option<Vec<u8>> = None;
-
+        let mut auth_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
+        let mut last_auth_type: Option<u64> = None;
         for _ in 0..n_auth_bundles {
             let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
-            match id.bundle_type {
-                zip248::BUNDLE_TYPE_TRANSPARENT => {
-                    transparent_auth_data = Some(data);
-                }
-                zip248::BUNDLE_TYPE_SAPLING => {
-                    sapling_auth_data = Some(data);
-                }
-                zip248::BUNDLE_TYPE_ORCHARD => {
-                    orchard_auth_data = Some(data);
-                }
-                _ => {
+            if let Some(prev) = last_auth_type {
+                if id.bundle_type <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "V6 transaction contains an unknown auth bundle type \
-                         and no digest registry was supplied",
+                        "V6 mAuthBundles is not in strictly increasing bundleType order",
+                    ));
+                }
+            }
+            last_auth_type = Some(id.bundle_type);
+            auth_data_by_type.insert(id.bundle_type, (id.bundle_variant, data));
+        }
+
+        // ZIP 248: every bundleType in mAuthBundles must also appear in
+        // mEffectBundles with the same bundleVariant.
+        for (bundle_type, (auth_variant, _)) in &auth_data_by_type {
+            match effect_data_by_type.get(bundle_type) {
+                Some((effect_variant, _)) if effect_variant == auth_variant => {}
+                Some(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction has mAuthBundles entry with a bundleVariant \
+                         that does not match the corresponding mEffectBundles entry",
+                    ));
+                }
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "V6 transaction has mAuthBundles entry with no matching \
+                         mEffectBundles entry",
                     ));
                 }
             }
         }
 
-        // 5. Reconstruct typed bundles from effect + auth data
-        // TODO: Parse transparent, sapling, orchard from their effect+auth byte vectors.
-        // For now, this is a stub that leaves the bundles empty.
-        // Full parsing will require reading from Cursor over the byte vectors.
-        let _ = (transparent_effect_data, transparent_auth_data);
-        let _ = (sapling_effect_data, sapling_auth_data);
-        let _ = (orchard_effect_data, orchard_auth_data);
+        // 5. Reconstruct typed bundles from effect + auth data.
+        let mut bundles = zip248::BundleMap::new();
+
+        // Helper: pop the (variant, data) pair for a given bundle type out of
+        // both maps so that anything left over after we've processed the
+        // known types is by definition unknown.
+        let mut take_known = |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+            let effect = effect_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+            let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+            (effect, auth)
+        };
+
+        let (transparent_effect, transparent_auth) = take_known(zip248::BUNDLE_TYPE_TRANSPARENT);
+        if let Some(effect) = transparent_effect {
+            if let Some(b) =
+                Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
+            {
+                bundles.insert_transparent(b);
+            }
+        }
+
+        let (sapling_effect, sapling_auth) = take_known(zip248::BUNDLE_TYPE_SAPLING);
+        if let Some(effect) = sapling_effect {
+            let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
+            if let Some(b) = sapling_serialization::read_v6_bundle(
+                &effect,
+                sapling_auth.as_deref(),
+                value_balance,
+            )? {
+                bundles.insert_sapling(b);
+            }
+        }
+
+        let (orchard_effect, orchard_auth) = take_known(zip248::BUNDLE_TYPE_ORCHARD);
+        if let Some(effect) = orchard_effect {
+            let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
+            if let Some(b) = orchard_serialization::read_v6_bundle(
+                &effect,
+                orchard_auth.as_deref(),
+                value_balance,
+            )? {
+                bundles.insert_orchard(b);
+            }
+        }
+
+        // ZIP 248 §"Implications for Wallets" requires the
+        // `bundle_effects_digest` (and `bundle_auth_digest`) to be supplied
+        // externally for unknown bundle types; we cannot derive them from the
+        // opaque bytes alone, so without a digest registry callback we cannot
+        // safely accept any unknown bundles here. Refuse the transaction. A
+        // future revision of this reader that takes a `BundleId -> digest`
+        // registry from the caller can lift this restriction.
+        if !effect_data_by_type.is_empty() || !auth_data_by_type.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "V6 transaction contains an unknown bundle type and no digest \
+                 registry was supplied",
+            ));
+        }
 
         let data = TransactionData {
             version,
@@ -1539,7 +1675,10 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(zcash_v6, feature = "zip-233"))]
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
         zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest;
 
@@ -1590,7 +1729,10 @@ pub mod testing {
         },
     };
 
-    #[cfg(all(zcash_v6, feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     #[cfg(zcash_unstable = "zfuture")]
