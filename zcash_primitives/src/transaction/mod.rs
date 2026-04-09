@@ -49,7 +49,7 @@ use zcash_protocol::constants::{
     V5_VERSION_GROUP_ID,
 };
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(zcash_v6)]
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -86,7 +86,7 @@ pub enum TxVersion {
     /// and [ZIP 225](https://zips.z.cash/zip-0225).
     V5,
     /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(zcash_v6)]
     V6,
     /// This version is used exclusively for in-development transaction
     /// serialization, and will never be active under the consensus rules.
@@ -108,7 +108,7 @@ impl TxVersion {
                 (V3_TX_VERSION, V3_VERSION_GROUP_ID) => Ok(TxVersion::V3),
                 (V4_TX_VERSION, V4_VERSION_GROUP_ID) => Ok(TxVersion::V4),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(zcash_v6)]
                 (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
@@ -140,7 +140,7 @@ impl TxVersion {
                 TxVersion::V3 => V3_TX_VERSION,
                 TxVersion::V4 => V4_TX_VERSION,
                 TxVersion::V5 => V5_TX_VERSION,
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(zcash_v6)]
                 TxVersion::V6 => V6_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
@@ -153,7 +153,7 @@ impl TxVersion {
             TxVersion::V3 => V3_VERSION_GROUP_ID,
             TxVersion::V4 => V4_VERSION_GROUP_ID,
             TxVersion::V5 => V5_VERSION_GROUP_ID,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => V6_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
@@ -174,7 +174,7 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::V3 | TxVersion::V4 => true,
             TxVersion::V5 => false,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => false,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
@@ -191,7 +191,7 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::V3 => false,
             TxVersion::V4 => true,
             TxVersion::V5 => true,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
@@ -203,7 +203,7 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
             TxVersion::V5 => true,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
@@ -214,7 +214,7 @@ impl TxVersion {
     pub fn has_zip233(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
@@ -269,11 +269,16 @@ impl TxVersion {
                 #[cfg(zcash_unstable = "zfuture")]
                 ZFuture => true,
             },
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 => false,
+                #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
+                // A v6 transaction is also valid under any speculative future
+                // upgrade that builds on top of NU7.
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
             },
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => match consensus_branch_id {
@@ -818,7 +823,7 @@ impl Transaction {
         match data.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v6(data)),
@@ -874,7 +879,7 @@ impl Transaction {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
@@ -1384,7 +1389,13 @@ impl Transaction {
         sapling_serialization::read_v5_bundle(reader)
     }
 
+    // `read_tze` is currently unused: V6 transactions reject TZE bundles in
+    // `read_v6` (since ZIP 248 has not yet assigned a bundleType for them),
+    // and pre-V6 transactions never carry TZE. The function is retained for
+    // symmetry with `write_tze` and so that a future read_v6 revision that
+    // accepts a TZE bundleType can easily call it.
     #[cfg(zcash_unstable = "zfuture")]
+    #[allow(dead_code)]
     fn read_tze<R: Read>(mut reader: &mut R) -> io::Result<Option<tze::Bundle<tze::Authorized>>> {
         let vin = Vector::read(&mut reader, TzeIn::read)?;
         let vout = Vector::read(&mut reader, TzeOut::read)?;
@@ -1403,7 +1414,7 @@ impl Transaction {
         match self.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
             TxVersion::V5 => self.write_v5(writer),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => self.write_v6(writer),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v6(writer),
@@ -1634,7 +1645,7 @@ impl Transaction {
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
         match self.data.version {
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => self.auth_commitment_v6(),
             _ => self.data.digest(BlockTxCommitmentDigester),
         }
