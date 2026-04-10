@@ -197,7 +197,7 @@ impl Typecode {
         a.typecode_value().cmp(&b.typecode_value())
     }
 
-    fn is_transparent(&self) -> bool {
+    pub fn is_transparent_data(&self) -> bool {
         match self {
             Typecode::Data(tc) => tc.is_transparent(),
             Typecode::Metadata(_) => false,

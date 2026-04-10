@@ -62,6 +62,8 @@ workspace.
   shielded receiver; at least one receiver (transparent or shielded) suffices.
 - `zcash_keys::address::UnifiedAddress::to_zcash_address` produces `zu`
   (shielded-only) addresses for R2, stripping any transparent receiver.
+- The `Sapling` and `Unified` variants of `zcash_keys::address::Address` now
+  wrap their payloads in `Box` to reduce the enum's stack footprint.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
 - The `std` feature flag now enables the equivalent flag on the dependencies
   `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.

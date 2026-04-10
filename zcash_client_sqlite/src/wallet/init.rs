@@ -1338,7 +1338,7 @@ mod tests {
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
             let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
-            let address_str = Address::Unified(
+            let address_str = Address::from(
                 ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,

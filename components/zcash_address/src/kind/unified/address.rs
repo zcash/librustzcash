@@ -1,7 +1,7 @@
 use zcash_protocol::address::Revision;
 use zcash_protocol::{constants, PoolType};
 
-use super::{private::SealedItem, DataTypecode, ParseError, Typecode, Uitem};
+use super::{private::SealedItem, DataTypecode, ParseError, Uitem};
 
 use alloc::vec::Vec;
 use core::convert::TryInto;

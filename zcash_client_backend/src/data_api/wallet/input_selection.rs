@@ -512,7 +512,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
+                        GreedyInputSelectorError::UnsupportedAddress(addr),
                     ));
                 }
             }
