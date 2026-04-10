@@ -45,6 +45,8 @@ workspace.
   (shielded-only) addresses for R2, stripping any transparent receiver; an
   address with no shielded receiver falls back to its `tu`
   (transparent-including) encoding.
+- The `Sapling` and `Unified` variants of `zcash_keys::address::Address` now
+  wrap their payloads in `Box` to reduce the enum's stack footprint.
 
 ### Fixed
 - `zcash_keys::keys::zcashd::ZcashdHdDerivation::parse_hd_path` no longer

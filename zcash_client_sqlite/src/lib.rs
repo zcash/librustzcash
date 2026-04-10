@@ -4861,7 +4861,7 @@ mod tests {
         // Asserts that looking up the exact same UA returns the owning account
         let result = state
             .wallet()
-            .find_account_for_address(state.network(), &Address::Unified(ua));
+            .find_account_for_address(state.network(), &Address::Unified(Box::new(ua)));
 
         assert_eq!(result.unwrap(), Some(account.id()));
     }
@@ -4906,7 +4906,7 @@ mod tests {
         if let Some(pa) = ua.sapling() {
             let result = state
                 .wallet()
-                .find_account_for_address(state.network(), &Address::Sapling(*pa));
+                .find_account_for_address(state.network(), &Address::Sapling(Box::new(*pa)));
             assert_eq!(result.unwrap(), Some(account.id()));
         }
     }
@@ -4979,7 +4979,7 @@ mod tests {
             .orchard()
             .cloned()
             .expect("orchard receiver must be present");
-        let address = Address::Unified(
+        let address = Address::Unified(Box::new(
             UnifiedAddress::from_receivers(
                 Some(o_external),
                 None,
@@ -4988,7 +4988,7 @@ mod tests {
                 None,
             )
             .expect("orchard+transparent UA must be valid"),
-        );
+        ));
 
         // Asserts that the unique possible account is found anyways, based on the transparent address,
         // since there are no UA conflicts.
@@ -5027,7 +5027,7 @@ mod tests {
             .cloned()
             .expect("UA must have sapling receiver");
 
-        let address = Address::Unified(
+        let address = Address::Unified(Box::new(
             {
                 #[cfg(feature = "orchard")]
                 {
@@ -5040,7 +5040,7 @@ mod tests {
                 }
             }
             .expect("sapling-only UA must be valid"),
-        );
+        ));
 
         // Asserts that the account is still found via the shielded receiver flags path
         let result = state
@@ -5080,10 +5080,10 @@ mod tests {
             .cloned()
             .expect("UA must have orchard receiver");
 
-        let address = Address::Unified(
+        let address = Address::Unified(Box::new(
             UnifiedAddress::from_receivers(Some(orchard_receiver), None, None, None, None)
                 .expect("orchard-only UA must be valid"),
-        );
+        ));
 
         // Asserts that the account is still found via the shielded receiver flags path
         let result = state
@@ -5131,7 +5131,7 @@ mod tests {
         let sapling_receiver_1 = ua1.sapling().cloned().unwrap();
         let orchard_receiver_2 = ua2.orchard().cloned().unwrap();
 
-        let invalid_address = Address::Unified(
+        let invalid_address = Address::Unified(Box::new(
             UnifiedAddress::from_receivers(
                 Some(orchard_receiver_2),
                 Some(sapling_receiver_1),
@@ -5140,7 +5140,7 @@ mod tests {
                 None,
             )
             .expect("sapling+orchard UA must be valid"),
-        );
+        ));
 
         // Asserts that the lookup reports a conflict instead of arbitrarily choosing one account
         let result = state
