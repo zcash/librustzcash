@@ -234,13 +234,13 @@ pub fn v4_signature_hash<
             SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-                    bundle.vin[*input.index()]
+                    bundle.vin.get(*input.index()).expect("transparent input index out of range for bundle vin")
                         .prevout()
                         .write(&mut data)
                         .unwrap();
                     input.script_code().write(&mut data).unwrap();
                     data.extend_from_slice(&input.value().to_i64_le_bytes());
-                    data.extend_from_slice(&bundle.vin[*input.index()].sequence().to_le_bytes());
+                    data.extend_from_slice(&bundle.vin.get(*input.index()).expect("transparent input index out of range for bundle vin").sequence().to_le_bytes());
                     h.update(&data);
                 } else {
                     panic!(
