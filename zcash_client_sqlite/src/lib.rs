@@ -401,6 +401,11 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
 }
 
 impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    /// Returns a reference to the underlying connection handle.
+    pub fn conn(&self) -> &C {
+        &self.conn
+    }
+
     /// Returns the network parameters that this walletdb instance is bound to.
     pub fn params(&self) -> &P {
         &self.params
@@ -2313,8 +2318,8 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
 // --- Governance-specific methods ---
 //
 // These methods support Zcash shielded voting and are not part of the
-// general-purpose wallet traits. They provide backward-looking queries
-// (historical snapshot) and witness generation at an external frontier.
+// general-purpose wallet traits. They provide a backward-looking snapshot
+// query for historical note selection.
 
 #[cfg(feature = "orchard")]
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
@@ -2335,37 +2340,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
             &self.params,
             account,
             snapshot_height,
-        )
-    }
-
-    /// Generate Orchard Merkle witnesses at a historical frontier.
-    ///
-    /// Copies the wallet's Orchard shard data into an ephemeral in-memory
-    /// database, inserts the provided frontier as a checkpoint, and generates
-    /// a witness for each of the given note positions.
-    ///
-    /// The wallet DB is strictly read-only — shard data is copied, not modified.
-    pub fn generate_orchard_witnesses_at_frontier(
-        &self,
-        note_positions: &[Position],
-        frontier: incrementalmerkletree::frontier::NonEmptyFrontier<
-            orchard::tree::MerkleHashOrchard,
-        >,
-        checkpoint_height: BlockHeight,
-    ) -> Result<
-        Vec<
-            incrementalmerkletree::MerklePath<
-                orchard::tree::MerkleHashOrchard,
-                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-            >,
-        >,
-        SqliteClientError,
-    > {
-        wallet::commitment_tree::generate_orchard_witnesses_at_frontier(
-            self.conn.borrow(),
-            note_positions,
-            frontier,
-            checkpoint_height,
         )
     }
 }
