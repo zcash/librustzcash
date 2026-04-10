@@ -108,6 +108,14 @@ impl Signer {
         })
     }
 
+    /// Returns the shielded (Orchard + Sapling) sighash.
+    ///
+    /// This can be used to produce signatures externally (e.g. via a
+    /// hardware wallet) for authorizing shielded spends.
+    pub fn shielded_sighash(&self) -> [u8; 32] {
+        self.shielded_sighash
+    }
+
     /// Signs the transparent spend at the given index with the given spending key.
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
