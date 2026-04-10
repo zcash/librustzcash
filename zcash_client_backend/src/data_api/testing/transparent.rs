@@ -2839,7 +2839,7 @@ where
         .1;
     let payment_amount = Zatoshis::const_from_u64(50_000);
     let request = TransactionRequest::new(vec![Payment::without_memo(
-        Address::Sapling(recipient).to_zcash_address(&network),
+        Address::Sapling(Box::new(recipient)).to_zcash_address(&network),
         payment_amount,
     )])
     .unwrap();

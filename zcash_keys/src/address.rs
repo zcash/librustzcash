@@ -1,6 +1,7 @@
 //! Structs for handling supported address types.
 
 use alloc::{
+    boxed::Box,
     string::{String, ToString},
     vec::Vec,
 };
@@ -459,7 +460,7 @@ impl Receiver {
 pub enum Address {
     /// A Sapling payment address.
     #[cfg(feature = "sapling")]
-    Sapling(PaymentAddress),
+    Sapling(Box<PaymentAddress>),
 
     /// A transparent address corresponding to either a public key hash or a script hash.
     Transparent(TransparentAddress),
@@ -467,7 +468,7 @@ pub enum Address {
     /// A [ZIP 316] Unified Address.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    Unified(UnifiedAddress),
+    Unified(Box<UnifiedAddress>),
 
     /// A [ZIP 320] transparent-source-only P2PKH address, or "TEX address".
     ///
@@ -478,7 +479,7 @@ pub enum Address {
 #[cfg(feature = "sapling")]
 impl From<PaymentAddress> for Address {
     fn from(addr: PaymentAddress) -> Self {
-        Address::Sapling(addr)
+        Address::Sapling(Box::new(addr))
     }
 }
 
@@ -490,7 +491,7 @@ impl From<TransparentAddress> for Address {
 
 impl From<UnifiedAddress> for Address {
     fn from(addr: UnifiedAddress) -> Self {
-        Address::Unified(addr)
+        Address::Unified(Box::new(addr))
     }
 }
 
@@ -639,7 +640,7 @@ impl Address {
     #[cfg(feature = "sapling")]
     pub fn to_sapling_address(&self) -> Option<PaymentAddress> {
         match self {
-            Address::Sapling(addr) => Some(*addr),
+            Address::Sapling(addr) => Some(**addr),
             Address::Transparent(_) => None,
             Address::Unified(ua) => ua.sapling().copied(),
             Address::Tex(_) => None,
@@ -660,7 +661,7 @@ impl Address {
     pub fn as_understood_unified_receivers(&self) -> Vec<Receiver> {
         match self {
             #[cfg(feature = "sapling")]
-            Address::Sapling(addr) => vec![Receiver::Sapling(*addr)],
+            Address::Sapling(addr) => vec![Receiver::Sapling(**addr)],
             Address::Transparent(addr) => vec![Receiver::Transparent(*addr)],
             Address::Unified(ua) => ua.as_understood_receivers(),
             Address::Tex(addr) => vec![Receiver::Transparent(TransparentAddress::PublicKeyHash(
@@ -700,9 +701,9 @@ pub mod testing {
     #[cfg(feature = "sapling")]
     pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
         prop_oneof![
-            arb_payment_address().prop_map(Address::Sapling),
+            arb_payment_address().prop_map(Address::from),
             arb_transparent_addr().prop_map(Address::Transparent),
-            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::from),
             proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ]
     }
@@ -711,7 +712,7 @@ pub mod testing {
     pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
         prop_oneof![
             arb_transparent_addr().prop_map(Address::Transparent),
-            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::from),
             proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ]
     }
@@ -759,7 +760,7 @@ mod tests {
         #[cfg(all(feature = "orchard", not(feature = "sapling")))]
         let ua = UnifiedAddress::from_receivers(orchard, transparent, None, None).unwrap();
 
-        let addr = Address::Unified(ua);
+        let addr = Address::from(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
         assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
     }
