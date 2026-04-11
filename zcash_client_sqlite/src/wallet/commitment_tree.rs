@@ -1092,6 +1092,29 @@ pub(crate) fn put_shard_roots<
     }
     drop(put_roots);
 
+    // Freshly-finalized shards may now be eligible for witness stabilization. Because
+    // `put_shard_roots` is typically invoked when subtree roots are downloaded from the light
+    // wallet server, check here to see if they can be stabilized, rather than waiting for the next
+    // `scan_complete` call.
+    let last_scanned_height: Option<u32> = conn
+        .query_row(
+            "SELECT MAX(block_range_end) - 1 FROM scan_queue",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+    if let Some(last_scanned_height) = last_scanned_height {
+        super::scanning::mark_stabilized_notes(conn, BlockHeight::from(last_scanned_height))
+            .map_err(|e| match e {
+                SqliteClientError::DbError(err) => ShardTreeError::Storage(Error::Query(err)),
+                other => {
+                    ShardTreeError::Storage(Error::Query(rusqlite::Error::ToSqlConversionFailure(
+                        Box::new(std::io::Error::other(format!("{other}"))),
+                    )))
+                }
+            })?;
+    }
+
     Ok(())
 }
 

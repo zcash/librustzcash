@@ -402,6 +402,28 @@ mod tests {
     }
 
     #[test]
+    fn note_not_stabilized_until_prune_depth_sapling() {
+        testing::pool::note_not_stabilized_until_prune_depth::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn note_not_stabilized_until_prune_depth_orchard() {
+        testing::pool::note_not_stabilized_until_prune_depth::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_notes_survive_truncation_sapling() {
+        testing::pool::stabilized_notes_survive_truncation::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_notes_survive_truncation_orchard() {
+        testing::pool::stabilized_notes_survive_truncation::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }
@@ -454,5 +476,16 @@ mod tests {
     #[cfg(feature = "orchard")]
     fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn mixed_stabilization_unmines_transaction_sapling() {
+        testing::pool::mixed_stabilization_unmines_transaction::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn mixed_stabilization_unmines_transaction_orchard() {
+        testing::pool::mixed_stabilization_unmines_transaction::<OrchardPoolTester>()
     }
 }

@@ -32,6 +32,14 @@ workspace.
   database transaction overhead).
 
 ### Changed
+- A `witness_stabilized` column has been added to the `sapling_received_notes`
+  and `orchard_received_notes` tables. A note is marked stabilized once its
+  containing shard is complete and the shard's end height is confirmed beyond
+  `PRUNING_DEPTH`. Stabilized notes retain their `mined_height` and `tx_index`
+  across `truncate_to_chain_state`, and remain spendable without requiring a
+  re-scan. `WalletSummary` balance queries and note selection treat a stabilized
+  note as trivially satisfying any confirmation policy, since at the point of
+  stabilization the note was already confirmed beyond `PRUNING_DEPTH`.
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
   collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
   ZIP 316 Revision 2 P2SH support.

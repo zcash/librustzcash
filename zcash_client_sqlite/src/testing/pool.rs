@@ -312,6 +312,27 @@ pub(crate) fn truncate_to_chain_state<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn note_not_stabilized_until_prune_depth<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_not_stabilized_until_prune_depth::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_notes_survive_truncation<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_notes_survive_truncation::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn mixed_stabilization_unmines_transaction<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::mixed_stabilization_unmines_transaction::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::truncate_to_chain_state_below_birthday::<T, _>(
         TestDbFactory::default(),

@@ -31,6 +31,16 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
 
+// Local mirror of `zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT` for use in the
+// feature-agnostic witness-stabilization path. The upstream constant is gated behind
+// the `orchard` feature because it is derived from `orchard::NOTE_COMMITMENT_TREE_DEPTH`,
+// but `mark_stabilized_notes` runs its `orchard_received_notes` UPDATE unconditionally
+// (the table is created by earlier migrations regardless of feature state).
+const ORCHARD_SHARD_HEIGHT_MIRROR: u8 = 16;
+
+#[cfg(feature = "orchard")]
+const _: () = assert!(ORCHARD_SHARD_HEIGHT_MIRROR == ORCHARD_SHARD_HEIGHT);
+
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
     match priority {
@@ -369,6 +379,61 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .chain(extended_after);
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
+
+    // Mark notes whose containing shard is complete and confirmed beyond the pruning depth.
+    let last_scanned_height = range.end - 1;
+    mark_stabilized_notes(conn, last_scanned_height)?;
+
+    Ok(())
+}
+
+/// Marks notes as stabilized when their containing shard is complete and the shard's end
+/// height has been confirmed beyond `PRUNING_DEPTH`. Once stabilized, a note's witness data
+/// is considered durable and will be preserved across truncation.
+pub(crate) fn mark_stabilized_notes(
+    conn: &rusqlite::Transaction<'_>,
+    last_scanned_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let stable_height = u32::from(last_scanned_height).saturating_sub(PRUNING_DEPTH);
+
+    conn.execute(
+        &format!(
+            "UPDATE sapling_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM sapling_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :stable_height
+                     AND (commitment_tree_position >> {}) = shard.shard_index
+               )",
+            SAPLING_SHARD_HEIGHT,
+        ),
+        named_params![":stable_height": stable_height],
+    )?;
+
+    // Not feature-gated on `orchard`: the `orchard_received_notes` table is created
+    // unconditionally by earlier migrations, so this UPDATE is safe (and is a no-op
+    // when no orchard rows exist). `ORCHARD_SHARD_HEIGHT_MIRROR` lets the SQL compile
+    // in `--no-default-features` builds where the upstream `ORCHARD_SHARD_HEIGHT` is
+    // gated behind the `orchard` feature.
+    conn.execute(
+        &format!(
+            "UPDATE orchard_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM orchard_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :stable_height
+                     AND (commitment_tree_position >> {}) = shard.shard_index
+               )",
+            ORCHARD_SHARD_HEIGHT_MIRROR,
+        ),
+        named_params![":stable_height": stable_height],
+    )?;
 
     Ok(())
 }

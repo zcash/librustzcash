@@ -2413,6 +2413,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
+                    rn.witness_stabilized,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2483,20 +2484,31 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            // A note is spendable if we have enough chain tip information to construct witnesses,
-            // the shard that its witness resides in is sufficiently scanned that we can construct
-            // the witness for the note, and the note has enough confirmations to be spent.
-            let is_spendable = any_spendable
-                && max_priority <= ScanPriority::Scanned
-                && confirmations_policy.confirmations_until_spendable(
-                    target_height,
-                    PoolType::Shielded(protocol),
-                    recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
-                    received_height,
-                    tx_trusted,
-                    max_shielding_input_height,
-                    tx_shielding_inputs_trusted,
-                ) == 0;
+            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+
+            // A stabilized note whose containing transaction is still mined is
+            // unconditionally spendable: at stabilization it was already confirmed beyond
+            // `PRUNING_DEPTH` (which exceeds any reasonable confirmation policy), and its
+            // witness data is durable in the shard tree. This remains true even when
+            // truncation has rolled the wallet's scanned chain tip back below the note's
+            // `mined_height`, because `truncate_to_height_internal` retains `mined_height`
+            // for fully-stabilized transactions. If the transaction has been un-mined —
+            // e.g. because some sibling note in the same tx was not stabilized — then the
+            // note is not currently spendable even if its own flag is still set.
+            // Non-stabilized notes require their shard to be sufficiently scanned and the
+            // usual confirmations policy to be met.
+            let is_spendable = (witness_stabilized && received_height.is_some())
+                || (any_spendable
+                    && max_priority <= ScanPriority::Scanned
+                    && confirmations_policy.confirmations_until_spendable(
+                        target_height,
+                        PoolType::Shielded(protocol),
+                        recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                        received_height,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    ) == 0);
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
@@ -3513,6 +3525,31 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     )
 }
 
+/// Returns `true` if the given pool has any received notes marked as `witness_stabilized`
+/// whose containing transaction is currently mined at a height strictly greater than
+/// `truncation_height`. Tree operations that would otherwise delete witness data above
+/// that height (namely `truncate_to_checkpoint` and `insert_frontier` at a position
+/// below `mined_height`) must be skipped for such pools.
+fn pool_has_stabilized_notes_above(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+    truncation_height: BlockHeight,
+) -> Result<bool, SqliteClientError> {
+    conn.query_row(
+        &format!(
+            "SELECT EXISTS (
+                 SELECT 1 FROM {table_prefix}_received_notes rn
+                 INNER JOIN transactions t ON t.id_tx = rn.transaction_id
+                 WHERE rn.witness_stabilized = 1
+                   AND t.mined_height > :height
+             )"
+        ),
+        named_params![":height": u32::from(truncation_height)],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(SqliteClientError::from)
+}
+
 pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -3533,21 +3570,39 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         ))
     })?;
 
-    // Delete from the scanning queue any range with a start height greater than the
-    // truncation height, and then truncate any remaining range by setting the end
-    // equal to the truncation height + 1. This sets our view of the chain tip back
-    // to the retained height.
-    conn.execute(
-        "DELETE FROM scan_queue
-        WHERE block_range_start >= :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
-    conn.execute(
-        "UPDATE scan_queue
-        SET block_range_end = :new_end_height
-        WHERE block_range_end > :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
+    // If there are stabilized notes whose `mined_height` is above the truncation height,
+    // we perform a "soft" truncation that preserves the state needed to spend them
+    // without re-scanning: the scan queue is not trimmed (so `chain_tip_height` stays at
+    // the pre-truncation value), the note commitment trees are not truncated (so
+    // stabilized witness data remains queryable), and the `blocks` rows above the
+    // truncation height are retained. Non-stabilized transactions and un-mined blocks
+    // are handled by the tx-level un-mine SQL below regardless.
+    let sapling_has_stabilized_above =
+        pool_has_stabilized_notes_above(conn, crate::SAPLING_TABLES_PREFIX, truncation_height)?;
+    #[cfg(feature = "orchard")]
+    let orchard_has_stabilized_above =
+        pool_has_stabilized_notes_above(conn, crate::ORCHARD_TABLES_PREFIX, truncation_height)?;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_has_stabilized_above = false;
+    let soft_truncate = sapling_has_stabilized_above || orchard_has_stabilized_above;
+
+    if !soft_truncate {
+        // Delete from the scanning queue any range with a start height greater than the
+        // truncation height, and then truncate any remaining range by setting the end
+        // equal to the truncation height + 1. This sets our view of the chain tip back
+        // to the retained height.
+        conn.execute(
+            "DELETE FROM scan_queue
+             WHERE block_range_start >= :new_end_height",
+            named_params![":new_end_height": u32::from(truncation_height + 1)],
+        )?;
+        conn.execute(
+            "UPDATE scan_queue
+             SET block_range_end = :new_end_height
+             WHERE block_range_end > :new_end_height",
+            named_params![":new_end_height": u32::from(truncation_height + 1)],
+        )?;
+    }
 
     // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
     // considered to have been returned to the mempool; it _might_ be spendable in this state, but
@@ -3566,18 +3621,53 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         named_params![":height": u32::from(truncation_height)],
     )?;
 
-    // Un-mine transactions. This must be done outside of the last_scanned_height check because
-    // transaction entries may be created as a consequence of receiving transparent TXOs.
+    // Un-mine transactions above the truncation height. For a hard truncation, the
+    // `block` FK is cleared because the `blocks` row is about to be deleted; for a soft
+    // truncation (when stabilized notes exist above `truncation_height`) the `blocks`
+    // rows are retained, so a fully-stabilized transaction also retains its FK. For
+    // "fully stabilized" transactions (at least one shielded received note AND zero
+    // unstabilized received notes across both shielded pools) we retain `mined_height`
+    // and `tx_index` so that the note remains associated with its mined block;
+    // `confirmed_unmined_at_height` is retained as well, but for preserved transactions
+    // it is NULL by construction (the `put_tx_meta` UPSERT clears it whenever
+    // `mined_height` is set). Everything else is fully un-mined.
     conn.execute(
-        "UPDATE transactions
-         SET block = NULL, mined_height = NULL, tx_index = NULL, confirmed_unmined_at_height = NULL
-         WHERE mined_height > :height",
-        named_params![":height": u32::from(truncation_height)],
+        "UPDATE transactions SET
+             block = CASE WHEN is_stabilized AND :soft_truncate THEN block ELSE NULL END,
+             mined_height = CASE WHEN is_stabilized THEN mined_height ELSE NULL END,
+             tx_index = CASE WHEN is_stabilized THEN tx_index ELSE NULL END,
+             confirmed_unmined_at_height =
+                 CASE WHEN is_stabilized THEN confirmed_unmined_at_height ELSE NULL END
+         FROM (
+             SELECT id_tx, (
+                 (EXISTS (SELECT 1 FROM sapling_received_notes WHERE transaction_id = id_tx)
+                  OR EXISTS (SELECT 1 FROM orchard_received_notes WHERE transaction_id = id_tx))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM sapling_received_notes
+                     WHERE transaction_id = id_tx AND witness_stabilized = 0
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM orchard_received_notes
+                     WHERE transaction_id = id_tx AND witness_stabilized = 0
+                 )
+             ) AS is_stabilized
+             FROM transactions
+             WHERE mined_height > :height
+         ) AS stab
+         WHERE transactions.id_tx = stab.id_tx",
+        named_params![
+            ":height": u32::from(truncation_height),
+            ":soft_truncate": soft_truncate,
+        ],
     )?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
-    // affected block records from the database.
-    if truncation_height < last_scanned_height {
+    // affected block records from the database. When we are performing a soft truncation
+    // (a stabilized note lives above `truncation_height` in at least one pool) we skip
+    // all of this: the tree must retain the stabilized note's witness data, the blocks
+    // above must remain so that the tree data stays consistent with the chain, and the
+    // scan queue was already left untouched above so there is nothing new to rescan.
+    if truncation_height < last_scanned_height && !soft_truncate {
         // Truncate the note commitment trees
         let mut wdb = WalletDb {
             conn: SqlTransaction(conn),
@@ -3699,29 +3789,53 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
         };
 
         // Insert the frontier from the chain state, creating a checkpoint at the target
-        // height.
-        wdb.with_sapling_tree_mut(|tree| {
-            tree.insert_frontier(
-                chain_state.final_sapling_tree().clone(),
-                Retention::Checkpoint {
-                    id: target_height,
-                    marking: Marking::None,
-                },
-            )?;
-            Ok::<_, SqliteClientError>(())
-        })?;
+        // height — unless a soft truncation applies, in which case the tree is left
+        // intact (so its preserved checkpoints can still serve as anchors for spending
+        // stabilized notes, and the shard data holding their witness paths is not
+        // pruned by an `insert_frontier` at a position below those notes).
+        let soft_truncate_any_pool = pool_has_stabilized_notes_above(
+            wdb.conn.0,
+            crate::SAPLING_TABLES_PREFIX,
+            target_height,
+        )? || {
+            #[cfg(feature = "orchard")]
+            {
+                pool_has_stabilized_notes_above(
+                    wdb.conn.0,
+                    crate::ORCHARD_TABLES_PREFIX,
+                    target_height,
+                )?
+            }
+            #[cfg(not(feature = "orchard"))]
+            {
+                false
+            }
+        };
 
-        #[cfg(feature = "orchard")]
-        wdb.with_orchard_tree_mut(|tree| {
-            tree.insert_frontier(
-                chain_state.final_orchard_tree().clone(),
-                Retention::Checkpoint {
-                    id: target_height,
-                    marking: Marking::None,
-                },
-            )?;
-            Ok::<_, SqliteClientError>(())
-        })?;
+        if !soft_truncate_any_pool {
+            wdb.with_sapling_tree_mut(|tree| {
+                tree.insert_frontier(
+                    chain_state.final_sapling_tree().clone(),
+                    Retention::Checkpoint {
+                        id: target_height,
+                        marking: Marking::None,
+                    },
+                )?;
+                Ok::<_, SqliteClientError>(())
+            })?;
+
+            #[cfg(feature = "orchard")]
+            wdb.with_orchard_tree_mut(|tree| {
+                tree.insert_frontier(
+                    chain_state.final_orchard_tree().clone(),
+                    Retention::Checkpoint {
+                        id: target_height,
+                        marking: Marking::None,
+                    },
+                )?;
+                Ok::<_, SqliteClientError>(())
+            })?;
+        }
     }
 
     // Truncate wallet data to the target height. This always trims the scan queue so that
@@ -4726,7 +4840,12 @@ pub mod testing {
                     row.get("sent_note_count")?,
                     row.get("received_note_count")?,
                     row.get("memo_count")?,
-                    row.get("expired_unmined")?,
+                    // `expired_unmined` can be `NULL` when the view's `BETWEEN` expression
+                    // receives a `NULL` `expiry_height`; in SQL three-valued logic that
+                    // bubbles up to the whole boolean. Treat `NULL` as "not known to be
+                    // expired".
+                    row.get::<_, Option<bool>>("expired_unmined")?
+                        .unwrap_or(false),
                     row.get("is_shielding")?,
                 ))
             })?

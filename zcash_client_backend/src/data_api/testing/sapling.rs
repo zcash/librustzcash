@@ -91,15 +91,16 @@ impl ShieldedPoolTester for SaplingPoolTester {
         shard_index: u64,
         truncate_at: Position,
     ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
-        st.wallet_mut().with_sapling_tree_mut::<_, _, ShardTreeError<_>>(|t| {
-            t.root(
-                incrementalmerkletree::Address::from_parts(
-                    Level::from(crate::data_api::SAPLING_SHARD_HEIGHT),
-                    shard_index,
-                ),
-                truncate_at,
-            )
-        })
+        st.wallet_mut()
+            .with_sapling_tree_mut::<_, _, ShardTreeError<_>>(|t| {
+                t.root(
+                    incrementalmerkletree::Address::from_parts(
+                        Level::from(crate::data_api::SAPLING_SHARD_HEIGHT),
+                        shard_index,
+                    ),
+                    truncate_at,
+                )
+            })
     }
 
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64 {

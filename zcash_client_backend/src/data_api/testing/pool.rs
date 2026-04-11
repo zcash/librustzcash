@@ -4912,8 +4912,7 @@ where
     // whose ommer at shard-root level is this real root; a placeholder here would collide with
     // that real value when the cap is later updated. Shard 1 is deliberately left without a
     // `subtree_end_height`, so only the first of the two notes will be stabilized.
-    let shard_0_root =
-        T::shard_root(&mut st, 0, Position::from(u64::from(shard_size))).unwrap();
+    let shard_0_root = T::shard_root(&mut st, 0, Position::from(u64::from(shard_size))).unwrap();
     T::put_subtree_roots(
         &mut st,
         0,
