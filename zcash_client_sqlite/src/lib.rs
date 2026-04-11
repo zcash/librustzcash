@@ -2313,45 +2313,44 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
 // --- Governance-specific methods ---
 //
 // These methods support Zcash shielded voting and are not part of the
-// general-purpose wallet traits. They provide backward-looking queries
-// (historical snapshot) and witness generation at an external frontier.
+// general-purpose wallet traits. They provide note queries and witness
+// generation at a historical height.
 
 #[cfg(feature = "orchard")]
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
-    /// Return all Orchard notes received at or before `snapshot_height` and
-    /// unspent as of that height, for the given account.
+    /// Return all Orchard notes received at or before `height`
+    /// and unspent as of that height, for the given account.
     ///
-    /// Unlike [`InputSource::select_unspent_notes`] which is forward-looking
-    /// (based on tx expiry), this is backward-looking: a note is included if
-    /// it was mined at or before `snapshot_height` and no spend of that note
-    /// was mined at or before `snapshot_height`.
-    pub fn get_orchard_notes_at_snapshot(
+    /// Unlike [`InputSource::select_unspent_notes`] (which applies confirmation,
+    /// dust, and expiry filters for transaction construction), this returns every
+    /// note that existed and was unspent at the given height.
+    pub fn get_orchard_notes_at_historical_height(
         &self,
         account: AccountUuid,
-        snapshot_height: BlockHeight,
+        height: BlockHeight,
     ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
-        wallet::orchard::get_orchard_notes_at_snapshot(
+        wallet::orchard::get_orchard_notes_at_historical_height(
             self.conn.borrow(),
             &self.params,
             account,
-            snapshot_height,
+            height,
         )
     }
 
-    /// Generate Orchard Merkle witnesses at a historical frontier.
+    /// Generate Orchard Merkle witnesses at a historical height.
     ///
     /// Copies the wallet's Orchard shard data into an ephemeral in-memory
     /// database, inserts the provided frontier as a checkpoint, and generates
     /// a witness for each of the given note positions.
     ///
     /// The wallet DB is strictly read-only — shard data is copied, not modified.
-    pub fn generate_orchard_witnesses_at_frontier(
+    pub fn generate_orchard_witnesses_at_historical_height(
         &self,
         note_positions: &[Position],
-        frontier: incrementalmerkletree::frontier::NonEmptyFrontier<
+        frontier_at_height: incrementalmerkletree::frontier::NonEmptyFrontier<
             orchard::tree::MerkleHashOrchard,
         >,
-        checkpoint_height: BlockHeight,
+        height: BlockHeight,
     ) -> Result<
         Vec<
             incrementalmerkletree::MerklePath<
@@ -2361,11 +2360,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         >,
         SqliteClientError,
     > {
-        wallet::commitment_tree::generate_orchard_witnesses_at_frontier(
+        wallet::commitment_tree::generate_orchard_witnesses_at_historical_height(
             self.conn.borrow(),
             note_positions,
-            frontier,
-            checkpoint_height,
+            frontier_at_height,
+            height,
         )
     }
 }
