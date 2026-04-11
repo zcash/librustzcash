@@ -2,7 +2,7 @@
 //!
 //! This module defines the core types for the ZIP 248 transaction format:
 //! - [`BundleId`]: A `(bundleType, bundleVariant)` pair identifying a protocol bundle.
-//! - [`TypedBundle`]: An enum over known typed bundles and opaque unknown bundles.
+//! - [`TypedBundle`]: An enum over known ZIP 248 bundle types.
 //! - [`BundleMap`]: An ordered map of bundles keyed by [`BundleId`].
 //! - [`ValuePoolDeltas`]: The value pool delta map recording per-bundle value contributions.
 //! - [`UnknownBundle`]: An opaque bundle with unparsed effect and auth data.
@@ -26,23 +26,112 @@ use super::components::tze;
 use super::Authorization;
 
 // ---------------------------------------------------------------------------
-// Bundle type constants (ZIP 248 registry for v6 transactions)
+// Bundle type and variant enums (ZIP 248 registry for v6 transactions)
 // ---------------------------------------------------------------------------
 
-/// Transparent bundle type.
-pub const BUNDLE_TYPE_TRANSPARENT: u64 = 0;
-// 1 is reserved.
-/// Sapling bundle type.
-pub const BUNDLE_TYPE_SAPLING: u64 = 2;
-/// Orchard bundle type.
-pub const BUNDLE_TYPE_ORCHARD: u64 = 3;
-/// Transaction fee bundle type (ZIP 2002). Value-only, no effect/auth data.
-pub const BUNDLE_TYPE_FEE: u64 = 4;
-/// ZIP 233 NSM field bundle type. Value-only, no effect/auth data.
-pub const BUNDLE_TYPE_ZIP233_NSM: u64 = 5;
+/// Bundle type identifiers from the V6 Transaction Bundle Type Registry
+/// defined in ZIP 248.
+///
+/// Each variant corresponds to a protocol or value pool. New bundle types
+/// may be added by future ZIPs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum BundleType {
+    /// Sprout JoinSplit descriptions (v1–v4 transactions only).
+    ///
+    /// In-memory only — no wire encoding, not in the ZIP 248 registry.
+    Sprout,
+    /// Transparent Zcash Extensions (speculative, `zcash_unstable = "zfuture"` only).
+    ///
+    /// In-memory only — not yet assigned a bundle type in ZIP 248.
+    Tze,
+    /// Transparent inputs and outputs (bundleType 0).
+    Transparent,
+    /// Reserved (bundleType 1). MUST NOT appear in any map.
+    Reserved,
+    /// Sapling spends and outputs (bundleType 2).
+    Sapling,
+    /// Orchard actions (bundleType 3).
+    Orchard,
+    /// Transaction fee, value-only (bundleType 4, ZIP 2002).
+    Fee,
+    /// ZIP 233 NSM field, value-only (bundleType 5).
+    Zip233Nsm,
+    /// Key rotation (bundleType 6, ZIP 270). No VP deltas.
+    KeyRotation,
+    /// Lockbox disbursement (bundleType 7, TBD).
+    LockboxDisbursement,
+}
 
-/// Default bundle variant for all currently-defined bundle types.
-pub const BUNDLE_VARIANT_DEFAULT: u64 = 0;
+impl BundleType {
+    /// Try to decode a wire value. Returns `None` for unrecognized types.
+    ///
+    /// [`BundleType::Sprout`] and [`BundleType::Tze`] are never returned —
+    /// they have no wire encoding.
+    pub fn from_u64(v: u64) -> Option<Self> {
+        match v {
+            0 => Some(Self::Transparent),
+            1 => Some(Self::Reserved),
+            2 => Some(Self::Sapling),
+            3 => Some(Self::Orchard),
+            4 => Some(Self::Fee),
+            5 => Some(Self::Zip233Nsm),
+            6 => Some(Self::KeyRotation),
+            7 => Some(Self::LockboxDisbursement),
+            _ => None,
+        }
+    }
+
+    /// Encode as a `u64` for `compactSize` serialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on [`BundleType::Sprout`] or [`BundleType::Tze`],
+    /// which have no wire encoding.
+    pub fn to_u64(self) -> u64 {
+        match self {
+            Self::Sprout | Self::Tze => panic!("in-memory-only bundle type has no wire encoding"),
+            Self::Transparent => 0,
+            Self::Reserved => 1,
+            Self::Sapling => 2,
+            Self::Orchard => 3,
+            Self::Fee => 4,
+            Self::Zip233Nsm => 5,
+            Self::KeyRotation => 6,
+            Self::LockboxDisbursement => 7,
+        }
+    }
+}
+
+/// Bundle variant identifiers from the V6 Transaction Bundle Type Registry
+/// defined in ZIP 248.
+///
+/// Within a given bundle type, variants allow protocol evolution while
+/// preserving the association with the same value pool.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum BundleVariant {
+    /// The default (and currently only assigned) variant for all bundle
+    /// types (bundleVariant 0).
+    Default,
+}
+
+impl BundleVariant {
+    /// Try to decode a wire value. Returns `None` for unrecognized variants.
+    pub fn from_u64(v: u64) -> Option<Self> {
+        match v {
+            0 => Some(Self::Default),
+            _ => None,
+        }
+    }
+
+    /// Encode as a `u64` for `compactSize` serialization.
+    pub fn to_u64(self) -> u64 {
+        match self {
+            Self::Default => 0,
+        }
+    }
+}
 
 /// Asset class byte for ZEC.
 pub const ASSET_CLASS_ZEC: u8 = 0x00;
@@ -60,23 +149,25 @@ pub const ASSET_CLASS_OTHER: u8 = 0x01;
 /// `(bundleType, bundleVariant)` pair are fixed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct BundleId {
-    pub bundle_type: u64,
-    pub bundle_variant: u64,
+    pub bundle_type: BundleType,
+    pub bundle_variant: BundleVariant,
 }
 
 impl BundleId {
-    pub const fn new(bundle_type: u64, bundle_variant: u64) -> Self {
+    pub const fn new(bundle_type: BundleType, bundle_variant: BundleVariant) -> Self {
         Self {
             bundle_type,
             bundle_variant,
         }
     }
 
-    pub const TRANSPARENT: Self = Self::new(BUNDLE_TYPE_TRANSPARENT, BUNDLE_VARIANT_DEFAULT);
-    pub const SAPLING: Self = Self::new(BUNDLE_TYPE_SAPLING, BUNDLE_VARIANT_DEFAULT);
-    pub const ORCHARD: Self = Self::new(BUNDLE_TYPE_ORCHARD, BUNDLE_VARIANT_DEFAULT);
-    pub const FEE: Self = Self::new(BUNDLE_TYPE_FEE, BUNDLE_VARIANT_DEFAULT);
-    pub const ZIP233_NSM: Self = Self::new(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT);
+    pub const SPROUT: Self = Self::new(BundleType::Sprout, BundleVariant::Default);
+    pub const TZE: Self = Self::new(BundleType::Tze, BundleVariant::Default);
+    pub const TRANSPARENT: Self = Self::new(BundleType::Transparent, BundleVariant::Default);
+    pub const SAPLING: Self = Self::new(BundleType::Sapling, BundleVariant::Default);
+    pub const ORCHARD: Self = Self::new(BundleType::Orchard, BundleVariant::Default);
+    pub const FEE: Self = Self::new(BundleType::Fee, BundleVariant::Default);
+    pub const ZIP233_NSM: Self = Self::new(BundleType::Zip233Nsm, BundleVariant::Default);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +198,9 @@ pub struct UnknownBundle {
 // TypedBundle
 // ---------------------------------------------------------------------------
 
-/// A bundle stored in the transaction's [`BundleMap`] — either a known typed
-/// bundle or an opaque unknown bundle.
+/// A typed bundle stored in the [`BundleMap`]'s `known` map.
+///
+/// Unknown bundle types are stored separately as [`UnknownBundle`].
 #[derive(Debug)]
 pub enum TypedBundle<A: Authorization> {
     Transparent(transparent::Bundle<A::TransparentAuth>),
@@ -117,7 +209,6 @@ pub enum TypedBundle<A: Authorization> {
     Orchard(orchard::Bundle<A::OrchardAuth, ZatBalance>),
     #[cfg(zcash_unstable = "zfuture")]
     Tze(tze::Bundle<A::TzeAuth>),
-    Unknown(UnknownBundle),
 }
 
 // ---------------------------------------------------------------------------
@@ -126,59 +217,63 @@ pub enum TypedBundle<A: Authorization> {
 
 /// An ordered map of protocol bundles keyed by [`BundleId`].
 ///
-/// This reflects the ZIP 248 transaction structure where bundles are
-/// self-describing entries in an ordered map. The map enforces that at most
-/// one bundle exists per `bundleType` (variants of the same type are
-/// mutually exclusive).
+/// Known bundle types are stored in a typed map keyed by [`BundleId`].
+/// Unknown bundle types (those whose wire value doesn't map to a
+/// [`BundleType`] variant) are stored separately as opaque byte blobs
+/// keyed by the raw `(bundleType, bundleVariant)` pair so that the
+/// transaction can be re-serialized without understanding their contents.
 #[derive(Debug)]
 pub struct BundleMap<A: Authorization> {
-    inner: BTreeMap<BundleId, TypedBundle<A>>,
+    known: BTreeMap<BundleId, TypedBundle<A>>,
+    /// Opaque bundles whose type is not recognized by this implementation,
+    /// keyed by raw `(bundleType, bundleVariant)` wire values.
+    unknown: BTreeMap<(u64, u64), UnknownBundle>,
 }
 
 impl<A: Authorization> BundleMap<A> {
     /// Creates an empty bundle map.
     pub fn new() -> Self {
         Self {
-            inner: BTreeMap::new(),
+            known: BTreeMap::new(),
+            unknown: BTreeMap::new(),
         }
     }
 
-    /// Returns an iterator over all bundles in bundle-type order.
+    /// Returns an iterator over known-type bundles in bundle-type order.
     pub fn iter(&self) -> impl Iterator<Item = (&BundleId, &TypedBundle<A>)> {
-        self.inner.iter()
+        self.known.iter()
     }
 
-    /// Returns true if the map contains no bundles.
+    /// Returns true if the map contains no bundles (known or unknown).
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.known.is_empty() && self.unknown.is_empty()
     }
 
     // -- Typed accessors --
 
     pub fn transparent(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
-        self.inner.get(&BundleId::TRANSPARENT).and_then(|b| match b {
+        self.known.get(&BundleId::TRANSPARENT).and_then(|b| match b {
             TypedBundle::Transparent(bundle) => Some(bundle),
             _ => None,
         })
     }
 
     pub fn sprout(&self) -> Option<&sprout::Bundle> {
-        // Sprout uses synthetic BundleId(1, 0) — see `insert_sprout`.
-        self.inner.get(&BundleId::new(1, 0)).and_then(|b| match b {
+        self.known.get(&BundleId::SPROUT).and_then(|b| match b {
             TypedBundle::Sprout(bundle) => Some(bundle),
             _ => None,
         })
     }
 
     pub fn sapling(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
-        self.inner.get(&BundleId::SAPLING).and_then(|b| match b {
+        self.known.get(&BundleId::SAPLING).and_then(|b| match b {
             TypedBundle::Sapling(bundle) => Some(bundle),
             _ => None,
         })
     }
 
     pub fn orchard(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
-        self.inner.get(&BundleId::ORCHARD).and_then(|b| match b {
+        self.known.get(&BundleId::ORCHARD).and_then(|b| match b {
             TypedBundle::Orchard(bundle) => Some(bundle),
             _ => None,
         })
@@ -186,64 +281,53 @@ impl<A: Authorization> BundleMap<A> {
 
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
-        // TZE uses synthetic BundleId(0xFFFF, 0) — see `insert_tze`.
-        self.inner
-            .get(&BundleId::new(0xFFFF, 0))
-            .and_then(|b| match b {
-                TypedBundle::Tze(bundle) => Some(bundle),
-                _ => None,
-            })
-    }
-
-    /// Returns an iterator over unknown (opaque) bundles.
-    pub fn unknown_bundles(&self) -> impl Iterator<Item = (&BundleId, &UnknownBundle)> {
-        self.inner.iter().filter_map(|(id, b)| match b {
-            TypedBundle::Unknown(ub) => Some((id, ub)),
+        self.known.get(&BundleId::TZE).and_then(|b| match b {
+            TypedBundle::Tze(bundle) => Some(bundle),
             _ => None,
         })
+    }
+
+    /// Returns an iterator over unknown (opaque) bundles, keyed by their
+    /// raw `(bundleType, bundleVariant)` wire values.
+    pub fn unknown_bundles(&self) -> impl Iterator<Item = (&(u64, u64), &UnknownBundle)> {
+        self.unknown.iter()
     }
 
     // -- Insertion --
 
     pub fn insert_transparent(&mut self, bundle: transparent::Bundle<A::TransparentAuth>) {
-        self.inner
+        self.known
             .insert(BundleId::TRANSPARENT, TypedBundle::Transparent(bundle));
     }
 
-    /// Insert a sprout bundle. Sprout doesn't have a ZIP 248 bundle type;
-    /// we use a synthetic BundleId with type 1 (reserved) and variant 0.
+    /// Insert a Sprout bundle. Uses the in-memory-only [`BundleType::Sprout`].
     pub fn insert_sprout(&mut self, bundle: sprout::Bundle) {
-        self.inner
-            .insert(BundleId::new(1, 0), TypedBundle::Sprout(bundle));
+        self.known.insert(BundleId::SPROUT, TypedBundle::Sprout(bundle));
     }
 
     pub fn insert_sapling(&mut self, bundle: sapling::Bundle<A::SaplingAuth, ZatBalance>) {
-        self.inner
+        self.known
             .insert(BundleId::SAPLING, TypedBundle::Sapling(bundle));
     }
 
     pub fn insert_orchard(&mut self, bundle: orchard::Bundle<A::OrchardAuth, ZatBalance>) {
-        self.inner
+        self.known
             .insert(BundleId::ORCHARD, TypedBundle::Orchard(bundle));
     }
 
     #[cfg(zcash_unstable = "zfuture")]
     pub fn insert_tze(&mut self, bundle: tze::Bundle<A::TzeAuth>) {
-        // Use a high synthetic type for TZE since it doesn't have an assigned type yet.
-        self.inner
-            .insert(BundleId::new(0xFFFF, 0), TypedBundle::Tze(bundle));
+        self.known.insert(BundleId::TZE, TypedBundle::Tze(bundle));
     }
 
-    pub fn insert_unknown(&mut self, id: BundleId, bundle: UnknownBundle) {
-        self.inner.insert(id, TypedBundle::Unknown(bundle));
+    /// Insert an opaque bundle whose type is not recognized.
+    pub fn insert_unknown(&mut self, raw_type: u64, raw_variant: u64, bundle: UnknownBundle) {
+        self.unknown.insert((raw_type, raw_variant), bundle);
     }
 
     /// Returns a mutable reference to an unknown bundle, if present.
-    pub fn get_unknown_mut(&mut self, id: &BundleId) -> Option<&mut UnknownBundle> {
-        self.inner.get_mut(id).and_then(|b| match b {
-            TypedBundle::Unknown(ub) => Some(ub),
-            _ => None,
-        })
+    pub fn get_unknown_mut(&mut self, raw_type: u64, raw_variant: u64) -> Option<&mut UnknownBundle> {
+        self.unknown.get_mut(&(raw_type, raw_variant))
     }
 
     // -- Authorization mapping --
@@ -305,25 +389,24 @@ impl<A: Authorization> BundleMap<A> {
         let mut tze_bundle = None;
         let mut result = BundleMap::new();
 
-        for (id, bundle) in self.inner {
+        for (_id, bundle) in self.known {
             match bundle {
                 TypedBundle::Transparent(b) => transparent_bundle = Some(b),
-                TypedBundle::Sprout(b) => sprout_bundle = Some((id, b)),
+                TypedBundle::Sprout(b) => sprout_bundle = Some(b),
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
                 TypedBundle::Orchard(b) => orchard_bundle = Some(b),
                 #[cfg(zcash_unstable = "zfuture")]
                 TypedBundle::Tze(b) => tze_bundle = Some(b),
-                TypedBundle::Unknown(ub) => {
-                    result.inner.insert(id, TypedBundle::Unknown(ub));
-                }
             }
         }
+        result.unknown = self.unknown;
 
         if let Some(b) = f_transparent(transparent_bundle)? {
             result.insert_transparent(b);
         }
-        if let Some((id, b)) = sprout_bundle {
-            result.inner.insert(id, TypedBundle::Sprout(b));
+        // Sprout bundles pass through unchanged (no authorization to map).
+        if let Some(b) = sprout_bundle {
+            result.insert_sprout(b);
         }
         if let Some(b) = f_sapling(sapling_bundle)? {
             result.insert_sapling(b);
@@ -350,18 +433,17 @@ impl<A: Authorization> Default for BundleMap<A> {
 // ValuePoolDeltas
 // ---------------------------------------------------------------------------
 
-/// Key for value pool delta entries, ordered by `(bundle_type, asset_class, asset_uuid)`.
+/// Key for value pool delta entries for known bundle types.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ValuePoolDeltaKey {
-    pub bundle_type: u64,
+    pub bundle_type: BundleType,
     pub asset_class: u8,
     /// For ZEC (asset_class == 0), this is all zeros. For other assets, a 64-byte UUID.
     pub asset_uuid: [u8; 64],
 }
 
 impl ValuePoolDeltaKey {
-    /// Creates a key for a ZEC delta of the given bundle type.
-    pub fn zec(bundle_type: u64) -> Self {
+    pub fn zec(bundle_type: BundleType) -> Self {
         Self {
             bundle_type,
             asset_class: ASSET_CLASS_ZEC,
@@ -370,16 +452,24 @@ impl ValuePoolDeltaKey {
     }
 }
 
+/// `(bundle_variant, value)` for a known-type VP delta entry.
+pub type VPDeltaValue = (BundleVariant, i64);
+
+/// Key for value pool delta entries for unknown bundle types.
+/// `(bundleType, assetClass, assetUuid)` — all raw wire values.
+pub type UnknownVPDeltaKey = (u64, u8, [u8; 64]);
+/// `(bundleVariant, value)` — raw wire values.
+pub type UnknownVPDeltaValue = (u64, i64);
+
 /// The value pool delta map from ZIP 248.
 ///
-/// Records per-bundle net contributions to the transparent transaction value pool.
-/// For v6 transactions this is the authoritative source of value balance information.
-/// For V1-V5 transactions it is derived from per-bundle value_balance fields.
+/// Known bundle types are stored in `entries` keyed by [`ValuePoolDeltaKey`].
+/// Unrecognized bundle types are stored separately in `unknown` so that
+/// the transaction can be re-serialized without understanding their contents.
 #[derive(Clone, Debug, Default)]
 pub struct ValuePoolDeltas {
-    entries: BTreeMap<ValuePoolDeltaKey, i64>,
-    /// Tracks the bundle variant for each bundle type present in the deltas.
-    bundle_variants: BTreeMap<u64, u64>,
+    known: BTreeMap<ValuePoolDeltaKey, VPDeltaValue>,
+    unknown: BTreeMap<UnknownVPDeltaKey, UnknownVPDeltaValue>,
 }
 
 impl ValuePoolDeltas {
@@ -388,83 +478,85 @@ impl ValuePoolDeltas {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.known.is_empty() && self.unknown.is_empty()
     }
 
-    /// Returns an iterator over all entries in canonical order.
-    pub fn iter(&self) -> impl Iterator<Item = (&ValuePoolDeltaKey, &i64)> {
-        self.entries.iter()
+    /// Returns an iterator over known-type entries in canonical order.
+    pub fn iter(&self) -> impl Iterator<Item = (&ValuePoolDeltaKey, &VPDeltaValue)> {
+        self.known.iter()
     }
 
-    /// Returns the bundle variant for a given bundle type, if present.
-    pub fn bundle_variant(&self, bundle_type: u64) -> Option<u64> {
-        self.bundle_variants.get(&bundle_type).copied()
+    /// Returns an iterator over unknown-type entries in canonical order.
+    pub fn unknown_iter(&self) -> impl Iterator<Item = (&UnknownVPDeltaKey, &UnknownVPDeltaValue)> {
+        self.unknown.iter()
+    }
+
+    /// Returns the bundle variant for a given known bundle type, if present.
+    pub fn bundle_variant(&self, bundle_type: BundleType) -> Option<BundleVariant> {
+        self.known
+            .range(ValuePoolDeltaKey::zec(bundle_type)..)
+            .find(|(k, _)| k.bundle_type == bundle_type)
+            .map(|(_, &(variant, _))| variant)
     }
 
     // -- ZEC convenience accessors for known bundle types --
 
-    fn get_zec(&self, bundle_type: u64) -> Option<i64> {
-        self.entries.get(&ValuePoolDeltaKey::zec(bundle_type)).copied()
+    fn get_zec(&self, bundle_type: BundleType) -> Option<i64> {
+        self.known
+            .get(&ValuePoolDeltaKey::zec(bundle_type))
+            .map(|&(_, v)| v)
     }
 
-    fn set_zec(&mut self, bundle_type: u64, variant: u64, value: i64) {
+    fn set_zec(&mut self, bundle_type: BundleType, variant: BundleVariant, value: i64) {
         if value != 0 {
-            self.entries
-                .insert(ValuePoolDeltaKey::zec(bundle_type), value);
+            self.known
+                .insert(ValuePoolDeltaKey::zec(bundle_type), (variant, value));
         } else {
-            self.entries.remove(&ValuePoolDeltaKey::zec(bundle_type));
+            self.known.remove(&ValuePoolDeltaKey::zec(bundle_type));
         }
-        self.bundle_variants.insert(bundle_type, variant);
     }
 
     pub fn transparent_value(&self) -> Option<ZatBalance> {
-        self.get_zec(BUNDLE_TYPE_TRANSPARENT)
+        self.get_zec(BundleType::Transparent)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     pub fn set_transparent(&mut self, value: ZatBalance) {
-        self.set_zec(
-            BUNDLE_TYPE_TRANSPARENT,
-            BUNDLE_VARIANT_DEFAULT,
-            i64::from(value),
-        );
+        self.set_zec(BundleType::Transparent, BundleVariant::Default, i64::from(value));
     }
 
     pub fn sapling_value(&self) -> Option<ZatBalance> {
-        self.get_zec(BUNDLE_TYPE_SAPLING)
+        self.get_zec(BundleType::Sapling)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     pub fn set_sapling(&mut self, value: ZatBalance) {
-        self.set_zec(BUNDLE_TYPE_SAPLING, BUNDLE_VARIANT_DEFAULT, i64::from(value));
+        self.set_zec(BundleType::Sapling, BundleVariant::Default, i64::from(value));
     }
 
     pub fn orchard_value(&self) -> Option<ZatBalance> {
-        self.get_zec(BUNDLE_TYPE_ORCHARD)
+        self.get_zec(BundleType::Orchard)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     pub fn set_orchard(&mut self, value: ZatBalance) {
-        self.set_zec(BUNDLE_TYPE_ORCHARD, BUNDLE_VARIANT_DEFAULT, i64::from(value));
+        self.set_zec(BundleType::Orchard, BundleVariant::Default, i64::from(value));
     }
 
     pub fn fee(&self) -> Option<Zatoshis> {
-        self.get_zec(BUNDLE_TYPE_FEE).and_then(|v| {
-            // Fee VP delta is negative (value removed from pool).
+        self.get_zec(BundleType::Fee).and_then(|v| {
             let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
             Zatoshis::from_u64(abs).ok()
         })
     }
 
     pub fn set_fee(&mut self, value: Zatoshis) {
-        // Fee is stored as a negative VP delta (value removed from pool).
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
-        self.set_zec(BUNDLE_TYPE_FEE, BUNDLE_VARIANT_DEFAULT, -pos);
+        self.set_zec(BundleType::Fee, BundleVariant::Default, -pos);
     }
 
     pub fn zip233_amount(&self) -> Option<Zatoshis> {
-        self.get_zec(BUNDLE_TYPE_ZIP233_NSM).and_then(|v| {
-            // ZIP 233 NSM is a negative VP delta.
+        self.get_zec(BundleType::Zip233Nsm).and_then(|v| {
             let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
             Zatoshis::from_u64(abs).ok()
         })
@@ -472,19 +564,42 @@ impl ValuePoolDeltas {
 
     pub fn set_zip233(&mut self, value: Zatoshis) {
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
-        self.set_zec(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT, -pos);
+        self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, -pos);
     }
 
-    /// Insert a raw entry. Used during v6 deserialization.
-    pub fn insert_raw(
-        &mut self,
-        key: ValuePoolDeltaKey,
-        variant: u64,
-        value: i64,
-    ) {
-        let bundle_type = key.bundle_type;
-        self.entries.insert(key, value);
-        self.bundle_variants.insert(bundle_type, variant);
+    /// Insert a known-type entry. Used during v6 deserialization.
+    pub fn insert_known(&mut self, key: ValuePoolDeltaKey, variant: BundleVariant, value: i64) {
+        self.known.insert(key, (variant, value));
+    }
+
+    /// Insert an unknown-type entry. Used during v6 deserialization.
+    pub fn insert_unknown(&mut self, bundle_type: u64, asset_class: u8, asset_uuid: [u8; 64], variant: u64, value: i64) {
+        self.unknown.insert((bundle_type, asset_class, asset_uuid), (variant, value));
+    }
+
+    /// Produce all VP delta entries (known and unknown) in canonical wire
+    /// order, sorted by `(bundleType, assetClass, assetUuid)`.
+    pub fn to_wire_entries(&self) -> Vec<ValuePoolDeltaEntry> {
+        let known = self.known.iter().map(|(k, &(variant, v))| ValuePoolDeltaEntry {
+            bundle_type: k.bundle_type.to_u64(),
+            bundle_variant: variant.to_u64(),
+            asset_class: k.asset_class,
+            asset_uuid: if k.asset_class == ASSET_CLASS_ZEC { None } else { Some(k.asset_uuid) },
+            value: v,
+        });
+        let unknown = self.unknown.iter().map(|(&(bt, ac, uuid), &(bv, v))| ValuePoolDeltaEntry {
+            bundle_type: bt,
+            bundle_variant: bv,
+            asset_class: ac,
+            asset_uuid: if ac == ASSET_CLASS_ZEC { None } else { Some(uuid) },
+            value: v,
+        });
+        let mut all: Vec<_> = known.chain(unknown).collect();
+        all.sort_by(|a, b| {
+            (a.bundle_type, a.asset_class, a.asset_uuid.unwrap_or([0u8; 64]))
+                .cmp(&(b.bundle_type, b.asset_class, b.asset_uuid.unwrap_or([0u8; 64])))
+        });
+        all
     }
 }
 
@@ -493,6 +608,9 @@ impl ValuePoolDeltas {
 // ---------------------------------------------------------------------------
 
 /// A single value pool delta entry as it appears on the wire.
+///
+/// Uses raw `u64` for type/variant since the wire may contain values for
+/// bundle types not recognized by this implementation.
 #[derive(Clone, Debug)]
 pub struct ValuePoolDeltaEntry {
     pub bundle_type: u64,
@@ -560,23 +678,27 @@ impl ValuePoolDeltaEntry {
 }
 
 /// Read the TLV framing for a bundle data entry: (bundleType, bundleVariant, dataLen, data).
-pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<(BundleId, Vec<u8>)> {
+///
+/// Returns raw `(u64, u64)` for the type/variant since the wire may carry
+/// unrecognized bundle types.
+pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64), Vec<u8>)> {
     let bundle_type = CompactSize::read(&mut reader)?;
     let bundle_variant = CompactSize::read(&mut reader)?;
     let data_len = CompactSize::read(&mut reader)? as usize;
     let mut data = vec![0u8; data_len];
     reader.read_exact(&mut data)?;
-    Ok((BundleId::new(bundle_type, bundle_variant), data))
+    Ok(((bundle_type, bundle_variant), data))
 }
 
 /// Write the TLV framing for a bundle data entry.
 pub fn write_bundle_data_framing<W: Write>(
     mut writer: W,
-    id: &BundleId,
+    bundle_type: u64,
+    bundle_variant: u64,
     data: &[u8],
 ) -> io::Result<()> {
-    CompactSize::write(&mut writer, id.bundle_type as usize)?;
-    CompactSize::write(&mut writer, id.bundle_variant as usize)?;
+    CompactSize::write(&mut writer, bundle_type as usize)?;
+    CompactSize::write(&mut writer, bundle_variant as usize)?;
     CompactSize::write(&mut writer, data.len())?;
     writer.write_all(data)?;
     Ok(())
@@ -698,11 +820,11 @@ mod tests {
         assert_eq!(vp.sapling_value(), Some(sap_vb));
 
         // Iteration order should be by bundle type
-        let types: Vec<u64> = vp.iter().map(|(k, _)| k.bundle_type).collect();
+        let types: Vec<BundleType> = vp.iter().map(|(k, _)| k.bundle_type).collect();
         assert_eq!(types, vec![
-            BUNDLE_TYPE_SAPLING,
-            BUNDLE_TYPE_FEE,
-            BUNDLE_TYPE_ZIP233_NSM,
+            BundleType::Sapling,
+            BundleType::Fee,
+            BundleType::Zip233Nsm,
         ]);
     }
 
@@ -718,8 +840,8 @@ mod tests {
     #[test]
     fn value_pool_delta_entry_roundtrip() {
         let entry = ValuePoolDeltaEntry {
-            bundle_type: BUNDLE_TYPE_SAPLING,
-            bundle_variant: BUNDLE_VARIANT_DEFAULT,
+            bundle_type: BundleType::Sapling.to_u64(),
+            bundle_variant: BundleVariant::Default.to_u64(),
             asset_class: ASSET_CLASS_ZEC,
             asset_uuid: None,
             value: -50000,
@@ -738,15 +860,7 @@ mod tests {
 
     #[test]
     fn value_pool_delta_entry_rejects_zero() {
-        let entry = ValuePoolDeltaEntry {
-            bundle_type: 0,
-            bundle_variant: 0,
-            asset_class: ASSET_CLASS_ZEC,
-            asset_uuid: None,
-            value: 0,
-        };
         let mut buf = Vec::new();
-        // Write manually since write doesn't check for zero
         CompactSize::write(&mut buf, 0).unwrap();
         CompactSize::write(&mut buf, 0).unwrap();
         buf.push(ASSET_CLASS_ZEC);
@@ -758,14 +872,16 @@ mod tests {
 
     #[test]
     fn bundle_data_framing_roundtrip() {
-        let id = BundleId::new(3, 0);
+        let bt = BundleType::Orchard.to_u64();
+        let bv = BundleVariant::Default.to_u64();
         let data = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let mut buf = Vec::new();
-        write_bundle_data_framing(&mut buf, &id, &data).unwrap();
+        write_bundle_data_framing(&mut buf, bt, bv, &data).unwrap();
 
-        let (parsed_id, parsed_data) = read_bundle_data_framing(&buf[..]).unwrap();
-        assert_eq!(parsed_id, id);
+        let ((parsed_bt, parsed_bv), parsed_data) = read_bundle_data_framing(&buf[..]).unwrap();
+        assert_eq!(parsed_bt, bt);
+        assert_eq!(parsed_bv, bv);
         assert_eq!(parsed_data, data);
     }
 
@@ -786,8 +902,7 @@ mod tests {
         use super::super::Authorized;
 
         let mut map: BundleMap<Authorized> = BundleMap::new();
-        let id = BundleId::new(99, 0);
-        map.insert_unknown(id, UnknownBundle {
+        map.insert_unknown(99, 0, UnknownBundle {
             effect_data: vec![1, 2, 3],
             effect_digest: blake2b_simd::Params::new()
                 .hash_length(32)
@@ -805,7 +920,7 @@ mod tests {
         assert!(!map.is_empty());
         let unknowns: Vec<_> = map.unknown_bundles().collect();
         assert_eq!(unknowns.len(), 1);
-        assert_eq!(unknowns[0].0, &id);
+        assert_eq!(unknowns[0].0, &(99u64, 0u64));
         assert_eq!(unknowns[0].1.effect_data, vec![1, 2, 3]);
     }
 }

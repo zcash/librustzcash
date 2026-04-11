@@ -635,8 +635,8 @@ impl<A: Authorization> TransactionData<A> {
         // order. The digests are taken from the `UnknownBundle` itself; the
         // caller is required to have supplied them at construction time, since
         // for unknown bundle types we don't have the bundle's digest algorithm.
-        let mut unknown_effect_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = Vec::new();
-        let mut unknown_auth_digests: Vec<(zip248::BundleId, blake2b_simd::Hash)> = Vec::new();
+        let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
+        let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         for (id, ub) in self.bundles.unknown_bundles() {
             unknown_effect_digests.push((*id, ub.effect_digest));
             if let Some(digest) = ub.auth_digest {
@@ -1127,21 +1127,17 @@ impl Transaction {
         // 2. Value pool deltas map. ZIP 248 requires entries in strictly
         //    increasing `(bundleType, assetClass, assetUuid)` order, with no
         //    duplicates, and requires every `(bundleType, ...)` group to share
-        //    a single `bundleVariant`. We track the previous key and the
-        //    per-bundleType variant as we read.
+        //    a single `bundleVariant`.
         let n_vp_deltas = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut vp = zip248::ValuePoolDeltas::empty();
-        let mut last_vp_key: Option<zip248::ValuePoolDeltaKey> = None;
+        // Track ordering: raw (bundleType, assetClass, assetUuid) tuples.
+        let mut last_vp_raw: Option<(u64, u8, [u8; 64])> = None;
         let mut vp_variants_by_type: BTreeMap<u64, u64> = BTreeMap::new();
         for _ in 0..n_vp_deltas {
             let entry = zip248::ValuePoolDeltaEntry::read(&mut reader)?;
-            let key = zip248::ValuePoolDeltaKey {
-                bundle_type: entry.bundle_type,
-                asset_class: entry.asset_class,
-                asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
-            };
-            if let Some(prev) = &last_vp_key {
-                if &key <= prev {
+            let raw_key = (entry.bundle_type, entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
+            if let Some(prev) = &last_vp_raw {
+                if &raw_key <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "v6 mValuePoolDeltas is not in strictly increasing \
@@ -1149,9 +1145,7 @@ impl Transaction {
                     ));
                 }
             }
-            last_vp_key = Some(key.clone());
-            // Per ZIP 248: all entries with the same bundleType must share a
-            // single bundleVariant.
+            last_vp_raw = Some(raw_key);
             match vp_variants_by_type.get(&entry.bundle_type) {
                 Some(&existing) if existing != entry.bundle_variant => {
                     return Err(io::Error::new(
@@ -1163,29 +1157,46 @@ impl Transaction {
                     vp_variants_by_type.insert(entry.bundle_type, entry.bundle_variant);
                 }
             }
-            vp.insert_raw(key, entry.bundle_variant, entry.value);
+            // Route to known or unknown storage based on whether the
+            // bundle type is recognized.
+            if let (Some(bt), Some(bv)) = (
+                zip248::BundleType::from_u64(entry.bundle_type),
+                zip248::BundleVariant::from_u64(entry.bundle_variant),
+            ) {
+                let key = zip248::ValuePoolDeltaKey {
+                    bundle_type: bt,
+                    asset_class: entry.asset_class,
+                    asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
+                };
+                vp.insert_known(key, bv, entry.value);
+            } else {
+                vp.insert_unknown(
+                    entry.bundle_type,
+                    entry.asset_class,
+                    entry.asset_uuid.unwrap_or([0u8; 64]),
+                    entry.bundle_variant,
+                    entry.value,
+                );
+            }
         }
 
-        // 3. Effect bundles map. ZIP 248 requires entries in strictly
-        //    increasing bundleType order; we collect into a BTreeMap which
-        //    enforces uniqueness, and additionally check the on-wire ordering
-        //    so that the transaction is rejected if the encoder produced an
-        //    out-of-order map.
+        // 3. Effect bundles map. Keyed by raw u64 bundleType since the wire
+        //    may contain unrecognized types.
         let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut effect_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
         let mut last_effect_type: Option<u64> = None;
         for _ in 0..n_effect_bundles {
-            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
             if let Some(prev) = last_effect_type {
-                if id.bundle_type <= prev {
+                if bt <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "v6 mEffectBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
-            last_effect_type = Some(id.bundle_type);
-            effect_data_by_type.insert(id.bundle_type, (id.bundle_variant, data));
+            last_effect_type = Some(bt);
+            effect_data_by_type.insert(bt, (bv, data));
         }
 
         // 4. Auth bundles map (same ordering rules).
@@ -1193,17 +1204,17 @@ impl Transaction {
         let mut auth_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
         let mut last_auth_type: Option<u64> = None;
         for _ in 0..n_auth_bundles {
-            let (id, data) = zip248::read_bundle_data_framing(&mut reader)?;
+            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
             if let Some(prev) = last_auth_type {
-                if id.bundle_type <= prev {
+                if bt <= prev {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "v6 mAuthBundles is not in strictly increasing bundleType order",
                     ));
                 }
             }
-            last_auth_type = Some(id.bundle_type);
-            auth_data_by_type.insert(id.bundle_type, (id.bundle_variant, data));
+            last_auth_type = Some(bt);
+            auth_data_by_type.insert(bt, (bv, data));
         }
 
         // ZIP 248: every bundleType in mAuthBundles must also appear in
@@ -1250,7 +1261,7 @@ impl Transaction {
         // - bundleType 4 (transaction fee) and 5 (ZIP 233 NSM field) MUST NOT
         //   appear in mEffectBundles or mAuthBundles (the registry marks both
         //   columns ❌).
-        for &value_only_bundle in &[zip248::BUNDLE_TYPE_FEE, zip248::BUNDLE_TYPE_ZIP233_NSM] {
+        for &value_only_bundle in &[zip248::BundleType::Fee.to_u64(), zip248::BundleType::Zip233Nsm.to_u64()] {
             if effect_data_by_type.contains_key(&value_only_bundle)
                 || auth_data_by_type.contains_key(&value_only_bundle)
             {
@@ -1261,10 +1272,9 @@ impl Transaction {
                 ));
             }
         }
-        const RESERVED_BUNDLE_TYPE: u64 = 1;
-        if vp_variants_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
-            || effect_data_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
-            || auth_data_by_type.contains_key(&RESERVED_BUNDLE_TYPE)
+        if vp_variants_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
+            || effect_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
+            || auth_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -1284,7 +1294,7 @@ impl Transaction {
             (effect, auth)
         };
 
-        let (transparent_effect, transparent_auth) = take_known(zip248::BUNDLE_TYPE_TRANSPARENT);
+        let (transparent_effect, transparent_auth) = take_known(zip248::BundleType::Transparent.to_u64());
         if let Some(effect) = transparent_effect {
             if let Some(b) = Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
             {
@@ -1292,7 +1302,7 @@ impl Transaction {
             }
         }
 
-        let (sapling_effect, sapling_auth) = take_known(zip248::BUNDLE_TYPE_SAPLING);
+        let (sapling_effect, sapling_auth) = take_known(zip248::BundleType::Sapling.to_u64());
         if let Some(effect) = sapling_effect {
             let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = sapling_serialization::read_v6_bundle(
@@ -1304,7 +1314,7 @@ impl Transaction {
             }
         }
 
-        let (orchard_effect, orchard_auth) = take_known(zip248::BUNDLE_TYPE_ORCHARD);
+        let (orchard_effect, orchard_auth) = take_known(zip248::BundleType::Orchard.to_u64());
         if let Some(effect) = orchard_effect {
             let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = orchard_serialization::read_v6_bundle(
@@ -1316,19 +1326,37 @@ impl Transaction {
             }
         }
 
-        // ZIP 248 §"Implications for Wallets" requires the
-        // `bundle_effects_digest` (and `bundle_auth_digest`) to be supplied
-        // externally for unknown bundle types; we cannot derive them from the
-        // opaque bytes alone, so without a digest registry callback we cannot
-        // safely accept any unknown bundles here. Refuse the transaction. A
-        // future revision of this reader that takes a `BundleId -> digest`
-        // registry from the caller can lift this restriction.
-        if !effect_data_by_type.is_empty() || !auth_data_by_type.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "v6 transaction contains an unknown bundle type and no digest \
-                 registry was supplied",
-            ));
+        // Store any remaining (unrecognized) bundles as opaque
+        // `UnknownBundle` entries so that the transaction can still be parsed
+        // and re-serialized.
+        //
+        // ZIP 248 §"Implications for Wallets": to compute the txid the
+        // caller must supply 32-byte `bundle_effects_digest` (and, if auth
+        // data is present, `bundle_auth_digest`) values via
+        // `BundleMap::get_unknown_mut`. Until those are set, the opaque-data
+        // hash used here is a stand-in that will produce an INCORRECT txid.
+        for (bundle_type, (variant, effect)) in effect_data_by_type {
+            let auth = auth_data_by_type.remove(&bundle_type);
+            let effect_digest = blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"ZIP248_OpaqueFx_")
+                .hash(&effect);
+            let auth_digest = auth.as_ref().map(|(_, a)| {
+                blake2b_simd::Params::new()
+                    .hash_length(32)
+                    .personal(b"ZIP248_OpaqueAu_")
+                    .hash(a)
+            });
+            bundles.insert_unknown(
+                bundle_type,
+                variant,
+                zip248::UnknownBundle {
+                    effect_data: effect,
+                    effect_digest,
+                    auth_data: auth.map(|(_, a)| a),
+                    auth_digest,
+                },
+            );
         }
 
         let data = TransactionData {
@@ -1508,91 +1536,70 @@ impl Transaction {
         self.write_v6_header(&mut writer)?;
 
         // 2. Value pool deltas map
-        let vp_entries: Vec<_> = self
-            .value_pool_deltas
-            .iter()
-            .map(|(k, &v)| zip248::ValuePoolDeltaEntry {
-                bundle_type: k.bundle_type,
-                bundle_variant: self
-                    .value_pool_deltas
-                    .bundle_variant(k.bundle_type)
-                    .unwrap_or(zip248::BUNDLE_VARIANT_DEFAULT),
-                asset_class: k.asset_class,
-                asset_uuid: if k.asset_class == zip248::ASSET_CLASS_ZEC {
-                    None
-                } else {
-                    Some(k.asset_uuid)
-                },
-                value: v,
-            })
-            .collect();
+        let vp_entries = self.value_pool_deltas.to_wire_entries();
         CompactSize::write(&mut writer, vp_entries.len())?;
         for entry in &vp_entries {
             entry.write(&mut writer)?;
         }
 
-        // 3. Effect bundles map
-        // Count bundles that have effect data (exclude value-only types 4, 5)
-        let mut effect_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+        // 3. Effect bundles map — raw (bundleType, bundleVariant, data) tuples.
+        let mut effect_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
 
         if let Some(tb) = self.bundles.transparent() {
             let mut buf = Vec::new();
             zip248::write_v6_transparent_effects(&mut buf, tb)?;
-            effect_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+            effect_bundles.push((zip248::BundleId::TRANSPARENT.bundle_type.to_u64(), zip248::BundleId::TRANSPARENT.bundle_variant.to_u64(), buf));
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
             sapling_serialization::write_v6_effects(&mut buf, sb)?;
-            effect_bundles.push((zip248::BundleId::SAPLING, buf));
+            effect_bundles.push((zip248::BundleId::SAPLING.bundle_type.to_u64(), zip248::BundleId::SAPLING.bundle_variant.to_u64(), buf));
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
             orchard_serialization::write_v6_effects(&mut buf, ob)?;
-            effect_bundles.push((zip248::BundleId::ORCHARD, buf));
+            effect_bundles.push((zip248::BundleId::ORCHARD.bundle_type.to_u64(), zip248::BundleId::ORCHARD.bundle_variant.to_u64(), buf));
         }
-        // Unknown bundles with effect data
-        for (id, ub) in self.bundles.unknown_bundles() {
-            effect_bundles.push((*id, ub.effect_data.clone()));
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
+            effect_bundles.push((bt, bv, ub.effect_data.clone()));
         }
-        // Sort by bundle type (BTreeMap already gives us sorted order from iter())
-        effect_bundles.sort_by_key(|(id, _)| *id);
+        effect_bundles.sort_by_key(|(bt, _, _)| *bt);
 
         CompactSize::write(&mut writer, effect_bundles.len())?;
-        for (id, data) in &effect_bundles {
-            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        for (bt, bv, data) in &effect_bundles {
+            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
         }
 
         // 4. Auth bundles map
-        let mut auth_bundles: Vec<(zip248::BundleId, Vec<u8>)> = Vec::new();
+        let mut auth_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
 
         if let Some(tb) = self.bundles.transparent() {
             if !tb.vin.is_empty() {
                 let mut buf = Vec::new();
                 zip248::write_v6_transparent_auth(&mut buf, tb)?;
-                auth_bundles.push((zip248::BundleId::TRANSPARENT, buf));
+                auth_bundles.push((zip248::BundleId::TRANSPARENT.bundle_type.to_u64(), zip248::BundleId::TRANSPARENT.bundle_variant.to_u64(), buf));
             }
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
             sapling_serialization::write_v6_auth(&mut buf, sb)?;
-            auth_bundles.push((zip248::BundleId::SAPLING, buf));
+            auth_bundles.push((zip248::BundleId::SAPLING.bundle_type.to_u64(), zip248::BundleId::SAPLING.bundle_variant.to_u64(), buf));
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
             orchard_serialization::write_v6_auth(&mut buf, ob)?;
-            auth_bundles.push((zip248::BundleId::ORCHARD, buf));
+            auth_bundles.push((zip248::BundleId::ORCHARD.bundle_type.to_u64(), zip248::BundleId::ORCHARD.bundle_variant.to_u64(), buf));
         }
-        // Unknown bundles with auth data
-        for (id, ub) in self.bundles.unknown_bundles() {
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
             if let Some(ref auth_data) = ub.auth_data {
-                auth_bundles.push((*id, auth_data.clone()));
+                auth_bundles.push((bt, bv, auth_data.clone()));
             }
         }
-        auth_bundles.sort_by_key(|(id, _)| *id);
+        auth_bundles.sort_by_key(|(bt, _, _)| *bt);
 
         CompactSize::write(&mut writer, auth_bundles.len())?;
-        for (id, data) in &auth_bundles {
-            zip248::write_bundle_data_framing(&mut writer, id, data)?;
+        for (bt, bv, data) in &auth_bundles {
+            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
         }
 
         Ok(())
@@ -1680,11 +1687,11 @@ impl Transaction {
             .map(Some)
             .map(hash_v6_orchard_auth);
 
-        let unknown_auth_digests: Vec<(zip248::BundleId, Blake2bHash)> = self
+        let unknown_auth_digests: Vec<((u64, u64), Blake2bHash)> = self
             .data
             .bundles
             .unknown_bundles()
-            .filter_map(|(id, ub)| ub.auth_digest.map(|digest| (*id, digest)))
+            .filter_map(|(&key, ub)| ub.auth_digest.map(|digest| (key, digest)))
             .collect();
 
         let auth_bundles_digest = hash_v6_auth_bundles(v6_bundle_digest_entries(
@@ -1739,12 +1746,12 @@ pub struct TxDigests<A> {
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
     #[cfg(zcash_v6)]
-    pub unknown_effect_digests: Vec<(zip248::BundleId, A)>,
+    pub unknown_effect_digests: Vec<((u64, u64), A)>,
     /// v6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
     #[cfg(zcash_v6)]
-    pub unknown_auth_digests: Vec<(zip248::BundleId, A)>,
+    pub unknown_auth_digests: Vec<((u64, u64), A)>,
 }
 
 pub trait TransactionDigest<A: Authorization> {
@@ -1909,7 +1916,7 @@ impl<A: Authorization> TransactionData<A> {
         // Bundle-local rule: every fee bundle entry in mValuePoolDeltas must
         // have assetClass = 0 (ZEC).
         for (key, _) in self.value_pool_deltas.iter() {
-            if key.bundle_type == zip248::BUNDLE_TYPE_FEE
+            if key.bundle_type == zip248::BundleType::Fee
                 && key.asset_class != zip248::ASSET_CLASS_ZEC
             {
                 return Err(V6ConsensusError::FeeAssetClassNotZec {
@@ -1932,8 +1939,8 @@ impl<A: Authorization> TransactionData<A> {
         let fee_delta = self
             .value_pool_deltas
             .iter()
-            .find_map(|(key, &value)| {
-                (key.bundle_type == zip248::BUNDLE_TYPE_FEE
+            .find_map(|(key, &(_, value))| {
+                (key.bundle_type == zip248::BundleType::Fee
                     && key.asset_class == zip248::ASSET_CLASS_ZEC)
                     .then_some(value)
             })
@@ -1951,16 +1958,15 @@ impl<A: Authorization> TransactionData<A> {
         // rule is "ZEC sum equals -BlockSubsidy(height)" which requires
         // block context and is the consumer's responsibility.)
         if !is_coinbase {
-            // Group entries by (assetClass, assetUuid). The
-            // ValuePoolDeltaKey orders by (bundleType, assetClass,
-            // assetUuid), so we walk it once and accumulate.
+            // Group ALL entries (known + unknown) by (assetClass, assetUuid)
+            // and verify the sum is zero for each asset.
             let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, i64)> = BTreeMap::new();
-            for (key, &value) in self.value_pool_deltas.iter() {
-                let asset_key = (key.asset_class, key.asset_uuid);
-                let entry = by_asset.entry(asset_key).or_insert((key.bundle_type, 0));
-                entry.1 = entry
+            for entry in self.value_pool_deltas.to_wire_entries() {
+                let asset_key = (entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
+                let acc = by_asset.entry(asset_key).or_insert((entry.bundle_type, 0));
+                acc.1 = acc
                     .1
-                    .checked_add(value)
+                    .checked_add(entry.value)
                     .ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
             }
             for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
