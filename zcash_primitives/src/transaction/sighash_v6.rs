@@ -10,25 +10,14 @@ use crate::{
         sighash::SignableInput,
         sighash_v5::{TransparentInputsDigests, transparent_sig_digest},
         txid::{
-            hash_v6_effects_bundles, v6_effect_digest_entries,
-            ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
+            ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION, hasher, hash_v6_effects_bundles,
+            tx_hash_personalization, v6_bundle_digest_entries,
         },
     },
 };
 
-/// Personalization prefix for the txid/sighash root hash.
-const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
-
-fn hasher(personal: &[u8; 16]) -> StateWrite {
-    StateWrite(
-        blake2b_simd::Params::new()
-            .hash_length(32)
-            .personal(personal)
-            .to_state(),
-    )
-}
-
-/// v6 signature hash per ZIP 248.
+/// Computes the v6 signature digest.
+/// [ZIP 248 §Signature Digest](https://zips.z.cash/zip-0248#signature-digest)
 ///
 /// For transactions with no transparent inputs, the signature digest is
 /// identical to the transaction identifier digest (since `transparent_sig_digest`
@@ -36,6 +25,8 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 ///
 /// For transactions with transparent inputs, `transparent_effects_digest` in the
 /// effects bundles is replaced with `transparent_sig_digest`.
+///
+/// Sapling and Orchard sighash uses `SIGHASH_ALL` (`hash_type = 0x01`).
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
@@ -45,11 +36,7 @@ pub fn v6_signature_hash<
     txid_parts: &Zip244Digests<Blake2bHash>,
     inputs_digests: Option<&TransparentInputsDigests>,
 ) -> Blake2bHash {
-    let mut personal = [0; 16];
-    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
-    (&mut personal[12..])
-        .write_u32_le(tx.consensus_branch_id().into())
-        .unwrap();
+    let personal = tx_hash_personalization(tx.consensus_branch_id());
 
     // VP deltas digest (same as txid)
     let vp_deltas_digest = txid_parts
@@ -65,8 +52,10 @@ pub fn v6_signature_hash<
         signable_input,
     );
 
-    let signature_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
-        tx.transparent_bundle().is_some().then_some(&transparent_sig),
+    let signature_bundles_digest = hash_v6_effects_bundles(v6_bundle_digest_entries(
+        tx.transparent_bundle()
+            .is_some()
+            .then_some(&transparent_sig),
         txid_parts.sapling_digest.as_ref(),
         txid_parts.orchard_digest.as_ref(),
         &txid_parts.unknown_effect_digests,
