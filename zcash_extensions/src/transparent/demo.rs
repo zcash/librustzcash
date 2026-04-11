@@ -677,8 +677,7 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
-            #[cfg(feature = "zip-233")]
-            Zatoshis::ZERO,
+            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             None,
             None,
             None,
@@ -710,8 +709,7 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
-            #[cfg(feature = "zip-233")]
-            Zatoshis::ZERO,
+            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             None,
             None,
             None,
@@ -739,8 +737,7 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
-            #[cfg(feature = "zip-233")]
-            Zatoshis::ZERO,
+            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             None,
             None,
             None,
