@@ -526,7 +526,7 @@ mod zip248_tests {
 
     /// Verifies that a v6 transaction with an unknown bundle type can be
     /// parsed and re-serialized (ZIP 248 forward compatibility).
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_unstable = "nu7")]
     #[test]
     fn unknown_bundle_roundtrip() {
         use super::super::{Authorized, Transaction, TransactionData, TxVersion};
@@ -570,7 +570,7 @@ mod zip248_tests {
 
     // -- Consensus rule tests --------------------------------------------------
 
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_unstable = "nu7")]
     mod consensus_rules {
         use super::super::super::{
             Authorized, TransactionData, TxVersion, V6ConsensusError, ZatBalance, zip248,
@@ -668,7 +668,7 @@ mod zip248_tests {
 
     // -- Parsing rule rejection tests ------------------------------------------
 
-    #[cfg(zcash_v6)]
+    #[cfg(zcash_unstable = "nu7")]
     mod parsing_rules {
         use super::super::super::{Transaction, zip248};
         use alloc::vec::Vec;
