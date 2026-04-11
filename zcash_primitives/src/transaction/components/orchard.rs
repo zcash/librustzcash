@@ -218,11 +218,12 @@ fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
     }
 }
 
-/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
+/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors.
+/// [ZIP 248 §Orchard Bundle](https://zips.z.cash/zip-0248#orchard-bundle)
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
-/// value balance is *not* read from these bytes — it lives in
+/// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
 pub fn read_v6_bundle(
     effects: &[u8],
@@ -233,9 +234,12 @@ pub fn read_v6_bundle(
 
     // Effecting data: nActions || OrchardActionEffecting* ||
     //                 (flags || anchor)?  (present iff nActions > 0)
+    //
+    // # Correctness
+    // The closure is not redundant: `read_action_without_auth` has an HRTB
+    // bound that clippy cannot see through.
     #[allow(clippy::redundant_closure)]
-    let actions_without_auth =
-        Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
+    let actions_without_auth = Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
 
     if actions_without_auth.is_empty() {
         if !effects_reader.is_empty() {
@@ -316,8 +320,9 @@ pub fn read_v6_bundle(
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-
 /// Writes the effecting data for an Orchard bundle in v6 format.
+/// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
+// ZIP 248 v6 bundle codec.
 pub fn write_v6_effects<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
@@ -335,6 +340,11 @@ pub fn write_v6_effects<W: Write>(
 }
 
 /// Writes the authorizing data for an Orchard bundle in v6 format.
+/// [ZIP 248 §Orchard Authorizing Data](https://zips.z.cash/zip-0248#orchard-authorizing-data)
+///
+/// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
+/// (version 0: `[0x01, 0x00]`).
+// ZIP 248 v6 bundle codec.
 pub fn write_v6_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
