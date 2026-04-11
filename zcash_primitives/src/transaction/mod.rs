@@ -1385,10 +1385,12 @@ impl Transaction {
         }
 
         // Store any remaining (unrecognized) bundles as opaque
-        // `UnknownBundle` entries. Digests are computed as flat BLAKE2b-256
-        // hashes of the raw vBundleData bytes with a (bundleType, bundleVariant)-
-        // derived personalization, per ZIP 248 §T.3 / §A.1. This allows wallets
-        // to compute the txid without understanding the bundle's internals.
+        // `UnknownBundle` entries. The effects digest is computed as a flat
+        // BLAKE2b-256 of the raw vBundleData bytes with a (bundleType,
+        // bundleVariant)-derived personalization per ZIP 248 §T.3, allowing
+        // wallets to compute the txid without understanding the bundle.
+        // Auth data is stored for re-serialization but no auth digest is
+        // computed — the correct algorithm is defined by the bundle's ZIP.
         for (bundle_type, (variant, effect)) in effect_data_by_type {
             let auth = auth_data_by_type.remove(&bundle_type);
             let effect_personal = zip248::opaque_effects_personalization(bundle_type, variant);
@@ -1396,13 +1398,6 @@ impl Transaction {
                 .hash_length(32)
                 .personal(&effect_personal)
                 .hash(&effect);
-            let auth_digest = auth.as_ref().map(|(_, a)| {
-                let auth_personal = zip248::opaque_auth_personalization(bundle_type, variant);
-                blake2b_simd::Params::new()
-                    .hash_length(32)
-                    .personal(&auth_personal)
-                    .hash(a)
-            });
             bundles.insert_unknown(
                 bundle_type,
                 variant,
@@ -1410,7 +1405,7 @@ impl Transaction {
                     effect_data: effect,
                     effect_digest,
                     auth_data: auth.map(|(_, a)| a),
-                    auth_digest,
+                    auth_digest: None,
                 },
             );
         }
