@@ -1,18 +1,16 @@
 use blake2b_simd::Hash as Blake2bHash;
+#[cfg(zcash_v6)]
 use core2::io::Write;
 
 use ::transparent::sighash::TransparentAuthorizingContext;
 
-use crate::{
-    encoding::WriteBytesExt,
-    transaction::{
-        Authorization, TransactionData, TxDigests,
-        sighash::SignableInput,
-        sighash_v5::transparent_sig_digest,
-        txid::{
-            ZCASH_TX_PERSONALIZATION_PREFIX, ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
-            hash_v6_effects_bundles, hasher, v6_bundle_digest_entries,
-        },
+use crate::transaction::{
+    Authorization, TransactionData, TxDigests,
+    sighash::SignableInput,
+    sighash_v5::transparent_sig_digest,
+    txid::{
+        ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION, hash_v6_effects_bundles, hasher,
+        tx_hash_personalization, v6_bundle_digest_entries,
     },
 };
 
@@ -36,11 +34,7 @@ pub fn v6_signature_hash<
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    let mut personal = [0; 16];
-    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
-    (&mut personal[12..])
-        .write_u32_le(tx.consensus_branch_id().into())
-        .unwrap();
+    let personal = tx_hash_personalization(tx.consensus_branch_id());
 
     // VP deltas digest (same as txid)
     let vp_deltas_digest = txid_parts

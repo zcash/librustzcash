@@ -286,6 +286,8 @@ impl TxVersion {
             TxVersion::ZFuture => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 | Nu6_2 => false,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => true,
                 ZFuture => true,
             },
         }
