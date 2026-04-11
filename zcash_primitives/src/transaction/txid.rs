@@ -18,10 +18,7 @@ use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
-#[cfg(all(
-    zcash_v6,
-    feature = "zip-233"
-))]
+#[cfg(all(zcash_v6, feature = "zip-233"))]
 use zcash_protocol::value::Zatoshis;
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -238,11 +235,7 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        zcash_v6,
-        feature = "zip-233"
-    ))]
-    zip233_amount: &Zatoshis,
+    #[cfg(all(zcash_v6, feature = "zip-233"))] zip233_amount: &Zatoshis,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -253,10 +246,7 @@ fn hash_header_txid_data(
     h.write_u32_le(expiry_height.into()).unwrap();
 
     // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
-    #[cfg(all(
-        zcash_v6,
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     if version.has_zip233() {
         h.write_u64_le((*zip233_amount).into()).unwrap();
     }
@@ -453,12 +443,9 @@ pub(crate) fn hash_v6_orchard_effects(
     // exactly as ZIP 244 does. The orchard crate's `hash_bundle_txid_data` is
     // the ZIP 244 form and includes valueBalanceOrchard, so we cannot delegate
     // to it and must re-implement the sub-hashes here.
-    const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] =
-        b"ZTxIdOrcActCHash";
-    const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] =
-        b"ZTxIdOrcActMHash";
-    const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] =
-        b"ZTxIdOrcActNHash";
+    const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActCHash";
+    const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActMHash";
+    const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActNHash";
 
     if !bundle.actions().is_empty() {
         let mut compact_h = hasher(ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION);
@@ -470,7 +457,9 @@ pub(crate) fn hash_v6_orchard_effects(
             // to trial-decrypt and identify relevant transactions.
             compact_h.write_all(&action.nullifier().to_bytes()).unwrap();
             compact_h.write_all(&action.cmx().to_bytes()).unwrap();
-            compact_h.write_all(&action.encrypted_note().epk_bytes).unwrap();
+            compact_h
+                .write_all(&action.encrypted_note().epk_bytes)
+                .unwrap();
             compact_h
                 .write_all(&action.encrypted_note().enc_ciphertext[..52])
                 .unwrap();
@@ -485,7 +474,9 @@ pub(crate) fn hash_v6_orchard_effects(
             // remainder of enc_ciphertext, and the out_ciphertext. These are
             // only needed for full verification.
             noncompact_h.write_all(&action.cv_net().to_bytes()).unwrap();
-            noncompact_h.write_all(&<[u8; 32]>::from(action.rk())).unwrap();
+            noncompact_h
+                .write_all(&<[u8; 32]>::from(action.rk()))
+                .unwrap();
             noncompact_h
                 .write_all(&action.encrypted_note().enc_ciphertext[564..])
                 .unwrap();
@@ -642,10 +633,7 @@ pub(crate) fn hash_v6_orchard_auth(
 ///
 /// Entries use raw `u64` wire values rather than an enum so that unknown
 /// bundle types can participate in the digest without requiring code changes.
-fn hash_v6_tagged_bundle_digests<'a, I>(
-    personalization: &[u8; 16],
-    entries: I,
-) -> Blake2bHash
+fn hash_v6_tagged_bundle_digests<'a, I>(personalization: &[u8; 16], entries: I) -> Blake2bHash
 where
     I: IntoIterator<Item = ((u64, u64), &'a Blake2bHash)>,
 {
@@ -709,21 +697,14 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            zcash_v6,
-            feature = "zip-233"
-        ))]
-        zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_v6, feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         hash_header_txid_data(
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(
-                zcash_v6,
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount,
         )
     }
@@ -862,10 +843,7 @@ pub fn to_txid(
 /// Personalization is `"ZcashTxHash_" || LE32(consensus_branch_id)`, the
 /// same scheme as ZIP 244 so that txids are fork-specific.
 #[cfg(zcash_v6)]
-fn to_hash_v6(
-    consensus_branch_id: BranchId,
-    digests: &TxDigests<Blake2bHash>,
-) -> Blake2bHash {
+fn to_hash_v6(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -> Blake2bHash {
     let mut personal = [0; 16];
     personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (&mut personal[12..])
@@ -887,7 +865,10 @@ fn to_hash_v6(
     // Merge known and unknown bundle digests in strictly increasing
     // (bundleType, bundleVariant) order, then hash them as tagged entries.
     let effects_bundles_digest = hash_v6_effects_bundles(v6_bundle_digest_entries(
-        digests.transparent_digests.is_some().then_some(&transparent_digest),
+        digests
+            .transparent_digests
+            .is_some()
+            .then_some(&transparent_digest),
         digests.sapling_digest.as_ref(),
         digests.orchard_digest.as_ref(),
         &digests.unknown_effect_digests,
@@ -975,11 +956,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
-        #[cfg(all(
-            zcash_v6,
-            feature = "zip-233"
-        ))]
-        _zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_v6, feature = "zip-233"))] _zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }

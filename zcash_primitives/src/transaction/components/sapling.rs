@@ -558,21 +558,14 @@ pub(crate) fn read_v6_bundle(
     // vOutputProofsSapling (192 bytes per output) ||
     // bindingSigSapling (SaplingSignature).
     let v_spend_proofs = Array::read(&mut auth_reader, n_spends, |r| read_zkproof(r))?;
-    let mut v_spend_auth_sigs: Vec<redjubjub::Signature<SpendAuth>> =
-        Vec::with_capacity(n_spends);
+    let mut v_spend_auth_sigs: Vec<redjubjub::Signature<SpendAuth>> = Vec::with_capacity(n_spends);
     for _ in 0..n_spends {
-        consume_v6_sighash_v0_info(
-            &mut auth_reader,
-            "Sapling spend auth sig",
-        )?;
+        consume_v6_sighash_v0_info(&mut auth_reader, "Sapling spend auth sig")?;
         v_spend_auth_sigs.push(read_spend_auth_sig(&mut auth_reader)?);
     }
     let v_output_proofs = Array::read(&mut auth_reader, n_outputs, |r| read_zkproof(r))?;
 
-    consume_v6_sighash_v0_info(
-        &mut auth_reader,
-        "Sapling binding sig",
-    )?;
+    consume_v6_sighash_v0_info(&mut auth_reader, "Sapling binding sig")?;
     let mut binding_sig_bytes = [0u8; 64];
     auth_reader.read_exact(&mut binding_sig_bytes)?;
     let binding_sig = redjubjub::Signature::from(binding_sig_bytes);
@@ -589,11 +582,7 @@ pub(crate) fn read_v6_bundle(
         .zip(v_spend_proofs.into_iter().zip(v_spend_auth_sigs))
         .map(|(spend, (zkproof, spend_auth_sig))| {
             // Safe: n_spends > 0 implies anchor.is_some().
-            spend.into_spend_description(
-                anchor.expect("nonempty spends"),
-                zkproof,
-                spend_auth_sig,
-            )
+            spend.into_spend_description(anchor.expect("nonempty spends"), zkproof, spend_auth_sig)
         })
         .collect();
 

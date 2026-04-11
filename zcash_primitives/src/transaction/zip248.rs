@@ -7,6 +7,7 @@
 //! - [`ValuePoolDeltas`]: The value pool delta map recording per-bundle value contributions.
 //! - [`UnknownBundle`]: An opaque bundle with unparsed effect and auth data.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -224,7 +225,7 @@ pub enum TypedBundle<A: Authorization> {
     Transparent(transparent::Bundle<A::TransparentAuth>),
     Sprout(sprout::Bundle),
     Sapling(sapling::Bundle<A::SaplingAuth, ZatBalance>),
-    Orchard(orchard::Bundle<A::OrchardAuth, ZatBalance>),
+    Orchard(Box<orchard::Bundle<A::OrchardAuth, ZatBalance>>),
     #[cfg(zcash_unstable = "zfuture")]
     Tze(tze::Bundle<A::TzeAuth>),
 }
@@ -271,10 +272,12 @@ impl<A: Authorization> BundleMap<A> {
 
     /// Returns the transparent bundle, if present.
     pub fn transparent(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
-        self.known.get(&BundleId::TRANSPARENT).and_then(|b| match b {
-            TypedBundle::Transparent(bundle) => Some(bundle),
-            _ => None,
-        })
+        self.known
+            .get(&BundleId::TRANSPARENT)
+            .and_then(|b| match b {
+                TypedBundle::Transparent(bundle) => Some(bundle),
+                _ => None,
+            })
     }
 
     /// Returns the sprout bundle, if present.
@@ -296,7 +299,7 @@ impl<A: Authorization> BundleMap<A> {
     /// Returns the orchard bundle, if present.
     pub fn orchard(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.known.get(&BundleId::ORCHARD).and_then(|b| match b {
-            TypedBundle::Orchard(bundle) => Some(bundle),
+            TypedBundle::Orchard(bundle) => Some(bundle.as_ref()),
             _ => None,
         })
     }
@@ -326,7 +329,8 @@ impl<A: Authorization> BundleMap<A> {
 
     /// Insert a Sprout bundle. Uses the in-memory-only [`BundleType::Sprout`].
     pub fn insert_sprout(&mut self, bundle: sprout::Bundle) {
-        self.known.insert(BundleId::SPROUT, TypedBundle::Sprout(bundle));
+        self.known
+            .insert(BundleId::SPROUT, TypedBundle::Sprout(bundle));
     }
 
     /// Inserts the sapling bundle.
@@ -338,7 +342,7 @@ impl<A: Authorization> BundleMap<A> {
     /// Inserts the orchard bundle.
     pub fn insert_orchard(&mut self, bundle: orchard::Bundle<A::OrchardAuth, ZatBalance>) {
         self.known
-            .insert(BundleId::ORCHARD, TypedBundle::Orchard(bundle));
+            .insert(BundleId::ORCHARD, TypedBundle::Orchard(Box::new(bundle)));
     }
 
     /// Inserts the tze bundle.
@@ -377,7 +381,8 @@ impl<A: Authorization> BundleMap<A> {
         ) -> Option<orchard::Bundle<B::OrchardAuth, ZatBalance>>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
             Option<tze::Bundle<A::TzeAuth>>,
-        ) -> Option<tze::Bundle<B::TzeAuth>>,
+        )
+            -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> BundleMap<B> {
         // Delegate to try_map_authorization with infallible closures.
         self.try_map_authorization::<B, core::convert::Infallible>(
@@ -426,7 +431,7 @@ impl<A: Authorization> BundleMap<A> {
                 TypedBundle::Transparent(b) => transparent_bundle = Some(b),
                 TypedBundle::Sprout(b) => sprout_bundle = Some(b),
                 TypedBundle::Sapling(b) => sapling_bundle = Some(b),
-                TypedBundle::Orchard(b) => orchard_bundle = Some(b),
+                TypedBundle::Orchard(b) => orchard_bundle = Some(*b),
                 #[cfg(zcash_unstable = "zfuture")]
                 TypedBundle::Tze(b) => tze_bundle = Some(b),
             }
@@ -486,13 +491,13 @@ impl ValuePoolDeltaKey {
 }
 
 /// `(bundle_variant, value)` for a known-type VP delta entry.
-pub type VPDeltaValue = (BundleVariant, i64);
+pub type VPDeltaValue = (BundleVariant, ZatBalance);
 
 /// Key for value pool delta entries for unknown bundle types.
 /// `(bundleType, assetClass, assetUuid)` — all raw wire values.
 pub type UnknownVPDeltaKey = (u64, u8, [u8; 64]);
 /// `(bundleVariant, value)` — raw wire values.
-pub type UnknownVPDeltaValue = (u64, i64);
+pub type UnknownVPDeltaValue = (u64, ZatBalance);
 
 /// The value pool delta map from ZIP 248.
 ///
@@ -536,14 +541,14 @@ impl ValuePoolDeltas {
 
     // -- ZEC convenience accessors for known bundle types --
 
-    fn get_zec(&self, bundle_type: BundleType) -> Option<i64> {
+    fn get_zec(&self, bundle_type: BundleType) -> Option<ZatBalance> {
         self.known
             .get(&ValuePoolDeltaKey::zec(bundle_type))
             .map(|&(_, v)| v)
     }
 
-    fn set_zec(&mut self, bundle_type: BundleType, variant: BundleVariant, value: i64) {
-        if value != 0 {
+    fn set_zec(&mut self, bundle_type: BundleType, variant: BundleVariant, value: ZatBalance) {
+        if value != ZatBalance::zero() {
             self.known
                 .insert(ValuePoolDeltaKey::zec(bundle_type), (variant, value));
         } else {
@@ -554,40 +559,39 @@ impl ValuePoolDeltas {
     /// Returns the transparent bundle's ZEC value pool delta.
     pub fn transparent_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Transparent)
-            .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     /// Sets the transparent bundle's ZEC value pool delta.
     pub fn set_transparent(&mut self, value: ZatBalance) {
-        self.set_zec(BundleType::Transparent, BundleVariant::Default, i64::from(value));
+        self.set_zec(BundleType::Transparent, BundleVariant::Default, value);
     }
 
     /// Returns the Sapling bundle's ZEC value pool delta.
     pub fn sapling_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Sapling)
-            .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     /// Sets the Sapling bundle's ZEC value pool delta.
     pub fn set_sapling(&mut self, value: ZatBalance) {
-        self.set_zec(BundleType::Sapling, BundleVariant::Default, i64::from(value));
+        self.set_zec(BundleType::Sapling, BundleVariant::Default, value);
     }
 
     /// Returns the Orchard bundle's ZEC value pool delta.
     pub fn orchard_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Orchard)
-            .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
     /// Sets the Orchard bundle's ZEC value pool delta.
     pub fn set_orchard(&mut self, value: ZatBalance) {
-        self.set_zec(BundleType::Orchard, BundleVariant::Default, i64::from(value));
+        self.set_zec(BundleType::Orchard, BundleVariant::Default, value);
     }
 
     /// Returns the transaction fee as a non-negative amount.
     pub fn fee(&self) -> Option<Zatoshis> {
         self.get_zec(BundleType::Fee).and_then(|v| {
-            let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
+            let abs = i64::from(v)
+                .checked_neg()
+                .and_then(|n| u64::try_from(n).ok())?;
             Zatoshis::from_u64(abs).ok()
         })
     }
@@ -595,13 +599,16 @@ impl ValuePoolDeltas {
     /// Sets the transaction fee (stored as a negative delta).
     pub fn set_fee(&mut self, value: Zatoshis) {
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
-        self.set_zec(BundleType::Fee, BundleVariant::Default, -pos);
+        let bal = ZatBalance::from_i64(-pos).expect("negated fee is valid ZatBalance");
+        self.set_zec(BundleType::Fee, BundleVariant::Default, bal);
     }
 
     /// Returns the ZIP 233 NSM amount as a non-negative value.
     pub fn zip233_amount(&self) -> Option<Zatoshis> {
         self.get_zec(BundleType::Zip233Nsm).and_then(|v| {
-            let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
+            let abs = i64::from(v)
+                .checked_neg()
+                .and_then(|n| u64::try_from(n).ok())?;
             Zatoshis::from_u64(abs).ok()
         })
     }
@@ -609,11 +616,17 @@ impl ValuePoolDeltas {
     /// Sets the ZIP 233 NSM delta (stored as a negative value).
     pub fn set_zip233(&mut self, value: Zatoshis) {
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
-        self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, -pos);
+        let bal = ZatBalance::from_i64(-pos).expect("negated ZIP 233 amount is valid ZatBalance");
+        self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, bal);
     }
 
     /// Insert a known-type entry. Used during v6 deserialization.
-    pub fn insert_known(&mut self, key: ValuePoolDeltaKey, variant: BundleVariant, value: i64) {
+    pub fn insert_known(
+        &mut self,
+        key: ValuePoolDeltaKey,
+        variant: BundleVariant,
+        value: ZatBalance,
+    ) {
         self.known.insert(key, (variant, value));
     }
 
@@ -624,32 +637,55 @@ impl ValuePoolDeltas {
         asset_class: u8,
         asset_uuid: [u8; 64],
         variant: u64,
-        value: i64,
+        value: ZatBalance,
     ) {
-        self.unknown.insert((bundle_type, asset_class, asset_uuid), (variant, value));
+        self.unknown
+            .insert((bundle_type, asset_class, asset_uuid), (variant, value));
     }
 
     /// Produce all VP delta entries (known and unknown) in canonical wire
     /// order, sorted by `(bundleType, assetClass, assetUuid)`.
     pub fn to_wire_entries(&self) -> Vec<ValuePoolDeltaEntry> {
-        let known = self.known.iter().map(|(k, &(variant, v))| ValuePoolDeltaEntry {
-            bundle_type: k.bundle_type.to_u64(),
-            bundle_variant: variant.to_u64(),
-            asset_class: k.asset_class,
-            asset_uuid: if k.asset_class == ASSET_CLASS_ZEC { None } else { Some(k.asset_uuid) },
-            value: v,
-        });
-        let unknown = self.unknown.iter().map(|(&(bt, ac, uuid), &(bv, v))| ValuePoolDeltaEntry {
-            bundle_type: bt,
-            bundle_variant: bv,
-            asset_class: ac,
-            asset_uuid: if ac == ASSET_CLASS_ZEC { None } else { Some(uuid) },
-            value: v,
-        });
+        let known = self
+            .known
+            .iter()
+            .map(|(k, &(variant, v))| ValuePoolDeltaEntry {
+                bundle_type: k.bundle_type.to_u64(),
+                bundle_variant: variant.to_u64(),
+                asset_class: k.asset_class,
+                asset_uuid: if k.asset_class == ASSET_CLASS_ZEC {
+                    None
+                } else {
+                    Some(k.asset_uuid)
+                },
+                value: v,
+            });
+        let unknown = self
+            .unknown
+            .iter()
+            .map(|(&(bt, ac, uuid), &(bv, v))| ValuePoolDeltaEntry {
+                bundle_type: bt,
+                bundle_variant: bv,
+                asset_class: ac,
+                asset_uuid: if ac == ASSET_CLASS_ZEC {
+                    None
+                } else {
+                    Some(uuid)
+                },
+                value: v,
+            });
         let mut all: Vec<_> = known.chain(unknown).collect();
         all.sort_by(|a, b| {
-            (a.bundle_type, a.asset_class, a.asset_uuid.unwrap_or([0u8; 64]))
-                .cmp(&(b.bundle_type, b.asset_class, b.asset_uuid.unwrap_or([0u8; 64])))
+            (
+                a.bundle_type,
+                a.asset_class,
+                a.asset_uuid.unwrap_or([0u8; 64]),
+            )
+                .cmp(&(
+                    b.bundle_type,
+                    b.asset_class,
+                    b.asset_uuid.unwrap_or([0u8; 64]),
+                ))
         });
         all
     }
@@ -669,7 +705,7 @@ pub struct ValuePoolDeltaEntry {
     pub bundle_variant: u64,
     pub asset_class: u8,
     pub asset_uuid: Option<[u8; 64]>,
-    pub value: i64,
+    pub value: ZatBalance,
 }
 
 impl ValuePoolDeltaEntry {
@@ -702,13 +738,19 @@ impl ValuePoolDeltaEntry {
         };
         let mut value_buf = [0u8; 8];
         reader.read_exact(&mut value_buf)?;
-        let value = i64::from_le_bytes(value_buf);
-        if value == 0 {
+        let raw = i64::from_le_bytes(value_buf);
+        if raw == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "ValuePoolDelta value must be nonzero",
             ));
         }
+        let value = ZatBalance::from_i64(raw).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "ValuePoolDelta value out of valid monetary range",
+            )
+        })?;
         Ok(Self {
             bundle_type,
             bundle_variant,
@@ -726,7 +768,7 @@ impl ValuePoolDeltaEntry {
         if let Some(ref uuid) = self.asset_uuid {
             writer.write_all(uuid)?;
         }
-        writer.write_all(&self.value.to_le_bytes())?;
+        writer.write_all(&i64::from(self.value).to_le_bytes())?;
         Ok(())
     }
 }
@@ -776,7 +818,6 @@ pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> 
     p
 }
 
-
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
 /// [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning)
 ///
@@ -796,7 +837,8 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
             #[cfg(feature = "std")]
             alloc::format!(
                 "unexpected sighashInfo length {} for {}; only sighash version 0 is supported",
-                info_len, _context,
+                info_len,
+                _context,
             ),
         ));
     }
@@ -810,7 +852,8 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
             #[cfg(feature = "std")]
             alloc::format!(
                 "unsupported sighash version {:#x} for {}",
-                version[0], _context,
+                version[0],
+                _context,
             ),
         ));
     }
@@ -894,11 +937,10 @@ mod tests {
 
         // Iteration order should be by bundle type
         let types: Vec<BundleType> = vp.iter().map(|(k, _)| k.bundle_type).collect();
-        assert_eq!(types, vec![
-            BundleType::Sapling,
-            BundleType::Fee,
-            BundleType::Zip233Nsm,
-        ]);
+        assert_eq!(
+            types,
+            vec![BundleType::Sapling, BundleType::Fee, BundleType::Zip233Nsm,]
+        );
     }
 
     #[test]
@@ -917,7 +959,7 @@ mod tests {
             bundle_variant: BundleVariant::Default.to_u64(),
             asset_class: ASSET_CLASS_ZEC,
             asset_uuid: None,
-            value: -50000,
+            value: ZatBalance::from_i64(-50000).unwrap(),
         };
 
         let mut buf = Vec::new();
@@ -975,20 +1017,24 @@ mod tests {
         use super::super::Authorized;
 
         let mut map: BundleMap<Authorized> = BundleMap::new();
-        map.insert_unknown(99, 0, UnknownBundle {
-            effect_data: vec![1, 2, 3],
-            effect_digest: blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(b"test_unknown_efx")
-                .hash(&[1, 2, 3]),
-            auth_data: Some(vec![4, 5, 6]),
-            auth_digest: Some(
-                blake2b_simd::Params::new()
+        map.insert_unknown(
+            99,
+            0,
+            UnknownBundle {
+                effect_data: vec![1, 2, 3],
+                effect_digest: blake2b_simd::Params::new()
                     .hash_length(32)
-                    .personal(b"test_unknown_aut")
-                    .hash(&[4, 5, 6]),
-            ),
-        });
+                    .personal(b"test_unknown_efx")
+                    .hash(&[1, 2, 3]),
+                auth_data: Some(vec![4, 5, 6]),
+                auth_digest: Some(
+                    blake2b_simd::Params::new()
+                        .hash_length(32)
+                        .personal(b"test_unknown_aut")
+                        .hash(&[4, 5, 6]),
+                ),
+            },
+        );
 
         assert!(!map.is_empty());
         let unknowns: Vec<_> = map.unknown_bundles().collect();

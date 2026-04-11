@@ -10,8 +10,8 @@ use crate::{
         sighash::SignableInput,
         sighash_v5::transparent_sig_digest,
         txid::{
-            hasher, hash_v6_effects_bundles, v6_bundle_digest_entries,
             ZCASH_TX_PERSONALIZATION_PREFIX, ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
+            hash_v6_effects_bundles, hasher, v6_bundle_digest_entries,
         },
     },
 };
@@ -56,7 +56,9 @@ pub fn v6_signature_hash<
     );
 
     let signature_bundles_digest = hash_v6_effects_bundles(v6_bundle_digest_entries(
-        tx.transparent_bundle().is_some().then_some(&transparent_sig),
+        tx.transparent_bundle()
+            .is_some()
+            .then_some(&transparent_sig),
         txid_parts.sapling_digest.as_ref(),
         txid_parts.orchard_digest.as_ref(),
         &txid_parts.unknown_effect_digests,

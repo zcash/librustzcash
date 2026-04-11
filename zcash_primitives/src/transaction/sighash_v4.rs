@@ -151,31 +151,21 @@ pub fn v4_signature_hash<
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            prevout_hash(
-                tx.transparent_bundle()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            prevout_hash(tx.transparent_bundle().map_or(&[], |b| b.vin.as_slice()))
         );
         update_hash!(
             h,
             (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            sequence_hash(
-                tx.transparent_bundle()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            sequence_hash(tx.transparent_bundle().map_or(&[], |b| b.vin.as_slice()))
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
             h.update(
-                outputs_hash(
-                    tx.transparent_bundle()
-                        .map_or(&[], |b| b.vout.as_slice()),
-                )
-                .as_bytes(),
+                outputs_hash(tx.transparent_bundle().map_or(&[], |b| b.vout.as_slice())).as_bytes(),
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match (tx.transparent_bundle(), signable_input) {
@@ -190,8 +180,7 @@ pub fn v4_signature_hash<
 
         update_hash!(
             h,
-            !tx.sprout_bundle()
-                .is_none_or(|b| b.joinsplits.is_empty()),
+            !tx.sprout_bundle().is_none_or(|b| b.joinsplits.is_empty()),
             {
                 let bundle = tx.sprout_bundle().unwrap();
                 joinsplits_hash(

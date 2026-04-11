@@ -17,6 +17,8 @@ use zcash_protocol::{
 };
 use zcash_script::opcode::PushValue;
 
+#[cfg(feature = "circuits")]
+use crate::transaction::zip248;
 use crate::transaction::{
     Transaction, TxVersion,
     fees::{
@@ -24,8 +26,6 @@ use crate::transaction::{
         transparent::{InputView, OutputView},
     },
 };
-#[cfg(feature = "circuits")]
-use crate::transaction::zip248;
 
 #[cfg(feature = "std")]
 use std::sync::mpsc::Sender;
@@ -345,10 +345,7 @@ pub struct Builder<'a, P, U> {
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        zcash_v6,
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     zip233_amount: Zatoshis,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
@@ -506,10 +503,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config,
             target_height,
             expiry_height,
-            #[cfg(all(
-                zcash_v6,
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
@@ -540,10 +534,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                zcash_v6,
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: self.zip233_amount,
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
@@ -693,10 +684,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
-            #[cfg(all(
-                zcash_v6,
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             -ZatBalance::from(self.zip233_amount),
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
@@ -802,10 +790,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
             .map_err(FeeError::FeeRule)
     }
 
-    #[cfg(all(
-        zcash_v6,
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
@@ -1096,10 +1081,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         if let Some(fee) = fee {
             vp_deltas.set_fee(fee);
         }
-        #[cfg(all(
-            zcash_v6,
-            feature = "zip-233"
-        ))]
+        #[cfg(all(zcash_v6, feature = "zip-233"))]
         vp_deltas.set_zip233(self.zip233_amount);
 
         let mut bundles = zip248::BundleMap::new();
@@ -1453,10 +1435,7 @@ mod tests {
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
-            #[cfg(all(
-                zcash_v6,
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,

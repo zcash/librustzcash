@@ -385,7 +385,7 @@ pub struct TransactionData<A: Authorization> {
 
 impl<A: Authorization> TransactionData<A> {
     /// Derives VP deltas from shielded bundle value balances and builds a
-    /// [`BundleMap`] from individual bundle options.
+    /// [`BundleMap`](zip248::BundleMap) from individual bundle options.
     fn build_bundle_map(
         value_pool_deltas: &mut zip248::ValuePoolDeltas,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
@@ -482,7 +482,8 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
-    /// Constructs a `TransactionData` directly from a [`BundleMap`] and [`ValuePoolDeltas`].
+    /// Constructs a `TransactionData` directly from a [`BundleMap`](zip248::BundleMap)
+    /// and [`ValuePoolDeltas`](zip248::ValuePoolDeltas).
     pub fn from_parts_v6(
         version: TxVersion,
         consensus_branch_id: BranchId,
@@ -1939,12 +1940,12 @@ pub enum V6ConsensusError {
     /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. The coinbase fee delta
     /// represents fees collected from other transactions in the block and
     /// must be nonnegative.
-    CoinbaseFeeDeltaNegative { value: i64 },
+    CoinbaseFeeDeltaNegative { value: ZatBalance },
     /// A non-coinbase transaction has a positive fee delta in
     /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. Fees paid are encoded as
     /// negative deltas (value removed from the transparent transaction
     /// value pool), so the fee delta must be nonpositive.
-    NonCoinbaseFeeDeltaPositive { value: i64 },
+    NonCoinbaseFeeDeltaPositive { value: ZatBalance },
     /// For a non-coinbase transaction, the per-asset sum of all entries in
     /// `mValuePoolDeltas` must be zero. This variant is returned when the
     /// sum for some asset is nonzero, indicating that value would be
@@ -1952,12 +1953,11 @@ pub enum V6ConsensusError {
     NonCoinbaseValueImbalance {
         bundle_type_for_asset: u64,
         asset_class: u8,
-        sum: i64,
+        sum: ZatBalance,
     },
-    /// A v6 transaction's per-asset value pool delta sum overflowed `i64`
-    /// while being computed. This is itself a consensus failure because a
-    /// well-formed sum must fit in `i64` after the deltas are constrained
-    /// to balance.
+    /// A v6 transaction's per-asset value pool delta sum overflowed while
+    /// being computed. This is itself a consensus failure because a
+    /// well-formed sum must fit after the deltas are constrained to balance.
     ValueDeltaSumOverflow,
 }
 
@@ -1977,12 +1977,12 @@ impl core::fmt::Display for V6ConsensusError {
             V6ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
                 f,
                 "coinbase fee bundle value pool delta is negative ({})",
-                value
+                i64::from(*value)
             ),
             V6ConsensusError::NonCoinbaseFeeDeltaPositive { value } => write!(
                 f,
                 "non-coinbase fee bundle value pool delta is positive ({}); fees are encoded as negative deltas",
-                value
+                i64::from(*value)
             ),
             V6ConsensusError::NonCoinbaseValueImbalance {
                 bundle_type_for_asset,
@@ -1991,7 +1991,9 @@ impl core::fmt::Display for V6ConsensusError {
             } => write!(
                 f,
                 "non-coinbase value pool deltas do not sum to zero for assetClass={:#x} (any-bundleType={}): sum={}",
-                asset_class, bundle_type_for_asset, sum
+                asset_class,
+                bundle_type_for_asset,
+                i64::from(*sum)
             ),
             V6ConsensusError::ValueDeltaSumOverflow => {
                 write!(f, "value pool delta sum overflowed i64")
@@ -2058,12 +2060,12 @@ impl<A: Authorization> TransactionData<A> {
                     && key.asset_class == zip248::ASSET_CLASS_ZEC)
                     .then_some(value)
             })
-            .unwrap_or(0);
+            .unwrap_or(ZatBalance::zero());
         if is_coinbase {
-            if fee_delta < 0 {
+            if i64::from(fee_delta) < 0 {
                 return Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: fee_delta });
             }
-        } else if fee_delta > 0 {
+        } else if i64::from(fee_delta) > 0 {
             return Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
         }
 
@@ -2075,17 +2077,16 @@ impl<A: Authorization> TransactionData<A> {
         if !is_coinbase {
             // Group ALL entries (known + unknown) by (assetClass, assetUuid)
             // and verify the sum is zero for each asset.
-            let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, i64)> = BTreeMap::new();
+            let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, ZatBalance)> = BTreeMap::new();
             for entry in self.value_pool_deltas.to_wire_entries() {
                 let asset_key = (entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
-                let acc = by_asset.entry(asset_key).or_insert((entry.bundle_type, 0));
-                acc.1 = acc
-                    .1
-                    .checked_add(entry.value)
-                    .ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
+                let acc = by_asset
+                    .entry(asset_key)
+                    .or_insert((entry.bundle_type, ZatBalance::zero()));
+                acc.1 = (acc.1 + entry.value).ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
             }
             for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
-                if sum != 0 {
+                if sum != ZatBalance::zero() {
                     return Err(V6ConsensusError::NonCoinbaseValueImbalance {
                         bundle_type_for_asset: any_bundle_type,
                         asset_class,

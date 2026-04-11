@@ -108,8 +108,7 @@ pub fn read_v6_bundle(
     // The closure is not redundant: `read_action_without_auth` has an HRTB
     // bound that clippy cannot see through.
     #[allow(clippy::redundant_closure)]
-    let actions_without_auth =
-        Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
+    let actions_without_auth = Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
 
     if actions_without_auth.is_empty() {
         if !effects_reader.is_empty() {

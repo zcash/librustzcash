@@ -26,16 +26,10 @@ use alloc::vec::Vec;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 
-#[cfg(all(
-    any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233",
-))]
-use zcash_protocol::value::Zatoshis;
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
-    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
+    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion, zip248},
     zcash_protocol::consensus::BranchId,
     zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
 };
@@ -175,11 +169,7 @@ impl Pczt {
             consensus_branch_id,
             lock_time,
             global.expiry_height.into(),
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            Zatoshis::ZERO,
+            zip248::ValuePoolDeltas::default(),
             transparent_bundle,
             None,
             sapling_bundle,

@@ -246,29 +246,27 @@ fn zip_0244() {
             .map(Script)
             .collect();
 
-        let test_bundle = txdata
-            .transparent_bundle()
-            .map(|b| transparent::Bundle {
-                // we have to do this map/clone to make the types line up, since the
-                // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
-                // it to be bound to TestTransparentAuth.
-                vin: b
-                    .vin
-                    .iter()
-                    .map(|vin| {
-                        TxIn::from_parts(
-                            vin.prevout().clone(),
-                            vin.script_sig().clone(),
-                            vin.sequence(),
-                        )
-                    })
-                    .collect(),
-                vout: b.vout.clone(),
-                authorization: TestTransparentAuth {
-                    input_amounts,
-                    input_scriptpubkeys,
-                },
-            });
+        let test_bundle = txdata.transparent_bundle().map(|b| transparent::Bundle {
+            // we have to do this map/clone to make the types line up, since the
+            // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
+            // it to be bound to TestTransparentAuth.
+            vin: b
+                .vin
+                .iter()
+                .map(|vin| {
+                    TxIn::from_parts(
+                        vin.prevout().clone(),
+                        vin.script_sig().clone(),
+                        vin.sequence(),
+                    )
+                })
+                .collect(),
+            vout: b.vout.clone(),
+            authorization: TestTransparentAuth {
+                input_amounts,
+                input_scriptpubkeys,
+            },
+        });
 
         #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
@@ -393,9 +391,15 @@ fn zip_0233() {
         vp.set_fee(Zatoshis::from_u64(fee).unwrap());
         vp.set_zip233(Zatoshis::from_u64(nsm).unwrap());
         TransactionData::<super::Authorized>::from_parts_v6(
-            super::TxVersion::V6, BranchId::Nu7, 0, BlockHeight::from_u32(100),
-            vp, zip248::BundleMap::new(),
-        ).freeze().unwrap()
+            super::TxVersion::V6,
+            BranchId::Nu7,
+            0,
+            BlockHeight::from_u32(100),
+            vp,
+            zip248::BundleMap::new(),
+        )
+        .freeze()
+        .unwrap()
     };
 
     // Roundtrip: serialize → read back → check VP deltas.
@@ -403,8 +407,14 @@ fn zip_0233() {
     let mut buf = Vec::new();
     tx.write(&mut buf).unwrap();
     let tx = Transaction::read(&buf[..], BranchId::Nu7).unwrap();
-    assert_eq!(tx.value_pool_deltas().fee(), Some(Zatoshis::from_u64(10_000).unwrap()));
-    assert_eq!(tx.value_pool_deltas().zip233_amount(), Some(Zatoshis::from_u64(50_000).unwrap()));
+    assert_eq!(
+        tx.value_pool_deltas().fee(),
+        Some(Zatoshis::from_u64(10_000).unwrap())
+    );
+    assert_eq!(
+        tx.value_pool_deltas().zip233_amount(),
+        Some(Zatoshis::from_u64(50_000).unwrap())
+    );
 
     // Determinism: same inputs → same txid.
     let tx2 = make_tx(10_000, 50_000);
@@ -417,9 +427,9 @@ fn zip_0233() {
 
 #[cfg(test)]
 mod zip248_tests {
+    use super::super::zip248;
     use alloc::vec;
     use alloc::vec::Vec;
-    use super::super::zip248;
     use zcash_protocol::value::{ZatBalance, Zatoshis};
 
     #[test]
@@ -474,7 +484,8 @@ mod zip248_tests {
         let mut buf = Vec::new();
         zip248::write_bundle_data_framing(&mut buf, bt, bv, &data).unwrap();
 
-        let ((parsed_bt, parsed_bv), parsed_data) = zip248::read_bundle_data_framing(&buf[..]).unwrap();
+        let ((parsed_bt, parsed_bv), parsed_data) =
+            zip248::read_bundle_data_framing(&buf[..]).unwrap();
         assert_eq!(parsed_bt, bt);
         assert_eq!(parsed_bv, bv);
         assert!(parsed_data.is_empty());
@@ -499,12 +510,16 @@ mod zip248_tests {
         let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
         map.insert_unknown(99, 0, test_unknown_bundle(&[]));
         assert_eq!(
-            map.unknown_bundles().map(|(&(bt, _), _)| bt).collect::<Vec<_>>(),
+            map.unknown_bundles()
+                .map(|(&(bt, _), _)| bt)
+                .collect::<Vec<_>>(),
             vec![99],
         );
         map.insert_unknown(50, 0, test_unknown_bundle(&[1]));
         assert_eq!(
-            map.unknown_bundles().map(|(&(bt, _), _)| bt).collect::<Vec<_>>(),
+            map.unknown_bundles()
+                .map(|(&(bt, _), _)| bt)
+                .collect::<Vec<_>>(),
             vec![50, 99],
         );
     }
@@ -558,15 +573,19 @@ mod zip248_tests {
     #[cfg(zcash_v6)]
     mod consensus_rules {
         use super::super::super::{
-            Authorized, TransactionData, TxVersion, V6ConsensusError, zip248,
+            Authorized, TransactionData, TxVersion, V6ConsensusError, ZatBalance, zip248,
         };
         use zcash_protocol::consensus::{BlockHeight, BranchId};
         use zcash_protocol::value::Zatoshis;
 
         fn make_v6(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
             TransactionData::from_parts_v6(
-                TxVersion::V6, BranchId::Nu7, 0, BlockHeight::from_u32(100),
-                vp, zip248::BundleMap::new(),
+                TxVersion::V6,
+                BranchId::Nu7,
+                0,
+                BlockHeight::from_u32(100),
+                vp,
+                zip248::BundleMap::new(),
             )
         }
 
@@ -581,12 +600,14 @@ mod zip248_tests {
                     asset_uuid: [0x42; 64],
                 },
                 zip248::BundleVariant::Default,
-                -1000,
+                ZatBalance::from_i64(-1000).unwrap(),
             );
             let tx = make_v6(vp);
             assert_eq!(
                 tx.check_v6_consensus_rules(false),
-                Err(V6ConsensusError::FeeAssetClassNotZec { asset_class: zip248::ASSET_CLASS_OTHER }),
+                Err(V6ConsensusError::FeeAssetClassNotZec {
+                    asset_class: zip248::ASSET_CLASS_OTHER
+                }),
             );
         }
 
@@ -597,7 +618,9 @@ mod zip248_tests {
             let tx = make_v6(vp);
             assert_eq!(
                 tx.check_v6_consensus_rules(true),
-                Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: -1000 }),
+                Err(V6ConsensusError::CoinbaseFeeDeltaNegative {
+                    value: ZatBalance::from_i64(-1000).unwrap(),
+                }),
             );
         }
 
@@ -609,12 +632,14 @@ mod zip248_tests {
             vp.insert_known(
                 zip248::ValuePoolDeltaKey::zec(zip248::BundleType::Fee),
                 zip248::BundleVariant::Default,
-                1000,
+                ZatBalance::from_i64(1000).unwrap(),
             );
             let tx = make_v6(vp);
             assert_eq!(
                 tx.check_v6_consensus_rules(false),
-                Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: 1000 }),
+                Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive {
+                    value: ZatBalance::from_i64(1000).unwrap(),
+                }),
             );
         }
 
@@ -625,7 +650,10 @@ mod zip248_tests {
             vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap());
             let tx = make_v6(vp);
             let err = tx.check_v6_consensus_rules(false).unwrap_err();
-            assert!(matches!(err, V6ConsensusError::NonCoinbaseValueImbalance { .. }));
+            assert!(matches!(
+                err,
+                V6ConsensusError::NonCoinbaseValueImbalance { .. }
+            ));
         }
 
         #[test]
@@ -642,8 +670,8 @@ mod zip248_tests {
 
     #[cfg(zcash_v6)]
     mod parsing_rules {
-        use alloc::vec::Vec;
         use super::super::super::{Transaction, zip248};
+        use alloc::vec::Vec;
         use zcash_encoding::CompactSize;
         use zcash_protocol::consensus::BranchId;
         use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
@@ -784,8 +812,8 @@ mod zip248_tests {
 
     #[cfg(zcash_v6)]
     mod wire_order {
-        use alloc::vec::Vec;
         use super::super::super::zip248;
+        use alloc::vec::Vec;
         use zcash_protocol::value::{ZatBalance, Zatoshis};
 
         #[test]
@@ -795,7 +823,7 @@ mod zip248_tests {
             vp.set_orchard(ZatBalance::from_i64(50_000).unwrap());
             vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
             // Unknown: bundleType 8 (sorts after all known types)
-            vp.insert_unknown(8, 0, [0u8; 64], 0, 99_000);
+            vp.insert_unknown(8, 0, [0u8; 64], 0, ZatBalance::from_i64(99_000).unwrap());
 
             let entries = vp.to_wire_entries();
             let types: Vec<u64> = entries.iter().map(|e| e.bundle_type).collect();

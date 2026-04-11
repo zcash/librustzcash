@@ -418,11 +418,7 @@ mod tests {
             BranchId::Canopy,
             0,
             BlockHeight::from(3),
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            Zatoshis::ZERO,
+            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             Some(transparent::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(
