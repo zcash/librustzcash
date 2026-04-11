@@ -39,7 +39,7 @@ use zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID};
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use {
     common::{Global, determine_lock_time},
-    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
+    zcash_primitives::transaction::{Authorization, TransactionData, TxVersion, zip248},
     zcash_protocol::{
         consensus::{BranchId, OrchardProtocolRevision},
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
