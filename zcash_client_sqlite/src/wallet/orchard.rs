@@ -250,7 +250,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
 /// Unlike `select_spendable_notes` (which applies confirmation, dust, and
 /// expiry filters for transaction construction), this returns every note
 /// that existed and was unspent at the given height.
-pub fn get_orchard_notes_at_historical_height<P: consensus::Parameters>(
+pub fn get_unspent_orchard_notes_at_historical_height<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
@@ -724,7 +724,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn get_orchard_notes_at_historical_height_boundary_heights() {
+    fn get_unspent_orchard_notes_at_historical_height_boundary_heights() {
         use zcash_client_backend::data_api::Account;
         use zcash_client_backend::data_api::testing::{
             AddressType, TestBuilder, pool::ShieldedPoolTester,
@@ -764,20 +764,20 @@ pub(crate) mod tests {
 
         // Before any notes: nothing (h1 - 1 is before the note was mined)
         let notes = db
-            .get_orchard_notes_at_historical_height(account.id(), h1 - 1)
+            .get_unspent_orchard_notes_at_historical_height(account.id(), h1 - 1)
             .unwrap();
         assert_eq!(notes.len(), 0);
 
         // At h1: original note received and unspent
         let notes = db
-            .get_orchard_notes_at_historical_height(account.id(), h1)
+            .get_unspent_orchard_notes_at_historical_height(account.id(), h1)
             .unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].note_value().unwrap(), value);
 
         // At h2: original spent, only change note remains
         let notes = db
-            .get_orchard_notes_at_historical_height(account.id(), h2)
+            .get_unspent_orchard_notes_at_historical_height(account.id(), h2)
             .unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(
@@ -787,7 +787,7 @@ pub(crate) mod tests {
 
         // At h3: change note + new note
         let notes = db
-            .get_orchard_notes_at_historical_height(account.id(), h3)
+            .get_unspent_orchard_notes_at_historical_height(account.id(), h3)
             .unwrap();
         assert_eq!(notes.len(), 2);
         let total: Zatoshis = notes
