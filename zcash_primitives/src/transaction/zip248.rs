@@ -150,7 +150,9 @@ pub const ASSET_CLASS_OTHER: u8 = 0x01;
 /// `(bundleType, bundleVariant)` pair are fixed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct BundleId {
+    /// The protocol-level bundle type (e.g. Transparent, Sapling, Orchard).
     pub bundle_type: BundleType,
+    /// The variant within the bundle type.
     pub bundle_variant: BundleVariant,
 }
 
@@ -207,6 +209,7 @@ pub struct UnknownBundle {
     /// Digest of the effecting data for the txid computation, using the
     /// opaque effects personalization from ZIP 248 §T.3.
     pub effect_digest: blake2b_simd::Hash,
+    /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
     /// Digest of the authorizing data. `None` when parsed from the wire;
     /// set via [`BundleMap::get_unknown_mut`] before computing the auth commitment.
@@ -473,7 +476,9 @@ impl<A: Authorization> Default for BundleMap<A> {
 /// Key for value pool delta entries for known bundle types.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ValuePoolDeltaKey {
+    /// The bundle type this delta belongs to.
     pub bundle_type: BundleType,
+    /// Asset class: 0 for ZEC, 1 for other assets.
     pub asset_class: u8,
     /// For ZEC (asset_class == 0), this is all zeros. For other assets, a 64-byte UUID.
     pub asset_uuid: [u8; 64],
@@ -701,10 +706,15 @@ impl ValuePoolDeltas {
 /// bundle types not recognized by this implementation.
 #[derive(Clone, Debug)]
 pub struct ValuePoolDeltaEntry {
+    /// Bundle type as a raw wire value (may be unrecognized).
     pub bundle_type: u64,
+    /// Bundle variant as a raw wire value.
     pub bundle_variant: u64,
+    /// Asset class: 0 for ZEC, 1 for other assets.
     pub asset_class: u8,
+    /// 64-byte asset UUID, present only when `asset_class != 0`.
     pub asset_uuid: Option<[u8; 64]>,
+    /// The signed value-pool delta for this entry.
     pub value: ZatBalance,
 }
 
