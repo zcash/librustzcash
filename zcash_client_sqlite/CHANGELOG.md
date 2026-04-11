@@ -30,6 +30,8 @@ workspace.
 - `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
+- `WalletDb::generate_orchard_witnesses_at_historical_height` generates Merkle
+  witnesses at a historical height using an ephemeral in-memory tree.
 
 ### Changed
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
