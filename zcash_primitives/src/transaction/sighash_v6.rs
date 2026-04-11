@@ -4,31 +4,20 @@ use core2::io::Write;
 use ::transparent::sighash::TransparentAuthorizingContext;
 
 use crate::{
-    encoding::{StateWrite, WriteBytesExt},
+    encoding::WriteBytesExt,
     transaction::{
         Authorization, TransactionData, TxDigests,
         sighash::SignableInput,
         sighash_v5::transparent_sig_digest,
         txid::{
-            hash_v6_effects_bundles, v6_bundle_digest_entries,
-            ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
+            hasher, hash_v6_effects_bundles, v6_bundle_digest_entries,
+            ZCASH_TX_PERSONALIZATION_PREFIX, ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
         },
     },
 };
 
-/// Personalization prefix for the txid/sighash root hash.
-const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
-
-fn hasher(personal: &[u8; 16]) -> StateWrite {
-    StateWrite(
-        blake2b_simd::Params::new()
-            .hash_length(32)
-            .personal(personal)
-            .to_state(),
-    )
-}
-
-/// v6 signature hash per ZIP 248.
+/// Computes the v6 signature digest.
+/// [ZIP 248 §Signature Digest](https://zips.z.cash/zip-0248#signature-digest)
 ///
 /// For transactions with no transparent inputs, the signature digest is
 /// identical to the transaction identifier digest (since `transparent_sig_digest`
@@ -36,6 +25,8 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 ///
 /// For transactions with transparent inputs, `transparent_effects_digest` in the
 /// effects bundles is replaced with `transparent_sig_digest`.
+///
+/// Sapling and Orchard sighash uses `SIGHASH_ALL` (`hash_type = 0x01`).
 #[cfg(zcash_v6)]
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
