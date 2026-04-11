@@ -86,11 +86,12 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
-/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
+/// Reads an [`orchard::Bundle`] from v6 effecting + authorizing byte vectors.
+/// [ZIP 248 §Orchard Bundle](https://zips.z.cash/zip-0248#orchard-bundle)
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
-/// value balance is *not* read from these bytes — it lives in
+/// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
 #[cfg(zcash_v6)]
 pub fn read_v6_bundle(
@@ -102,6 +103,10 @@ pub fn read_v6_bundle(
 
     // Effecting data: nActions || OrchardActionEffecting* ||
     //                 (flags || anchor)?  (present iff nActions > 0)
+    //
+    // # Correctness
+    // The closure is not redundant: `read_action_without_auth` has an HRTB
+    // bound that clippy cannot see through.
     #[allow(clippy::redundant_closure)]
     let actions_without_auth =
         Vector::read(&mut effects_reader, |r| read_action_without_auth(r))?;
@@ -179,6 +184,7 @@ pub fn read_v6_bundle(
 }
 
 /// Writes the effecting data for an Orchard bundle in v6 format.
+/// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
 #[cfg(zcash_v6)]
 pub fn write_v6_effects<W: Write>(
     mut writer: W,
@@ -195,6 +201,10 @@ pub fn write_v6_effects<W: Write>(
 }
 
 /// Writes the authorizing data for an Orchard bundle in v6 format.
+/// [ZIP 248 §Orchard Authorizing Data](https://zips.z.cash/zip-0248#orchard-authorizing-data)
+///
+/// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
+/// (version 0: `[0x01, 0x00]`).
 #[cfg(zcash_v6)]
 pub fn write_v6_auth<W: Write>(
     mut writer: W,
@@ -352,15 +362,6 @@ pub fn write_v5_bundle<W: Write>(
     }
 
     Ok(())
-}
-
-#[cfg(zcash_v6)]
-pub fn write_v6_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
-    writer: W,
-) -> io::Result<()> {
-    // TODO: This is a temporary delegation for non-ZIP-248 code paths.
-    write_v5_bundle(bundle, writer)
 }
 
 pub fn write_value_commitment<W: Write>(mut writer: W, cv: &ValueCommitment) -> io::Result<()> {

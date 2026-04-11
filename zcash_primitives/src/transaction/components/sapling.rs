@@ -499,11 +499,12 @@ pub(crate) fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-/// Reads a [`Bundle`] from v6 effecting + authorizing byte vectors per ZIP 248.
+/// Reads a [`Bundle`] from v6 effecting + authorizing byte vectors.
+/// [ZIP 248 §Sapling Bundle](https://zips.z.cash/zip-0248#sapling-bundle)
 ///
 /// `effects` and `auth` are the raw `vBundleData` payloads from the
 /// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
-/// value balance is *not* read from these bytes — it lives in
+/// value balance is *not* read from these bytes -- it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
 #[cfg(zcash_v6)]
 pub(crate) fn read_v6_bundle(
@@ -611,6 +612,8 @@ pub(crate) fn read_v6_bundle(
 }
 
 /// Writes the effecting data for a Sapling bundle in v6 format.
+/// [ZIP 248 §Sapling Effecting Data](https://zips.z.cash/zip-0248#sapling-effecting-data)
+///
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
 ///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
 ///         anchorSapling (32 bytes, present if nSpends > 0).
@@ -641,6 +644,11 @@ pub(crate) fn write_v6_effects<W: Write>(
 }
 
 /// Writes the authorizing data for a Sapling bundle in v6 format.
+/// [ZIP 248 §Sapling Authorizing Data](https://zips.z.cash/zip-0248#sapling-authorizing-data)
+///
+/// Each spend auth sig and the binding sig are prefixed with a `sighashInfo`
+/// (version 0: `[0x01, 0x00]`).
+///
 /// Layout: vSpendProofsSapling (192*nSpends),
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),
