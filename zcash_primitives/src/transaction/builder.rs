@@ -346,7 +346,7 @@ pub struct Builder<'a, P, U> {
     target_height: BlockHeight,
     expiry_height: BlockHeight,
     #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        zcash_v6,
         feature = "zip-233"
     ))]
     zip233_amount: Zatoshis,
@@ -507,7 +507,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             target_height,
             expiry_height,
             #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                zcash_v6,
                 feature = "zip-233"
             ))]
             zip233_amount: Zatoshis::ZERO,
@@ -541,7 +541,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             target_height: self.target_height,
             expiry_height: self.expiry_height,
             #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                zcash_v6,
                 feature = "zip-233"
             ))]
             zip233_amount: self.zip233_amount,
@@ -694,7 +694,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                 },
             )?,
             #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                zcash_v6,
                 feature = "zip-233"
             ))]
             -ZatBalance::from(self.zip233_amount),
@@ -803,7 +803,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 
     #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        zcash_v6,
         feature = "zip-233"
     ))]
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
@@ -1097,7 +1097,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             vp_deltas.set_fee(fee);
         }
         #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            zcash_v6,
             feature = "zip-233"
         ))]
         vp_deltas.set_zip233(self.zip233_amount);
@@ -1454,7 +1454,7 @@ mod tests {
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                zcash_v6,
                 feature = "zip-233"
             ))]
             zip233_amount: Zatoshis::ZERO,

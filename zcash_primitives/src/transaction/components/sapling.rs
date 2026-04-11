@@ -22,7 +22,7 @@ use zcash_protocol::{
 
 use super::GROTH_PROOF_SIZE;
 use crate::transaction::Transaction;
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 use crate::transaction::zip248::consume_v6_sighash_v0_info;
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
@@ -505,7 +505,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
 /// `mEffectBundles[2]` and `mAuthBundles[2]` map entries respectively. The
 /// value balance is *not* read from these bytes — it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub(crate) fn read_v6_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
@@ -614,7 +614,7 @@ pub(crate) fn read_v6_bundle(
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
 ///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
 ///         anchorSapling (32 bytes, present if nSpends > 0).
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub(crate) fn write_v6_effects<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,
@@ -645,7 +645,7 @@ pub(crate) fn write_v6_effects<W: Write>(
 ///         vSpendAuthSigsSapling (SaplingSignature[nSpends] with sighashInfo),
 ///         vOutputProofsSapling (192*nOutputs),
 ///         bindingSigSapling (SaplingSignature with sighashInfo).
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub(crate) fn write_v6_auth<W: Write>(
     mut writer: W,
     bundle: &Bundle<Authorized, ZatBalance>,

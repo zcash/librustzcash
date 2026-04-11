@@ -433,7 +433,7 @@ fn zip_0233() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
-            txdata.zip233_amount,
+            txdata.value_pool_deltas().clone(),
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),

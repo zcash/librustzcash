@@ -9,7 +9,7 @@ use ::sapling::bundle::GrothProofBytes;
 #[cfg(zcash_unstable = "zfuture")]
 use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 use super::sighash_v6::v6_signature_hash;
 
 pub enum SignableInput<'a> {

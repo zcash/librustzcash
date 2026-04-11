@@ -163,9 +163,8 @@ impl<A: Authorization> BundleMap<A> {
     }
 
     pub fn sprout(&self) -> Option<&sprout::Bundle> {
-        // Sprout doesn't have a ZIP 248 bundle type; we store it at a synthetic key.
-        // For V1-V4 compat, we iterate to find it.
-        self.inner.values().find_map(|b| match b {
+        // Sprout uses synthetic BundleId(1, 0) — see `insert_sprout`.
+        self.inner.get(&BundleId::new(1, 0)).and_then(|b| match b {
             TypedBundle::Sprout(bundle) => Some(bundle),
             _ => None,
         })
@@ -187,10 +186,13 @@ impl<A: Authorization> BundleMap<A> {
 
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
-        self.inner.values().find_map(|b| match b {
-            TypedBundle::Tze(bundle) => Some(bundle),
-            _ => None,
-        })
+        // TZE uses synthetic BundleId(0xFFFF, 0) — see `insert_tze`.
+        self.inner
+            .get(&BundleId::new(0xFFFF, 0))
+            .and_then(|b| match b {
+                TypedBundle::Tze(bundle) => Some(bundle),
+                _ => None,
+            })
     }
 
     /// Returns an iterator over unknown (opaque) bundles.
@@ -261,48 +263,16 @@ impl<A: Authorization> BundleMap<A> {
             Option<tze::Bundle<A::TzeAuth>>,
         ) -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> BundleMap<B> {
-        // Extract known typed bundles from the map.
-        let mut transparent_bundle = None;
-        let mut sprout_bundle = None;
-        let mut sapling_bundle = None;
-        let mut orchard_bundle = None;
-        #[cfg(zcash_unstable = "zfuture")]
-        let mut tze_bundle = None;
-        let mut result = BundleMap::new();
-
-        for (id, bundle) in self.inner {
-            match bundle {
-                TypedBundle::Transparent(b) => transparent_bundle = Some(b),
-                TypedBundle::Sprout(b) => sprout_bundle = Some((id, b)),
-                TypedBundle::Sapling(b) => sapling_bundle = Some(b),
-                TypedBundle::Orchard(b) => orchard_bundle = Some(b),
-                #[cfg(zcash_unstable = "zfuture")]
-                TypedBundle::Tze(b) => tze_bundle = Some(b),
-                TypedBundle::Unknown(ub) => {
-                    result.inner.insert(id, TypedBundle::Unknown(ub));
-                }
-            }
-        }
-
-        // Apply mappers.
-        if let Some(b) = f_transparent(transparent_bundle) {
-            result.insert_transparent(b);
-        }
-        if let Some((id, b)) = sprout_bundle {
-            result.inner.insert(id, TypedBundle::Sprout(b));
-        }
-        if let Some(b) = f_sapling(sapling_bundle) {
-            result.insert_sapling(b);
-        }
-        if let Some(b) = f_orchard(orchard_bundle) {
-            result.insert_orchard(b);
-        }
-        #[cfg(zcash_unstable = "zfuture")]
-        if let Some(b) = f_tze(tze_bundle) {
-            result.insert_tze(b);
-        }
-
-        result
+        // Delegate to try_map_authorization with infallible closures.
+        self.try_map_authorization::<B, core::convert::Infallible>(
+            |b| Ok(f_transparent(b)),
+            |b| Ok(f_sapling(b)),
+            |b| Ok(f_orchard(b)),
+            #[cfg(zcash_unstable = "zfuture")]
+            |b| Ok(f_tze(b)),
+        )
+        // Safety: Infallible cannot be constructed, so this never panics.
+        .unwrap()
     }
 
     /// Like [`map_authorization`] but with fallible closures.
@@ -481,27 +451,28 @@ impl ValuePoolDeltas {
     pub fn fee(&self) -> Option<Zatoshis> {
         self.get_zec(BUNDLE_TYPE_FEE).and_then(|v| {
             // Fee VP delta is negative (value removed from pool).
-            // Return the absolute value as Zatoshis.
-            Zatoshis::from_u64((-v) as u64).ok()
+            let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
+            Zatoshis::from_u64(abs).ok()
         })
     }
 
     pub fn set_fee(&mut self, value: Zatoshis) {
         // Fee is stored as a negative VP delta (value removed from pool).
-        let neg: i64 = -(u64::from(value) as i64);
-        self.set_zec(BUNDLE_TYPE_FEE, BUNDLE_VARIANT_DEFAULT, neg);
+        let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
+        self.set_zec(BUNDLE_TYPE_FEE, BUNDLE_VARIANT_DEFAULT, -pos);
     }
 
     pub fn zip233_amount(&self) -> Option<Zatoshis> {
         self.get_zec(BUNDLE_TYPE_ZIP233_NSM).and_then(|v| {
             // ZIP 233 NSM is a negative VP delta.
-            Zatoshis::from_u64((-v) as u64).ok()
+            let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
+            Zatoshis::from_u64(abs).ok()
         })
     }
 
     pub fn set_zip233(&mut self, value: Zatoshis) {
-        let neg: i64 = -(u64::from(value) as i64);
-        self.set_zec(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT, neg);
+        let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
+        self.set_zec(BUNDLE_TYPE_ZIP233_NSM, BUNDLE_VARIANT_DEFAULT, -pos);
     }
 
     /// Insert a raw entry. Used during v6 deserialization.
@@ -614,10 +585,10 @@ pub fn write_bundle_data_framing<W: Write>(
 /// Reads and validates a sighash version 0 `sighashInfo` prefix
 /// (`compactSize(1) || 0x00`) per ZIP 248 §"Sighash Versioning". Sighash
 /// version 0 is currently the only defined version.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
     reader: &mut R,
-    context: &'static str,
+    _context: &'static str,
 ) -> io::Result<()> {
     let info_len = CompactSize::read_t::<_, usize>(&mut *reader)?;
     if info_len != 1 {
@@ -628,7 +599,7 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
             #[cfg(feature = "std")]
             alloc::format!(
                 "unexpected sighashInfo length {} for {}; only sighash version 0 is supported",
-                info_len, context,
+                info_len, _context,
             ),
         ));
     }
@@ -642,11 +613,10 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
             #[cfg(feature = "std")]
             alloc::format!(
                 "unsupported sighash version {:#x} for {}",
-                version[0], context,
+                version[0], _context,
             ),
         ));
     }
-    let _ = context;
     Ok(())
 }
 

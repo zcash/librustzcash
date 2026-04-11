@@ -19,7 +19,7 @@ use super::{
 };
 
 #[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+    zcash_v6,
     feature = "zip-233"
 ))]
 use zcash_protocol::value::Zatoshis;
@@ -64,17 +64,17 @@ const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxId
 const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuthHash_";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 const ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaHash";
 #[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
 // ZIP 248 v6-specific personalization strings
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) const ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdVPDeltaHash";
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) const ZCASH_V6_EFFECTS_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdEffBnd_Hash";
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthBnd__Hash";
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
@@ -239,7 +239,7 @@ fn hash_header_txid_data(
     lock_time: u32,
     expiry_height: BlockHeight,
     #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        zcash_v6,
         feature = "zip-233"
     ))]
     zip233_amount: &Zatoshis,
@@ -254,7 +254,7 @@ fn hash_header_txid_data(
 
     // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
     #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        zcash_v6,
         feature = "zip-233"
     ))]
     if version.has_zip233() {
@@ -317,7 +317,7 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
 // ---------------------------------------------------------------------------
 
 /// v6 header digest: same fields as V5 but WITHOUT zip233_amount.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_header(
     version: TxVersion,
     consensus_branch_id: BranchId,
@@ -334,7 +334,7 @@ pub(crate) fn hash_v6_header(
 }
 
 /// v6 value pool deltas digest.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> Blake2bHash {
     use zcash_encoding::CompactSize;
 
@@ -365,7 +365,7 @@ pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> 
 /// When `nSpendsSapling = 0` the wire format omits `anchorSapling`; per the
 /// clarified ZIP 248 §T.3.2 the digest still includes 32 bytes at position
 /// T.3.2c, which are hashed as 32 zero bytes in that case.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
 ) -> Blake2bHash {
@@ -387,7 +387,7 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
 /// v6 orchard effects digest: actions + flags + anchor, WITHOUT value_balance.
 /// Computed from bundle accessors rather than delegating to the orchard crate's
 /// `commitment()` method (which includes value_balance).
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_orchard_effects(
     bundle: &orchard::Bundle<impl orchard::Authorization, ZatBalance>,
 ) -> Blake2bHash {
@@ -453,7 +453,7 @@ pub(crate) fn hash_v6_orchard_effects(
 /// `associatedData` for every bundle type, so `sighashInfo = [0x00]` (a single
 /// version byte) and the wire encoding is `compactSize(1) || [0x00]` =
 /// `[0x01, 0x00]`. Sighash version 0 is currently the only defined version.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 const V6_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 
 /// v6 transparent authorizing-data digest per ZIP 248 §A.1.0.
@@ -462,7 +462,7 @@ const V6_SIGHASH_V0_INFO_WIRE: &[u8; 2] = &[0x01, 0x00];
 /// encoding (sighash version 0: `[0x01, 0x00]`) followed by the `scriptSig`
 /// field encoding (a `compactSize`-prefixed byte array). When there are no
 /// transparent inputs, returns `BLAKE2b-256("ZTxAuthTransHash", [])`.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_transparent_auth(
     transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
 ) -> Blake2bHash {
@@ -482,7 +482,7 @@ pub(crate) fn hash_v6_transparent_auth(
 /// sighash version 0 `SaplingSignature`), the output proofs, and the binding
 /// signature (also as a `SaplingSignature`). When there are no spends and no
 /// outputs, returns `BLAKE2b-256("ZTxAuthSapliHash", [])`.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_sapling_auth(
     sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
@@ -515,7 +515,7 @@ pub(crate) fn hash_v6_sapling_auth(
 /// `OrchardSignature`, then the binding signature (also as an
 /// `OrchardSignature`). When there are no actions, returns
 /// `BLAKE2b-256("ZTxAuthOrchaHash", [])`.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_orchard_auth(
     orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
 ) -> Blake2bHash {
@@ -542,7 +542,7 @@ pub(crate) fn hash_v6_orchard_auth(
 ///
 /// The caller is responsible for providing entries in the order required by ZIP 248
 /// (strictly increasing `(bundleType, bundleVariant)`), including any unknown bundles.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 fn hash_v6_tagged_bundle_digests<'a, I>(
     personalization: &[u8; 16],
     entries: I,
@@ -566,7 +566,7 @@ where
 /// Wraps each per-bundle effecting-data digest with `(bundleType, bundleVariant)`
 /// tags and hashes them in increasing `bundleType` order under the
 /// `ZTxIdEffBnd_Hash` personalization.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_effects_bundles<'a, I>(entries: I) -> Blake2bHash
 where
     I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
@@ -579,7 +579,7 @@ where
 /// Wraps each per-bundle authorizing-data digest with `(bundleType, bundleVariant)`
 /// tags and hashes them in increasing `bundleType` order under the
 /// `ZTxAuthBnd__Hash` personalization.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub(crate) fn hash_v6_auth_bundles<'a, I>(entries: I) -> Blake2bHash
 where
     I: IntoIterator<Item = (super::zip248::BundleId, &'a Blake2bHash)>,
@@ -617,7 +617,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         lock_time: u32,
         expiry_height: BlockHeight,
         #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            zcash_v6,
             feature = "zip-233"
         ))]
         zip233_amount: &Zatoshis,
@@ -628,7 +628,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             lock_time,
             expiry_height,
             #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                zcash_v6,
                 feature = "zip-233"
             ))]
             zip233_amount,
@@ -679,11 +679,11 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             // The fields below are populated by the v6-specific `digest_v6()`
             // path; the legacy `TransactionDigest::combine` path used for
             // pre-v6 transactions leaves them empty.
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_v6)]
             value_pool_deltas_digest: None,
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_v6)]
             unknown_effect_digests: alloc::vec::Vec::new(),
-            #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+            #[cfg(zcash_v6)]
             unknown_auth_digests: alloc::vec::Vec::new(),
         }
     }
@@ -755,7 +755,7 @@ pub fn to_txid(
 /// v6 txid hash per ZIP 248 §T: header_digest || value_pool_deltas_digest ||
 /// effects_bundles_digest, all under the consensus-branch-id-personalized
 /// "ZcashTxHash_" hash.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 fn to_hash_v6(
     consensus_branch_id: BranchId,
     digests: &TxDigests<Blake2bHash>,
@@ -772,7 +772,7 @@ fn to_hash_v6(
 
     let transparent_digest = hash_transparent_txid_data(digests.transparent_digests.as_ref());
 
-    let effects_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
+    let effects_bundles_digest = hash_v6_effects_bundles(v6_bundle_digest_entries(
         digests.transparent_digests.is_some().then_some(&transparent_digest),
         digests.sapling_digest.as_ref(),
         digests.orchard_digest.as_ref(),
@@ -786,13 +786,13 @@ fn to_hash_v6(
     h.finalize()
 }
 
-/// Builds the (BundleId, &Blake2bHash) entries for `effects_bundles_digest` /
-/// `signature_bundles_digest`, merging the known transparent/sapling/orchard
-/// per-bundle digests with any unknown-bundle digests in strictly increasing
-/// `(bundleType, bundleVariant)` order. Returns a `Vec` so the caller can pass
-/// it directly into `hash_v6_effects_bundles`.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) fn v6_effect_digest_entries<'a>(
+/// Builds `(BundleId, &Blake2bHash)` entries for a v6 per-bundle digest
+/// (`effects_bundles_digest`, `signature_bundles_digest`, or
+/// `auth_bundles_digest`), merging known transparent/sapling/orchard digests
+/// with unknown-bundle digests in strictly increasing `(bundleType,
+/// bundleVariant)` order.
+#[cfg(zcash_v6)]
+pub(crate) fn v6_bundle_digest_entries<'a>(
     transparent_digest: Option<&'a Blake2bHash>,
     sapling_digest: Option<&'a Blake2bHash>,
     orchard_digest: Option<&'a Blake2bHash>,
@@ -807,34 +807,6 @@ pub(crate) fn v6_effect_digest_entries<'a>(
         entries.push((BundleId::SAPLING, d));
     }
     if let Some(d) = orchard_digest {
-        entries.push((BundleId::ORCHARD, d));
-    }
-    for (id, digest) in unknown {
-        entries.push((*id, digest));
-    }
-    entries.sort_by_key(|(id, _)| *id);
-    entries
-}
-
-/// Builds the (BundleId, &Blake2bHash) entries for `auth_bundles_digest`,
-/// merging known and unknown per-bundle authorizing-data digests in strictly
-/// increasing `(bundleType, bundleVariant)` order.
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-pub(crate) fn v6_auth_digest_entries<'a>(
-    transparent_auth_digest: Option<&'a Blake2bHash>,
-    sapling_auth_digest: Option<&'a Blake2bHash>,
-    orchard_auth_digest: Option<&'a Blake2bHash>,
-    unknown: &'a [(super::zip248::BundleId, Blake2bHash)],
-) -> alloc::vec::Vec<(super::zip248::BundleId, &'a Blake2bHash)> {
-    use super::zip248::BundleId;
-    let mut entries: alloc::vec::Vec<(BundleId, &'a Blake2bHash)> = alloc::vec::Vec::new();
-    if let Some(d) = transparent_auth_digest {
-        entries.push((BundleId::TRANSPARENT, d));
-    }
-    if let Some(d) = sapling_auth_digest {
-        entries.push((BundleId::SAPLING, d));
-    }
-    if let Some(d) = orchard_auth_digest {
         entries.push((BundleId::ORCHARD, d));
     }
     for (id, digest) in unknown {
@@ -870,7 +842,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         _lock_time: u32,
         _expiry_height: BlockHeight,
         #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            zcash_v6,
             feature = "zip-233"
         ))]
         _zip233_amount: &Zatoshis,

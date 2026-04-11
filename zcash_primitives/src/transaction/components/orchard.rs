@@ -18,7 +18,7 @@ use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_protocol::value::ZatBalance;
 
 use crate::transaction::Transaction;
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 use crate::transaction::zip248::consume_v6_sighash_v0_info;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
@@ -92,7 +92,7 @@ pub fn read_v5_bundle<R: Read>(
 /// `mEffectBundles[3]` and `mAuthBundles[3]` map entries respectively. The
 /// value balance is *not* read from these bytes — it lives in
 /// `mValuePoolDeltas` and must be supplied by the caller.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub fn read_v6_bundle(
     effects: &[u8],
     auth: Option<&[u8]>,
@@ -178,9 +178,8 @@ pub fn read_v6_bundle(
     )))
 }
 
-
 /// Writes the effecting data for an Orchard bundle in v6 format.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub fn write_v6_effects<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
@@ -196,7 +195,7 @@ pub fn write_v6_effects<W: Write>(
 }
 
 /// Writes the authorizing data for an Orchard bundle in v6 format.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub fn write_v6_auth<W: Write>(
     mut writer: W,
     bundle: &orchard::Bundle<Authorized, ZatBalance>,
@@ -355,7 +354,7 @@ pub fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,
