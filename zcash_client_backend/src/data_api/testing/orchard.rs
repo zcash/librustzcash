@@ -5,7 +5,7 @@ use ::orchard::{
     note_encryption::OrchardDomain,
     tree::MerkleHashOrchard,
 };
-use incrementalmerkletree::{Hashable, Level};
+use incrementalmerkletree::{Hashable, Level, Position};
 use shardtree::error::ShardTreeError;
 
 use zcash_keys::{
@@ -100,6 +100,22 @@ impl ShieldedPoolTester for OrchardPoolTester {
     ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
         st.wallet_mut()
             .put_orchard_subtree_roots(start_index, roots)
+    }
+
+    fn shard_root<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        shard_index: u64,
+        truncate_at: Position,
+    ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
+        st.wallet_mut().with_orchard_tree_mut::<_, _, ShardTreeError<_>>(|t| {
+            t.root(
+                incrementalmerkletree::Address::from_parts(
+                    Level::from(crate::data_api::ORCHARD_SHARD_HEIGHT),
+                    shard_index,
+                ),
+                truncate_at,
+            )
+        })
     }
 
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64 {

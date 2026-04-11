@@ -146,6 +146,14 @@ pub trait ShieldedPoolTester {
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
     ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
 
+    /// Returns the root hash of the note commitment subtree rooted at the given shard address,
+    /// computing it from the wallet's shard tree state truncated at the given position.
+    fn shard_root<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        shard_index: u64,
+        truncate_at: Position,
+    ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
+
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64;
 
     fn note_value(note: &Self::Note) -> Zatoshis;
@@ -4590,6 +4598,360 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
     assert!(
         st.wallet().get_block_hash(max_scanned).unwrap().is_some(),
         "blocks at max_scanned should be preserved"
+    );
+}
+
+/// Note stabilization requires both a filled shard AND the shard's end height to be confirmed
+/// beyond the pruning depth. This test ensures notes do not get prematurely marked as stable when
+/// just the shard has filled.
+pub fn note_not_stabilized_until_prune_depth<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let birthday = account.birthday().height();
+    let note_value = Zatoshis::const_from_u64(500_000);
+
+    // Generate and scan 5 filler blocks, then capture the chain state as our
+    // truncation target.
+    let filler_count = 5u32;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(birthday + 1, filler_count as usize);
+    let truncation_target = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+
+    // Mine and scan the note.
+    let (note_height, note_block_insert, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, note_value);
+    let note_txid = note_block_insert.txids()[0];
+    st.scan_cached_blocks(note_height, 1);
+
+    // Fill shard 0 at the note's block height.
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            note_height,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+
+    // Scan fewer than PRUNING_DEPTH extra blocks
+    let extra_blocks = PRUNING_DEPTH - 1;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
+
+    // Confirm the transaction is mined before truncation
+    let pre_trunc = st
+        .get_tx_from_history(note_txid)
+        .unwrap()
+        .expect("tx should appear in history");
+    assert_eq!(
+        pre_trunc.mined_height(),
+        Some(note_height),
+        "tx should be mined before truncation"
+    );
+
+    // Truncate the chain state
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed");
+
+    // Confirm the note no longer has a mined height
+    let post_trunc = st
+        .get_tx_from_history(note_txid)
+        .unwrap()
+        .expect("tx should still appear in history after truncation");
+    assert_eq!(
+        post_trunc.mined_height(),
+        None,
+        "note in a filled-but-unconfirmed shard should be un-mined by truncation"
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "un-mined transaction should yield zero spendable balance"
+    );
+    assert_eq!(
+        st.get_pending_shielded_balance(account.id(), ConfirmationsPolicy::MIN),
+        note_value,
+        "note should appear as pending (mined but unconfirmed at current tip)"
+    );
+}
+
+/// A note is stabilized once its shard is filled AND the shard's end height is
+/// confirmed beyond the pruning depth. Stabilized notes must be retained across truncation, and the
+/// retained notes must be spendable without re-scan.
+pub fn stabilized_notes_survive_truncation<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let birthday = account.birthday().height();
+    let note_value = Zatoshis::const_from_u64(500_000);
+
+    // Generate and scan 5 filler blocks, then capture the chain state as our
+    // truncation target.
+    let filler_count = 5u32;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(birthday + 1, filler_count as usize);
+    let truncation_target = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    let truncation_height = truncation_target.block_height();
+
+    // Mine and scan the note.
+    let (note_height, note_block_insert, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, note_value);
+    let note_txid = note_block_insert.txids()[0];
+    st.scan_cached_blocks(note_height, 1);
+    assert!(note_height > truncation_height);
+
+    // Record shard 0's completion at `birthday`, well below any `stable_height` we
+    // will reach.
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            birthday,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+
+    // Scan PRUNING_DEPTH additional blocks to stabilize the note
+    let extra_blocks = PRUNING_DEPTH;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
+
+    // Confirm note is spendable before truncation
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        note_value,
+        "note should be spendable before truncation"
+    );
+
+    // Truncate below the note height, and confirm stabilized data has been retained
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed");
+
+    let post_trunc = st
+        .get_tx_from_history(note_txid)
+        .unwrap()
+        .expect("tx should still appear in history after truncation");
+    assert_eq!(
+        post_trunc.mined_height(),
+        Some(note_height),
+        "stabilized transaction should retain its mined_height across truncation"
+    );
+    assert_eq!(
+        st.get_total_balance(account.id()),
+        note_value,
+        "stabilized transaction's note should remain in the total balance"
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        note_value,
+        "note should still be spendable"
+    );
+
+    // Build and sign a spending transaction with the retained note
+    let to_extsk = T::sk(&[0xcc; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let send_value = Zatoshis::const_from_u64(10_000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        send_value,
+    )])
+    .unwrap();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("proposal should succeed after re-scan of stabilized note");
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .expect("spend construction should succeed");
+    assert_eq!(
+        txids.len(),
+        1,
+        "one transaction should be produced by the spend"
+    );
+}
+
+/// Stabilization is tracked per-note: a transaction whose outputs straddle a shard boundary may
+/// end up with some notes stabilized and others not. Because witness data for the unstabilized
+/// note(s) cannot be preserved across truncation, any such mixed-state transaction must be
+/// un-mined by truncation, even though some of its notes *are* stabilized.
+pub fn mixed_stabilization_unmines_transaction<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::{SAPLING_SHARD_HEIGHT, ll::wallet::PRUNING_DEPTH};
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let birthday = account.birthday().height();
+    let note_value = Zatoshis::const_from_u64(500_000);
+
+    // Position the pool's commitment tree such that the next block's two outputs will land at the
+    // last position of shard 0 and the first position of shard 1, respectively. We do this by
+    // invoking `generate_block_at` with a height gap; the intermediate phantom block's chain
+    // state is back-filled with `SHARD_SIZE - 1` real commitments. The phantom block also
+    // becomes our truncation target.
+    let shard_size: u32 = 1 << SAPLING_SHARD_HEIGHT;
+    let initial_tree_size: u32 = shard_size - 1;
+    let (sapling_initial_size, orchard_initial_size) = match T::SHIELDED_PROTOCOL {
+        ShieldedProtocol::Sapling => (initial_tree_size, 0),
+        ShieldedProtocol::Orchard => (0, initial_tree_size),
+    };
+    let tx_height = birthday + 1;
+    st.generate_block_at(
+        tx_height,
+        BlockHash([0; 32]),
+        &[
+            FakeCompactOutput::new(&dfvk, AddressType::DefaultExternal, note_value),
+            FakeCompactOutput::new(&dfvk, AddressType::Internal, note_value),
+        ],
+        sapling_initial_size,
+        orchard_initial_size,
+        false,
+    );
+
+    // The phantom block at `birthday` is our truncation target: its chain state has the pool's
+    // tree sized at `initial_tree_size`, leaving the next block's outputs to land at the shard
+    // boundary.
+    let truncation_target = st
+        .latest_cached_block_below_height(tx_height)
+        .expect("phantom block should have been inserted")
+        .chain_state()
+        .clone();
+
+    // Scan the TX block. The wallet's tree is brought up to shard 0's last position via the
+    // frontier carried in `from_state`, then the block's two outputs are inserted at positions
+    // (shard_size - 1) and shard_size, completing shard 0 and starting shard 1.
+    st.scan_cached_blocks(tx_height, 1);
+    let tx_txid = st
+        .wallet()
+        .get_tx_history()
+        .unwrap()
+        .into_iter()
+        .find(|tx| tx.mined_height() == Some(tx_height))
+        .expect("scanned TX should appear in history")
+        .txid();
+
+    // Record shard 0's completion at `birthday`, well below any `stable_height` we will reach.
+    // We must pass shard 0's actual root here because subsequent scans will produce frontiers
+    // whose ommer at shard-root level is this real root; a placeholder here would collide with
+    // that real value when the cap is later updated. Shard 1 is deliberately left without a
+    // `subtree_end_height`, so only the first of the two notes will be stabilized.
+    let shard_0_root =
+        T::shard_root(&mut st, 0, Position::from(u64::from(shard_size))).unwrap();
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(birthday, shard_0_root)],
+    )
+    .unwrap();
+
+    // Scan `PRUNING_DEPTH` more blocks so that `stable_height` crosses shard 0's
+    // `subtree_end_height`, marking the first note stabilized.
+    let extra_blocks = PRUNING_DEPTH;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(tx_height + 1, extra_blocks as usize);
+
+    // Truncate below the TX block. Because the TX contains a non-stabilized note, the un-mine
+    // logic should clear its `mined_height` even though the TX's first note *is* stabilized.
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed");
+
+    let post_trunc = st
+        .get_tx_from_history(tx_txid)
+        .unwrap()
+        .expect("tx should still appear in history after truncation");
+    assert_eq!(
+        post_trunc.mined_height(),
+        None,
+        "a transaction with any unstabilized note must be un-mined by truncation"
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO,
+        "un-mined transaction's notes should not be spendable"
     );
 }
 
