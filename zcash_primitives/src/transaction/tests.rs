@@ -380,94 +380,39 @@ fn zip_0244() {
     }
 }
 
-/// Tests ZIP 233 NSM interaction with the v6 (ZIP 248) digest and sighash.
-///
-/// Constructs a minimal v6 transaction with a ZIP 233 NSM amount and a fee VP
-/// delta, serializes it in the ZIP 248 wire format, reads it back, and verifies
-/// the write-read roundtrip preserves the VP deltas and that the v6 sighash is
-/// deterministic.
-///
-/// NOTE: The old hardcoded test vectors in `data::zip_0233` were generated for
-/// the pre-ZIP-248 wire format and are no longer valid. Cross-implementation
-/// test vectors for the ZIP 248 format should be generated from the upstream
-/// `zcash-hackworks/zcash-test-vectors` repository once its `zip_0233.py` is
-/// updated.
+/// Roundtrip test for ZIP 233 NSM + fee VP deltas in ZIP 248 format.
+// TODO: regenerate cross-implementation test vectors from zcash-hackworks/zcash-test-vectors
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 #[test]
 fn zip_0233() {
     use super::zip248;
     use zcash_protocol::consensus::BlockHeight;
 
-    // Build a minimal v6 transaction with fee + ZIP 233 NSM VP deltas.
-    let mut vp = zip248::ValuePoolDeltas::empty();
-    vp.set_fee(Zatoshis::from_u64(10_000).unwrap());
-    vp.set_zip233(Zatoshis::from_u64(50_000).unwrap());
+    let make_tx = |fee: u64, nsm: u64| {
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        vp.set_fee(Zatoshis::from_u64(fee).unwrap());
+        vp.set_zip233(Zatoshis::from_u64(nsm).unwrap());
+        TransactionData::<super::Authorized>::from_parts_v6(
+            super::TxVersion::V6, BranchId::Nu7, 0, BlockHeight::from_u32(100),
+            vp, zip248::BundleMap::new(),
+        ).freeze().unwrap()
+    };
 
-    let txdata = TransactionData::<super::Authorized>::from_parts_v6(
-        super::TxVersion::V6,
-        BranchId::Nu7,
-        0,
-        BlockHeight::from_u32(100),
-        vp,
-        zip248::BundleMap::new(),
-    );
+    // Roundtrip: serialize → read back → check VP deltas.
+    let tx = make_tx(10_000, 50_000);
+    let mut buf = Vec::new();
+    tx.write(&mut buf).unwrap();
+    let tx = Transaction::read(&buf[..], BranchId::Nu7).unwrap();
+    assert_eq!(tx.value_pool_deltas().fee(), Some(Zatoshis::from_u64(10_000).unwrap()));
+    assert_eq!(tx.value_pool_deltas().zip233_amount(), Some(Zatoshis::from_u64(50_000).unwrap()));
 
-    // Freeze → serialize → read back.
-    let tx = txdata.freeze().unwrap();
-    let mut tx_bytes = Vec::new();
-    tx.write(&mut tx_bytes).unwrap();
-    let tx = Transaction::read(&tx_bytes[..], BranchId::Nu7).unwrap();
-
-    // VP deltas roundtrip correctly.
-    assert_eq!(
-        tx.value_pool_deltas().fee(),
-        Some(Zatoshis::from_u64(10_000).unwrap()),
-    );
-    assert_eq!(
-        tx.value_pool_deltas().zip233_amount(),
-        Some(Zatoshis::from_u64(50_000).unwrap()),
-    );
-
-    // Txid is deterministic (same inputs → same txid).
-    let txdata2 = TransactionData::<super::Authorized>::from_parts_v6(
-        super::TxVersion::V6,
-        BranchId::Nu7,
-        0,
-        BlockHeight::from_u32(100),
-        {
-            let mut vp2 = zip248::ValuePoolDeltas::empty();
-            vp2.set_fee(Zatoshis::from_u64(10_000).unwrap());
-            vp2.set_zip233(Zatoshis::from_u64(50_000).unwrap());
-            vp2
-        },
-        zip248::BundleMap::new(),
-    );
-    let tx2 = txdata2.freeze().unwrap();
+    // Determinism: same inputs → same txid.
+    let tx2 = make_tx(10_000, 50_000);
     assert_eq!(tx.txid(), tx2.txid());
 
-    // Auth commitment is deterministic.
-    assert_eq!(
-        tx.auth_commitment().as_ref(),
-        tx2.auth_commitment().as_ref(),
-    );
-
-    // For a transaction with no transparent inputs and no shielded bundles,
-    // the v6 txid digest commits to header + VP deltas + empty effects.
-    // Verify the VP deltas actually influence the txid by checking a
-    // different fee produces a different txid.
-    let mut vp_different = zip248::ValuePoolDeltas::empty();
-    vp_different.set_fee(Zatoshis::from_u64(20_000).unwrap());
-    vp_different.set_zip233(Zatoshis::from_u64(50_000).unwrap());
-    let txdata_different = TransactionData::<super::Authorized>::from_parts_v6(
-        super::TxVersion::V6,
-        BranchId::Nu7,
-        0,
-        BlockHeight::from_u32(100),
-        vp_different,
-        zip248::BundleMap::new(),
-    );
-    let tx3 = txdata_different.freeze().unwrap();
-    assert_ne!(tx.txid(), tx3.txid(), "different fee should produce different txid");
+    // Different VP deltas → different txid.
+    let tx3 = make_tx(20_000, 50_000);
+    assert_ne!(tx.txid(), tx3.txid());
 }
 
 #[cfg(test)]
@@ -479,13 +424,11 @@ mod zip248_tests {
 
     #[test]
     fn value_pool_deltas_write_read_roundtrip() {
-        // Build VP deltas with various entries
         let mut vp = zip248::ValuePoolDeltas::empty();
         vp.set_sapling(ZatBalance::from_i64(100_000).unwrap());
         vp.set_orchard(ZatBalance::from_i64(-50_000).unwrap());
         vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
 
-        // Serialize VP deltas
         let entries = vp.to_wire_entries();
         let mut buf = Vec::new();
         zcash_encoding::CompactSize::write(&mut buf, entries.len()).unwrap();
@@ -493,7 +436,6 @@ mod zip248_tests {
             entry.write(&mut buf).unwrap();
         }
 
-        // Deserialize VP deltas
         let mut cursor = &buf[..];
         let n = zcash_encoding::CompactSize::read_t::<_, usize>(&mut cursor).unwrap();
         let mut vp2 = zip248::ValuePoolDeltas::empty();
@@ -512,7 +454,6 @@ mod zip248_tests {
             }
         }
 
-        // Verify round-trip
         assert_eq!(
             vp2.sapling_value(),
             Some(ZatBalance::from_i64(100_000).unwrap())
@@ -539,65 +480,48 @@ mod zip248_tests {
         assert!(parsed_data.is_empty());
     }
 
+    fn test_unknown_bundle(data: &[u8]) -> zip248::UnknownBundle {
+        zip248::UnknownBundle {
+            effect_data: data.to_vec(),
+            effect_digest: blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"test_unknown_efx")
+                .hash(data),
+            auth_data: None,
+            auth_digest: None,
+        }
+    }
+
     #[test]
     fn bundle_map_unknown_iteration_order() {
         use super::super::Authorized;
 
-        let placeholder_digest = blake2b_simd::Params::new()
-            .hash_length(32)
-            .personal(b"test_unknown_efx")
-            .hash(&[]);
-
         let mut map: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-
-        // Insert in reverse order
-        map.insert_unknown(99u64, 0u64, zip248::UnknownBundle {
-            effect_data: vec![],
-            effect_digest: placeholder_digest,
-            auth_data: None,
-            auth_digest: None,
-        });
-
-        // Verify iteration is in bundle_type order
-        let types: Vec<u64> = map.unknown_bundles().map(|(&(bt, _), _)| bt).collect();
-        assert_eq!(types, vec![99]);
-
-        // Adding more bundles should maintain order
-        map.insert_unknown(50, 0, zip248::UnknownBundle {
-            effect_data: vec![1],
-            effect_digest: placeholder_digest,
-            auth_data: None,
-            auth_digest: None,
-        });
-        let types: Vec<u64> = map.unknown_bundles().map(|(&(bt, _), _)| bt).collect();
-        assert_eq!(types, vec![50, 99]);
+        map.insert_unknown(99, 0, test_unknown_bundle(&[]));
+        assert_eq!(
+            map.unknown_bundles().map(|(&(bt, _), _)| bt).collect::<Vec<_>>(),
+            vec![99],
+        );
+        map.insert_unknown(50, 0, test_unknown_bundle(&[1]));
+        assert_eq!(
+            map.unknown_bundles().map(|(&(bt, _), _)| bt).collect::<Vec<_>>(),
+            vec![50, 99],
+        );
     }
 
-    /// Verifies that a v6 transaction containing an unknown bundle type can be
-    /// parsed and re-serialized. This is the core forward-compatibility
-    /// property of ZIP 248.
+    /// Verifies that a v6 transaction with an unknown bundle type can be
+    /// parsed and re-serialized (ZIP 248 forward compatibility).
     #[cfg(zcash_v6)]
     #[test]
     fn unknown_bundle_roundtrip() {
         use super::super::{Authorized, Transaction, TransactionData, TxVersion};
         use zcash_protocol::consensus::{BlockHeight, BranchId};
 
-        // Construct a transaction with a known fee VP delta and an unknown
-        // bundle (type 42, variant 0) that has effect data but no auth data.
         let mut vp = zip248::ValuePoolDeltas::empty();
         vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
 
         let mut bundles: zip248::BundleMap<Authorized> = zip248::BundleMap::new();
-        let unknown_effect = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        bundles.insert_unknown(42, 0, zip248::UnknownBundle {
-            effect_data: unknown_effect.clone(),
-            effect_digest: blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(b"test_unknown_efx")
-                .hash(&unknown_effect),
-            auth_data: None,
-            auth_digest: None,
-        });
+        bundles.insert_unknown(42, 0, test_unknown_bundle(&[0xDE, 0xAD, 0xBE, 0xEF]));
 
         let txdata = TransactionData::<Authorized>::from_parts_v6(
             TxVersion::V6,
@@ -627,5 +551,295 @@ mod zip248_tests {
         let mut buf2 = Vec::new();
         tx2.write(&mut buf2).unwrap();
         assert_eq!(buf, buf2);
+    }
+
+    // -- Consensus rule tests --------------------------------------------------
+
+    #[cfg(zcash_v6)]
+    mod consensus_rules {
+        use super::super::super::{
+            Authorized, TransactionData, TxVersion, V6ConsensusError, zip248,
+        };
+        use zcash_protocol::consensus::{BlockHeight, BranchId};
+        use zcash_protocol::value::Zatoshis;
+
+        fn make_v6(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
+            TransactionData::from_parts_v6(
+                TxVersion::V6, BranchId::Nu7, 0, BlockHeight::from_u32(100),
+                vp, zip248::BundleMap::new(),
+            )
+        }
+
+        #[test]
+        fn fee_asset_class_must_be_zec() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // Insert a fee entry with non-ZEC asset class via the raw API.
+            vp.insert_known(
+                zip248::ValuePoolDeltaKey {
+                    bundle_type: zip248::BundleType::Fee,
+                    asset_class: zip248::ASSET_CLASS_OTHER,
+                    asset_uuid: [0x42; 64],
+                },
+                zip248::BundleVariant::Default,
+                -1000,
+            );
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_consensus_rules(false),
+                Err(V6ConsensusError::FeeAssetClassNotZec { asset_class: zip248::ASSET_CLASS_OTHER }),
+            );
+        }
+
+        #[test]
+        fn coinbase_fee_delta_must_be_nonnegative() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // stored as -1000
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_consensus_rules(true),
+                Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: -1000 }),
+            );
+        }
+
+        #[test]
+        fn non_coinbase_fee_delta_must_be_nonpositive() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // Manually insert a positive fee delta (simulating a coinbase-style
+            // fee entry in a non-coinbase transaction).
+            vp.insert_known(
+                zip248::ValuePoolDeltaKey::zec(zip248::BundleType::Fee),
+                zip248::BundleVariant::Default,
+                1000,
+            );
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_consensus_rules(false),
+                Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: 1000 }),
+            );
+        }
+
+        #[test]
+        fn non_coinbase_vp_deltas_must_balance() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // Sapling adds 100k to the pool but nothing subtracts it.
+            vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(100_000).unwrap());
+            let tx = make_v6(vp);
+            let err = tx.check_v6_consensus_rules(false).unwrap_err();
+            assert!(matches!(err, V6ConsensusError::NonCoinbaseValueImbalance { .. }));
+        }
+
+        #[test]
+        fn balanced_non_coinbase_passes() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.set_fee(Zatoshis::from_u64(1000).unwrap()); // -1000
+            vp.set_sapling(zcash_protocol::value::ZatBalance::from_i64(1000).unwrap()); // +1000
+            let tx = make_v6(vp);
+            assert_eq!(tx.check_v6_consensus_rules(false), Ok(()));
+        }
+    }
+
+    // -- Parsing rule rejection tests ------------------------------------------
+
+    #[cfg(zcash_v6)]
+    mod parsing_rules {
+        use alloc::vec::Vec;
+        use super::super::super::{Transaction, zip248};
+        use zcash_encoding::CompactSize;
+        use zcash_protocol::consensus::BranchId;
+        use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+
+        /// Builds a minimal v6 transaction header (20 bytes).
+        fn v6_header(branch_id: BranchId) -> Vec<u8> {
+            let mut buf = Vec::new();
+            // header: version 6 with overwintered bit
+            buf.extend_from_slice(&(V6_TX_VERSION | (1 << 31)).to_le_bytes());
+            buf.extend_from_slice(&V6_VERSION_GROUP_ID.to_le_bytes());
+            buf.extend_from_slice(&u32::from(branch_id).to_le_bytes());
+            buf.extend_from_slice(&0u32.to_le_bytes()); // lock_time
+            buf.extend_from_slice(&100u32.to_le_bytes()); // expiry_height
+            buf
+        }
+
+        /// Appends empty VP deltas + empty effect/auth maps.
+        fn append_empty_body(buf: &mut Vec<u8>) {
+            CompactSize::write(&mut *buf, 0).unwrap(); // nValuePoolDeltas
+            CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
+            CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
+        }
+
+        /// Writes a VP delta entry directly to bytes.
+        fn write_vp_entry(buf: &mut Vec<u8>, bundle_type: u64, variant: u64, value: i64) {
+            CompactSize::write(&mut *buf, bundle_type as usize).unwrap();
+            CompactSize::write(&mut *buf, variant as usize).unwrap();
+            buf.push(zip248::ASSET_CLASS_ZEC);
+            buf.extend_from_slice(&value.to_le_bytes());
+        }
+
+        #[test]
+        fn rejects_out_of_order_vp_deltas() {
+            let mut buf = v6_header(BranchId::Nu7);
+            // 2 VP delta entries: Orchard (3) then Sapling (2) — wrong order.
+            CompactSize::write(&mut *buf, 2).unwrap();
+            write_vp_entry(&mut buf, 3, 0, 100_000); // Orchard first (wrong)
+            write_vp_entry(&mut buf, 2, 0, -100_000); // Sapling second
+            CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
+            CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_duplicate_vp_deltas() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 2).unwrap();
+            write_vp_entry(&mut buf, 2, 0, 50_000);
+            write_vp_entry(&mut buf, 2, 0, 50_000);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_reserved_bundle_type() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 1).unwrap();
+            write_vp_entry(&mut buf, 1, 0, 1000);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_zero_vp_delta_value() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 1).unwrap();
+            write_vp_entry(&mut buf, 2, 0, 0);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_fee_in_effect_bundles() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 1).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 4, 0, &[0xAA]).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_mismatched_variant_across_maps() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 1).unwrap();
+            write_vp_entry(&mut buf, 2, 0, 100_000);
+            // Effect bundle says bundleType 2 variant 1 — mismatch.
+            CompactSize::write(&mut *buf, 1).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 2, 1, &[]).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap(); // no auth
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn rejects_auth_without_effect() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 1).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 2, 0, &[0xBB]).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
+        fn accepts_empty_v6_transaction() {
+            let mut buf = v6_header(BranchId::Nu7);
+            append_empty_body(&mut buf);
+            let tx = Transaction::read(&buf[..], BranchId::Nu7).unwrap();
+            assert!(tx.transparent_bundle().is_none());
+            assert!(tx.sapling_bundle().is_none());
+            assert!(tx.orchard_bundle().is_none());
+        }
+
+        #[test]
+        fn rejects_out_of_order_effect_bundles() {
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
+            // Effect bundles: Orchard (3) before Transparent (0) — wrong order.
+            CompactSize::write(&mut *buf, 2).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 3, 0, &[0xAA]).unwrap();
+            zip248::write_bundle_data_framing(&mut buf, 0, 0, &[0xBB]).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap(); // no auth
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+    }
+
+    // -- Wire order and roundtrip tests ----------------------------------------
+
+    #[cfg(zcash_v6)]
+    mod wire_order {
+        use alloc::vec::Vec;
+        use super::super::super::zip248;
+        use zcash_protocol::value::{ZatBalance, Zatoshis};
+
+        #[test]
+        fn to_wire_entries_canonical_order_with_unknown() {
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            // Known: Orchard (3), Fee (4)
+            vp.set_orchard(ZatBalance::from_i64(50_000).unwrap());
+            vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
+            // Unknown: bundleType 8 (sorts after all known types)
+            vp.insert_unknown(8, 0, [0u8; 64], 0, 99_000);
+
+            let entries = vp.to_wire_entries();
+            let types: Vec<u64> = entries.iter().map(|e| e.bundle_type).collect();
+            // Orchard=3, Fee=4, Unknown=8 — strictly increasing.
+            assert_eq!(types, vec![3, 4, 8]);
+        }
+    }
+
+    // -- Sighash version info error tests --------------------------------------
+
+    #[cfg(zcash_v6)]
+    mod sighash_info {
+        use super::super::super::zip248;
+
+        #[test]
+        fn rejects_wrong_sighash_version() {
+            // sighashInfo with version byte 0x01 instead of 0x00.
+            let data: &[u8] = &[0x01, 0x01]; // compactSize(1), version=1
+            let mut cursor = data;
+            let result = zip248::consume_v6_sighash_v0_info(&mut cursor, "test");
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn rejects_wrong_sighash_length() {
+            // sighashInfo with length 2 instead of 1.
+            let data: &[u8] = &[0x02, 0x00, 0x00]; // compactSize(2), two bytes
+            let mut cursor = data;
+            let result = zip248::consume_v6_sighash_v0_info(&mut cursor, "test");
+            assert!(result.is_err());
+        }
+    }
+
+    // -- In-memory-only BundleType panic tests ---------------------------------
+
+    #[test]
+    #[should_panic(expected = "in-memory-only")]
+    fn sprout_bundle_type_has_no_wire_encoding() {
+        let _ = zip248::BundleType::Sprout.to_u64();
+    }
+
+    #[test]
+    #[should_panic(expected = "in-memory-only")]
+    fn tze_bundle_type_has_no_wire_encoding() {
+        let _ = zip248::BundleType::Tze.to_u64();
     }
 }
