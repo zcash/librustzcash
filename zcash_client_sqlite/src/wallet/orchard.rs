@@ -244,16 +244,17 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     )
 }
 
-/// Return all Orchard notes that were received at or before `snapshot_height`
-/// and unspent as of `snapshot_height`, for the given account.
+/// Return all Orchard notes that were received at or before `height`
+/// and unspent as of `height`, for the given account.
 ///
-/// This is a backward-looking query used for governance voting snapshots,
-/// unlike `select_spendable_notes` which is forward-looking (via tx expiry).
-pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
+/// Unlike `select_spendable_notes` (which applies confirmation, dust, and
+/// expiry filters for transaction construction), this returns every note
+/// that existed and was unspent at the given height.
+pub fn get_orchard_notes_at_historical_height<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    snapshot_height: BlockHeight,
+    height: BlockHeight,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let mut stmt = conn.prepare_cached(
         "SELECT
@@ -267,7 +268,7 @@ pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
          INNER JOIN transactions t ON t.id_tx = rn.transaction_id
          WHERE accounts.uuid = :account_uuid
            AND t.block IS NOT NULL
-           AND t.block <= :snapshot_height
+           AND t.block <= :height
            AND rn.nf IS NOT NULL
            AND rn.commitment_tree_position IS NOT NULL
            AND rn.recipient_key_scope IN (0, 1)
@@ -277,7 +278,7 @@ pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
                FROM orchard_received_note_spends rns
                JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
                WHERE t_spend.block IS NOT NULL
-                 AND t_spend.block <= :snapshot_height
+                 AND t_spend.block <= :height
            )
          ORDER BY rn.commitment_tree_position",
     )?;
@@ -285,7 +286,7 @@ pub fn get_orchard_notes_at_snapshot<P: consensus::Parameters>(
     let rows = stmt.query_and_then(
         named_params![
             ":account_uuid": account.0,
-            ":snapshot_height": u32::from(snapshot_height),
+            ":height": u32::from(height),
         ],
         |row| to_received_note(params, row),
     )?;
@@ -723,7 +724,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn get_orchard_notes_at_snapshot_boundary_heights() {
+    fn get_orchard_notes_at_historical_height_boundary_heights() {
         use zcash_client_backend::data_api::Account;
         use zcash_client_backend::data_api::testing::{
             AddressType, TestBuilder, pool::ShieldedPoolTester,
@@ -763,25 +764,31 @@ pub(crate) mod tests {
 
         // Before any notes: nothing (h1 - 1 is before the note was mined)
         let notes = db
-            .get_orchard_notes_at_snapshot(account.id(), h1 - 1)
+            .get_orchard_notes_at_historical_height(account.id(), h1 - 1)
             .unwrap();
         assert_eq!(notes.len(), 0);
 
-        // Snapshot at h1: original note received and unspent
-        let notes = db.get_orchard_notes_at_snapshot(account.id(), h1).unwrap();
+        // At h1: original note received and unspent
+        let notes = db
+            .get_orchard_notes_at_historical_height(account.id(), h1)
+            .unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].note_value().unwrap(), value);
 
-        // Snapshot at h2: original spent, only change note remains
-        let notes = db.get_orchard_notes_at_snapshot(account.id(), h2).unwrap();
+        // At h2: original spent, only change note remains
+        let notes = db
+            .get_orchard_notes_at_historical_height(account.id(), h2)
+            .unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(
             notes[0].note_value().unwrap(),
             (value - spend_value).unwrap()
         );
 
-        // Snapshot at h3: change note + new note
-        let notes = db.get_orchard_notes_at_snapshot(account.id(), h3).unwrap();
+        // At h3: change note + new note
+        let notes = db
+            .get_orchard_notes_at_historical_height(account.id(), h3)
+            .unwrap();
         assert_eq!(notes.len(), 2);
         let total: Zatoshis = notes
             .iter()
