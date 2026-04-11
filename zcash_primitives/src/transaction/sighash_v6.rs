@@ -10,7 +10,7 @@ use crate::{
         sighash::SignableInput,
         sighash_v5::transparent_sig_digest,
         txid::{
-            hash_v6_effects_bundles, v6_effect_digest_entries,
+            hash_v6_effects_bundles, v6_bundle_digest_entries,
             ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION,
         },
     },
@@ -36,7 +36,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 ///
 /// For transactions with transparent inputs, `transparent_effects_digest` in the
 /// effects bundles is replaced with `transparent_sig_digest`.
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_v6)]
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
@@ -64,7 +64,7 @@ pub fn v6_signature_hash<
         signable_input,
     );
 
-    let signature_bundles_digest = hash_v6_effects_bundles(v6_effect_digest_entries(
+    let signature_bundles_digest = hash_v6_effects_bundles(v6_bundle_digest_entries(
         tx.transparent_bundle().is_some().then_some(&transparent_sig),
         txid_parts.sapling_digest.as_ref(),
         txid_parts.orchard_digest.as_ref(),
