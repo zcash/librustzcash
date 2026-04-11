@@ -343,9 +343,6 @@ pub(crate) fn hash_v6_header(
     h.write_u32_le(consensus_branch_id.into()).unwrap();
     h.write_u32_le(lock_time).unwrap();
     h.write_u32_le(expiry_height.into()).unwrap();
-    // # Correctness: no zip233_amount here even though ZIP 244 §T.1 includes it
-    // for v5 transactions. In v6, issuance amounts are captured by the VP deltas
-    // digest (§T.2), so including them here would double-commit.
     h.finalize()
 }
 
@@ -362,17 +359,12 @@ pub(crate) fn hash_v6_header(
 /// the digest must be deterministic for txid stability -- two implementations
 /// that parse the same wire bytes must always compute the same digest.
 ///
-/// Each serialized entry is `bundleType || assetClass || assetUuid || delta`,
-/// concatenated directly into the hash state without length prefixes, since
-/// all fields are fixed-width.
+/// Each entry is serialized as `bundleType || bundleVariant || assetClass ||
+/// assetUuid || value` using the wire encoding (compactSize for type/variant,
+/// 0 or 64 bytes for assetUuid depending on assetClass).
 #[cfg(zcash_v6)]
 pub(crate) fn hash_v6_value_pool_deltas(vp: &super::zip248::ValuePoolDeltas) -> Blake2bHash {
     let mut h = hasher(ZCASH_V6_VP_DELTAS_HASH_PERSONALIZATION);
-    // `to_wire_entries()` returns both known and unknown entries merged into a
-    // single Vec sorted by their composite wire key, ensuring canonical order.
-    // This is what guarantees that transparent < sapling < orchard < unknown
-    // in the hash preimage, matching the spec's requirement for strictly
-    // increasing `(bundleType, assetClass, assetUuid)`.
     for entry in vp.to_wire_entries() {
         entry.write(&mut h).unwrap();
     }
@@ -410,7 +402,7 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
         // per spend, split into compact and non-compact sub-hashes.
         h.write_all(hash_sapling_spends(bundle.shielded_spends()).as_bytes())
             .unwrap();
-        // [ZIP 248 §T.3.2b]: outputs_digest commits to (cmu, epk, enc, cv, out, proof)
+        // [ZIP 248 §T.3.2b]: outputs_digest commits to (cmu, epk, enc, cv, out)
         // per output, split into compact, memo, and non-compact sub-hashes.
         h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
             .unwrap();
@@ -424,8 +416,6 @@ pub(crate) fn hash_v6_sapling_effects<A: sapling::bundle::Authorization>(
         } else {
             h.write_all(&[0u8; 32]).unwrap();
         }
-        // # Correctness: no valueBalanceSapling here -- it is in the VP deltas
-        // digest per ZIP 248 §T.2, not in the per-bundle effects digest.
     }
     h.finalize()
 }
@@ -510,9 +500,6 @@ pub(crate) fn hash_v6_orchard_effects(
         // Flags and anchor follow the three sub-digests.
         h.write_all(&[bundle.flags().to_byte()]).unwrap();
         h.write_all(&bundle.anchor().to_bytes()).unwrap();
-        // # Correctness: valueBalanceOrchard is deliberately NOT included; it
-        // lives in mValuePoolDeltas per ZIP 248 §T.2. Including it here would
-        // double-commit the orchard value balance.
     }
     h.finalize()
 }
@@ -548,10 +535,6 @@ pub(crate) fn hash_v6_transparent_auth(
     let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
     if let Some(bundle) = transparent_bundle {
         for txin in &bundle.vin {
-            // sighashInfo prefix: compactSize(1) || version(0x00) for sighash v0.
-            // This two-byte prefix is defined by ZIP 248 §"Sighash Versioning"
-            // and must appear before every per-input scriptSig to bind the auth
-            // digest to a specific sighash algorithm version.
             h.write_all(V6_SIGHASH_V0_INFO_WIRE).expect("infallible");
             txin.script_sig().write(&mut h).expect("infallible");
         }
@@ -883,9 +866,6 @@ fn to_hash_v6(
     consensus_branch_id: BranchId,
     digests: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    // Personalization: "ZcashTxHash_" || LE32(consensus_branch_id).
-    // Embedding the branch ID in the personalization makes the txid
-    // inherently chain-specific, preventing cross-fork replay.
     let mut personal = [0; 16];
     personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (&mut personal[12..])

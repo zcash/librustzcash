@@ -386,19 +386,6 @@ pub struct TransactionData<A: Authorization> {
 impl<A: Authorization> TransactionData<A> {
     /// Derives VP deltas from shielded bundle value balances and builds a
     /// [`BundleMap`] from individual bundle options.
-    ///
-    /// # Correctness
-    ///
-    /// VP deltas for sapling and orchard are unconditionally overwritten here
-    /// from each bundle's `value_balance()`, even if the caller already set
-    /// them. This ensures the deltas always match the bundle contents and
-    /// avoids desync when `from_parts` is called with stale or empty deltas.
-    /// Transparent deltas are NOT set here because computing them requires
-    /// prevout amounts from external (UTXO-set) context.
-    ///
-    /// This derivation is the authoritative source for shielded VP deltas in
-    /// the v6 wire format -- see
-    /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format).
     fn build_bundle_map(
         value_pool_deltas: &mut zip248::ValuePoolDeltas,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
@@ -406,9 +393,6 @@ impl<A: Authorization> TransactionData<A> {
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> zip248::BundleMap<A> {
-        // Sapling and orchard carry their value balance inside the bundle,
-        // so we can always populate them. (Transparent requires prevout
-        // amounts from external context and cannot be derived here.)
         if let Some(ref b) = sapling_bundle {
             value_pool_deltas.set_sapling(*b.value_balance());
         }
@@ -666,9 +650,7 @@ impl<A: Authorization> TransactionData<A> {
 
         let digester = TxIdDigester;
 
-        // Collect pre-computed digests for unrecognized bundle types. These
-        // are opaque 32-byte hashes the caller must have set correctly via
-        // `BundleMap::get_unknown_mut` before calling this method.
+        // Unknown-bundle digests (flat hashes of opaque vBundleData bytes).
         let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         for (id, ub) in self.bundles.unknown_bundles() {
@@ -1403,27 +1385,22 @@ impl Transaction {
         }
 
         // Store any remaining (unrecognized) bundles as opaque
-        // `UnknownBundle` entries so that the transaction can still be parsed
-        // and re-serialized.
-        //
-        // # Correctness: the placeholder digests computed below (with
-        // personalization `ZIP248_OpaqueFx_` / `ZIP248_OpaqueAu_`) are NOT
-        // valid for txid computation. They exist solely so that the
-        // `UnknownBundle` struct is always populated. A caller that needs a
-        // correct txid for transactions containing unknown bundles must
-        // replace these via `BundleMap::get_unknown_mut` with the real
-        // 32-byte `bundle_effects_digest` / `bundle_auth_digest` from an
-        // external source that understands the bundle's spec.
+        // `UnknownBundle` entries. Digests are computed as flat BLAKE2b-256
+        // hashes of the raw vBundleData bytes with a (bundleType, bundleVariant)-
+        // derived personalization, per ZIP 248 §T.3 / §A.1. This allows wallets
+        // to compute the txid without understanding the bundle's internals.
         for (bundle_type, (variant, effect)) in effect_data_by_type {
             let auth = auth_data_by_type.remove(&bundle_type);
+            let effect_personal = zip248::opaque_effects_personalization(bundle_type, variant);
             let effect_digest = blake2b_simd::Params::new()
                 .hash_length(32)
-                .personal(b"ZIP248_OpaqueFx_")
+                .personal(&effect_personal)
                 .hash(&effect);
             let auth_digest = auth.as_ref().map(|(_, a)| {
+                let auth_personal = zip248::opaque_auth_personalization(bundle_type, variant);
                 blake2b_simd::Params::new()
                     .hash_length(32)
-                    .personal(b"ZIP248_OpaqueAu_")
+                    .personal(&auth_personal)
                     .hash(a)
             });
             bundles.insert_unknown(

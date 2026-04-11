@@ -206,10 +206,17 @@ impl BundleId {
 pub struct UnknownBundle {
     /// Raw effecting-data bytes from the wire.
     pub effect_data: Vec<u8>,
-    /// Digest of the effecting data, supplied externally.
+    /// Digest of the effecting data for the txid computation.
+    ///
+    /// For unknown bundle types, this is a flat BLAKE2b-256 of the raw
+    /// `vBundleData` bytes, consistent with the ZIP 248 design intent that
+    /// wallets can "hash the effecting data opaquely, without needing to
+    /// parse its internal structure." The caller may override this via
+    /// [`BundleMap::get_unknown_mut`] if the defining ZIP specifies a
+    /// different digest algorithm.
     pub effect_digest: blake2b_simd::Hash,
     pub auth_data: Option<Vec<u8>>,
-    /// Required to be `Some(_)` if and only if `auth_data` is `Some(_)`.
+    /// Digest of the authorizing data. Required when `auth_data` is `Some`.
     pub auth_digest: Option<blake2b_simd::Hash>,
 }
 
@@ -757,6 +764,39 @@ pub fn write_bundle_data_framing<W: Write>(
     CompactSize::write(&mut writer, data.len())?;
     writer.write_all(data)?;
     Ok(())
+}
+
+/// Returns the 16-byte BLAKE2b personalization for the opaque effects digest
+/// of a bundle with the given type and variant.
+/// [ZIP 248 §T.3](https://zips.z.cash/zip-0248#t-3-effects-bundles-digest)
+///
+/// Format: `"ZTxIdT" || LE32(bundleType) || "V" || u8(bundleVariant) || "Hash"`
+///
+/// This is used for bundle types not understood by the wallet, allowing the
+/// txid to be computed by flat-hashing the raw `vBundleData` bytes.
+pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> [u8; 16] {
+    let mut p = [0u8; 16];
+    p[..6].copy_from_slice(b"ZTxIdT");
+    p[6..10].copy_from_slice(&(bundle_type as u32).to_le_bytes());
+    p[10] = b'V';
+    p[11] = bundle_variant as u8;
+    p[12..16].copy_from_slice(b"Hash");
+    p
+}
+
+/// Returns the 16-byte BLAKE2b personalization for the opaque auth digest
+/// of a bundle with the given type and variant.
+/// [ZIP 248 §A.1](https://zips.z.cash/zip-0248#a-1-auth-bundles-digest)
+///
+/// Format: `"ZTxAuT" || LE32(bundleType) || "V" || u8(bundleVariant) || "Hash"`
+pub fn opaque_auth_personalization(bundle_type: u64, bundle_variant: u64) -> [u8; 16] {
+    let mut p = [0u8; 16];
+    p[..6].copy_from_slice(b"ZTxAuT");
+    p[6..10].copy_from_slice(&(bundle_type as u32).to_le_bytes());
+    p[10] = b'V';
+    p[11] = bundle_variant as u8;
+    p[12..16].copy_from_slice(b"Hash");
+    p
 }
 
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
