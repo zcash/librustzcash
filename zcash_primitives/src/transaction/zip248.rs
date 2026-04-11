@@ -154,6 +154,7 @@ pub struct BundleId {
 }
 
 impl BundleId {
+    /// Constructs a BundleId from its type and variant.
     pub const fn new(bundle_type: BundleType, bundle_variant: BundleVariant) -> Self {
         Self {
             bundle_type,
@@ -161,12 +162,28 @@ impl BundleId {
         }
     }
 
+    /// Returns `(bundleType, bundleVariant)` as raw `u64` values for wire encoding.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bundle type has no wire encoding (e.g. [`BundleType::Sprout`]).
+    pub fn wire_key(&self) -> (u64, u64) {
+        (self.bundle_type.to_u64(), self.bundle_variant.to_u64())
+    }
+
+    /// Sprout bundle (in-memory only, no wire encoding).
     pub const SPROUT: Self = Self::new(BundleType::Sprout, BundleVariant::Default);
+    /// TZE bundle (in-memory only, no wire encoding).
     pub const TZE: Self = Self::new(BundleType::Tze, BundleVariant::Default);
+    /// Transparent bundle (bundleType 0, variant 0).
     pub const TRANSPARENT: Self = Self::new(BundleType::Transparent, BundleVariant::Default);
+    /// Sapling bundle (bundleType 2, variant 0).
     pub const SAPLING: Self = Self::new(BundleType::Sapling, BundleVariant::Default);
+    /// Orchard bundle (bundleType 3, variant 0).
     pub const ORCHARD: Self = Self::new(BundleType::Orchard, BundleVariant::Default);
+    /// Transaction fee (bundleType 4, variant 0, value-only).
     pub const FEE: Self = Self::new(BundleType::Fee, BundleVariant::Default);
+    /// ZIP 233 NSM field (bundleType 5, variant 0, value-only).
     pub const ZIP233_NSM: Self = Self::new(BundleType::Zip233Nsm, BundleVariant::Default);
 }
 
@@ -187,7 +204,9 @@ impl BundleId {
 /// the opaque bytes alone.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
+    /// Raw effecting-data bytes from the wire.
     pub effect_data: Vec<u8>,
+    /// Digest of the effecting data, supplied externally.
     pub effect_digest: blake2b_simd::Hash,
     pub auth_data: Option<Vec<u8>>,
     /// Required to be `Some(_)` if and only if `auth_data` is `Some(_)`.
@@ -251,6 +270,7 @@ impl<A: Authorization> BundleMap<A> {
 
     // -- Typed accessors --
 
+    /// Returns the transparent bundle, if present.
     pub fn transparent(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
         self.known.get(&BundleId::TRANSPARENT).and_then(|b| match b {
             TypedBundle::Transparent(bundle) => Some(bundle),
@@ -258,6 +278,7 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
+    /// Returns the sprout bundle, if present.
     pub fn sprout(&self) -> Option<&sprout::Bundle> {
         self.known.get(&BundleId::SPROUT).and_then(|b| match b {
             TypedBundle::Sprout(bundle) => Some(bundle),
@@ -265,6 +286,7 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
+    /// Returns the sapling bundle, if present.
     pub fn sapling(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
         self.known.get(&BundleId::SAPLING).and_then(|b| match b {
             TypedBundle::Sapling(bundle) => Some(bundle),
@@ -272,6 +294,7 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
+    /// Returns the orchard bundle, if present.
     pub fn orchard(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.known.get(&BundleId::ORCHARD).and_then(|b| match b {
             TypedBundle::Orchard(bundle) => Some(bundle),
@@ -279,6 +302,7 @@ impl<A: Authorization> BundleMap<A> {
         })
     }
 
+    /// Returns the tze bundle, if present.
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
         self.known.get(&BundleId::TZE).and_then(|b| match b {
@@ -295,6 +319,7 @@ impl<A: Authorization> BundleMap<A> {
 
     // -- Insertion --
 
+    /// Inserts the transparent bundle.
     pub fn insert_transparent(&mut self, bundle: transparent::Bundle<A::TransparentAuth>) {
         self.known
             .insert(BundleId::TRANSPARENT, TypedBundle::Transparent(bundle));
@@ -305,16 +330,19 @@ impl<A: Authorization> BundleMap<A> {
         self.known.insert(BundleId::SPROUT, TypedBundle::Sprout(bundle));
     }
 
+    /// Inserts the sapling bundle.
     pub fn insert_sapling(&mut self, bundle: sapling::Bundle<A::SaplingAuth, ZatBalance>) {
         self.known
             .insert(BundleId::SAPLING, TypedBundle::Sapling(bundle));
     }
 
+    /// Inserts the orchard bundle.
     pub fn insert_orchard(&mut self, bundle: orchard::Bundle<A::OrchardAuth, ZatBalance>) {
         self.known
             .insert(BundleId::ORCHARD, TypedBundle::Orchard(bundle));
     }
 
+    /// Inserts the tze bundle.
     #[cfg(zcash_unstable = "zfuture")]
     pub fn insert_tze(&mut self, bundle: tze::Bundle<A::TzeAuth>) {
         self.known.insert(BundleId::TZE, TypedBundle::Tze(bundle));
@@ -326,12 +354,17 @@ impl<A: Authorization> BundleMap<A> {
     }
 
     /// Returns a mutable reference to an unknown bundle, if present.
-    pub fn get_unknown_mut(&mut self, raw_type: u64, raw_variant: u64) -> Option<&mut UnknownBundle> {
+    pub fn get_unknown_mut(
+        &mut self,
+        raw_type: u64,
+        raw_variant: u64,
+    ) -> Option<&mut UnknownBundle> {
         self.unknown.get_mut(&(raw_type, raw_variant))
     }
 
     // -- Authorization mapping --
 
+    /// Transforms bundle authorization types using the given per-protocol closures.
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl FnOnce(
@@ -443,6 +476,7 @@ pub struct ValuePoolDeltaKey {
 }
 
 impl ValuePoolDeltaKey {
+    /// Creates a key for a ZEC delta of the given bundle type.
     pub fn zec(bundle_type: BundleType) -> Self {
         Self {
             bundle_type,
@@ -473,10 +507,12 @@ pub struct ValuePoolDeltas {
 }
 
 impl ValuePoolDeltas {
+    /// Returns an empty value pool delta map.
     pub fn empty() -> Self {
         Self::default()
     }
 
+    /// Returns true if there are no entries.
     pub fn is_empty(&self) -> bool {
         self.known.is_empty() && self.unknown.is_empty()
     }
@@ -516,33 +552,40 @@ impl ValuePoolDeltas {
         }
     }
 
+    /// Returns the transparent bundle's ZEC value pool delta.
     pub fn transparent_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Transparent)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
+    /// Sets the transparent bundle's ZEC value pool delta.
     pub fn set_transparent(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Transparent, BundleVariant::Default, i64::from(value));
     }
 
+    /// Returns the Sapling bundle's ZEC value pool delta.
     pub fn sapling_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Sapling)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
+    /// Sets the Sapling bundle's ZEC value pool delta.
     pub fn set_sapling(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Sapling, BundleVariant::Default, i64::from(value));
     }
 
+    /// Returns the Orchard bundle's ZEC value pool delta.
     pub fn orchard_value(&self) -> Option<ZatBalance> {
         self.get_zec(BundleType::Orchard)
             .and_then(|v| ZatBalance::from_i64(v).ok())
     }
 
+    /// Sets the Orchard bundle's ZEC value pool delta.
     pub fn set_orchard(&mut self, value: ZatBalance) {
         self.set_zec(BundleType::Orchard, BundleVariant::Default, i64::from(value));
     }
 
+    /// Returns the transaction fee as a non-negative amount.
     pub fn fee(&self) -> Option<Zatoshis> {
         self.get_zec(BundleType::Fee).and_then(|v| {
             let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
@@ -550,11 +593,13 @@ impl ValuePoolDeltas {
         })
     }
 
+    /// Sets the transaction fee (stored as a negative delta).
     pub fn set_fee(&mut self, value: Zatoshis) {
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
         self.set_zec(BundleType::Fee, BundleVariant::Default, -pos);
     }
 
+    /// Returns the ZIP 233 NSM amount as a non-negative value.
     pub fn zip233_amount(&self) -> Option<Zatoshis> {
         self.get_zec(BundleType::Zip233Nsm).and_then(|v| {
             let abs = v.checked_neg().and_then(|n| u64::try_from(n).ok())?;
@@ -562,6 +607,7 @@ impl ValuePoolDeltas {
         })
     }
 
+    /// Sets the ZIP 233 NSM delta (stored as a negative value).
     pub fn set_zip233(&mut self, value: Zatoshis) {
         let pos = i64::try_from(u64::from(value)).expect("MAX_MONEY fits in i64");
         self.set_zec(BundleType::Zip233Nsm, BundleVariant::Default, -pos);
@@ -573,7 +619,14 @@ impl ValuePoolDeltas {
     }
 
     /// Insert an unknown-type entry. Used during v6 deserialization.
-    pub fn insert_unknown(&mut self, bundle_type: u64, asset_class: u8, asset_uuid: [u8; 64], variant: u64, value: i64) {
+    pub fn insert_unknown(
+        &mut self,
+        bundle_type: u64,
+        asset_class: u8,
+        asset_uuid: [u8; 64],
+        variant: u64,
+        value: i64,
+    ) {
         self.unknown.insert((bundle_type, asset_class, asset_uuid), (variant, value));
     }
 
@@ -621,6 +674,7 @@ pub struct ValuePoolDeltaEntry {
 }
 
 impl ValuePoolDeltaEntry {
+    /// Deserializes a value pool delta entry from the wire format.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let bundle_type = CompactSize::read(&mut reader)?;
         let bundle_variant = CompactSize::read(&mut reader)?;
@@ -665,6 +719,7 @@ impl ValuePoolDeltaEntry {
         })
     }
 
+    /// Serializes this entry in the wire format.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         CompactSize::write(&mut writer, self.bundle_type as usize)?;
         CompactSize::write(&mut writer, self.bundle_variant as usize)?;
@@ -704,9 +759,11 @@ pub fn write_bundle_data_framing<W: Write>(
     Ok(())
 }
 
-/// Reads and validates a sighash version 0 `sighashInfo` prefix
-/// (`compactSize(1) || 0x00`) per ZIP 248 §"Sighash Versioning". Sighash
-/// version 0 is currently the only defined version.
+/// Reads and validates a sighash version 0 `sighashInfo` prefix.
+/// [ZIP 248 §Sighash Versioning](https://zips.z.cash/zip-0248#sighash-versioning)
+///
+/// Sighash version 0 encodes as `[0x01, 0x00]` on the wire: compactSize(1) for the
+/// info length, then `0x00` for the version byte. This is the only defined version.
 #[cfg(zcash_v6)]
 pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
     reader: &mut R,
@@ -747,20 +804,20 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
 // ---------------------------------------------------------------------------
 
 /// Writes transparent effecting data in v6 format.
+/// [ZIP 248 §Transparent Effecting Data](https://zips.z.cash/zip-0248#transparent-effecting-data)
+///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
 pub fn write_v6_transparent_effects<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
-    // tx_in_count + TransparentInputEffecting (prevout_hash + prevout_index + nSequence)
     CompactSize::write(&mut writer, bundle.vin.len())?;
     for txin in &bundle.vin {
         txin.prevout().write(&mut writer)?;
         writer.write_all(&txin.sequence().to_le_bytes())?;
     }
 
-    // tx_out_count + TransparentOutput (value + scriptPubKey)
     CompactSize::write(&mut writer, bundle.vout.len())?;
     for txout in &bundle.vout {
         txout.write(&mut writer)?;
@@ -770,14 +827,15 @@ pub fn write_v6_transparent_effects<W: Write>(
 }
 
 /// Writes transparent authorizing data in v6 format.
+/// [ZIP 248 §Transparent Authorizing Data](https://zips.z.cash/zip-0248#transparent-authorizing-data)
+///
 /// Layout: per-input TransparentInputAuth (sighashInfo + scriptSig).
 pub fn write_v6_transparent_auth<W: Write>(
     mut writer: W,
     bundle: &transparent::Bundle<transparent::Authorized>,
 ) -> io::Result<()> {
     for txin in &bundle.vin {
-        // TransparentSighashInfo: compactSize-prefixed byte array
-        // For sighash version 0: single byte 0x00
+        // sighashInfo: version 0
         CompactSize::write(&mut writer, 1)?;
         writer.write_all(&[0x00])?;
         // scriptSig with compactSize length prefix
@@ -805,16 +863,13 @@ mod tests {
         assert_eq!(vp.fee(), None);
         assert_eq!(vp.zip233_amount(), None);
 
-        // Set fee
         vp.set_fee(Zatoshis::from_u64(1000).unwrap());
         assert!(!vp.is_empty());
         assert_eq!(vp.fee(), Some(Zatoshis::from_u64(1000).unwrap()));
 
-        // Set zip233
         vp.set_zip233(Zatoshis::from_u64(5000).unwrap());
         assert_eq!(vp.zip233_amount(), Some(Zatoshis::from_u64(5000).unwrap()));
 
-        // Set sapling value balance
         let sap_vb = ZatBalance::from_i64(100_000).unwrap();
         vp.set_sapling(sap_vb);
         assert_eq!(vp.sapling_value(), Some(sap_vb));
