@@ -2324,12 +2324,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
     /// Unlike [`InputSource::select_unspent_notes`] (which applies confirmation,
     /// dust, and expiry filters for transaction construction), this returns every
     /// note that existed and was unspent at the given height.
-    pub fn get_orchard_notes_at_historical_height(
+    pub fn get_unspent_orchard_notes_at_historical_height(
         &self,
         account: AccountUuid,
         height: BlockHeight,
     ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
-        wallet::orchard::get_orchard_notes_at_historical_height(
+        wallet::orchard::get_unspent_orchard_notes_at_historical_height(
             self.conn.borrow(),
             &self.params,
             account,
