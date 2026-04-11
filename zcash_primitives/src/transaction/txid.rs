@@ -28,7 +28,7 @@ use super::{
 };
 
 /// TxId tree root personalization
-pub(crate) const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
+const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 
 // TxId level 1 node personalization
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
@@ -76,6 +76,17 @@ pub(crate) const ZCASH_V6_AUTH_BUNDLES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAu
 
 pub(crate) fn hasher(personal: &[u8; 16]) -> StateWrite {
     StateWrite(Params::new().hash_length(32).personal(personal).to_state())
+}
+
+/// Builds the 16-byte BLAKE2b personalization used for txid and sighash
+/// top-level hashes: `"ZcashTxHash_" || LE32(consensus_branch_id)`.
+pub(crate) fn tx_hash_personalization(consensus_branch_id: BranchId) -> [u8; 16] {
+    let mut personal = [0; 16];
+    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
+    (&mut personal[12..])
+        .write_u32_le(consensus_branch_id.into())
+        .unwrap();
+    personal
 }
 
 /// Sequentially append the serialized value of each transparent input
@@ -772,11 +783,7 @@ pub(crate) fn to_hash(
     orchard_digest: Option<Blake2bHash>,
     #[cfg(zcash_unstable = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
-    let mut personal = [0; 16];
-    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
-    (&mut personal[12..])
-        .write_u32_le(consensus_branch_id.into())
-        .unwrap();
+    let personal = tx_hash_personalization(consensus_branch_id);
 
     let mut h = hasher(&personal);
     h.write_all(header_digest.as_bytes()).unwrap();
@@ -844,11 +851,7 @@ pub fn to_txid(
 /// same scheme as ZIP 244 so that txids are fork-specific.
 #[cfg(zcash_v6)]
 fn to_hash_v6(consensus_branch_id: BranchId, digests: &TxDigests<Blake2bHash>) -> Blake2bHash {
-    let mut personal = [0; 16];
-    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
-    (&mut personal[12..])
-        .write_u32_le(consensus_branch_id.into())
-        .unwrap();
+    let personal = tx_hash_personalization(consensus_branch_id);
 
     // If there are no value-pool deltas (e.g. a coinbase-only transaction),
     // fall back to the empty-hash sentinel so the three-part structure is
