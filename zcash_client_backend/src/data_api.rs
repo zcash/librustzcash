@@ -156,8 +156,16 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 ///
 /// This conforms to the structure of subtree data returned by
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
+///
+/// Exposed unconditionally so downstream consumers (e.g. SQL code that targets the
+/// Orchard note tables regardless of whether the `orchard` feature is enabled) can
+/// rely on a single source of truth. The `const_assert` below pins this value
+/// against `orchard::NOTE_COMMITMENT_TREE_DEPTH / 2` whenever the feature is
+/// enabled, so any drift in the Orchard crate traps at compile time.
+pub const ORCHARD_SHARD_HEIGHT: u8 = 16;
+
 #[cfg(feature = "orchard")]
-pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
+const _: () = assert!(ORCHARD_SHARD_HEIGHT == orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 / 2);
 
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.

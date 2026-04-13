@@ -375,6 +375,7 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -458,6 +459,7 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"

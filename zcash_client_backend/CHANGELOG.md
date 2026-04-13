@@ -46,6 +46,12 @@ workspace.
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`.
+- `zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT` is now available
+  unconditionally; the value (`16`) is still pinned against
+  `orchard::NOTE_COMMITMENT_TREE_DEPTH / 2` by a compile-time assertion when
+  the `orchard` feature is enabled. Downstream code that targets the Orchard
+  note tables regardless of feature state can now use this constant as a
+  single source of truth.
 - `zcash_client_backend::data_api`:
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`

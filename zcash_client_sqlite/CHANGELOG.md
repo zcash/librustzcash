@@ -63,6 +63,12 @@ workspace.
   scanning is exactly `last_scanned - (PRUNING_DEPTH - 1)` and under
   non-contiguous scanning (e.g. `ChainTip` range scanned before `Historic`
   ranges) walks forward from the PD floor to the first real checkpoint.This
+- Added a `witness_stabilized` column to the `sapling_received_notes` and
+  `orchard_received_notes` tables. The column is set to 1 by the new
+  `mark_stabilized_notes` helper, invoked at the end of each scan batch (and
+  during migration backfill), for notes whose containing shard's
+  `subtree_end_height` lies at or below `last_scanned - (PRUNING_DEPTH - 1)`
+  (the truncation rewind boundary).
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.

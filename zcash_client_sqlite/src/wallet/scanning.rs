@@ -25,11 +25,10 @@ use crate::{
 use super::common::table_constants;
 use super::wallet_birthday;
 
-#[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
-
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
+
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
@@ -369,6 +368,57 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .chain(extended_after);
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
+
+    // Mark any notes whose containing shard has now been confirmed beyond the pruning depth.
+    let last_scanned_height = range.end - 1;
+    mark_stabilized_notes(conn, last_scanned_height)?;
+
+    Ok(())
+}
+
+/// Marks notes as stabilized when their containing shard is complete and the shard's end
+/// height lies at or below the truncation rewind boundary
+/// (`last_scanned_height - (PRUNING_DEPTH - 1)`). Once stabilized, a note's witness data is
+/// considered durable and will be preserved across truncation.
+pub(crate) fn mark_stabilized_notes(
+    conn: &rusqlite::Transaction<'_>,
+    last_scanned_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let stable_height = u32::from(last_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+
+    conn.execute(
+        &format!(
+            "UPDATE sapling_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM sapling_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :stable_height
+                     AND (commitment_tree_position >> {}) = shard.shard_index
+               )",
+            SAPLING_SHARD_HEIGHT,
+        ),
+        named_params![":stable_height": stable_height],
+    )?;
+
+    conn.execute(
+        &format!(
+            "UPDATE orchard_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM orchard_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :stable_height
+                     AND (commitment_tree_position >> {}) = shard.shard_index
+               )",
+            ORCHARD_SHARD_HEIGHT,
+        ),
+        named_params![":stable_height": stable_height],
+    )?;
 
     Ok(())
 }
