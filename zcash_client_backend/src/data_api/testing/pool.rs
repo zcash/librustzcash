@@ -4258,21 +4258,28 @@ where
     );
 }
 
-pub fn truncate_to_chain_state<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
-where
+pub fn truncate_to_chain_state_deep<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    // Test plan:
-    // 1. Set up test environment with account
+    // Deep-truncation test plan:
+    // 1. Set up test environment with a birthday-aligned account
     // 2. Generate and scan initial blocks to populate the note commitment tree
-    // 3. Capture the chain state at a specific height
-    // 4. Generate and scan blocks beyond PRUNING_DEPTH to ensure early checkpoints are pruned
-    // 5. Verify that normal truncate_to_height fails due to missing checkpoints
+    // 3. Capture the chain state at a specific height (the future truncation target)
+    // 4. Generate and scan strictly more than PRUNING_DEPTH extra blocks so that the
+    //    captured checkpoint is pruned AND the target lies below `tip - PRUNING_DEPTH`
+    //    (the "deep" branch of `truncate_to_height_internal`)
+    // 5. Verify that normal truncate_to_height fails due to the missing checkpoint
     // 6. Test that truncate_to_chain_state succeeds using the captured chain state
-    // 7. Verify wallet state after truncation
+    // 7. Verify wallet state after truncation: the scan_queue is rewound all the way
+    //    to the target, but blocks, transactions, tx_locator_map entries, and note
+    //    commitment trees are only rewound to `tip - (PRUNING_DEPTH - 1)` (the oldest
+    //    retained checkpoint)
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+    use crate::data_api::{ll::wallet::PRUNING_DEPTH, scanning::ScanPriority};
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
@@ -4283,7 +4290,7 @@ where
 
     // Step 2: Generate and scan initial blocks to populate the note commitment tree.
     // We use an "other" fvk so that notes won't be tracked by the wallet (keeping the
-    // test focused on tree state rather than wallet balances).
+    // test focused on tree/block state rather than wallet balances).
     let seed = [1u8; 32];
     let other_sk = T::sk(&seed);
     let other_fvk = T::sk_to_fvk(&other_sk);
@@ -4309,9 +4316,154 @@ where
         .clone();
     assert_eq!(captured_chain_state.block_height(), capture_height);
 
-    // Step 4: Generate and scan blocks well beyond PRUNING_DEPTH so that the checkpoint
-    // at capture_height is pruned from the note commitment tree.
-    let extra_blocks = PRUNING_DEPTH + 10;
+    // Step 4: Generate and scan strictly more than PRUNING_DEPTH extra blocks so that
+    // the checkpoint at capture_height is pruned from the note commitment tree AND
+    // capture_height is below `tip - PRUNING_DEPTH`, which exercises the deep branch
+    // of `truncate_to_height_internal`.
+    let extra_blocks = PRUNING_DEPTH + 1;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5000),
+        );
+    }
+    st.scan_cached_blocks(capture_height + 1, extra_blocks as usize);
+
+    let pre_truncation_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set");
+    assert!(
+        pre_truncation_tip > capture_height + PRUNING_DEPTH,
+        "tip should be strictly beyond pruning depth from capture height"
+    );
+
+    // Step 5: Verify that truncate_to_height fails at capture_height because the
+    // checkpoint has been pruned.
+    let truncation_result = st.wallet_mut().truncate_to_height(capture_height);
+    assert!(
+        truncation_result.is_err(),
+        "truncate_to_height should fail when checkpoint has been pruned"
+    );
+
+    // Step 6: truncate_to_chain_state should succeed. For a deep target it skips frontier
+    // insertion entirely and relies on the existing tree checkpoints above the target.
+    st.wallet_mut()
+        .truncate_to_chain_state(captured_chain_state.clone())
+        .expect("truncate_to_chain_state should succeed");
+
+    // Step 7: Verify wallet state after truncation.
+    // 7a. The chain tip (derived from scan_queue) should now report the truncation target.
+    let new_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should match truncation height");
+    assert_eq!(new_tip, capture_height);
+
+    // 7b. No `Scanned` range in the scan queue may extend above the truncation target.
+    let ranges = st
+        .wallet()
+        .suggest_scan_ranges()
+        .expect("suggest_scan_ranges should succeed");
+    let future_scanned = ranges
+        .iter()
+        .find(|r| r.priority() == ScanPriority::Scanned && r.block_range().end > capture_height);
+    assert!(
+        future_scanned.is_none(),
+        "no `Scanned` range should extend above the truncation target, found: {future_scanned:?}"
+    );
+
+    // 7c. A deep truncation rewinds the scan queue all the way to the target, but blocks,
+    // transactions, tx_locator_map entries, and note commitment trees are only rewound to the
+    // oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`. Data at that boundary is kept
+    // (so stabilized notes remain spendable); data above it is removed.
+    let prune_boundary = pre_truncation_tip - (PRUNING_DEPTH - 1);
+    let wallet = st.wallet();
+    assert!(
+        wallet.get_block_hash(prune_boundary).unwrap().is_some(),
+        "block entry at (tip - (PRUNING_DEPTH - 1)) should be preserved by a deep truncation"
+    );
+    assert!(
+        wallet.get_block_hash(prune_boundary + 1).unwrap().is_none(),
+        "block entries above (tip - (PRUNING_DEPTH - 1)) must be removed by a deep truncation"
+    );
+    assert!(
+        wallet.get_block_hash(pre_truncation_tip).unwrap().is_none(),
+        "block entries up to the pre-truncation tip must be removed by a deep truncation"
+    );
+    assert_eq!(
+        wallet
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height()),
+        Some(prune_boundary),
+        "block_max_scanned should equal (tip - (PRUNING_DEPTH - 1)) after a deep truncation"
+    );
+}
+
+pub fn truncate_to_chain_state_shallow<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Shallow-truncation test plan:
+    // 1. Set up test environment with a birthday-aligned account
+    // 2. Generate and scan initial blocks to populate the note commitment tree
+    // 3. Capture the chain state at a specific height (the future truncation target)
+    // 4. Generate and scan `PRUNING_DEPTH - 1` extra blocks so that the target sits at the
+    //    shallow boundary (`target == tip - (PRUNING_DEPTH - 1)`, the oldest retained
+    //    checkpoint)
+    // 5. Test that truncate_to_chain_state succeeds using the captured chain state
+    // 6. Verify wallet state after truncation: scan_queue, blocks, tx_locator_map and
+    //    note commitment trees are all rewound to the truncation target. Data at the
+    //    target is preserved; anything above is removed.
+
+    use crate::data_api::{ll::wallet::PRUNING_DEPTH, scanning::ScanPriority};
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    // Step 2: Generate and scan initial blocks to populate the note commitment tree.
+    // We use an "other" fvk so that notes won't be tracked by the wallet (keeping the
+    // test focused on tree/block state rather than wallet balances).
+    let seed = [1u8; 32];
+    let other_sk = T::sk(&seed);
+    let other_fvk = T::sk_to_fvk(&other_sk);
+
+    let initial_block_count = 8u32;
+    for _ in 0..initial_block_count {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    let scan_start = sapling_activation;
+    st.scan_cached_blocks(scan_start, initial_block_count as usize);
+
+    // Step 3: Capture the chain state at the current tip. The CachedBlock tracks the
+    // exact frontier that corresponds to the end of each generated block.
+    let capture_height = sapling_activation + initial_block_count - 1;
+    let captured_chain_state = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(captured_chain_state.block_height(), capture_height);
+
+    // Step 4: Scan `PRUNING_DEPTH - 1` extra blocks so that the truncation target sits at the
+    // shallow boundary (`target == tip - (PRUNING_DEPTH - 1)`, which is exactly the oldest
+    // retained checkpoint given the tree's `max_checkpoints = PRUNING_DEPTH`).
+    let extra_blocks = PRUNING_DEPTH - 1;
     for _ in 0..extra_blocks {
         st.generate_next_block(
             &other_fvk,
@@ -4326,47 +4478,173 @@ where
         .chain_height()
         .unwrap()
         .expect("chain tip should be set");
-    assert!(
-        tip >= capture_height + PRUNING_DEPTH,
-        "tip should be beyond pruning depth from capture height"
+    assert_eq!(
+        tip,
+        capture_height + (PRUNING_DEPTH - 1),
+        "tip should be exactly at the shallow boundary from capture height"
     );
 
-    // Step 5: Verify that truncate_to_height fails at capture_height because the
-    // checkpoint has been pruned.
-    let truncation_result = st.wallet_mut().truncate_to_height(capture_height);
-    assert!(
-        truncation_result.is_err(),
-        "truncate_to_height should fail when checkpoint has been pruned"
-    );
-
-    // Step 6: truncate_to_chain_state should succeed because it inserts the frontier
-    // as a checkpoint before truncating.
+    // Step 5: truncate_to_chain_state should succeed. For a shallow target it truncates
+    // directly to the existing checkpoint at the target height (no frontier synthesis
+    // required when the target checkpoint is still retained).
     st.wallet_mut()
         .truncate_to_chain_state(captured_chain_state.clone())
         .expect("truncate_to_chain_state should succeed");
 
-    // Step 7: Verify wallet state after truncation.
-    // The chain tip should now be at the capture height.
+    // Step 6: Verify wallet state after truncation.
+    // 6a. The chain tip (derived from scan_queue) should now report the truncation target.
     let new_tip = st
         .wallet()
         .chain_height()
         .unwrap()
-        .expect("chain tip should still be set after truncation");
+        .expect("chain tip should match truncation height");
     assert_eq!(new_tip, capture_height);
 
-    // The block hash at capture_height should match what was in the captured chain state.
-    let hash_at_capture = st
+    // 6b. No `Scanned` range in the scan queue may extend above the truncation target.
+    let ranges = st
         .wallet()
-        .get_block_hash(capture_height)
-        .unwrap()
-        .expect("block hash should exist at capture height");
-    assert_eq!(hash_at_capture, captured_chain_state.block_hash());
+        .suggest_scan_ranges()
+        .expect("suggest_scan_ranges should succeed");
+    let future_scanned = ranges
+        .iter()
+        .find(|r| r.priority() == ScanPriority::Scanned && r.block_range().end > capture_height);
+    assert!(
+        future_scanned.is_none(),
+        "no `Scanned` range should extend above the truncation target, found: {future_scanned:?}"
+    );
 
-    // Blocks above the capture height should have been removed.
+    // 6c. A shallow truncation rewinds blocks, tx_locator_map, and note commitment trees
+    // to the truncation target: data at the target is preserved but anything above is
+    // removed.
+    let wallet = st.wallet();
+    assert!(
+        wallet.get_block_hash(capture_height).unwrap().is_some(),
+        "block entry at the truncation target should be preserved"
+    );
+    assert!(
+        wallet.get_block_hash(capture_height + 1).unwrap().is_none(),
+        "block entries above the truncation target should be removed by a shallow truncation"
+    );
     assert_eq!(
-        st.wallet().get_block_hash(capture_height + 1).unwrap(),
-        None,
-        "blocks above capture height should be removed"
+        wallet
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height()),
+        Some(capture_height),
+        "block_max_scanned should equal the truncation target after a shallow truncation"
+    );
+}
+
+/// Regression test: after the scan scheduler processes a `ChainTip` range before a lower
+/// `Historic` range, `MAX(height) FROM blocks` points into one scanned region while
+/// `last_scanned - (PRUNING_DEPTH - 1)` lands inside the unscanned gap between the two
+/// regions. `truncate_to_chain_state` must still succeed: the previous implementation
+/// returned `CorruptedData` because it expected a checkpoint at exactly the PD floor; the
+/// current implementation clamps forward to the lowest checkpoint that still lies inside
+/// the prune window.
+pub fn truncate_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::{ll::wallet::PRUNING_DEPTH, scanning::ScanPriority};
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    // Scan is always sequential in cache order, but `scan_cached_blocks` is happy to be
+    // invoked on subranges out of order. We pre-generate a contiguous chain of blocks and
+    // scan it in two disjoint segments with a gap in between.
+    let seed = [1u8; 32];
+    let other_fvk = T::sk_to_fvk(&T::sk(&seed));
+    let filler_value = Zatoshis::const_from_u64(10_000);
+
+    let low_count: u32 = 10;
+    let gap_size: u32 = PRUNING_DEPTH + 5; // must exceed PD so the PD floor lands in the gap
+    let high_count: u32 = 10;
+    let total_generated = low_count + gap_size + high_count;
+
+    for _ in 0..total_generated {
+        st.generate_next_block(&other_fvk, AddressType::DefaultExternal, filler_value);
+    }
+
+    // `with_account_from_sapling_activation` anchors the account birthday at
+    // `sapling_activation - 1`, so the first cached block lives at `sapling_activation`.
+    let low_start = sapling_activation;
+    let low_end_inclusive = low_start + low_count - 1;
+    let high_start = low_end_inclusive + gap_size + 1;
+    let high_end_inclusive = high_start + high_count - 1;
+
+    // Scan the low range (simulating a historic range).
+    st.scan_cached_blocks(low_start, low_count as usize);
+
+    // Capture the chain state at the end of the low range; we'll use it as the deep
+    // truncation target. This reflects the caller having a `ChainState` from back when
+    // scanning ended at `low_end_inclusive`.
+    let truncation_target = st
+        .latest_cached_block_below_height(low_end_inclusive + 1)
+        .expect("a cached block should exist at or below the end of the low range")
+        .chain_state()
+        .clone();
+    assert_eq!(truncation_target.block_height(), low_end_inclusive);
+
+    // Scan the high range (simulating a chain-tip range), leaving `gap_size` blocks in
+    // the middle unscanned. Because `high_start > low_end_inclusive + PRUNING_DEPTH`, the
+    // PD floor after this scan (`high_end_inclusive - (PRUNING_DEPTH - 1)`) lands inside
+    // the unscanned gap.
+    st.scan_cached_blocks(high_start, high_count as usize);
+
+    // Confirm the pre-truncation state matches the scenario we claim to be testing.
+    // `block_max_scanned` reports `MAX(height) FROM blocks`, which is exactly what
+    // `truncate_to_height_internal` uses as `last_scanned_height` when computing the PD
+    // floor. `chain_height` would also include unscanned portions of the scan queue, so
+    // it is not a tight enough bound for this test.
+    let max_scanned_height = st
+        .wallet()
+        .block_max_scanned()
+        .unwrap()
+        .map(|m| m.block_height())
+        .expect("block_max_scanned should report the high-range tip");
+    assert_eq!(max_scanned_height, high_end_inclusive);
+    let pd_floor = max_scanned_height - (PRUNING_DEPTH - 1);
+    assert!(
+        pd_floor > low_end_inclusive && pd_floor < high_start,
+        "test invariant: PD floor must lie in the unscanned gap (got {pd_floor}, \
+         gap is ({low_end_inclusive}, {high_start}))"
+    );
+
+    // Previously this would fail with `CorruptedData` because no checkpoint exists at
+    // `pd_floor`. The current implementation clamps forward to the lowest in-window
+    // checkpoint (`high_start`) and succeeds.
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed across a non-contiguous scan");
+
+    // The core claim of this test is that `truncate_to_chain_state` returned `Ok(())`
+    // rather than `CorruptedData`, which the `expect` above already verified: prior to
+    // the clamp-in-window fix, `truncate_to_checkpoint` was invoked at `pd_floor`
+    // (which sits in the unscanned gap and has no checkpoint) and failed. Beyond that,
+    // the only post-condition we still assert is that the scan queue has no lingering
+    // `Scanned` range above the truncation target — the exact pre/post block-boundary
+    // depends on which baseline checkpoints the scanner seeded, which is an
+    // implementation detail of `scan_cached_blocks` and not part of this commit's
+    // contract.
+    let ranges = st
+        .wallet()
+        .suggest_scan_ranges()
+        .expect("suggest_scan_ranges should succeed");
+    let future_scanned = ranges.iter().find(|r| {
+        r.priority() == ScanPriority::Scanned && r.block_range().end > low_end_inclusive + 1
+    });
+    assert!(
+        future_scanned.is_none(),
+        "no `Scanned` range should extend above the truncation target, found: {future_scanned:?}"
     );
 }
 
@@ -4460,16 +4738,50 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
     // This should succeed. On the buggy code, this fails with RequestedRewindInvalid
     // because select_truncation_height cannot find an entry in the blocks table at the
     // target height.
-    let _target_height = prior_chain_state.block_height();
+    let target_height = prior_chain_state.block_height();
+    let pre_truncation_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("tip should be set before truncation");
+    let prune_depth = pre_truncation_tip - (PRUNING_DEPTH - 1);
+
     st.wallet_mut()
         .truncate_to_chain_state(prior_chain_state)
         .expect("truncate_to_chain_state below birthday should succeed");
 
-    // All blocks were above the target height, so they should have been removed.
+    // scan_queue should be rewound to truncation height
+    let new_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set to truncation target");
+    assert_eq!(new_tip, target_height);
+
+    // The target is far below the oldest retained checkpoint (`tip - (PRUNING_DEPTH - 1)`), so
+    // this exercises the deep path: the scan queue is rewound all the way to the target, while
+    // other wallet data is rewound only to that retention boundary. Data at the boundary is
+    // kept; data above it must be removed.
+    let wallet = st.wallet();
+    assert!(
+        wallet.get_block_hash(prune_depth).unwrap().is_some(),
+        "block entry at (tip - (PRUNING_DEPTH - 1)) should be preserved by a deep truncation"
+    );
+    assert!(
+        wallet.get_block_hash(prune_depth + 1).unwrap().is_none(),
+        "block entries above (tip - (PRUNING_DEPTH - 1)) must be removed by a deep truncation"
+    );
+    assert!(
+        wallet.get_block_hash(pre_truncation_tip).unwrap().is_none(),
+        "block entries up to the pre-truncation tip must be removed by a deep truncation"
+    );
     assert_eq!(
-        st.wallet().get_block_hash(birthday_height).unwrap(),
-        None,
-        "blocks at birthday height should be removed after truncating below birthday"
+        wallet
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height()),
+        Some(prune_depth),
+        "block_max_scanned should equal (tip - (PRUNING_DEPTH - 1)) after a deep truncation"
     );
 }
 

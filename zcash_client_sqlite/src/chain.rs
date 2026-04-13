@@ -369,14 +369,25 @@ mod tests {
     }
 
     #[test]
-    fn truncate_to_chain_state_sapling() {
-        testing::pool::truncate_to_chain_state::<SaplingPoolTester>()
+    fn truncate_to_chain_state_deep_sapling() {
+        testing::pool::truncate_to_chain_state_deep::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn truncate_to_chain_state_orchard() {
-        testing::pool::truncate_to_chain_state::<OrchardPoolTester>()
+    fn truncate_to_chain_state_deep_orchard() {
+        testing::pool::truncate_to_chain_state_deep::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn truncate_to_chain_state_shallow_sapling() {
+        testing::pool::truncate_to_chain_state_shallow::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_to_chain_state_shallow_orchard() {
+        testing::pool::truncate_to_chain_state_shallow::<OrchardPoolTester>()
     }
 
     #[test]
@@ -388,6 +399,17 @@ mod tests {
     #[cfg(feature = "orchard")]
     fn truncate_to_chain_state_below_birthday_orchard() {
         testing::pool::truncate_to_chain_state_below_birthday::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn truncate_after_non_contiguous_scan_sapling() {
+        testing::pool::truncate_after_non_contiguous_scan::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_after_non_contiguous_scan_orchard() {
+        testing::pool::truncate_after_non_contiguous_scan::<OrchardPoolTester>()
     }
 
     #[test]

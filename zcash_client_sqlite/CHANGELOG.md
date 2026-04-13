@@ -30,6 +30,10 @@ workspace.
 - `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
+- `zcash_client_sqlite::wallet::commitment_tree::min_checkpoint_id_at_or_above`
+  returns the lowest retained checkpoint id at or above a given block height,
+  used by truncation to clamp the rewind floor to a real checkpoint inside the
+  prune window.
 
 ### Changed
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
@@ -48,6 +52,17 @@ workspace.
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a
   precomputed input size for accurate ZIP 317 fee estimation.
+- Truncation no longer unconditionally rewinds all wallet data to the requested
+  target height. For deep truncations (more than `PRUNING_DEPTH` below the
+  scanned tip), only the scan queue is rewound to the requested height; blocks,
+  note commitment trees, transactions, transparent UTXO observations, and
+  nullifier map entries are not rewound beyond `PRUNING_DEPTH`. Shallow
+  truncations (within `PRUNING_DEPTH` of the tip) behave as before. The rewind
+  floor is now the lowest shard-tree checkpoint that lies inside the prune window
+  `[last_scanned - (PRUNING_DEPTH - 1), last_scanned]`, which under contiguous
+  scanning is exactly `last_scanned - (PRUNING_DEPTH - 1)` and under
+  non-contiguous scanning (e.g. `ChainTip` range scanned before `Historic`
+  ranges) walks forward from the PD floor to the first real checkpoint.This
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.

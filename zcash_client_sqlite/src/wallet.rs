@@ -3533,10 +3533,47 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         ))
     })?;
 
-    // Delete from the scanning queue any range with a start height greater than the
-    // truncation height, and then truncate any remaining range by setting the end
-    // equal to the truncation height + 1. This sets our view of the chain tip back
-    // to the retained height.
+    // For deep truncations the scan queue is rewound to `truncation_height`, but blocks, trees,
+    // transactions, transparent UTXO observations, and nullifier map entries are only rewound to
+    // the lowest shard-tree checkpoint that still lies inside the prune window
+    // `[last_scanned - (PRUNING_DEPTH - 1), last_scanned]`. Under contiguous scanning that is
+    // exactly `last_scanned - (PRUNING_DEPTH - 1)`, because the tree's `max_checkpoints` cap
+    // equals `PRUNING_DEPTH` and FIFO-by-id pruning retains every height in the window. Under
+    // non-contiguous scanning (e.g. `ChainTip` range scanned before `Historic` ranges, per
+    // `suggest_scan_ranges` ordering in `wallet::scanning`), the PD floor may sit in an
+    // unscanned gap and have no checkpoint; walking forward from the floor to the first real
+    // checkpoint keeps us inside the window while still coinciding with a real checkpoint that
+    // `truncate_to_checkpoint` can act on.
+    let pd_floor = last_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+    let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        conn,
+        crate::SAPLING_TABLES_PREFIX,
+        pd_floor,
+    )
+    .map_err(ShardTreeError::Storage)?;
+    #[cfg(feature = "orchard")]
+    let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        conn,
+        crate::ORCHARD_TABLES_PREFIX,
+        pd_floor,
+    )
+    .map_err(ShardTreeError::Storage)?;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_window_floor: Option<BlockHeight> = None;
+
+    // Combine the per-pool floors by taking the shallower (larger height). Under normal scanning
+    // both pools record checkpoints at identical heights (each block's `put_block` updates both
+    // trees), so the two values agree and this is a no-op choice.
+    let in_window_floor = match (sapling_window_floor, orchard_window_floor) {
+        (Some(s), Some(o)) => s.max(o),
+        (Some(h), None) | (None, Some(h)) => h,
+        (None, None) => pd_floor,
+    };
+    let data_rewind_height = truncation_height.max(in_window_floor);
+
+    // scan_queue ALWAYS rewinds all the way to `truncation_height`, signalling to the sync
+    // loop that anything above must be re-scanned. This holds for both shallow and deep
+    // truncations.
     conn.execute(
         "DELETE FROM scan_queue
         WHERE block_range_start >= :new_end_height",
@@ -3563,7 +3600,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
          FROM transactions tx
          WHERE tx.id_tx = transaction_id
          AND max_observed_unspent_height > :height",
-        named_params![":height": u32::from(truncation_height)],
+        named_params![":height": u32::from(data_rewind_height)],
     )?;
 
     // Un-mine transactions. This must be done outside of the last_scanned_height check because
@@ -3572,13 +3609,13 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         "UPDATE transactions
          SET block = NULL, mined_height = NULL, tx_index = NULL, confirmed_unmined_at_height = NULL
          WHERE mined_height > :height",
-        named_params![":height": u32::from(truncation_height)],
+        named_params![":height": u32::from(data_rewind_height)],
     )?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
     // affected block records from the database.
-    if truncation_height < last_scanned_height {
-        // Truncate the note commitment trees
+    if data_rewind_height < last_scanned_height {
+        // Truncate the note commitment trees to `data_rewind_height`
         let mut wdb = WalletDb {
             conn: SqlTransaction(conn),
             params: params.clone(),
@@ -3587,13 +3624,26 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
             #[cfg(feature = "transparent-inputs")]
             gap_limits: *gap_limits,
         };
+        // `truncate_to_checkpoint` returns `Ok(false)` when the tree has no checkpoint at the
+        // requested id; surface that as `CorruptedData` rather than letting the bool drop on
+        // the floor.
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            if !tree.truncate_to_checkpoint(&data_rewind_height)? {
+                return Err(SqliteClientError::CorruptedData(format!(
+                    "Sapling tree has no checkpoint at expected rewind height {data_rewind_height}; \
+                     the shard tree is inconsistent with the recorded checkpoint rows."
+                )));
+            }
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            if !tree.truncate_to_checkpoint(&data_rewind_height)? {
+                return Err(SqliteClientError::CorruptedData(format!(
+                    "Orchard tree has no checkpoint at expected rewind height {data_rewind_height}; \
+                     the shard tree is inconsistent with the recorded checkpoint rows."
+                )));
+            }
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -3607,15 +3657,15 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         // Now that they aren't depended on, delete un-mined blocks.
         conn.execute(
             "DELETE FROM blocks WHERE height > ?",
-            [u32::from(truncation_height)],
+            [u32::from(data_rewind_height)],
         )?;
 
         // Delete from the nullifier map any entries with a locator referencing a block
-        // height greater than the truncation height.
+        // height greater than the data-rewind height.
         conn.execute(
             "DELETE FROM tx_locator_map
             WHERE block_height > :block_height",
-            named_params![":block_height": u32::from(truncation_height)],
+            named_params![":block_height": u32::from(data_rewind_height)],
         )?;
     }
 
@@ -3634,19 +3684,41 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 ///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
 ///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
 ///   target height, and finally truncates to that new checkpoint.
+///
+/// # Spending stabilized notes after a deep truncation
+///
+/// A deep truncation rewinds the scan queue to `target_height` but preserves blocks, trees,
+/// transactions, and other wallet data above the lowest shard-tree checkpoint inside the
+/// prune window, so notes flagged `witness_stabilized` retain valid witness data. To
+/// actually spend those notes, the caller must follow up with
+/// `WalletWrite::update_chain_tip` to restore the wallet's view of the chain tip.
+/// Otherwise `propose_transfer` either fails at `get_target_and_anchor_heights` with
+/// `Error::ScanRequired` (when no checkpoint sits at or below the derived anchor), or —
+/// if an anchor can still be constructed — derives it from the rewound `chain_height()`,
+/// placing it below the stabilized note's mined height; the anchor-height check in note
+/// selection then filters the note out and proposal construction fails with
+/// `Error::InsufficientFunds { available: 0, .. }`. Stabilized balance reported by
+/// `get_wallet_summary` does not depend on a restored chain tip; only spend
+/// construction does.
 pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
     chain_state: ChainState,
 ) -> Result<(), SqliteClientError> {
     let target_height = chain_state.block_height();
 
-    // Only truncate trees when the maximum scanned height is greater than the target height. When
-    // the target height is at or above the max scanned height, we skip frontier insertion (it is
-    // unnecessary at the max scanned height, and could introduce a subtree root discontinuity
-    // above it; the frontier will be added naturally during scanning). We will however still need
-    // to truncate the scan queue so that ranges above the target are removed.
-    let truncate_trees = block_max_scanned(wdb.conn.0, &wdb.params)?
-        .is_some_and(|meta| meta.block_height() > target_height);
+    // Only truncate trees when the target is strictly below the maximum scanned height AND
+    // inside the prune window `[max_scanned - (PRUNING_DEPTH - 1), max_scanned]`. Targets at or
+    // above the max scanned height are skipped because a frontier there could introduce a
+    // subtree root discontinuity above it; the frontier will be added naturally during scanning.
+    // Targets below the prune window are skipped because `truncate_to_height_internal` clamps
+    // its rewind floor up to the lowest checkpoint inside the window, and any checkpoint
+    // inserted at a deeper target would itself be truncated away on that subsequent call. In
+    // both skipped cases the scan queue is still trimmed above `target_height` unconditionally
+    // in `truncate_to_height_internal`.
+    let truncate_trees = block_max_scanned(wdb.conn.0, &wdb.params)?.is_some_and(|m| {
+        let h = m.block_height();
+        target_height < h && target_height >= h.saturating_sub(PRUNING_DEPTH - 1)
+    });
 
     if truncate_trees {
         // Try the simple case first: if a checkpoint exists at or below the target height,
