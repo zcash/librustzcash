@@ -4954,6 +4954,120 @@ where
     );
 }
 
+/// Regression test for the stabilized-note truncation behavior.
+///
+/// When a truncation occurs, accounts should be re-scanned from the truncation height. There was a
+/// regression while implementing note stabilization which broke the scan queue on truncation,
+/// causing accounts not to be re-scanned as expected. This test ensures re-scan behavior works as
+/// expected.
+pub fn truncate_reopens_scan_range_above_stabilized_notes<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::{ll::wallet::PRUNING_DEPTH, scanning::ScanPriority};
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let dfvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let birthday = st.test_account().unwrap().birthday().height();
+    let note_value = Zatoshis::const_from_u64(500_000);
+
+    // Generate and scan 5 filler blocks, then capture the chain state as our truncation
+    // target. This height is where a caller wanting to trigger a re-scan would truncate to.
+    let filler_count = 5u32;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(birthday + 1, filler_count as usize);
+    let truncation_target = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    let truncation_height = truncation_target.block_height();
+
+    // Mine and scan a note owned by the wallet; this note's `mined_height` will be above
+    // `truncation_height`, and is what triggers the soft-truncate path.
+    let (note_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(note_height, 1);
+    assert!(note_height > truncation_height);
+
+    // Fill shard 0 at birthday, far below any `stable_height` we will reach.
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            birthday,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+
+    // Scan `PRUNING_DEPTH` more blocks so that the note is stabilized before truncation.
+    let extra_blocks = PRUNING_DEPTH;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
+
+    let pre_trunc_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set before truncation");
+    assert!(pre_trunc_tip > truncation_height);
+
+    // Truncate. The documented contract is that the chain tip is now `truncation_height`,
+    // regardless of how much stabilized data is retained above it.
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed");
+
+    let post_trunc_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should still be set after truncation");
+    assert_eq!(
+        post_trunc_tip, truncation_height,
+        "after truncate_to_chain_state, chain_height must report the truncation target so \
+         callers (and the sync loop) know to re-scan above it; leaving the scan queue intact \
+         to preserve stabilized-note data silently suppresses re-scan of the range that was \
+         truncated"
+    );
+
+    // And the scan queue must not claim the range above `truncation_height` is already
+    // `Scanned`, otherwise `suggest_scan_ranges` will report nothing to do and the caller
+    // will never re-scan. Any entry that extends above the truncation height with priority
+    // `Scanned` would defeat the truncation.
+    let ranges = st
+        .wallet()
+        .suggest_scan_ranges()
+        .expect("suggest_scan_ranges should succeed");
+    let covering_scanned = ranges.iter().find(|r| {
+        r.priority() == ScanPriority::Scanned && r.block_range().end > truncation_height + 1
+    });
+    assert!(
+        covering_scanned.is_none(),
+        "no `Scanned` range should extend above the truncation height after truncation, \
+         but found: {covering_scanned:?}"
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,

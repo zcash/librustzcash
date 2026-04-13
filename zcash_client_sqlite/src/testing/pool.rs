@@ -333,6 +333,13 @@ pub(crate) fn mixed_stabilization_unmines_transaction<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn truncate_reopens_scan_range_above_stabilized_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::truncate_reopens_scan_range_above_stabilized_notes::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::truncate_to_chain_state_below_birthday::<T, _>(
         TestDbFactory::default(),

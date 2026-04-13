@@ -488,4 +488,15 @@ mod tests {
     fn mixed_stabilization_unmines_transaction_orchard() {
         testing::pool::mixed_stabilization_unmines_transaction::<OrchardPoolTester>()
     }
+
+    #[test]
+    fn truncate_reopens_scan_range_above_stabilized_notes_sapling() {
+        testing::pool::truncate_reopens_scan_range_above_stabilized_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_reopens_scan_range_above_stabilized_notes_orchard() {
+        testing::pool::truncate_reopens_scan_range_above_stabilized_notes::<OrchardPoolTester>()
+    }
 }
