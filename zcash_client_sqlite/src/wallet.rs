@@ -3734,6 +3734,88 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     Ok(())
 }
 
+/// Rewinds the wallet to at most the given block height, preserving any wallet data which has been
+/// confirmed beyond the pruning depth.
+///
+/// In contrast to [`truncate_to_height`], which unconditionally deletes wallet state above
+/// `max_height` (transaction & note data is retained, but committment trees, blocks, etc are
+/// removed to the truncation height), this rewinds the scan queue to `max_height` but only rewinds
+/// blocks, note commitment trees, transactions, transparent UTXO observations, and nullifier-map
+/// entries as far back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`). Data at or below
+/// that height is preserved. Because `PRUNING_DEPTH` is a property of chain depth, the floor is
+/// derived from the wallet's view of the chain tip rather than from `MAX(blocks.height)`.
+///
+///
+/// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor (via
+/// [`commitment_tree::min_checkpoint_id_at_or_above`]) so that [`truncate_to_height_internal`] has
+/// a real checkpoint to truncate to under non-contiguous scan orders.
+///
+/// Returns the actual scan-queue rewind height (`max_height` clamped to the max scanned height when
+/// `max_height` is above it).
+pub(crate) fn rewind_to_height<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+    max_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    let max_scanned_height = block_max_scanned(conn, params)?
+        .map(|m| m.block_height())
+        .unwrap_or_else(|| {
+            params
+                .activation_height(NetworkUpgrade::Sapling)
+                // Fall back to the genesis block in regtest mode.
+                .map_or(BlockHeight::from_u32(0), |h| h - 1)
+        });
+
+    // Compute the floor height of the pruning window
+    let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+    let truncation_target = max_height.max(pruning_floor);
+
+    // Determine the minimum sapling and orchard checkpoints within the pruning window
+    let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        conn,
+        crate::SAPLING_TABLES_PREFIX,
+        truncation_target,
+    )
+    .map_err(ShardTreeError::Storage)?;
+
+    #[cfg(feature = "orchard")]
+    {
+        // Check that Orchard checkpoint matches the Sapling checkpoint.
+        // These should always match, unless the database is corrupted.
+        let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+            conn,
+            crate::ORCHARD_TABLES_PREFIX,
+            truncation_target,
+        )
+        .map_err(ShardTreeError::Storage)?;
+        if orchard_window_floor != sapling_window_floor {
+            return Err(SqliteClientError::CorruptedData(
+                "Sapling and Orchard should have the same checkpoints".into(),
+            ));
+        }
+    }
+
+    // Combine the per-pool floors by taking the shallower (larger height).
+    let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+
+    // Use `truncate_to_height_internal` perform full truncation of data within the pruning window
+    truncate_to_height_internal(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        truncation_height,
+    )?;
+
+    // When the caller asked to rewind below the truncation_height floor, trim the scan queue the
+    // rest of the way down to `max_height` so the sync loop will re-scan the blocks between
+    // `max_height` and `data_rewind_height`.
+    trim_scan_queue_to(conn, max_height)?;
+
+    Ok(max_height.min(max_scanned_height))
+}
+
 /// Trims the `scan_queue` so that no range extends above `max_height`.
 ///
 /// Deletes any range whose start is above `max_height`, and clamps the upper bound of any

@@ -624,6 +624,27 @@ pub(crate) fn max_checkpoint_id(
     .map_err(Error::Query)
 }
 
+/// Returns the lowest retained checkpoint id that is at or above `floor`, or `None`
+/// if the pool's checkpoint table contains no checkpoint within `[floor, ∞)`.
+pub(crate) fn min_checkpoint_id_at_or_above(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    floor: BlockHeight,
+) -> Result<Option<BlockHeight>, Error> {
+    conn.query_row(
+        &format!(
+            "SELECT MIN(checkpoint_id) FROM {table_prefix}_tree_checkpoints
+             WHERE checkpoint_id >= :floor"
+        ),
+        named_params![":floor": u32::from(floor)],
+        |row| {
+            row.get::<_, Option<u32>>(0)
+                .map(|opt| opt.map(BlockHeight::from))
+        },
+    )
+    .map_err(Error::Query)
+}
+
 pub(crate) fn add_checkpoint(
     conn: &rusqlite::Transaction<'_>,
     table_prefix: &'static str,

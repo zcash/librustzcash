@@ -402,6 +402,39 @@ mod tests {
     }
 
     #[test]
+    fn rewind_to_height_deep_sapling() {
+        testing::pool::rewind_to_height_deep::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_height_deep_orchard() {
+        testing::pool::rewind_to_height_deep::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_to_height_shallow_sapling() {
+        testing::pool::rewind_to_height_shallow::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_height_shallow_orchard() {
+        testing::pool::rewind_to_height_shallow::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_after_non_contiguous_scan_sapling() {
+        testing::pool::rewind_after_non_contiguous_scan::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_after_non_contiguous_scan_orchard() {
+        testing::pool::rewind_after_non_contiguous_scan::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }

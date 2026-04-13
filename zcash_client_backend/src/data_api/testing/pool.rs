@@ -4593,6 +4593,304 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
     );
 }
 
+pub fn rewind_to_height_deep<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Deep-rewind test plan:
+    // 1. Set up a birthday-aligned account.
+    // 2. Generate and scan initial blocks to populate the note commitment tree.
+    // 3. Pick a rewind target well below the future prune floor.
+    // 4. Generate and scan more than PRUNING_DEPTH extra blocks so that the checkpoint at the
+    //    target is pruned AND the target lies below `tip - PRUNING_DEPTH` (the "deep" branch).
+    // 5. Call `rewind_to_height(target)` and verify:
+    //    - the scan queue is rewound all the way to `target`;
+    //    - blocks, transactions, tx_locator_map entries, and note commitment trees are
+    //      only rewound to `tip - (PRUNING_DEPTH - 1)` (the oldest retained checkpoint).
+
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    // Generate and scan initial blocks using an "other" fvk so notes are not tracked
+    // by the wallet.
+    let seed = [1u8; 32];
+    let other_fvk = T::sk_to_fvk(&T::sk(&seed));
+
+    let initial_block_count = 8u32;
+    for _ in 0..initial_block_count {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    st.scan_cached_blocks(sapling_activation, initial_block_count as usize);
+
+    // The rewind target is the tip of the initial range.
+    let rewind_target = sapling_activation + initial_block_count - 1;
+
+    // Scan more than PRUNING_DEPTH extra blocks so that the checkpoint at rewind_target is pruned
+    // AND rewind_target is below `tip - PRUNING_DEPTH`.
+    let extra_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5000),
+        );
+    }
+    st.scan_cached_blocks(rewind_target + 1, extra_blocks as usize);
+
+    let pre_rewind_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set");
+    assert!(
+        pre_rewind_tip > rewind_target + PRUNING_DEPTH,
+        "tip should be strictly beyond pruning depth from the rewind target"
+    );
+
+    // Capture the block hash at the prune boundary so we can assert it survives the rewind
+    // unchanged (rather than merely that something exists at that height).
+    let prune_boundary = pre_rewind_tip - (PRUNING_DEPTH - 1);
+    let boundary_hash_before = st
+        .wallet()
+        .get_block_hash(prune_boundary)
+        .unwrap()
+        .expect("block at prune boundary should be present before rewind");
+
+    // `rewind_to_height` must succeed at the same target.
+    let rewound_to = st
+        .wallet_mut()
+        .rewind_to_height(rewind_target)
+        .expect("rewind_to_height should succeed for a deep target");
+    assert_eq!(rewound_to, rewind_target);
+
+    // The chain tip (derived from scan_queue) should now report the rewind target.
+    let new_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should match rewind target");
+    assert_eq!(new_tip, rewind_target);
+
+    // A deep rewind keeps the scan queue rewound to the target, while blocks,
+    // transactions, tx_locator_map entries, and note commitment trees are only rewound
+    // to the oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`. Data at that
+    // boundary is kept (so stabilized notes remain spendable); data above it is removed.
+    let wallet = st.wallet();
+    assert_eq!(
+        wallet.get_block_hash(prune_boundary).unwrap(),
+        Some(boundary_hash_before),
+        "block hash at (tip - (PRUNING_DEPTH - 1)) should be preserved unchanged by a deep rewind"
+    );
+    assert!(
+        wallet.get_block_hash(prune_boundary + 1).unwrap().is_none(),
+        "block entries above (tip - (PRUNING_DEPTH - 1)) must be removed by a deep rewind"
+    );
+    assert!(
+        wallet.get_block_hash(pre_rewind_tip).unwrap().is_none(),
+        "block entries up to the pre-rewind tip must be removed by a deep rewind"
+    );
+    assert_eq!(
+        wallet
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height()),
+        Some(prune_boundary),
+        "block_max_scanned should equal (tip - (PRUNING_DEPTH - 1)) after a deep rewind"
+    );
+}
+
+pub fn rewind_to_height_shallow<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Shallow-rewind test plan:
+    // 1. Set up a birthday-aligned account.
+    // 2. Generate and scan initial blocks to populate the note commitment tree.
+    // 3. Pick a rewind target.
+    // 4. Generate and scan `PRUNING_DEPTH - 1` extra blocks so that the target sits at
+    //    the shallow boundary (`target == tip - (PRUNING_DEPTH - 1)`, exactly the oldest
+    //    retained checkpoint).
+    // 5. Call `rewind_to_height(target)` and verify all wallet data is rewound to the
+    //    target: data at the target is preserved, anything above is removed.
+
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    let seed = [1u8; 32];
+    let other_fvk = T::sk_to_fvk(&T::sk(&seed));
+
+    let initial_block_count = 8u32;
+    for _ in 0..initial_block_count {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    st.scan_cached_blocks(sapling_activation, initial_block_count as usize);
+
+    let rewind_target = sapling_activation + initial_block_count - 1;
+
+    // Scan `PRUNING_DEPTH - 1` extra blocks so the target sits at the shallow boundary
+    // (`target == tip - (PRUNING_DEPTH - 1)`, exactly the oldest retained checkpoint
+    // given the tree's `max_checkpoints = PRUNING_DEPTH`).
+    let extra_blocks = PRUNING_DEPTH - 1;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &other_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5000),
+        );
+    }
+    st.scan_cached_blocks(rewind_target + 1, extra_blocks as usize);
+
+    let tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set");
+    assert_eq!(
+        tip,
+        rewind_target + (PRUNING_DEPTH - 1),
+        "tip should be exactly at the shallow boundary from the rewind target"
+    );
+
+    let target_hash_before = st
+        .wallet()
+        .get_block_hash(rewind_target)
+        .unwrap()
+        .expect("block at the rewind target should be present before rewind");
+
+    let rewound_to = st
+        .wallet_mut()
+        .rewind_to_height(rewind_target)
+        .expect("rewind_to_height should succeed for a shallow target");
+    assert_eq!(rewound_to, rewind_target);
+
+    let new_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should match rewind target");
+    assert_eq!(new_tip, rewind_target);
+
+    // A shallow rewind truncates blocks, tx_locator_map, and note commitment trees
+    // directly to the rewind target: data at the target is preserved (with the same
+    // content it had before), anything above is removed.
+    let wallet = st.wallet();
+    assert_eq!(
+        wallet.get_block_hash(rewind_target).unwrap(),
+        Some(target_hash_before),
+        "block hash at the rewind target should be preserved unchanged"
+    );
+    assert!(
+        wallet.get_block_hash(rewind_target + 1).unwrap().is_none(),
+        "block entries above the rewind target should be removed by a shallow rewind"
+    );
+    assert_eq!(
+        wallet
+            .block_max_scanned()
+            .unwrap()
+            .map(|m| m.block_height()),
+        Some(rewind_target),
+        "block_max_scanned should equal the rewind target after a shallow rewind"
+    );
+}
+
+pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    // Regression test: after the scan scheduler processes a `ChainTip` range before a
+    // lower `Historic` range, `MAX(height) FROM blocks` points into one scanned region
+    // while `last_scanned - (PRUNING_DEPTH - 1)` lands inside the unscanned gap between
+    // the two regions. `rewind_to_height` must still succeed: an implementation that
+    // expected a checkpoint at exactly the PD floor would return `CorruptedData` via
+    // `truncate_to_checkpoint`; clamping forward to the lowest checkpoint inside the
+    // prune window keeps us aligned with a real checkpoint.
+
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let sapling_activation = st
+        .network()
+        .activation_height(consensus::NetworkUpgrade::Sapling)
+        .unwrap();
+
+    // Scan is always sequential in cache order, but `scan_cached_blocks` is happy to be
+    // invoked on subranges out of order. We pre-generate a contiguous chain of blocks
+    // and scan it in two disjoint segments with a gap in between.
+    let seed = [1u8; 32];
+    let other_fvk = T::sk_to_fvk(&T::sk(&seed));
+    let filler_value = Zatoshis::const_from_u64(10_000);
+
+    let low_count: u32 = 10;
+    let gap_size: u32 = PRUNING_DEPTH + 5; // must exceed PD so the PD floor lands in the gap
+    let high_count: u32 = 10;
+    let total_generated = low_count + gap_size + high_count;
+
+    for _ in 0..total_generated {
+        st.generate_next_block(&other_fvk, AddressType::DefaultExternal, filler_value);
+    }
+
+    let low_start = sapling_activation;
+    let low_end_inclusive = low_start + low_count - 1;
+    let high_start = low_end_inclusive + gap_size + 1;
+
+    // Scan the low range first (simulating a historic range).
+    st.scan_cached_blocks(low_start, low_count as usize);
+
+    // Scan the high range next (simulating a chain-tip range), leaving `gap_size` blocks
+    // in the middle unscanned. Because `high_start > low_end_inclusive + PRUNING_DEPTH`,
+    // the PD floor after this scan (`high_end_inclusive - (PRUNING_DEPTH - 1)`) lands
+    // inside the unscanned gap.
+    st.scan_cached_blocks(high_start, high_count as usize);
+
+    let max_scanned_height = st
+        .wallet()
+        .block_max_scanned()
+        .unwrap()
+        .map(|m| m.block_height())
+        .expect("block_max_scanned should report the high-range tip");
+    let high_end_inclusive = high_start + high_count - 1;
+    assert_eq!(max_scanned_height, high_end_inclusive);
+    let pd_floor = max_scanned_height - (PRUNING_DEPTH - 1);
+    assert!(
+        pd_floor > low_end_inclusive && pd_floor < high_start,
+        "test invariant: PD floor must lie in the unscanned gap (got {pd_floor}, \
+         gap is ({low_end_inclusive}, {high_start}))"
+    );
+
+    // `rewind_to_height` must return `Ok(_)` rather than `CorruptedData`: clamping
+    // forward to the lowest checkpoint inside the window (which sits at `high_start`)
+    // keeps us aligned with a real checkpoint.
+    st.wallet_mut()
+        .rewind_to_height(low_end_inclusive)
+        .expect("rewind_to_height should succeed across a non-contiguous scan");
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,

@@ -1065,6 +1065,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         todo!()
     }
 
+    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        todo!()
+    }
+
     fn import_account_hd(
         &mut self,
         _account_name: &str,
