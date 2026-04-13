@@ -294,7 +294,7 @@ pub trait Authorization {
 }
 
 /// [`Authorization`] marker type for fully-authorized transactions.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -379,6 +379,40 @@ pub struct TransactionData<A: Authorization> {
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+}
+
+impl Clone for TransactionData<Authorized> {
+    fn clone(&self) -> Self {
+        TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount: self.zip233_amount,
+            transparent_bundle: self.transparent_bundle.clone(),
+            sprout_bundle: self.sprout_bundle.clone(),
+            sapling_bundle: self.sapling_bundle.clone(),
+            orchard_bundle: self.orchard_bundle.clone(),
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_bundle: self.tze_bundle.clone(),
+        }
+    }
+}
+
+impl Clone for Transaction {
+    fn clone(&self) -> Self {
+        // SAFETY: We're reconstructing the Transaction from its data.
+        // The txid is deterministic from the data, so cloning data and
+        // re-computing txid would be equivalent.
+        Transaction {
+            txid: self.txid,
+            data: self.data.clone(),
+        }
+    }
 }
 
 impl<A: Authorization> TransactionData<A> {

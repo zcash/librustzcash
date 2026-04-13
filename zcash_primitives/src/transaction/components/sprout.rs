@@ -194,4 +194,48 @@ impl JsDescription {
     pub fn net_value(&self) -> ZatBalance {
         (self.vpub_new - self.vpub_old).expect("difference is in range [-MAX_MONEY..=MAX_MONEY]")
     }
+
+    /// Returns the value added to the Sprout pool by this JoinSplit.
+    pub fn vpub_old(&self) -> ZatBalance {
+        self.vpub_old
+    }
+
+    /// Returns the value removed from the Sprout pool by this JoinSplit.
+    pub fn vpub_new(&self) -> ZatBalance {
+        self.vpub_new
+    }
+
+    /// Returns the Sprout note commitment tree anchor for this JoinSplit.
+    pub fn anchor(&self) -> &[u8; 32] {
+        &self.anchor
+    }
+
+    /// Returns the nullifiers for the input notes of this JoinSplit.
+    pub fn nullifiers(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
+        &self.nullifiers
+    }
+
+    /// Returns the note commitments for the output notes of this JoinSplit.
+    pub fn commitments(&self) -> &[[u8; 32]; ZC_NUM_JS_OUTPUTS] {
+        &self.commitments
+    }
+
+    /// Returns the random seed for this JoinSplit.
+    pub fn random_seed(&self) -> &[u8; 32] {
+        &self.random_seed
+    }
+
+    /// Returns the message authentication codes for this JoinSplit.
+    pub fn macs(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
+        &self.macs
+    }
+
+    /// Returns the Groth16 proof bytes for this JoinSplit, if it uses Groth16.
+    /// Returns `None` for PHGR proofs (pre-Sapling).
+    pub fn groth_proof_bytes(&self) -> Option<&[u8; GROTH_PROOF_SIZE]> {
+        match &self.proof {
+            SproutProof::Groth(bytes) => Some(bytes),
+            SproutProof::PHGR(_) => None,
+        }
+    }
 }
