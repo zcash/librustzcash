@@ -391,6 +391,17 @@ mod tests {
     }
 
     #[test]
+    fn stabilized_note_spendable_after_deep_truncation_sapling() {
+        testing::pool::stabilized_note_spendable_after_deep_truncation::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_after_deep_truncation_orchard() {
+        testing::pool::stabilized_note_spendable_after_deep_truncation::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn truncate_to_chain_state_below_birthday_sapling() {
         testing::pool::truncate_to_chain_state_below_birthday::<SaplingPoolTester>()
     }

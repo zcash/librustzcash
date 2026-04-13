@@ -326,6 +326,13 @@ pub(crate) fn truncate_after_non_contiguous_scan<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn stabilized_note_spendable_after_deep_truncation<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_after_deep_truncation::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::truncate_to_chain_state_below_birthday::<T, _>(
         TestDbFactory::default(),

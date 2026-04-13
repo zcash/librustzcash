@@ -69,6 +69,16 @@ workspace.
   during migration backfill), for notes whose containing shard's
   `subtree_end_height` lies at or below `last_scanned - (PRUNING_DEPTH - 1)`
   (the truncation rewind boundary).
+- Note-selection (`select_unspent_notes`,
+  `select_spendable_notes_matching_value`) and balance reporting
+  (`get_wallet_summary`) now consult the `witness_stabilized` flag in addition to
+  the existing `v_<pool>_shards_scan_state` join. A stabilized note bypasses the
+  shard-scanned, unscanned-tip, and confirmations checks (those are properties of
+  the wallet's scan state, which `witness_stabilized` makes irrelevant), so
+  stabilized notes remain spendable after a deep truncation rewinds `scan_queue`
+  below them. The anchor-height check (`mined_height <= anchor_height`) remains
+  in force for stabilized notes, because that is a property of the caller's
+  anchor choice rather than of the wallet's scan state.
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.

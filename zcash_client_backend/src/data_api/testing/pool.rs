@@ -4905,6 +4905,209 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
     );
 }
 
+/// A note whose witness data has stabilized remains spendable after a deep truncation rewinds the
+/// scan queue below it.
+pub fn stabilized_note_spendable_after_deep_truncation<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let dfvk = T::test_account_fvk(&st);
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let birthday = st.test_account().unwrap().birthday().height();
+    let note_value = Zatoshis::const_from_u64(500_000);
+
+    // Scan a handful of filler blocks and capture the chain state as our deep-truncation target.
+    let filler_count = 5u32;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(birthday + 1, filler_count as usize);
+    let truncation_target = st
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    let truncation_height = truncation_target.block_height();
+
+    // Mine and scan a wallet-owned note above the truncation target.
+    let (note_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(note_height, 1);
+    assert!(note_height > truncation_height);
+
+    // Record shard 0's completion at `note_height` — the block that contains the note. Paired
+    // with the post-note blocks scanned below, this drives `shard.subtree_end_height` past the
+    // pruning boundary at `tip - PRUNING_DEPTH`, which is the condition `mark_stabilized_notes`
+    // uses to flip `witness_stabilized` for notes whose position lies within the shard.
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            note_height,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+
+    // Scan strictly more than `PRUNING_DEPTH` blocks past the note so the note stabilizes.
+    let extra_blocks = PRUNING_DEPTH + 1;
+    for _ in 0..extra_blocks {
+        st.generate_next_block(
+            &not_our_key,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000),
+        );
+    }
+    st.scan_cached_blocks(note_height + 1, extra_blocks as usize);
+
+    let account = st.get_account();
+
+    // Remember the pre-truncation tip so we can feed it back into the wallet below. A recent chain
+    // tip will be required to calculate an anchor to spend this note later.
+    let pre_trunc_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set before truncation");
+
+    // Deep-truncate: the target is far below the tip (beyond the prune window), but only just
+    // below the note.
+    st.wallet_mut()
+        .truncate_to_chain_state(truncation_target)
+        .expect("truncate_to_chain_state should succeed");
+    let tip_after_trunc = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set after truncation");
+    assert_eq!(
+        tip_after_trunc, truncation_height,
+        "scan_queue must be rewound to the truncation target"
+    );
+
+    // Pre-`update_chain_tip` state: the scan_queue has been rewound below the note, but
+    // the chain tip has not yet been restored. The balance path uses the stabilization
+    // flag directly and is therefore unaffected. The spend path is blocked because
+    // `propose_transfer` derives its anchor from the rewound `chain_height()`, placing
+    // the anchor below the note's mined height; the anchor-height check in note
+    // selection then filters the note out and note selection reports no spendable
+    // inputs. This pair of assertions pins the "balance works, spend fails" split
+    // documented in `truncate_to_chain_state`'s rustdoc so that a future refactor of
+    // note selection or anchor derivation cannot silently invert it.
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        note_value,
+        "stabilized balance must be available even before update_chain_tip"
+    );
+    let pre_update_request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        T::sk_default_address(&T::sk(&[0xcc; 32])).to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_000),
+    )])
+    .unwrap();
+    let pre_update_change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let pre_update_input_selector = GreedyInputSelector::new();
+    // The exact error depends on how far `propose_transfer` gets before running out of
+    // usable state
+    let pre_update_result = st.propose_transfer(
+        account.id(),
+        &pre_update_input_selector,
+        &pre_update_change_strategy,
+        pre_update_request,
+        ConfirmationsPolicy::MIN,
+    );
+    assert_matches!(
+        pre_update_result,
+        Err(crate::data_api::error::Error::ScanRequired)
+            | Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        "propose_transfer should fail with InsufficientFunds or ScanRequired"
+    );
+    if let Err(crate::data_api::error::Error::InsufficientFunds { available, .. }) =
+        &pre_update_result
+    {
+        assert_eq!(
+            *available,
+            Zatoshis::ZERO,
+            "when note selection runs, no notes should be eligible without the restored tip",
+        );
+    }
+
+    // Restore `chain_height()` to the pre-truncation tip, so that `propose_transfer` can derive an anchor
+    st.wallet_mut()
+        .update_chain_tip(pre_trunc_tip)
+        .expect("update_chain_tip should succeed");
+    let tip_after_update = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip should be set after update_chain_tip");
+    assert_eq!(tip_after_update, pre_trunc_tip);
+
+    // Post-truncation: the note is still spendable because (a) its witness data was preserved
+    // (commit B) and (b) the spendability queries consult the stabilization flag instead of
+    // scan_queue (commit E). If either is missing, this assertion fails.
+    let post_trunc_spendable = st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN);
+    assert_eq!(
+        post_trunc_spendable, note_value,
+        "stabilized note should remain spendable after deep truncation"
+    );
+
+    // End-to-end: build and sign a real spend. This exercises the full note-selection and
+    // witness-construction path.
+    let to_extsk = T::sk(&[0xcc; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let send_value = Zatoshis::const_from_u64(10_000);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        send_value,
+    )])
+    .unwrap();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("proposal should succeed with stabilized note after deep truncation");
+    let txids = st
+        .create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .expect("spend construction should succeed");
+    assert_eq!(
+        txids.len(),
+        1,
+        "the spend should produce exactly one transaction"
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,
