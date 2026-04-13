@@ -1734,15 +1734,15 @@ pub trait WalletRead {
         params: &P,
         address: &zcash_keys::address::Address,
     ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
-        let mut baseline_acc_id: Option<Self::AccountId> = None;
+        let mut found_acc_id: Option<Self::AccountId> = None;
 
         if let Address::Unified(ua) = address {
             for acc_id in self.get_account_ids()? {
                 for addr_info in self.list_addresses(acc_id)? {
                     let stored = addr_info.address();
                     if address_receiver_matches_ua(stored, ua, params) {
-                        match baseline_acc_id {
-                            None => baseline_acc_id = Some(acc_id),
+                        match found_acc_id {
+                            None => found_acc_id = Some(acc_id),
                             Some(prev) if prev == acc_id => {}
                             Some(_) => {
                                 return Err(FindAccountForAddressError::UnifiedAddressConflict);
@@ -1754,14 +1754,20 @@ pub trait WalletRead {
         } else {
             for acc_id in self.get_account_ids()? {
                 for addr_info in self.list_addresses(acc_id)? {
-                    if addr_info.address() == address {
+                    let stored = addr_info.address();
+                    if stored == address {
                         return Ok(Some(acc_id));
+                    }
+                    if let Address::Unified(stored_ua) = stored {
+                        if address_receiver_matches_ua(address, stored_ua, params) {
+                            return Ok(Some(acc_id));
+                        }
                     }
                 }
             }
         }
 
-        Ok(baseline_acc_id)
+        Ok(found_acc_id)
     }
 
     /// Returns the most recently generated unified address for the specified account that conforms
@@ -3468,13 +3474,13 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "orchard")]
     fn unified_account_with(
         transparent: Option<TransparentAddress>,
         sapling: Option<sapling::PaymentAddress>,
-        orchard: Option<orchard::Address>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
     ) -> Address {
         UnifiedAddress::from_receivers(
+            #[cfg(feature = "orchard")]
             Some(orchard).flatten(),
             Some(sapling).flatten(),
             transparent,
@@ -3507,6 +3513,52 @@ mod tests {
             &Address::Transparent(transparent_address_for_tag(1)),
         );
         assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_transparent_receiver_in_unified_address_returns_matching_account() {
+        let transparent = transparent_address_for_tag(1);
+        let sapling_address = sapling_address_for_tag(11);
+
+        #[cfg(feature = "orchard")]
+        {
+            let wallet = MockWalletDb::from_account_addresses(
+                zcash_protocol::consensus::Network::MainNetwork,
+                [(
+                    1,
+                    vec![address_info_of(unified_account_with(
+                        Some(transparent),
+                        Some(sapling_address),
+                        None,
+                    ))],
+                )],
+            );
+            let result = wallet.find_account_for_address(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                &Address::Transparent(transparent),
+            );
+            assert_eq!(result.unwrap(), Some(1));
+        }
+        #[cfg(not(feature = "orchard"))]
+        {
+            let wallet = MockWalletDb::from_account_addresses(
+                zcash_protocol::consensus::Network::MainNetwork,
+                [(
+                    1,
+                    vec![crate::data_api::tests::address_info_of(
+                        crate::data_api::tests::unified_account_with(
+                            Some(transparent.clone()),
+                            Some(sapling_address),
+                        ),
+                    )],
+                )],
+            );
+            let result = wallet.find_account_for_address(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                &Address::Transparent(transparent),
+            );
+            assert_eq!(result.unwrap(), Some(1));
+        }
     }
 
     #[test]

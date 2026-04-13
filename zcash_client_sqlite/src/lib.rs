@@ -3434,6 +3434,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn find_account_for_address_returns_matching_account_for_receivers_of_own_ua() {
+        use zcash_keys::address::Address;
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+        // Asserts that looking up a receiver address extracted from the stored UA
+        // returns the owning account via the non-UA query path.
+        if let Some(taddr) = ua.transparent() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Transparent(taddr.clone()));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+        if let Some(pa) = ua.sapling() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Sapling(pa.clone()));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+    }
+
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn find_account_for_ua_finds_via_transparent_receiver_cache() {
@@ -3451,7 +3478,7 @@ mod tests {
         let account_rowid = remove_account_from_db(&mut state, acc1_id);
 
         // Inserts in the DB one row representing a transparent address of that account
-        let t1 =
+        let transparent_address =
             UnifiedSpendingKey::from_seed(&state.network(), &[7u8; 32], zip32::AccountId::ZERO)
                 .expect("valid seed")
                 .to_unified_full_viewing_key()
@@ -3476,7 +3503,11 @@ mod tests {
                     wdb.params(),
                     AccountRef(account_rowid),
                     TransparentKeyScope::EXTERNAL,
-                    vec![(Address::Transparent(t1), t1, NonHardenedChildIndex::ZERO)],
+                    vec![(
+                        Address::Transparent(transparent_address),
+                        transparent_address,
+                        NonHardenedChildIndex::ZERO,
+                    )],
                 )?;
                 transparent::reserve_next_n_addresses(
                     wdb.conn.0,
@@ -3505,7 +3536,7 @@ mod tests {
             .cloned()
             .expect("orchard receiver must be present");
         let address = Address::Unified(
-            UnifiedAddress::from_receivers(Some(o_external), None, Some(t1))
+            UnifiedAddress::from_receivers(Some(o_external), None, Some(transparent_address))
                 .expect("orchard+transparent UA must be valid"),
         );
 
