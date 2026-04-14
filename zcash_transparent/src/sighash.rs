@@ -1,8 +1,12 @@
 use alloc::vec::Vec;
+use core::fmt;
 use getset::Getters;
 use zcash_protocol::value::Zatoshis;
 
-use crate::{address::Script, bundle::Authorization};
+use crate::{
+    address::Script,
+    bundle::{Authorization, Bundle},
+};
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;
@@ -58,6 +62,24 @@ pub trait TransparentAuthorizingContext: Authorization {
     fn input_scriptpubkeys(&self) -> Vec<Script>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidInputIndex {
+    pub index: usize,
+    pub input_count: usize,
+}
+
+impl fmt::Display for InvalidInputIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "transparent input index {} is out of range for bundle with {} inputs",
+            self.index, self.input_count
+        )
+    }
+}
+
+impl core::error::Error for InvalidInputIndex {}
+
 /// A transparent input that is signable because we know its value and `script_pubkey`.
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
@@ -71,19 +93,66 @@ pub struct SignableInput<'a> {
 
 impl<'a> SignableInput<'a> {
     /// Constructs a signable input from its parts.
-    pub fn from_parts(
+    pub fn from_parts<A: Authorization>(
+        bundle: &Bundle<A>,
         hash_type: SighashType,
         index: usize,
         script_code: &'a Script,
         script_pubkey: &'a Script,
         value: Zatoshis,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, InvalidInputIndex> {
+        if index >= bundle.vin.len() {
+            return Err(InvalidInputIndex {
+                index,
+                input_count: bundle.vin.len(),
+            });
+        }
+
+        Ok(Self {
             hash_type,
             index,
             script_code,
             script_pubkey,
             value,
-        }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zcash_protocol::value::Zatoshis;
+
+    use super::{InvalidInputIndex, SighashType, SignableInput};
+    use crate::{
+        address::Script,
+        bundle::{Bundle, EffectsOnly, OutPoint, TxIn},
+    };
+
+    #[test]
+    fn signable_input_rejects_out_of_range_index() {
+        let bundle = Bundle {
+            vin: vec![TxIn::from_parts(OutPoint::fake(), (), u32::MAX)],
+            vout: vec![],
+            authorization: EffectsOnly { inputs: vec![] },
+        };
+        let script = Script::default();
+
+        let err = SignableInput::from_parts(
+            &bundle,
+            SighashType::ALL,
+            1,
+            &script,
+            &script,
+            Zatoshis::ZERO,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err,
+            InvalidInputIndex {
+                index: 1,
+                input_count: 1,
+            }
+        );
     }
 }

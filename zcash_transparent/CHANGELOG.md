@@ -34,6 +34,9 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- `zcash_transparent::sighash::SignableInput::from_parts` now validates the
+  referenced transparent input index against `&Bundle<_>` and returns
+  `Result<_, InvalidInputIndex>`.
 - `zcash_transparent::builder::TransparentBuilder::add_p2sh_input` is no longer
   restricted to the PCZT workflow; `Bundle::apply_signatures`,
   `Bundle::prepare_transparent_signatures`, and
