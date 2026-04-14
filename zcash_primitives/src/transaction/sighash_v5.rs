@@ -119,7 +119,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
             //S.2g.iv:  nSequence    (4-byte unsigned little-endian)
             let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
             if let SignableInput::Transparent(input) = input {
-                let txin = bundle.vin.get(*input.index()).expect("transparent input index out of range for bundle vin");
+                let txin = &bundle.vin[*input.index()];
                 txin.prevout().write(&mut ch).unwrap();
                 ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
                 input.script_pubkey().write(&mut ch).unwrap();
