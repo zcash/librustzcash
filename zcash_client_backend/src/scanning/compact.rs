@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::hash::Hash;
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Marking, Retention};
 use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
 use subtle::ConditionallySelectable;
 
@@ -177,6 +177,7 @@ pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
+    internal_keys: &ScanningKeys<AccountId, IvkTag>,
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
@@ -279,7 +280,7 @@ where
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
-        let (sapling_outputs, mut sapling_nc) = find_received(
+        let (mut sapling_outputs, mut sapling_nc) = find_received(
             cur_height,
             pos_tracker.compact_tx_contains_last_sapling_outputs_in_block(&tx),
             txid,
@@ -315,10 +316,9 @@ where
             |output| sapling::Node::from_cmu(&output.cmu),
         );
         sapling_note_commitments.append(&mut sapling_nc);
-        let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
 
         #[cfg(feature = "orchard")]
-        let (orchard_outputs, mut orchard_nc) = find_received(
+        let (mut orchard_outputs, mut orchard_nc) = find_received(
             cur_height,
             pos_tracker.compact_tx_contains_last_orchard_actions_in_block(&tx),
             txid,
@@ -354,6 +354,161 @@ where
         #[cfg(feature = "orchard")]
         orchard_note_commitments.append(&mut orchard_nc);
 
+        // Targeted Internal IVK pass: when a transaction is identified as
+        // wallet-relevant (by nullifier match, External-IVK match, or the
+        // shielding-transaction pattern), try Internal IVK on its shielded
+        // outputs to recover change notes. This avoids trying Internal IVK on
+        // every output in the block while still finding all wallet notes.
+        let has_shielded_outputs = !tx.outputs.is_empty();
+        #[cfg(feature = "orchard")]
+        let has_shielded_outputs = has_shielded_outputs || !tx.actions.is_empty();
+
+        let trigger_nullifier = !sapling_spends.is_empty();
+        #[cfg(feature = "orchard")]
+        let trigger_nullifier = trigger_nullifier || !orchard_spends.is_empty();
+
+        let trigger_external = !sapling_outputs.is_empty();
+        #[cfg(feature = "orchard")]
+        let trigger_external = trigger_external || !orchard_outputs.is_empty();
+
+        // Shielding pattern: transparent inputs + shielded outputs + no
+        // shielded spends. This catches transactions that convert transparent
+        // funds to Internal-scope shielded notes and would otherwise be
+        // invisible to External-only scanning.
+        let has_no_shielded_spends = tx.spends.is_empty();
+        #[cfg(feature = "orchard")]
+        let has_no_shielded_spends = has_no_shielded_spends && orchard_spends.is_empty();
+
+        let trigger_shielding = !tx.vin.is_empty()
+            && has_shielded_outputs
+            && has_no_shielded_spends;
+
+        if (trigger_nullifier || trigger_external || trigger_shielding)
+            && has_shielded_outputs
+        {
+            tracing::debug!(
+                "Targeted Internal IVK on tx {} at height {} (triggers: nullifier={}, external={}, shielding={})",
+                txid, cur_height, trigger_nullifier, trigger_external, trigger_shielding,
+            );
+            // Try Internal IVK on Sapling outputs of this transaction.
+            if !tx.outputs.is_empty() {
+                let decoded_sapling: Vec<_> = tx
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, output)| {
+                        Ok((
+                            SaplingDomain::new(zip212_enforcement),
+                            CompactOutputDescription::try_from(output).map_err(|_| {
+                                ScanError::EncodingInvalid {
+                                    at_height: cur_height,
+                                    txid,
+                                    pool_type: ShieldedProtocol::Sapling,
+                                    index: i,
+                                }
+                            })?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if !decoded_sapling.is_empty() {
+                    let (mut internal_sapling_outputs, _) = find_received(
+                        cur_height,
+                        false, // not last commitments — already tracked
+                        txid,
+                        |output_idx| pos_tracker.sapling_note_position(output_idx),
+                        &internal_keys.sapling,
+                        &spent_from_accounts,
+                        &decoded_sapling,
+                        None::<fn(zcash_primitives::transaction::TxId) -> std::collections::HashMap<usize, super::DecryptedOutput<IvkTag, SaplingDomain, ()>>>,
+                        |ivks, outputs| {
+                            batch::try_compact_note_decryption(ivks, outputs)
+                                .into_iter()
+                                .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                                .collect()
+                        },
+                        |output| sapling::Node::from_cmu(&output.cmu),
+                    );
+
+                    // Update note commitment retention for any newly-matched outputs.
+                    let nc_offset = sapling_note_commitments.len() - tx.outputs.len();
+                    for output in &internal_sapling_outputs {
+                        let idx = nc_offset + output.index();
+                        if let Some((_, retention)) = sapling_note_commitments.get_mut(idx) {
+                            match retention {
+                                Retention::Ephemeral => *retention = Retention::Marked,
+                                Retention::Checkpoint { marking, .. } => {
+                                    *marking = Marking::Marked;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    sapling_outputs.append(&mut internal_sapling_outputs);
+                }
+            }
+
+            // Try Internal IVK on Orchard actions of this transaction.
+            #[cfg(feature = "orchard")]
+            if !tx.actions.is_empty() {
+                let decoded_orchard: Vec<_> = tx
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, action)| {
+                        let action = CompactAction::try_from(action).map_err(|_| {
+                            ScanError::EncodingInvalid {
+                                at_height: cur_height,
+                                txid,
+                                pool_type: ShieldedProtocol::Orchard,
+                                index: i,
+                            }
+                        })?;
+                        Ok((OrchardDomain::for_compact_action(&action), action))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if !decoded_orchard.is_empty() {
+                    let (mut internal_orchard_outputs, _) = find_received(
+                        cur_height,
+                        false,
+                        txid,
+                        |output_idx| pos_tracker.orchard_note_position(output_idx),
+                        &internal_keys.orchard,
+                        &spent_from_accounts,
+                        &decoded_orchard,
+                        None::<fn(zcash_primitives::transaction::TxId) -> std::collections::HashMap<usize, super::DecryptedOutput<IvkTag, OrchardDomain, ()>>>,
+                        |ivks, outputs| {
+                            batch::try_compact_note_decryption(ivks, outputs)
+                                .into_iter()
+                                .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                                .collect()
+                        },
+                        |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+                    );
+
+                    let nc_offset = orchard_note_commitments.len() - tx.actions.len();
+                    for output in &internal_orchard_outputs {
+                        let idx = nc_offset + output.index();
+                        if let Some((_, retention)) = orchard_note_commitments.get_mut(idx) {
+                            match retention {
+                                Retention::Ephemeral => *retention = Retention::Marked,
+                                Retention::Checkpoint { marking, .. } => {
+                                    *marking = Marking::Marked;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    orchard_outputs.append(&mut internal_orchard_outputs);
+                }
+            }
+        }
+
+        // Recompute wallet-relevance after the Internal IVK pass.
+        let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
         #[cfg(feature = "orchard")]
         let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
         #[cfg(not(feature = "orchard"))]
@@ -630,10 +785,12 @@ mod tests {
                 None
             };
 
+            let empty_internal = ScanningKeys::empty();
             let scanned_block = scan_block_with_runners(
                 &network,
                 cb,
                 &scanning_keys,
+                &empty_internal,
                 &Nullifiers::empty(),
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
@@ -716,10 +873,12 @@ mod tests {
                 None
             };
 
+            let empty_internal = ScanningKeys::empty();
             let scanned_block = scan_block_with_runners(
                 &network,
                 cb,
                 &scanning_keys,
+                &empty_internal,
                 &Nullifiers::empty(),
                 None,
                 batch_runners.as_mut(),
