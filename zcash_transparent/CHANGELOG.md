@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.6.4] - PLANNED
+## [0.6.4] - 2026-04-16
 
 ### Added
 - `zcash_transparent::sighash::SighashType::from_raw`
