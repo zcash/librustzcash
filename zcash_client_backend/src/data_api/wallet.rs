@@ -1546,7 +1546,7 @@ where
                 }
             },
             Address::Sapling(to) => {
-                add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
+                add_sapling_output(&mut builder, &mut sapling_output_meta, *to)?;
             }
             Address::Transparent(to) => {
                 add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;

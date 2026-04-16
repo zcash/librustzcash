@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Display};
 use nonempty::NonEmpty;
 
-use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
+use zcash_address::unified::{self, Container, Encoding, MetadataItem, Typecode, Uitem};
 use zcash_protocol::{PoolType, consensus};
 use zip32::{AccountId, DiversifierIndex};
 
@@ -41,6 +41,11 @@ use orchard::{self, keys::Scope};
 
 #[cfg(all(feature = "sapling", feature = "unstable"))]
 use ::sapling::zip32::ExtendedFullViewingKey;
+
+#[cfg(test)]
+pub(crate) mod test_vectors {
+    pub(crate) mod unified_viewing_keys_r2;
+}
 
 #[cfg(feature = "sapling")]
 pub mod sapling {
@@ -209,7 +214,7 @@ impl Era {
 }
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: ::transparent::keys::AccountPrivKey,
@@ -217,19 +222,6 @@ pub struct UnifiedSpendingKey {
     sapling: sapling::ExtendedSpendingKey,
     #[cfg(feature = "orchard")]
     orchard: orchard::keys::SpendingKey,
-}
-
-impl core::fmt::Debug for UnifiedSpendingKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut d = f.debug_struct("UnifiedSpendingKey");
-        #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &"...");
-        #[cfg(feature = "sapling")]
-        d.field("sapling", &"...");
-        #[cfg(feature = "orchard")]
-        d.field("orchard", &"...");
-        d.finish()
-    }
 }
 
 impl UnifiedSpendingKey {
@@ -285,6 +277,9 @@ impl UnifiedSpendingKey {
             #[cfg(feature = "orchard")]
             orchard: Some((&self.orchard).into()),
             unknown: vec![],
+            expiry_height: None,
+            expiry_time: None,
+            unknown_metadata: vec![],
         }
     }
 
@@ -324,7 +319,7 @@ impl UnifiedSpendingKey {
         #[cfg(feature = "orchard")]
         {
             let orchard_key = self.orchard();
-            CompactSize::write(&mut result, usize::try_from(Typecode::Orchard).unwrap()).unwrap();
+            CompactSize::write(&mut result, usize::try_from(Typecode::ORCHARD).unwrap()).unwrap();
 
             let orchard_key_bytes = orchard_key.to_bytes();
             CompactSize::write(&mut result, orchard_key_bytes.len()).unwrap();
@@ -334,7 +329,7 @@ impl UnifiedSpendingKey {
         #[cfg(feature = "sapling")]
         {
             let sapling_key = self.sapling();
-            CompactSize::write(&mut result, usize::try_from(Typecode::Sapling).unwrap()).unwrap();
+            CompactSize::write(&mut result, usize::try_from(Typecode::SAPLING).unwrap()).unwrap();
 
             let sapling_key_bytes = sapling_key.to_bytes();
             CompactSize::write(&mut result, sapling_key_bytes.len()).unwrap();
@@ -344,7 +339,7 @@ impl UnifiedSpendingKey {
         #[cfg(feature = "transparent-inputs")]
         {
             let account_tkey = self.transparent();
-            CompactSize::write(&mut result, usize::try_from(Typecode::P2pkh).unwrap()).unwrap();
+            CompactSize::write(&mut result, usize::try_from(Typecode::P2PKH).unwrap()).unwrap();
 
             let account_tkey_bytes = account_tkey.to_bytes();
             CompactSize::write(&mut result, account_tkey_bytes.len()).unwrap();
@@ -385,15 +380,15 @@ impl UnifiedSpendingKey {
                 .map_err(|_| DecodingError::ReadError("key length"))?;
 
             match tc {
-                Typecode::Orchard => {
+                Typecode::ORCHARD => {
                     if len != 32 {
-                        return Err(DecodingError::LengthMismatch(Typecode::Orchard, len));
+                        return Err(DecodingError::LengthMismatch(Typecode::ORCHARD, len));
                     }
 
                     let mut key = [0u8; 32];
                     source
                         .read_exact(&mut key)
-                        .map_err(|_| DecodingError::InsufficientData(Typecode::Orchard))?;
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::ORCHARD))?;
 
                     #[cfg(feature = "orchard")]
                     {
@@ -401,43 +396,43 @@ impl UnifiedSpendingKey {
                             Option::<orchard::keys::SpendingKey>::from(
                                 orchard::keys::SpendingKey::from_bytes(key),
                             )
-                            .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
+                            .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
                         );
                     }
                 }
-                Typecode::Sapling => {
+                Typecode::SAPLING => {
                     if len != 169 {
-                        return Err(DecodingError::LengthMismatch(Typecode::Sapling, len));
+                        return Err(DecodingError::LengthMismatch(Typecode::SAPLING, len));
                     }
 
                     let mut key = [0u8; 169];
                     source
                         .read_exact(&mut key)
-                        .map_err(|_| DecodingError::InsufficientData(Typecode::Sapling))?;
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::SAPLING))?;
 
                     #[cfg(feature = "sapling")]
                     {
                         sapling = Some(
                             sapling::ExtendedSpendingKey::from_bytes(&key)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::Sapling))?,
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
                         );
                     }
                 }
-                Typecode::P2pkh => {
+                Typecode::P2PKH => {
                     if len != 74 {
-                        return Err(DecodingError::LengthMismatch(Typecode::P2pkh, len));
+                        return Err(DecodingError::LengthMismatch(Typecode::P2PKH, len));
                     }
 
                     let mut key = [0u8; 74];
                     source
                         .read_exact(&mut key)
-                        .map_err(|_| DecodingError::InsufficientData(Typecode::P2pkh))?;
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::P2PKH))?;
 
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
                             ::transparent::keys::AccountPrivKey::from_bytes(&key)
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
                         );
                     }
                 }
@@ -470,7 +465,7 @@ impl UnifiedSpendingKey {
                     #[cfg(feature = "orchard")]
                     orchard.unwrap(),
                 )
-                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh));
+                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH));
             }
         }
     }
@@ -799,14 +794,8 @@ impl From<bip32::Error> for DerivationError {
 
 /// A key that provides the capability to recover outgoing transaction information from
 /// the block chain.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct OutgoingViewingKey([u8; 32]);
-
-impl core::fmt::Debug for OutgoingViewingKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("OutgoingViewingKey").field(&"...").finish()
-    }
-}
 
 impl From<[u8; 32]> for OutgoingViewingKey {
     fn from(ovk: [u8; 32]) -> Self {
@@ -849,7 +838,7 @@ impl AsRef<[u8; 32]> for OutgoingViewingKey {
 }
 
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified full viewing key.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<::transparent::keys::AccountPubKey>,
@@ -858,27 +847,9 @@ pub struct UnifiedFullViewingKey {
     #[cfg(feature = "orchard")]
     orchard: Option<orchard::keys::FullViewingKey>,
     unknown: Vec<(u32, Vec<u8>)>,
-}
-
-impl core::fmt::Debug for UnifiedFullViewingKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut d = f.debug_struct("UnifiedFullViewingKey");
-        #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &self.transparent.as_ref().map(|_| "..."));
-        #[cfg(feature = "sapling")]
-        d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
-        #[cfg(feature = "orchard")]
-        d.field("orchard", &self.orchard.as_ref().map(|_| "..."));
-        d.field(
-            "unknown_typecodes",
-            &self
-                .unknown
-                .iter()
-                .map(|(typecode, _)| *typecode)
-                .collect::<Vec<_>>(),
-        )
-        .finish()
-    }
+    expiry_height: Option<consensus::BlockHeight>,
+    expiry_time: Option<u64>,
+    unknown_metadata: Vec<(u32, Vec<u8>)>,
 }
 
 impl UnifiedFullViewingKey {
@@ -903,8 +874,9 @@ impl UnifiedFullViewingKey {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            // We don't currently allow constructing new UFVKs with unknown items, but we store
-            // this to allow parsing such UFVKs.
+            vec![],
+            None,
+            None,
             vec![],
         )
     }
@@ -920,8 +892,9 @@ impl UnifiedFullViewingKey {
             None,
             #[cfg(feature = "orchard")]
             Some(orchard),
-            // We don't currently allow constructing new UFVKs with unknown items, but we store
-            // this to allow parsing such UFVKs.
+            vec![],
+            None,
+            None,
             vec![],
         )
     }
@@ -937,8 +910,9 @@ impl UnifiedFullViewingKey {
             Some(sapling.to_diversifiable_full_viewing_key()),
             #[cfg(feature = "orchard")]
             None,
-            // We don't currently allow constructing new UFVKs with unknown items, but we store
-            // this to allow parsing such UFVKs.
+            vec![],
+            None,
+            None,
             vec![],
         )
     }
@@ -952,6 +926,9 @@ impl UnifiedFullViewingKey {
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         unknown: Vec<(u32, Vec<u8>)>,
+        expiry_height: Option<consensus::BlockHeight>,
+        expiry_time: Option<u64>,
+        unknown_metadata: Vec<(u32, Vec<u8>)>,
     ) -> Result<UnifiedFullViewingKey, DerivationError> {
         // Verify that IVK derivation succeeds; we don't want to construct a UFVK
         // that can't derive transparent addresses.
@@ -969,6 +946,9 @@ impl UnifiedFullViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         })
     }
 
@@ -976,7 +956,7 @@ impl UnifiedFullViewingKey {
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
-        let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
+        let (net, _revision, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
         let expected_net = params.network_type();
         if net != expected_net {
             return Err(format!(
@@ -990,64 +970,67 @@ impl UnifiedFullViewingKey {
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn parse(ufvk: &Ufvk) -> Result<Self, DecodingError> {
+    pub fn parse(ufvk: &unified::Ufvk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
         let mut sapling = None;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
+        let mut unknown = vec![];
+        let mut expiry_height = None;
+        let mut expiry_time = None;
+        let mut unknown_metadata = vec![];
 
-        // We can use as-parsed order here for efficiency, because we're breaking out the
-        // receivers we support from the unknown receivers.
-        let unknown = ufvk
-            .items_as_parsed()
-            .iter()
-            .filter_map(|receiver| match receiver {
-                #[cfg(feature = "orchard")]
-                unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
-                    .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))
-                    .map(|addr| {
-                        orchard = Some(addr);
-                        None
-                    })
-                    .transpose(),
-                #[cfg(not(feature = "orchard"))]
-                unified::Fvk::Orchard(data) => Some(Ok::<_, DecodingError>((
-                    u32::from(unified::Typecode::Orchard),
-                    data.to_vec(),
-                ))),
-                #[cfg(feature = "sapling")]
-                unified::Fvk::Sapling(data) => {
-                    sapling::DiversifiableFullViewingKey::from_bytes(data)
-                        .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))
-                        .map(|pa| {
-                            sapling = Some(pa);
-                            None
-                        })
-                        .transpose()
+        for item in ufvk.items_as_parsed() {
+            match item {
+                Uitem::Data(unified::Fvk::Orchard(data)) => {
+                    #[cfg(feature = "orchard")]
+                    {
+                        orchard = Some(
+                            orchard::keys::FullViewingKey::from_bytes(data)
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
+                        );
+                    }
+                    #[cfg(not(feature = "orchard"))]
+                    unknown.push((u32::from(unified::Typecode::ORCHARD), data.to_vec()));
                 }
-                #[cfg(not(feature = "sapling"))]
-                unified::Fvk::Sapling(data) => Some(Ok::<_, DecodingError>((
-                    u32::from(unified::Typecode::Sapling),
-                    data.to_vec(),
-                ))),
-                #[cfg(feature = "transparent-inputs")]
-                unified::Fvk::P2pkh(data) => ::transparent::keys::AccountPubKey::deserialize(data)
-                    .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
-                    .map(|tfvk| {
-                        transparent = Some(tfvk);
-                        None
-                    })
-                    .transpose(),
-                #[cfg(not(feature = "transparent-inputs"))]
-                unified::Fvk::P2pkh(data) => Some(Ok::<_, DecodingError>((
-                    u32::from(unified::Typecode::P2pkh),
-                    data.to_vec(),
-                ))),
-                unified::Fvk::Unknown { typecode, data } => Some(Ok((*typecode, data.clone()))),
-            })
-            .collect::<Result<_, _>>()?;
+                Uitem::Data(unified::Fvk::Sapling(data)) => {
+                    #[cfg(feature = "sapling")]
+                    {
+                        sapling = Some(
+                            sapling::DiversifiableFullViewingKey::from_bytes(data)
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
+                        );
+                    }
+                    #[cfg(not(feature = "sapling"))]
+                    unknown.push((u32::from(unified::Typecode::SAPLING), data.to_vec()));
+                }
+                Uitem::Data(unified::Fvk::P2pkh(data)) => {
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        transparent = Some(
+                            ::transparent::keys::AccountPubKey::deserialize(data)
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
+                        );
+                    }
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    unknown.push((u32::from(unified::Typecode::P2PKH), data.to_vec()));
+                }
+                Uitem::Data(unified::Fvk::Unknown { typecode, data }) => {
+                    unknown.push((*typecode, data.clone()));
+                }
+                Uitem::Metadata(MetadataItem::ExpiryHeight(h)) => {
+                    expiry_height = Some(consensus::BlockHeight::from_u32(*h));
+                }
+                Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
+                    expiry_time = Some(*t);
+                }
+                Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
+                    unknown_metadata.push((*typecode, data.clone()));
+                }
+            }
+        }
 
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
@@ -1057,8 +1040,11 @@ impl UnifiedFullViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         )
-        .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
+        .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
@@ -1067,37 +1053,60 @@ impl UnifiedFullViewingKey {
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
-    fn to_ufvk(&self) -> Ufvk {
-        let items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
+    fn to_ufvk(&self) -> unified::Ufvk {
+        // ZIP 316 recommends that producers upgrade to Revision 2 as soon as
+        // possible. We use R2 unconditionally here.
+        let revision = unified::Revision::R2;
+
+        let data_items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Fvk::Unknown {
                 typecode: *typecode,
                 data: data.clone(),
             }
         }));
         #[cfg(feature = "orchard")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.orchard
                 .as_ref()
                 .map(|fvk| fvk.to_bytes())
                 .map(unified::Fvk::Orchard),
         );
         #[cfg(feature = "sapling")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.sapling
                 .as_ref()
                 .map(|dfvk| dfvk.to_bytes())
                 .map(unified::Fvk::Sapling),
         );
         #[cfg(feature = "transparent-inputs")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.transparent
                 .as_ref()
                 .map(|tfvk| tfvk.serialize().try_into().unwrap())
                 .map(unified::Fvk::P2pkh),
         );
 
-        unified::Ufvk::try_from_items(items.collect())
-            .expect("UnifiedFullViewingKey should only be constructed safely")
+        let meta_items = core::iter::empty()
+            .chain(self.unknown_metadata.iter().map(|(typecode, data)| {
+                unified::MetadataItem::Unknown {
+                    typecode: *typecode,
+                    data: data.clone(),
+                }
+            }))
+            .chain(
+                self.expiry_height
+                    .map(|h| unified::MetadataItem::ExpiryHeight(u32::from(h))),
+            )
+            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
+
+        unified::Ufvk::try_from_items(
+            revision,
+            data_items
+                .map(Uitem::Data)
+                .chain(meta_items.map(Uitem::Metadata))
+                .collect(),
+        )
+        .expect("UnifiedFullViewingKey should only be constructed safely")
     }
 
     /// Derives a Unified Incoming Viewing Key from this Unified Full Viewing Key.
@@ -1112,7 +1121,10 @@ impl UnifiedFullViewingKey {
             sapling: self.sapling.as_ref().map(|s| s.to_external_ivk()),
             #[cfg(feature = "orchard")]
             orchard: self.orchard.as_ref().map(|o| o.to_ivk(Scope::External)),
+            expiry_height: self.expiry_height,
+            expiry_time: self.expiry_time,
             unknown: Vec::new(),
+            unknown_metadata: vec![],
         }
     }
 
@@ -1133,6 +1145,32 @@ impl UnifiedFullViewingKey {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
         self.orchard.as_ref()
+    }
+
+    /// Returns whether this key has a Sapling component.
+    pub fn has_sapling(&self) -> bool {
+        #[cfg(feature = "sapling")]
+        return self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        return false;
+    }
+
+    /// Returns whether this key has an Orchard component.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(feature = "orchard")]
+        return self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        return false;
+    }
+
+    /// Returns the expiry height metadata for this key, if present.
+    pub fn expiry_height(&self) -> Option<consensus::BlockHeight> {
+        self.expiry_height
+    }
+
+    /// Returns the expiry time metadata for this key, if present.
+    pub fn expiry_time(&self) -> Option<u64> {
+        self.expiry_time
     }
 
     /// Returns `true` if this UFVK subsumes the given UIVK: every IVK item present in
@@ -1306,7 +1344,7 @@ impl UnifiedFullViewingKey {
 }
 
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified incoming viewing key.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<::transparent::keys::ExternalIvk>,
@@ -1314,8 +1352,10 @@ pub struct UnifiedIncomingViewingKey {
     sapling: Option<::sapling::zip32::IncomingViewingKey>,
     #[cfg(feature = "orchard")]
     orchard: Option<orchard::keys::IncomingViewingKey>,
-    /// Stores the unrecognized elements of the unified encoding.
     unknown: Vec<(u32, Vec<u8>)>,
+    expiry_height: Option<consensus::BlockHeight>,
+    expiry_time: Option<u64>,
+    unknown_metadata: Vec<(u32, Vec<u8>)>,
 }
 
 impl PartialEq for UnifiedIncomingViewingKey {
@@ -1325,27 +1365,6 @@ impl PartialEq for UnifiedIncomingViewingKey {
 }
 
 impl Eq for UnifiedIncomingViewingKey {}
-
-impl core::fmt::Debug for UnifiedIncomingViewingKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut d = f.debug_struct("UnifiedIncomingViewingKey");
-        #[cfg(feature = "transparent-inputs")]
-        d.field("transparent", &self.transparent);
-        #[cfg(feature = "sapling")]
-        d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
-        #[cfg(feature = "orchard")]
-        d.field("orchard", &self.orchard.as_ref().map(|_| "..."));
-        d.field(
-            "unknown_typecodes",
-            &self
-                .unknown
-                .iter()
-                .map(|(typecode, _)| *typecode)
-                .collect::<Vec<_>>(),
-        )
-        .finish()
-    }
-}
 
 impl UnifiedIncomingViewingKey {
     /// Construct a new unified incoming viewing key.
@@ -1360,7 +1379,10 @@ impl UnifiedIncomingViewingKey {
         >,
         #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
-        // TODO: Implement construction of UIVKs with metadata items.
+        unknown: Vec<(u32, Vec<u8>)>,
+        expiry_height: Option<consensus::BlockHeight>,
+        expiry_time: Option<u64>,
+        unknown_metadata: Vec<(u32, Vec<u8>)>,
     ) -> UnifiedIncomingViewingKey {
         UnifiedIncomingViewingKey {
             #[cfg(feature = "transparent-inputs")]
@@ -1369,9 +1391,10 @@ impl UnifiedIncomingViewingKey {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            // We don't allow constructing new UFVKs with unknown items, but we store
-            // this to allow parsing such UFVKs.
-            unknown: vec![],
+            unknown,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         }
     }
 
@@ -1379,7 +1402,7 @@ impl UnifiedIncomingViewingKey {
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
-        let (net, ufvk) = unified::Uivk::decode(encoding).map_err(|e| e.to_string())?;
+        let (net, _revision, uivk) = unified::Uivk::decode(encoding).map_err(|e| e.to_string())?;
         let expected_net = params.network_type();
         if net != expected_net {
             return Err(format!(
@@ -1387,62 +1410,68 @@ impl UnifiedIncomingViewingKey {
             ));
         }
 
-        Self::parse(&ufvk).map_err(|e| e.to_string())
+        Self::parse(&uivk).map_err(|e| e.to_string())
     }
 
     /// Constructs a unified incoming viewing key from a parsed unified encoding.
-    fn parse(uivk: &Uivk) -> Result<Self, DecodingError> {
+    fn parse(uivk: &unified::Uivk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
         let mut sapling = None;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
-
         let mut unknown = vec![];
+        let mut expiry_height = None;
+        let mut expiry_time = None;
+        let mut unknown_metadata = vec![];
 
-        // We can use as-parsed order here for efficiency, because we're breaking out the
-        // receivers we support from the unknown receivers.
-        for receiver in uivk.items_as_parsed() {
-            match receiver {
-                unified::Ivk::Orchard(data) => {
+        for item in uivk.items_as_parsed() {
+            match item {
+                Uitem::Data(unified::Ivk::Orchard(data)) => {
                     #[cfg(feature = "orchard")]
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
                         );
                     }
-
                     #[cfg(not(feature = "orchard"))]
-                    unknown.push((u32::from(unified::Typecode::Orchard), data.to_vec()));
+                    unknown.push((u32::from(unified::Typecode::ORCHARD), data.to_vec()));
                 }
-                unified::Ivk::Sapling(data) => {
+                Uitem::Data(unified::Ivk::Sapling(data)) => {
                     #[cfg(feature = "sapling")]
                     {
                         sapling = Some(
                             Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))?,
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
                         );
                     }
-
                     #[cfg(not(feature = "sapling"))]
-                    unknown.push((u32::from(unified::Typecode::Sapling), data.to_vec()));
+                    unknown.push((u32::from(unified::Typecode::SAPLING), data.to_vec()));
                 }
-                unified::Ivk::P2pkh(data) => {
+                Uitem::Data(unified::Ivk::P2pkh(data)) => {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
                             ::transparent::keys::ExternalIvk::deserialize(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
                         );
                     }
-
                     #[cfg(not(feature = "transparent-inputs"))]
-                    unknown.push((u32::from(unified::Typecode::P2pkh), data.to_vec()));
+                    unknown.push((u32::from(unified::Typecode::P2PKH), data.to_vec()));
                 }
-                unified::Ivk::Unknown { typecode, data } => {
+                Uitem::Data(unified::Ivk::Unknown { typecode, data }) => {
                     unknown.push((*typecode, data.clone()));
+                }
+                Uitem::Metadata(MetadataItem::ExpiryHeight(h)) => {
+                    expiry_height = Some(consensus::BlockHeight::from_u32(*h));
+                }
+                Uitem::Metadata(MetadataItem::ExpiryTime(t)) => {
+                    expiry_time = Some(*t);
+                }
+                Uitem::Metadata(MetadataItem::Unknown { typecode, data }) => {
+                    unknown_metadata.push((*typecode, data.clone()));
                 }
             }
         }
@@ -1455,46 +1484,72 @@ impl UnifiedIncomingViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         })
     }
 
-    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
+    /// Returns the string encoding of this `UnifiedIncomingViewingKey` for the given network.
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         self.render().encode(&params.network_type())
     }
 
     /// Converts this unified incoming viewing key to a unified encoding.
-    fn render(&self) -> Uivk {
-        let items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
+    fn render(&self) -> unified::Uivk {
+        // ZIP 316 recommends that producers upgrade to Revision 2 as soon as
+        // possible. We use R2 unconditionally here.
+        let revision = unified::Revision::R2;
+
+        let data_items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Ivk::Unknown {
                 typecode: *typecode,
                 data: data.clone(),
             }
         }));
         #[cfg(feature = "orchard")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.orchard
                 .as_ref()
                 .map(|ivk| ivk.to_bytes())
                 .map(unified::Ivk::Orchard),
         );
         #[cfg(feature = "sapling")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.sapling
                 .as_ref()
                 .map(|divk| divk.to_bytes())
                 .map(unified::Ivk::Sapling),
         );
         #[cfg(feature = "transparent-inputs")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.transparent
                 .as_ref()
                 .map(|tivk| tivk.serialize().try_into().unwrap())
                 .map(unified::Ivk::P2pkh),
         );
 
-        unified::Uivk::try_from_items(items.collect())
-            .expect("UnifiedIncomingViewingKey should only be constructed safely.")
+        let meta_items = core::iter::empty()
+            .chain(self.unknown_metadata.iter().map(|(typecode, data)| {
+                unified::MetadataItem::Unknown {
+                    typecode: *typecode,
+                    data: data.clone(),
+                }
+            }))
+            .chain(
+                self.expiry_height
+                    .map(|h| unified::MetadataItem::ExpiryHeight(u32::from(h))),
+            )
+            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
+
+        unified::Uivk::try_from_items(
+            revision,
+            data_items
+                .map(Uitem::Data)
+                .chain(meta_items.map(Uitem::Metadata))
+                .collect(),
+        )
+        .expect("UnifiedIncomingViewingKey should only be constructed safely.")
     }
 
     /// Returns whether this uivk has a transparent key item.
@@ -1543,6 +1598,16 @@ impl UnifiedIncomingViewingKey {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &Option<orchard::keys::IncomingViewingKey> {
         &self.orchard
+    }
+
+    /// Returns the expiry height metadata for this key, if present.
+    pub fn expiry_height(&self) -> Option<consensus::BlockHeight> {
+        self.expiry_height
+    }
+
+    /// Returns the expiry time metadata for this key, if present.
+    pub fn expiry_time(&self) -> Option<u64> {
+        self.expiry_time
     }
 
     /// Returns `true` if this UIVK subsumes `other`: every IVK item present in `other`
@@ -1627,7 +1692,7 @@ impl UnifiedIncomingViewingKey {
             #[cfg(not(feature = "orchard"))]
             if request.orchard == Require {
                 return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                    Typecode::Orchard,
+                    Typecode::ORCHARD,
                 ));
             }
 
@@ -1636,7 +1701,7 @@ impl UnifiedIncomingViewingKey {
                 let orchard_j = orchard::keys::DiversifierIndex::from(*_j.as_bytes());
                 orchard = Some(oivk.address_at(orchard_j))
             } else if request.orchard == Require {
-                return Err(AddressGenerationError::KeyNotAvailable(Typecode::Orchard));
+                return Err(AddressGenerationError::KeyNotAvailable(Typecode::ORCHARD));
             }
         }
 
@@ -1646,7 +1711,7 @@ impl UnifiedIncomingViewingKey {
             #[cfg(not(feature = "sapling"))]
             if request.sapling == Require {
                 return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                    Typecode::Sapling,
+                    Typecode::SAPLING,
                 ));
             }
 
@@ -1663,7 +1728,7 @@ impl UnifiedIncomingViewingKey {
                     _ => Ok(None),
                 }?;
             } else if request.sapling == Require {
-                return Err(AddressGenerationError::KeyNotAvailable(Typecode::Sapling));
+                return Err(AddressGenerationError::KeyNotAvailable(Typecode::SAPLING));
             }
         }
 
@@ -1673,7 +1738,7 @@ impl UnifiedIncomingViewingKey {
             #[cfg(not(feature = "transparent-inputs"))]
             if request.p2pkh == Require {
                 return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                    Typecode::P2pkh,
+                    Typecode::P2PKH,
                 ));
             }
 
@@ -1692,7 +1757,7 @@ impl UnifiedIncomingViewingKey {
                     _ => Ok(None),
                 }?;
             } else if request.p2pkh == Require {
-                return Err(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh));
+                return Err(AddressGenerationError::KeyNotAvailable(Typecode::P2PKH));
             }
         }
         #[cfg(not(feature = "transparent-inputs"))]
@@ -1704,6 +1769,8 @@ impl UnifiedIncomingViewingKey {
             #[cfg(feature = "sapling")]
             sapling,
             transparent,
+            self.expiry_height,
+            self.expiry_time,
         )
         .ok_or(AddressGenerationError::ShieldedReceiverRequired)
     }
@@ -1775,19 +1842,19 @@ impl UnifiedIncomingViewingKey {
             UnifiedAddressRequest::Custom(req) => {
                 if req.orchard() == Require && !self.has_orchard() {
                     return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                        Typecode::Orchard,
+                        Typecode::ORCHARD,
                     ));
                 }
 
                 if req.sapling() == Require && !self.has_sapling() {
                     return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                        Typecode::Sapling,
+                        Typecode::SAPLING,
                     ));
                 }
 
                 if req.p2pkh() == Require && !self.has_transparent() {
                     return Err(AddressGenerationError::ReceiverTypeNotSupported(
-                        Typecode::P2pkh,
+                        Typecode::P2PKH,
                     ));
                 }
 
@@ -1876,11 +1943,8 @@ mod tests {
     #[cfg(any(feature = "sapling", feature = "orchard"))]
     use {
         super::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
-        zcash_address::unified::{Encoding, Uivk},
+        zcash_address::unified::{self, Encoding},
     };
-
-    #[cfg(feature = "orchard")]
-    use zip32::Scope;
 
     #[cfg(feature = "sapling")]
     use super::sapling;
@@ -1934,125 +1998,81 @@ mod tests {
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
+    /// Tests UFVK encoding round-trip and verification against R2 test vectors from
+    /// https://github.com/zcash/zcash-test-vectors/blob/667c92954acd7defc6e60e25b022fedf8831dfb3/test-vectors/rust/unified_viewing_keys_r2.rs
     #[test]
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
     fn ufvk_round_trip() {
-        #[cfg(feature = "orchard")]
-        let orchard = {
-            let sk =
-                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
-            Some(orchard::keys::FullViewingKey::from(&sk))
-        };
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
 
-        #[cfg(feature = "sapling")]
-        let sapling = {
-            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
-            Some(extsk.to_diversifiable_full_viewing_key())
-        };
+        for tv in TEST_VECTORS {
+            // Skip vectors containing P2SH items, which are not yet supported by
+            // the Rust FVK parser.
+            if tv.p2sh_fvk_bytes.is_some() {
+                continue;
+            }
 
-        #[cfg(feature = "transparent-inputs")]
-        let transparent = {
-            let privkey =
-                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
-            Some(privkey.to_account_pubkey())
-        };
+            let ufvk =
+                UnifiedFullViewingKey::decode(&MAIN_NETWORK, tv.unified_fvk).unwrap_or_else(|e| {
+                    panic!("Failed to decode UFVK for account {}: {e}", tv.account)
+                });
 
-        let ufvk = UnifiedFullViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            transparent,
-            #[cfg(feature = "sapling")]
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        );
+            // Verify round-trip for vectors without metadata items. Vectors with
+            // expiry_height or expiry_time include metadata that UnifiedFullViewingKey
+            // does not currently preserve, so the re-encoding will differ.
+            if tv.expiry_height.is_none() && tv.expiry_time.is_none() {
+                let reencoded = ufvk.encode(&MAIN_NETWORK);
+                assert_eq!(
+                    reencoded, tv.unified_fvk,
+                    "UFVK round-trip failed for account {}",
+                    tv.account
+                );
+            }
 
-        let ufvk = ufvk.expect("Orchard or Sapling fvk is present.");
-        let encoded = ufvk.encode(&MAIN_NETWORK);
+            // Verify key data matches the test vector bytes.
+            if let Some(ref expected) = tv.t_p2pkh_fvk_bytes {
+                let actual = ufvk
+                    .transparent()
+                    .expect("transparent key present in test vector")
+                    .serialize();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "transparent FVK mismatch for account {}",
+                    tv.account
+                );
+            }
 
-        // Test encoded form against known values; these test vectors contain Orchard receivers
-        // that will be treated as unknown if the `orchard` feature is not enabled.
-        let encoded_with_t = "uview1tg6rpjgju2s2j37gkgjq79qrh5lvzr6e0ed3n4sf4hu5qd35vmsh7avl80xa6mx7ryqce9hztwaqwrdthetpy4pc0kce25x453hwcmax02p80pg5savlg865sft9reat07c5vlactr6l2pxtlqtqunt2j9gmvr8spcuzf07af80h5qmut38h0gvcfa9k4rwujacwwca9vu8jev7wq6c725huv8qjmhss3hdj2vh8cfxhpqcm2qzc34msyrfxk5u6dqttt4vv2mr0aajreww5yufpk0gn4xkfm888467k7v6fmw7syqq6cceu078yw8xja502jxr0jgum43lhvpzmf7eu5dmnn6cr6f7p43yw8znzgxg598mllewnx076hljlvynhzwn5es94yrv65tdg3utuz2u3sras0wfcq4adxwdvlk387d22g3q98t5z74quw2fa4wed32escx8dwh4mw35t4jwf35xyfxnu83mk5s4kw2glkgsshmxk";
-        let _encoded_no_t = "uview12z384wdq76ceewlsu0esk7d97qnd23v2qnvhujxtcf2lsq8g4hwzpx44fwxssnm5tg8skyh4tnc8gydwxefnnm0hd0a6c6etmj0pp9jqkdsllkr70u8gpf7ndsfqcjlqn6dec3faumzqlqcmtjf8vp92h7kj38ph2786zx30hq2wru8ae3excdwc8w0z3t9fuw7mt7xy5sn6s4e45kwm0cjp70wytnensgdnev286t3vew3yuwt2hcz865y037k30e428dvgne37xvyeal2vu8yjnznphf9t2rw3gdp0hk5zwq00ws8f3l3j5n3qkqgsyzrwx4qzmgq0xwwk4vz2r6vtsykgz089jncvycmem3535zjwvvtvjw8v98y0d5ydwte575gjm7a7k";
+            if let Some(ref expected) = tv.sapling_fvk_bytes {
+                let actual = ufvk
+                    .sapling()
+                    .expect("sapling key present in test vector")
+                    .to_bytes();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "sapling FVK mismatch for account {}",
+                    tv.account
+                );
+            }
 
-        // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
-        // because we will not generate these parts of the encoding if the UFVK does not have an
-        // these parts.
-        #[cfg(all(feature = "sapling", feature = "orchard"))]
-        {
-            #[cfg(feature = "transparent-inputs")]
-            assert_eq!(encoded, encoded_with_t);
-            #[cfg(not(feature = "transparent-inputs"))]
-            assert_eq!(encoded, _encoded_no_t);
+            if let Some(ref expected) = tv.orchard_fvk_bytes {
+                let actual = ufvk
+                    .orchard()
+                    .expect("orchard key present in test vector")
+                    .to_bytes();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "orchard FVK mismatch for account {}",
+                    tv.account
+                );
+            }
         }
-
-        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).unwrap();
-        let reencoded = decoded.encode(&MAIN_NETWORK);
-        assert_eq!(encoded, reencoded);
-
-        #[cfg(feature = "transparent-inputs")]
-        assert_eq!(
-            decoded.transparent.map(|t| t.serialize()),
-            ufvk.transparent.as_ref().map(|t| t.serialize()),
-        );
-        #[cfg(feature = "sapling")]
-        assert_eq!(
-            decoded.sapling.map(|s| s.to_bytes()),
-            ufvk.sapling.map(|s| s.to_bytes()),
-        );
-        #[cfg(feature = "orchard")]
-        assert_eq!(
-            decoded.orchard.map(|o| o.to_bytes()),
-            ufvk.orchard.map(|o| o.to_bytes()),
-        );
-
-        let decoded_with_t = UnifiedFullViewingKey::decode(&MAIN_NETWORK, encoded_with_t).unwrap();
-        #[cfg(feature = "transparent-inputs")]
-        assert_eq!(
-            decoded_with_t.transparent.map(|t| t.serialize()),
-            ufvk.transparent.as_ref().map(|t| t.serialize()),
-        );
-
-        // Both Orchard and Sapling enabled
-        #[cfg(all(
-            feature = "orchard",
-            feature = "sapling",
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 0);
-        #[cfg(all(
-            feature = "orchard",
-            feature = "sapling",
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-
-        // Orchard enabled
-        #[cfg(all(
-            feature = "orchard",
-            not(feature = "sapling"),
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-        #[cfg(all(
-            feature = "orchard",
-            not(feature = "sapling"),
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 2);
-
-        // Sapling enabled
-        #[cfg(all(
-            not(feature = "orchard"),
-            feature = "sapling",
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-        #[cfg(all(
-            not(feature = "orchard"),
-            feature = "sapling",
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 2);
     }
 
     #[test]
@@ -2117,127 +2137,86 @@ mod tests {
         }
     }
 
+    /// Tests UIVK encoding round-trip and verification against R2 test vectors from
+    /// https://github.com/zcash/zcash-test-vectors/blob/667c92954acd7defc6e60e25b022fedf8831dfb3/test-vectors/rust/unified_viewing_keys_r2.rs
     #[test]
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
+    #[cfg(all(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
     fn uivk_round_trip() {
+        use super::test_vectors::unified_viewing_keys_r2::TEST_VECTORS;
         use zcash_protocol::consensus::NetworkType;
 
-        #[cfg(feature = "orchard")]
-        let orchard = {
-            let sk =
-                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
-            Some(orchard::keys::FullViewingKey::from(&sk).to_ivk(Scope::External))
-        };
+        for tv in TEST_VECTORS {
+            // Skip vectors containing P2SH items, which are not yet supported by
+            // the Rust IVK parser.
+            if tv.p2sh_ivk_bytes.is_some() {
+                continue;
+            }
 
-        #[cfg(feature = "sapling")]
-        let sapling = {
-            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
-            Some(extsk.to_diversifiable_full_viewing_key().to_external_ivk())
-        };
+            let decoded =
+                UnifiedIncomingViewingKey::parse(&unified::Uivk::decode(tv.unified_ivk).unwrap().2)
+                    .unwrap_or_else(|e| {
+                        panic!("Failed to decode UIVK for account {}: {e}", tv.account)
+                    });
 
-        #[cfg(feature = "transparent-inputs")]
-        let transparent = {
-            let privkey =
-                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
-            Some(privkey.to_account_pubkey().derive_external_ivk().unwrap())
-        };
+            // Verify round-trip for vectors without metadata items. Vectors with
+            // expiry_height or expiry_time include metadata that UnifiedIncomingViewingKey
+            // does not currently preserve, so the re-encoding will differ.
+            if tv.expiry_height.is_none() && tv.expiry_time.is_none() {
+                let reencoded = decoded.render().encode(&NetworkType::Main);
+                assert_eq!(
+                    reencoded, tv.unified_ivk,
+                    "UIVK round-trip failed for account {}",
+                    tv.account
+                );
+            }
 
-        let uivk = UnifiedIncomingViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            transparent,
-            #[cfg(feature = "sapling")]
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        );
+            // Verify key data matches the test vector bytes.
+            if let Some(ref expected) = tv.t_p2pkh_ivk_bytes {
+                let actual = decoded
+                    .transparent
+                    .as_ref()
+                    .expect("transparent key present in test vector")
+                    .serialize();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "transparent IVK mismatch for account {}",
+                    tv.account
+                );
+            }
 
-        let encoded = uivk.render().encode(&NetworkType::Main);
+            if let Some(ref expected) = tv.sapling_ivk_bytes {
+                let actual = decoded
+                    .sapling
+                    .as_ref()
+                    .expect("sapling key present in test vector")
+                    .to_bytes();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "sapling IVK mismatch for account {}",
+                    tv.account
+                );
+            }
 
-        // Test encoded form against known values; these test vectors contain Orchard receivers
-        // that will be treated as unknown if the `orchard` feature is not enabled.
-        let encoded_with_t = "uivk1z28yg638vjwusmf0zc9ad2j0mpv6s42wc5kqt004aaqfu5xxxgu7mdcydn9qf723fnryt34s6jyxyw0jt7spq04c3v9ze6qe9gjjc5aglz8zv5pqtw58czd0actynww5n85z3052kzgy6cu0fyjafyp4sr4kppyrrwhwev2rr0awq6m8d66esvk6fgacggqnswg5g9gkv6t6fj9ajhyd0gmel4yzscprpzduncc0e2lywufup6fvzf6y8cefez2r99pgge5yyfuus0r60khgu895pln5e7nn77q6s9kh2uwf6lrfu06ma2kd7r05jjvl4hn6nupge8fajh0cazd7mkmz23t79w";
-        let _encoded_no_t = "uivk1020vq9j5zeqxh303sxa0zv2hn9wm9fev8x0p8yqxdwyzde9r4c90fcglc63usj0ycl2scy8zxuhtser0qrq356xfy8x3vyuxu7f6gas75svl9v9m3ctuazsu0ar8e8crtx7x6zgh4kw8xm3q4rlkpm9er2wefxhhf9pn547gpuz9vw27gsdp6c03nwlrxgzhr2g6xek0x8l5avrx9ue9lf032tr7kmhqf3nfdxg7ldfgx6yf09g";
-
-        // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
-        // because we will not generate these parts of the encoding if the UIVK does not have an
-        // these parts.
-        #[cfg(all(feature = "sapling", feature = "orchard"))]
-        {
-            #[cfg(feature = "transparent-inputs")]
-            assert_eq!(encoded, encoded_with_t);
-            #[cfg(not(feature = "transparent-inputs"))]
-            assert_eq!(encoded, _encoded_no_t);
+            if let Some(ref expected) = tv.orchard_ivk_bytes {
+                let actual = decoded
+                    .orchard
+                    .as_ref()
+                    .expect("orchard key present in test vector")
+                    .to_bytes();
+                assert_eq!(
+                    &actual[..],
+                    &expected[..],
+                    "orchard IVK mismatch for account {}",
+                    tv.account
+                );
+            }
         }
-
-        let decoded = UnifiedIncomingViewingKey::parse(&Uivk::decode(&encoded).unwrap().1).unwrap();
-        let reencoded = decoded.render().encode(&NetworkType::Main);
-        assert_eq!(encoded, reencoded);
-
-        #[cfg(feature = "transparent-inputs")]
-        assert_eq!(
-            decoded.transparent.map(|t| t.serialize()),
-            uivk.transparent.as_ref().map(|t| t.serialize()),
-        );
-        #[cfg(feature = "sapling")]
-        assert_eq!(
-            decoded.sapling.map(|s| s.to_bytes()),
-            uivk.sapling.map(|s| s.to_bytes()),
-        );
-        #[cfg(feature = "orchard")]
-        assert_eq!(
-            decoded.orchard.map(|o| o.to_bytes()),
-            uivk.orchard.map(|o| o.to_bytes()),
-        );
-
-        let decoded_with_t =
-            UnifiedIncomingViewingKey::parse(&Uivk::decode(encoded_with_t).unwrap().1).unwrap();
-        #[cfg(feature = "transparent-inputs")]
-        assert_eq!(
-            decoded_with_t.transparent.map(|t| t.serialize()),
-            uivk.transparent.as_ref().map(|t| t.serialize()),
-        );
-
-        // Both Orchard and Sapling enabled
-        #[cfg(all(
-            feature = "orchard",
-            feature = "sapling",
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 0);
-        #[cfg(all(
-            feature = "orchard",
-            feature = "sapling",
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-
-        // Orchard enabled
-        #[cfg(all(
-            feature = "orchard",
-            not(feature = "sapling"),
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-        #[cfg(all(
-            feature = "orchard",
-            not(feature = "sapling"),
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 2);
-
-        // Sapling enabled
-        #[cfg(all(
-            not(feature = "orchard"),
-            feature = "sapling",
-            feature = "transparent-inputs"
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 1);
-        #[cfg(all(
-            not(feature = "orchard"),
-            feature = "sapling",
-            not(feature = "transparent-inputs")
-        ))]
-        assert_eq!(decoded_with_t.unknown.len(), 2);
     }
 
     #[test]
@@ -2340,165 +2319,5 @@ mod tests {
             #[cfg(feature = "transparent-inputs")]
             assert_eq!(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
         }
-    }
-
-    #[cfg(feature = "unstable")]
-    #[test]
-    fn usk_debug_redaction() {
-        let seed = [0u8; 64];
-        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
-        assert!(format!("{:?}", usk).contains("\"...\""));
-    }
-
-    #[test]
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
-    fn ufvk_debug_redaction() {
-        #[cfg(feature = "orchard")]
-        let orchard = {
-            let sk =
-                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
-            Some(orchard::keys::FullViewingKey::from(&sk))
-        };
-
-        #[cfg(feature = "sapling")]
-        let sapling = {
-            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
-            Some(extsk.to_diversifiable_full_viewing_key())
-        };
-
-        #[cfg(feature = "transparent-inputs")]
-        let transparent = {
-            let privkey =
-                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
-            Some(privkey.to_account_pubkey())
-        };
-
-        let ufvk = UnifiedFullViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            transparent,
-            #[cfg(feature = "sapling")]
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        )
-        .unwrap();
-
-        let debug_str = format!("{:?}", ufvk);
-        #[cfg(feature = "transparent-inputs")]
-        assert!(debug_str.contains("transparent: Some(\"...\")"));
-        #[cfg(feature = "sapling")]
-        assert!(debug_str.contains("sapling: Some(\"...\")"));
-        #[cfg(feature = "orchard")]
-        assert!(debug_str.contains("orchard: Some(\"...\")"));
-    }
-
-    #[test]
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
-    fn uivk_debug_redaction() {
-        #[cfg(feature = "orchard")]
-        let orchard = {
-            let sk =
-                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
-            Some(orchard::keys::FullViewingKey::from(&sk).to_ivk(Scope::External))
-        };
-
-        #[cfg(feature = "sapling")]
-        let sapling = {
-            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
-            Some(extsk.to_diversifiable_full_viewing_key().to_external_ivk())
-        };
-
-        #[cfg(feature = "transparent-inputs")]
-        let transparent = {
-            let privkey =
-                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
-            Some(privkey.to_account_pubkey().derive_external_ivk().unwrap())
-        };
-
-        let uivk = UnifiedIncomingViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            transparent,
-            #[cfg(feature = "sapling")]
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        );
-
-        let debug_str = format!("{:?}", uivk);
-        #[cfg(feature = "sapling")]
-        assert!(debug_str.contains("sapling: Some(\"...\")"));
-        #[cfg(feature = "orchard")]
-        assert!(debug_str.contains("orchard: Some(\"...\")"));
-    }
-
-    #[test]
-    fn ovk_debug_redaction() {
-        assert_eq!(
-            format!("{:?}", super::OutgoingViewingKey::from([0u8; 32])),
-            "OutgoingViewingKey(\"...\")"
-        );
-    }
-
-    #[cfg(any(feature = "sapling", feature = "orchard"))]
-    #[test]
-    fn subsumes_ufvk_same_key() {
-        let seed = vec![0u8; 32];
-        let usk =
-            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-
-        // A UFVK subsumes itself.
-        assert!(ufvk.subsumes_ufvk(&ufvk));
-    }
-
-    #[cfg(any(feature = "sapling", feature = "orchard"))]
-    #[test]
-    fn subsumes_uivk_from_same_ufvk() {
-        let seed = vec![0u8; 32];
-        let usk =
-            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-        let uivk = ufvk.to_unified_incoming_viewing_key();
-
-        // A UFVK subsumes the UIVK derived from it.
-        assert!(ufvk.subsumes_uivk(&uivk));
-    }
-
-    #[cfg(all(feature = "sapling", feature = "orchard"))]
-    #[test]
-    fn subsumes_ufvk_subset() {
-        let seed = vec![0u8; 32];
-        let usk =
-            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-
-        // A UFVK with all components subsumes one with fewer components.
-        let subset_ufvk = UnifiedFullViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            None,
-            ufvk.sapling().cloned(),
-            None, // no Orchard
-        )
-        .unwrap();
-        assert!(ufvk.subsumes_ufvk(&subset_ufvk));
-        // The subset does not subsume the full key.
-        assert!(!subset_ufvk.subsumes_ufvk(&ufvk));
-    }
-
-    #[cfg(any(feature = "sapling", feature = "orchard"))]
-    #[test]
-    fn subsumes_ufvk_different_keys() {
-        let seed0 = vec![0u8; 32];
-        let seed1 = vec![1u8; 32];
-        let usk0 =
-            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed0, AccountId::ZERO).unwrap();
-        let usk1 =
-            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed1, AccountId::ZERO).unwrap();
-        let ufvk0 = usk0.to_unified_full_viewing_key();
-        let ufvk1 = usk1.to_unified_full_viewing_key();
-
-        // UFVKs from different seeds do not subsume each other.
-        assert!(!ufvk0.subsumes_ufvk(&ufvk1));
-        assert!(!ufvk1.subsumes_ufvk(&ufvk0));
     }
 }

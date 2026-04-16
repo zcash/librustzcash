@@ -2396,7 +2396,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
             compact_sapling_output(
                 params,
                 height,
-                recipient,
+                *recipient,
                 value,
                 Some(::sapling::keys::OutgoingViewingKey(ovk_bytes)),
                 &mut rng,

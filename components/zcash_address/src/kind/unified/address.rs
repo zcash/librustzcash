@@ -1,9 +1,10 @@
+use zcash_protocol::address::Revision;
 use zcash_protocol::{constants, PoolType};
 
-use super::{private::SealedItem, ParseError, Typecode};
+use super::{private::SealedItem, DataTypecode, ParseError, Uitem};
 
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -15,34 +16,34 @@ pub enum Receiver {
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
-impl TryFrom<(u32, &[u8])> for Receiver {
-    type Error = ParseError;
-
-    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
-        match typecode.try_into()? {
-            Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
-            Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
-            Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
-            Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
-            Typecode::Unknown(_) => Ok(Receiver::Unknown {
-                typecode,
+impl SealedItem for Receiver {
+    fn parse(typecode: DataTypecode, addr: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
+            DataTypecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
+            DataTypecode::P2sh => addr.try_into().map(Receiver::P2sh),
+            DataTypecode::Sapling => addr.try_into().map(Receiver::Sapling),
+            DataTypecode::Orchard => addr.try_into().map(Receiver::Orchard),
+            DataTypecode::Unknown(tc) => Ok(Receiver::Unknown {
+                typecode: tc,
                 data: addr.to_vec(),
             }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid address for typecode {}: {}", typecode, e))
+            ParseError::InvalidEncoding(format!(
+                "Invalid address for typecode {}: {}",
+                u32::from(typecode),
+                e
+            ))
         })
     }
-}
 
-impl SealedItem for Receiver {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Receiver::P2pkh(_) => Typecode::P2pkh,
-            Receiver::P2sh(_) => Typecode::P2sh,
-            Receiver::Sapling(_) => Typecode::Sapling,
-            Receiver::Orchard(_) => Typecode::Orchard,
-            Receiver::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Receiver::P2pkh(_) => DataTypecode::P2pkh,
+            Receiver::P2sh(_) => DataTypecode::P2sh,
+            Receiver::Sapling(_) => DataTypecode::Sapling,
+            Receiver::Orchard(_) => DataTypecode::Orchard,
+            Receiver::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -77,7 +78,7 @@ impl SealedItem for Receiver {
 /// let example_ua: &str = address_from_user();
 ///
 /// // We can parse this directly as a `unified::Address`:
-/// let (network, ua) = unified::Address::decode(example_ua)?;
+/// let (network, _revision, ua) = unified::Address::decode(example_ua)?;
 ///
 /// // Or we can parse via `ZcashAddress` (which you should do):
 /// struct MyUnifiedAddress(unified::Address);
@@ -102,58 +103,70 @@ impl SealedItem for Receiver {
 /// let receivers: Vec<unified::Receiver> = ua.items();
 ///
 /// // And we can create the UA from a list of receivers:
-/// let new_ua = unified::Address::try_from_items(receivers)?;
+/// let new_ua = unified::Address::try_from_items(
+///     unified::Revision::R0,
+///     receivers.into_iter().map(unified::Uitem::Data).collect(),
+/// )?;
 /// assert_eq!(new_ua, ua);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Address(pub(crate) Vec<Receiver>);
+pub struct Address {
+    pub(crate) revision: Revision,
+    pub(crate) items: Vec<Uitem<Receiver>>,
+}
 
 impl Address {
     /// Returns whether this address has the ability to receive transfers of the given pool type.
     pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
-        self.0.iter().any(|r| match r {
-            Receiver::Orchard(_) => pool_type == PoolType::ORCHARD,
-            Receiver::Sapling(_) => pool_type == PoolType::SAPLING,
-            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::TRANSPARENT,
-            Receiver::Unknown { .. } => false,
+        self.items.iter().any(|item| match item {
+            Uitem::Data(Receiver::Orchard(_)) => pool_type == PoolType::ORCHARD,
+            Uitem::Data(Receiver::Sapling(_)) => pool_type == PoolType::SAPLING,
+            Uitem::Data(Receiver::P2pkh(_) | Receiver::P2sh(_)) => {
+                pool_type == PoolType::TRANSPARENT
+            }
+            Uitem::Data(Receiver::Unknown { .. }) => false,
+            Uitem::Metadata(_) => false,
         })
     }
 
     /// Returns whether this address contains the given receiver.
     pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
-        self.0.contains(receiver)
+        self.items.iter().any(|item| match item {
+            Uitem::Data(r) => r == receiver,
+            Uitem::Metadata(_) => false,
+        })
     }
 
     /// Returns whether this address can receive a memo.
     pub fn can_receive_memo(&self) -> bool {
-        self.0
-            .iter()
-            .any(|r| matches!(r, Receiver::Sapling(_) | Receiver::Orchard(_)))
+        self.items.iter().any(|item| {
+            matches!(
+                item,
+                Uitem::Data(Receiver::Sapling(_)) | Uitem::Data(Receiver::Orchard(_))
+            )
+        })
     }
 }
 
 impl super::private::SealedContainer for Address {
-    /// The HRP for a Bech32m-encoded mainnet Unified Address.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
     const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS;
-
-    /// The HRP for a Bech32m-encoded testnet Unified Address.
-    ///
-    /// Defined in [ZIP 316][zip-0316].
-    ///
-    /// [zip-0316]: https://zips.z.cash/zip-0316
     const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS;
-
-    /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS;
 
-    fn from_inner(receivers: Vec<Self::Item>) -> Self {
-        Self(receivers)
+    const MAINNET_R2: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS_R2;
+    const TESTNET_R2: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS_R2;
+    const REGTEST_R2: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS_R2;
+
+    const MAINNET_R2_TI: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS_R2_TI;
+    const TESTNET_R2_TI: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS_R2_TI;
+    const REGTEST_R2_TI: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS_R2_TI;
+
+    const IS_ADDRESS: bool = true;
+
+    fn from_inner(revision: Revision, items: Vec<Uitem<Receiver>>) -> Self {
+        Self { revision, items }
     }
 }
 
@@ -161,8 +174,12 @@ impl super::Encoding for Address {}
 impl super::Container for Address {
     type Item = Receiver;
 
-    fn items_as_parsed(&self) -> &[Receiver] {
-        &self.0
+    fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    fn items_as_parsed(&self) -> &[Uitem<Receiver>] {
+        &self.items
     }
 }
 
@@ -177,10 +194,10 @@ pub mod testing {
         sample::select,
         strategy::Strategy,
     };
-    use zcash_encoding::MAX_COMPACT_SIZE;
+    use zcash_protocol::address::Revision;
 
     use super::{Address, Receiver};
-    use crate::unified::Typecode;
+    use crate::unified::{DataTypecode, MetadataItem, Typecode, Uitem};
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -193,15 +210,19 @@ pub mod testing {
 
     /// A strategy to generate an arbitrary transparent typecode.
     pub fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
-        select(vec![Typecode::P2pkh, Typecode::P2sh])
+        select(vec![
+            Typecode::Data(DataTypecode::P2pkh),
+            Typecode::Data(DataTypecode::P2sh),
+        ])
     }
 
     /// A strategy to generate an arbitrary shielded (Sapling, Orchard, or unknown) typecode.
     pub fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
         prop_oneof![
-            Just(Typecode::Sapling),
-            Just(Typecode::Orchard),
-            ((<u32>::from(Typecode::Orchard) + 1)..MAX_COMPACT_SIZE).prop_map(Typecode::Unknown)
+            Just(Typecode::Data(DataTypecode::Sapling)),
+            Just(Typecode::Data(DataTypecode::Orchard)),
+            ((<u32>::from(DataTypecode::Orchard) + 1)..0xC0u32)
+                .prop_map(|tc| Typecode::Data(DataTypecode::Unknown(tc)))
         ]
     }
 
@@ -219,34 +240,114 @@ pub mod testing {
     }
 
     /// Generates an arbitrary Unified address containing receivers corresponding to the provided
-    /// set of typecodes. The receivers of this address are likely to not represent valid protocol
-    /// receivers, and should only be used for testing parsing and/or encoding functions that do
-    /// not concern themselves with the validity of the underlying receivers.
+    /// set of typecodes.
     pub fn arb_unified_address_for_typecodes(
         typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
         typecodes
             .into_iter()
             .map(|tc| match tc {
-                Typecode::P2pkh => uniform20(0u8..).prop_map(Receiver::P2pkh).boxed(),
-                Typecode::P2sh => uniform20(0u8..).prop_map(Receiver::P2sh).boxed(),
-                Typecode::Sapling => uniform43().prop_map(Receiver::Sapling).boxed(),
-                Typecode::Orchard => uniform43().prop_map(Receiver::Orchard).boxed(),
-                Typecode::Unknown(typecode) => vec(any::<u8>(), 32..256)
+                Typecode::Data(DataTypecode::P2pkh) => {
+                    uniform20(0u8..).prop_map(Receiver::P2pkh).boxed()
+                }
+                Typecode::Data(DataTypecode::P2sh) => {
+                    uniform20(0u8..).prop_map(Receiver::P2sh).boxed()
+                }
+                Typecode::Data(DataTypecode::Sapling) => {
+                    uniform43().prop_map(Receiver::Sapling).boxed()
+                }
+                Typecode::Data(DataTypecode::Orchard) => {
+                    uniform43().prop_map(Receiver::Orchard).boxed()
+                }
+                Typecode::Data(DataTypecode::Unknown(typecode)) => vec(any::<u8>(), 32..256)
                     .prop_map(move |data| Receiver::Unknown { typecode, data })
                     .boxed(),
+                Typecode::Metadata(_) => {
+                    // Metadata items are not generated in receiver position.
+                    uniform43().prop_map(Receiver::Sapling).boxed()
+                }
             })
             .collect::<Vec<_>>()
     }
 
-    /// Generates an arbitrary Unified address. The receivers of this address are likely to not
-    /// represent valid protocol receivers, and should only be used for testing parsing and/or
-    /// encoding functions that do not concern themselves with the validity of the underlying
-    /// receivers.
+    /// Generates an arbitrary R0 Unified address (shielded with optional transparent).
     pub fn arb_unified_address() -> impl Strategy<Value = Address> {
         arb_typecodes()
             .prop_flat_map(arb_unified_address_for_typecodes)
-            .prop_map(Address)
+            .prop_map(|receivers| Address {
+                revision: Revision::R0,
+                items: receivers.into_iter().map(Uitem::Data).collect(),
+            })
+    }
+
+    /// Generates an arbitrary set of metadata items.
+    pub fn arb_metadata_items() -> impl Strategy<Value = Vec<Uitem<Receiver>>> {
+        (
+            prop::option::of(
+                any::<u32>().prop_map(|h| Uitem::Metadata(MetadataItem::ExpiryHeight(h))),
+            ),
+            prop::option::of(
+                any::<u64>().prop_map(|t| Uitem::Metadata(MetadataItem::ExpiryTime(t))),
+            ),
+        )
+            .prop_map(|(h, t)| h.into_iter().chain(t).collect())
+    }
+
+    /// A strategy to generate a known shielded typecode (Sapling or Orchard only).
+    /// Unlike `arb_shielded_typecode`, this excludes unknown typecodes which are not
+    /// recognized as shielded for `zu` address validation.
+    pub fn arb_known_shielded_typecode() -> impl Strategy<Value = Typecode> {
+        select(vec![
+            Typecode::Data(DataTypecode::Sapling),
+            Typecode::Data(DataTypecode::Orchard),
+        ])
+    }
+
+    /// Generates an arbitrary R2 shielded-only (`zu`) Unified address: at least one known
+    /// shielded receiver (Sapling or Orchard), no transparent receivers, with optional metadata.
+    pub fn arb_r2_shielded_address() -> impl Strategy<Value = Address> {
+        (
+            prop::collection::hash_set(arb_known_shielded_typecode(), 1..2),
+            arb_metadata_items(),
+        )
+            .prop_flat_map(|(shielded_tcs, metadata)| {
+                let typecodes: Vec<_> = shielded_tcs.into_iter().collect();
+                arb_unified_address_for_typecodes(typecodes).prop_map(move |receivers| {
+                    let mut items: Vec<Uitem<Receiver>> =
+                        receivers.into_iter().map(Uitem::Data).collect();
+                    items.extend(metadata.clone());
+                    Address {
+                        revision: Revision::R2,
+                        items,
+                    }
+                })
+            })
+    }
+
+    /// Generates an arbitrary R2 transparent-including (`tu`) Unified address: at least one
+    /// shielded receiver plus a transparent receiver, with optional metadata.
+    pub fn arb_r2_transparent_including_address() -> impl Strategy<Value = Address> {
+        (
+            prop::collection::hash_set(arb_shielded_typecode(), 1..3),
+            arb_transparent_typecode(),
+            arb_metadata_items(),
+        )
+            .prop_flat_map(|(shielded_tcs, transparent_tc, metadata)| {
+                let mut typecodes: Vec<_> = shielded_tcs
+                    .into_iter()
+                    .chain(Some(transparent_tc))
+                    .collect();
+                typecodes.sort_unstable_by(Typecode::encoding_order);
+                arb_unified_address_for_typecodes(typecodes).prop_map(move |receivers| {
+                    let mut items: Vec<Uitem<Receiver>> =
+                        receivers.into_iter().map(Uitem::Data).collect();
+                    items.extend(metadata.clone());
+                    Address {
+                        revision: Revision::R2,
+                        items,
+                    }
+                })
+            })
     }
 }
 
@@ -256,18 +357,23 @@ pub mod test_vectors;
 #[cfg(test)]
 mod tests {
     use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
 
     use assert_matches::assert_matches;
+    use zcash_protocol::address::Revision;
     use zcash_protocol::consensus::NetworkType;
 
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
-        unified::address::testing::arb_unified_address,
+        kind::unified::{private::SealedContainer, Container, Encoding, MetadataItem, Uitem},
+        unified::address::testing::{
+            arb_r2_shielded_address, arb_r2_transparent_including_address, arb_unified_address,
+        },
     };
 
     use proptest::{prelude::*, sample::select};
 
-    use super::{Address, ParseError, Receiver, Typecode};
+    use super::{Address, ParseError, Receiver};
+    use crate::unified::Typecode;
 
     proptest! {
         #[test]
@@ -277,6 +383,33 @@ mod tests {
         ) {
             let encoded = ua.encode(&network);
             let decoded = Address::decode(&encoded);
+            let decoded = decoded.map(|(net, _rev, addr)| (net, addr));
+            prop_assert_eq!(&decoded, &Ok((network, ua)));
+            let reencoded = decoded.unwrap().1.encode(&network);
+            prop_assert_eq!(reencoded, encoded);
+        }
+
+        #[test]
+        fn r2_shielded_ua_roundtrip(
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
+            ua in arb_r2_shielded_address(),
+        ) {
+            let encoded = ua.encode(&network);
+            let decoded = Address::decode(&encoded);
+            let decoded = decoded.map(|(net, _rev, addr)| (net, addr));
+            prop_assert_eq!(&decoded, &Ok((network, ua)));
+            let reencoded = decoded.unwrap().1.encode(&network);
+            prop_assert_eq!(reencoded, encoded);
+        }
+
+        #[test]
+        fn r2_transparent_including_ua_roundtrip(
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
+            ua in arb_r2_transparent_including_address(),
+        ) {
+            let encoded = ua.encode(&network);
+            let decoded = Address::decode(&encoded);
+            let decoded = decoded.map(|(net, _rev, addr)| (net, addr));
             prop_assert_eq!(&decoded, &Ok((network, ua)));
             let reencoded = decoded.unwrap().1.encode(&network);
             prop_assert_eq!(reencoded, encoded);
@@ -285,7 +418,11 @@ mod tests {
 
     #[test]
     fn padding() {
-        // The test cases below use `Address(vec![Receiver::Orchard([1; 43])])` as base.
+        // The test cases below use `Address { revision: R0, items: vec![Uitem::Data(Receiver::Orchard([1; 43]))] }` as base.
+        let _ua = Address {
+            revision: Revision::R0,
+            items: vec![Uitem::Data(Receiver::Orchard([1; 43]))],
+        };
 
         // Invalid padding ([0xff; 16] instead of [0x75, 0x00, 0x00, 0x00...])
         let invalid_padding = [
@@ -296,7 +433,7 @@ mod tests {
             0x7b, 0x28, 0x69, 0xc9, 0x84,
         ];
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &invalid_padding[..]),
+            Address::parse_internal(Address::MAINNET, &invalid_padding[..], Revision::R0),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -311,7 +448,7 @@ mod tests {
             0x4b, 0x31, 0xee, 0x5a,
         ];
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &truncated_padding[..]),
+            Address::parse_internal(Address::MAINNET, &truncated_padding[..], Revision::R0),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -320,10 +457,6 @@ mod tests {
 
     #[test]
     fn truncated() {
-        // The test cases below start from an encoding of
-        //     `Address(vec![Receiver::Orchard([1; 43]), Receiver::Sapling([2; 43])])`
-        // with the receiver data truncated, but valid padding.
-
         // - Missing the last data byte of the Sapling receiver.
         let truncated_sapling_data = [
             0xaa, 0xb0, 0x6e, 0x7b, 0x26, 0x7a, 0x22, 0x17, 0x39, 0xfa, 0x07, 0x69, 0xe9, 0x32,
@@ -336,7 +469,7 @@ mod tests {
             0xc6, 0x5e, 0x68, 0xa2, 0x78, 0x6c, 0x9e,
         ];
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &truncated_sapling_data[..]),
+            Address::parse_internal(Address::MAINNET, &truncated_sapling_data[..], Revision::R0),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -349,82 +482,95 @@ mod tests {
             0xe6, 0x70, 0x36, 0x5b, 0x7b, 0x9e,
         ];
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &truncated_after_sapling_typecode[..]),
+            Address::parse_internal(
+                Address::MAINNET,
+                &truncated_after_sapling_typecode[..],
+                Revision::R0
+            ),
             Err(ParseError::InvalidEncoding(_))
         );
     }
 
     #[test]
     fn duplicate_typecode() {
-        // Construct and serialize an invalid UA. This must be done using private
-        // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
+        let ua = Address {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Receiver::Sapling([1; 43])),
+                Uitem::Data(Receiver::Sapling([2; 43])),
+            ],
+        };
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
-            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+            Address::parse_internal(Address::MAINNET, &encoded[..], Revision::R0),
+            Err(ParseError::DuplicateTypecode(Typecode::Data(
+                super::super::DataTypecode::Sapling
+            )))
         );
     }
 
     #[test]
     fn p2pkh_and_p2sh() {
-        // Construct and serialize an invalid UA. This must be done using private
-        // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
+        let ua = Address {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Receiver::P2pkh([0; 20])),
+                Uitem::Data(Receiver::P2sh([0; 20])),
+            ],
+        };
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
-        // ensure that decoding catches the error
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET, &encoded[..], Revision::R0),
             Err(ParseError::BothP2phkAndP2sh)
         );
     }
 
     #[test]
     fn addresses_out_of_order() {
-        // Construct and serialize an invalid UA. This must be done using private
-        // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::Sapling([0; 43]), Receiver::P2pkh([0; 20])]);
+        let ua = Address {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Receiver::Sapling([0; 43])),
+                Uitem::Data(Receiver::P2pkh([0; 20])),
+            ],
+        };
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
-        // ensure that decoding catches the error
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET, &encoded[..], Revision::R0),
             Err(ParseError::InvalidTypecodeOrder)
         );
     }
 
     #[test]
     fn only_transparent() {
-        // Encoding of `Address(vec![Receiver::P2pkh([0; 20])])`.
+        // Encoding of `Address { items: vec![Uitem::Data(Receiver::P2pkh([0; 20]))] }`.
         let encoded = [
             0xf0, 0x9e, 0x9d, 0x6e, 0xf5, 0xa6, 0xac, 0x16, 0x50, 0xf0, 0xdb, 0xe1, 0x2c, 0xa5,
             0x36, 0x22, 0xa2, 0x04, 0x89, 0x86, 0xe9, 0x6a, 0x9b, 0xf3, 0xff, 0x6d, 0x2f, 0xe6,
             0xea, 0xdb, 0xc5, 0x20, 0x62, 0xf9, 0x6f, 0xa9, 0x86, 0xcc,
         ];
 
-        // We can't actually exercise this error, because at present the only transparent
-        // receivers we can use are P2PKH and P2SH (which cannot be used together), and
-        // with only one of them we don't have sufficient data for F4Jumble (so we hit a
-        // different error).
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET, &encoded[..], Revision::R0),
             Err(ParseError::InvalidEncoding(_))
         );
     }
 
     #[test]
     fn receivers_are_sorted() {
-        // Construct a UA with receivers in an unsorted order.
-        let ua = Address(vec![
-            Receiver::P2pkh([0; 20]),
-            Receiver::Orchard([0; 43]),
-            Receiver::Unknown {
-                typecode: 0xff,
-                data: vec![],
-            },
-            Receiver::Sapling([0; 43]),
-        ]);
+        let ua = Address {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Receiver::P2pkh([0; 20])),
+                Uitem::Data(Receiver::Orchard([0; 43])),
+                Uitem::Data(Receiver::Unknown {
+                    typecode: 0xff,
+                    data: vec![],
+                }),
+                Uitem::Data(Receiver::Sapling([0; 43])),
+            ],
+        };
 
-        // `Address::receivers` sorts the receivers in priority order.
         assert_eq!(
             ua.items(),
             vec![
@@ -437,5 +583,142 @@ mod tests {
                 },
             ]
         )
+    }
+
+    #[test]
+    fn r2_address_with_expiry() {
+        // Construct an R2 address with Orchard + ExpiryHeight (no transparent = zu).
+        let items = vec![
+            Uitem::Data(Receiver::Orchard([7; 43])),
+            Uitem::Metadata(MetadataItem::ExpiryHeight(1_000_000)),
+        ];
+        let ua = Address::try_from_items(Revision::R2, items).unwrap();
+        assert_eq!(ua.revision(), Revision::R2);
+
+        // Round-trip through encoding.
+        let encoded = ua.encode(&NetworkType::Main);
+        assert!(encoded.starts_with("zu1")); // shielded-only R2 mainnet HRP
+        let (net, rev, decoded) = Address::decode(&encoded).unwrap();
+        assert_eq!(net, NetworkType::Main);
+        assert_eq!(rev, Revision::R2);
+        assert_eq!(decoded, ua);
+
+        // Check that metadata is preserved.
+        let meta: Vec<_> = decoded.metadata_items();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(*meta[0], MetadataItem::ExpiryHeight(1_000_000));
+    }
+
+    #[test]
+    fn r2_tu_address_with_transparent() {
+        // R2 addresses with transparent receivers encode as tu.
+        let items = vec![
+            Uitem::Data(Receiver::P2pkh([0; 20])),
+            Uitem::Data(Receiver::Orchard([0; 43])),
+            Uitem::Metadata(MetadataItem::ExpiryHeight(1_000_000)),
+        ];
+        let ua = Address::try_from_items(Revision::R2, items).unwrap();
+
+        let encoded = ua.encode(&NetworkType::Main);
+        assert!(encoded.starts_with("tu1")); // transparent-including R2 mainnet HRP
+
+        // Round-trip decode.
+        let (net, rev, decoded) = Address::decode(&encoded).unwrap();
+        assert_eq!(net, NetworkType::Main);
+        assert_eq!(rev, Revision::R2);
+        assert_eq!(decoded, ua);
+    }
+
+    #[test]
+    fn zu_address_rejects_transparent() {
+        // Manually construct a zu-encoded payload containing transparent data.
+        // The parse_internal with zu HRP should reject it.
+        use crate::kind::unified::private::SealedContainer;
+
+        let ua = Address {
+            revision: Revision::R2,
+            items: vec![
+                Uitem::Data(Receiver::P2pkh([0; 20])),
+                Uitem::Data(Receiver::Orchard([0; 43])),
+                Uitem::Metadata(MetadataItem::ExpiryHeight(1_000_000)),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET_R2);
+        assert_eq!(
+            Address::parse_internal(Address::MAINNET_R2, &encoded[..], Revision::R2),
+            Err(ParseError::TransparentReceiverInR2Address)
+        );
+    }
+
+    #[test]
+    fn tu_transparent_only_roundtrip() {
+        // A tu address with only P2pkh + ExpiryHeight (no shielded) is valid.
+        let items = vec![
+            Uitem::Data(Receiver::P2pkh([1; 20])),
+            Uitem::Metadata(MetadataItem::ExpiryHeight(500_000)),
+        ];
+        let ua = Address::try_from_items(Revision::R2, items).unwrap();
+
+        let encoded = ua.encode(&NetworkType::Main);
+        assert!(encoded.starts_with("tu1")); // transparent-including HRP
+
+        // Round-trip.
+        let (net, rev, decoded) = Address::decode(&encoded).unwrap();
+        assert_eq!(net, NetworkType::Main);
+        assert_eq!(rev, Revision::R2);
+        assert_eq!(decoded, ua);
+    }
+
+    #[test]
+    fn zu_requires_shielded() {
+        // An R2 address with only metadata (no data items) should fail.
+        let items = vec![Uitem::Metadata(MetadataItem::ExpiryHeight(100))];
+        assert_eq!(
+            Address::try_from_items(Revision::R2, items),
+            Err(ParseError::NoDataItems)
+        );
+    }
+
+    #[test]
+    fn r0_rejects_must_understand_metadata() {
+        // Construct an R0 address encoding that contains a MUST-understand metadata item.
+        // We build the raw bytes manually: Orchard receiver + ExpiryHeight metadata.
+        use crate::kind::unified::private::SealedContainer;
+
+        let ua = Address {
+            revision: Revision::R0,
+            items: vec![
+                Uitem::Data(Receiver::Orchard([1; 43])),
+                Uitem::Metadata(MetadataItem::ExpiryHeight(100)),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        // Parsing as R0 should fail with NotUnderstood.
+        assert_matches!(
+            Address::parse_internal(Address::MAINNET, &encoded[..], Revision::R0),
+            Err(ParseError::NotUnderstood(0xE0))
+        );
+    }
+
+    #[test]
+    fn r2_rejects_unknown_must_understand_metadata() {
+        // An unknown MUST-understand metadata (e.g. 0xE5) should fail in R2 too.
+        use crate::kind::unified::private::SealedContainer;
+
+        let ua = Address {
+            revision: Revision::R2,
+            items: vec![
+                Uitem::Data(Receiver::Orchard([1; 43])),
+                Uitem::Metadata(MetadataItem::Unknown {
+                    typecode: 0xE5,
+                    data: vec![0; 4],
+                }),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET_R2);
+        assert_matches!(
+            Address::parse_internal(Address::MAINNET_R2, &encoded[..], Revision::R2),
+            Err(ParseError::NotUnderstood(0xE5))
+        );
     }
 }

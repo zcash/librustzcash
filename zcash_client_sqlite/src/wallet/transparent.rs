@@ -364,7 +364,7 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     use transparent::keys::ExternalIvk;
     use zcash_address::unified::{Container as _, Encoding as _};
 
-    let (network, uivk) = Uivk::decode(uivk_str)
+    let (network, _revision, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
 
     if params.network_type() != network {

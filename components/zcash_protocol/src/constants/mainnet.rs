@@ -78,3 +78,31 @@ pub const HRP_UNIFIED_FVK: &str = "uview";
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
 pub const HRP_UNIFIED_IVK: &str = "uivk";
+
+/// The HRP for a Bech32m-encoded mainnet shielded-only Revision 2 Unified Address.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_ADDRESS_R2: &str = "zu";
+
+/// The HRP for a Bech32m-encoded mainnet transparent-including Revision 2 Unified Address.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_ADDRESS_R2_TI: &str = "tu";
+
+/// The HRP for a Bech32m-encoded mainnet Revision 2 Unified FVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_FVK_R2: &str = "uvf";
+
+/// The HRP for a Bech32m-encoded mainnet Revision 2 Unified IVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_IVK_R2: &str = "uvi";

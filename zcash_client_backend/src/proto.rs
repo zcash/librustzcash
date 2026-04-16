@@ -353,7 +353,8 @@ impl service::LightdInfo {
         if self.donation_address.is_empty() {
             None
         } else {
-            let (network_type, address) = unified::Address::decode(&self.donation_address).ok()?;
+            let (network_type, _revision, address) =
+                unified::Address::decode(&self.donation_address).ok()?;
             (Some(network_type) == self.chain_name()).then_some(address)
         }
     }
