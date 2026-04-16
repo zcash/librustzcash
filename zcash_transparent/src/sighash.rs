@@ -34,6 +34,12 @@ impl SighashType {
         }
     }
 
+    /// Constructs a `SighashType` from a raw pre-V5 `hash_type` byte
+    /// without applying ZIP 244 strictness.
+    pub fn from_raw(hash_type: u8) -> Self {
+        Self(hash_type)
+    }
+
     /// Encodes this `SighashType` using the [ZIP 244] rules.
     ///
     /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
