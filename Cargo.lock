@@ -824,8 +824,7 @@ checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 [[package]]
 name = "core2"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
+source = "git+https://github.com/bbqsrc/core2?rev=7bf2611bd9a52b438300c640e142ad5c1298b05b#7bf2611bd9a52b438300c640e142ad5c1298b05b"
 dependencies = [
  "memchr",
 ]
