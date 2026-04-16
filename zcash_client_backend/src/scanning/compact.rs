@@ -379,16 +379,17 @@ where
         #[cfg(feature = "orchard")]
         let has_no_shielded_spends = has_no_shielded_spends && orchard_spends.is_empty();
 
-        let trigger_shielding = !tx.vin.is_empty()
-            && has_shielded_outputs
-            && has_no_shielded_spends;
+        let trigger_shielding =
+            !tx.vin.is_empty() && has_shielded_outputs && has_no_shielded_spends;
 
-        if (trigger_nullifier || trigger_external || trigger_shielding)
-            && has_shielded_outputs
-        {
+        if (trigger_nullifier || trigger_external || trigger_shielding) && has_shielded_outputs {
             tracing::debug!(
                 "Targeted Internal IVK on tx {} at height {} (triggers: nullifier={}, external={}, shielding={})",
-                txid, cur_height, trigger_nullifier, trigger_external, trigger_shielding,
+                txid,
+                cur_height,
+                trigger_nullifier,
+                trigger_external,
+                trigger_shielding,
             );
             // Try Internal IVK on Sapling outputs of this transaction.
             if !tx.outputs.is_empty() {
@@ -420,11 +421,20 @@ where
                         &internal_keys.sapling,
                         &spent_from_accounts,
                         &decoded_sapling,
-                        None::<fn(zcash_primitives::transaction::TxId) -> std::collections::HashMap<usize, super::DecryptedOutput<IvkTag, SaplingDomain, ()>>>,
+                        None::<
+                            fn(
+                                zcash_primitives::transaction::TxId,
+                            ) -> std::collections::HashMap<
+                                usize,
+                                super::DecryptedOutput<IvkTag, SaplingDomain, ()>,
+                            >,
+                        >,
                         |ivks, outputs| {
                             batch::try_compact_note_decryption(ivks, outputs)
                                 .into_iter()
-                                .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                                .map(|opt| {
+                                    opt.map(|((note, recipient), i)| ((note, recipient, ()), i))
+                                })
                                 .collect()
                         },
                         |output| sapling::Node::from_cmu(&output.cmu),
@@ -478,11 +488,20 @@ where
                         &internal_keys.orchard,
                         &spent_from_accounts,
                         &decoded_orchard,
-                        None::<fn(zcash_primitives::transaction::TxId) -> std::collections::HashMap<usize, super::DecryptedOutput<IvkTag, OrchardDomain, ()>>>,
+                        None::<
+                            fn(
+                                zcash_primitives::transaction::TxId,
+                            ) -> std::collections::HashMap<
+                                usize,
+                                super::DecryptedOutput<IvkTag, OrchardDomain, ()>,
+                            >,
+                        >,
                         |ivks, outputs| {
                             batch::try_compact_note_decryption(ivks, outputs)
                                 .into_iter()
-                                .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                                .map(|opt| {
+                                    opt.map(|((note, recipient), i)| ((note, recipient, ()), i))
+                                })
                                 .collect()
                         },
                         |output| MerkleHashOrchard::from_cmx(&output.cmx()),

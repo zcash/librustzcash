@@ -613,12 +613,10 @@ where
     // etc.), blocks may be scanned out of order, which means the wallet might not yet
     // know the nullifiers being spent. In that case, fall back to both IVKs for
     // correctness.
-    let fully_scanned = data_db
-        .block_fully_scanned()
-        .map_err(Error::Wallet)?;
+    let fully_scanned = data_db.block_fully_scanned().map_err(Error::Wallet)?;
     let is_contiguous = fully_scanned
         .as_ref()
-        .map_or(false, |meta| from_height == meta.block_height() + 1);
+        .is_some_and(|meta| from_height == meta.block_height() + 1);
 
     let scopes = if is_contiguous {
         tracing::debug!(
@@ -641,10 +639,7 @@ where
         &scopes,
     );
     let internal_keys = if is_contiguous {
-        ScanningKeys::from_account_ufvks_with_scopes(
-            account_ufvks,
-            &[Scope::Internal],
-        )
+        ScanningKeys::from_account_ufvks_with_scopes(account_ufvks, &[Scope::Internal])
     } else {
         // Both scopes are already in scanning_keys; no separate Internal pass needed.
         drop(account_ufvks);
