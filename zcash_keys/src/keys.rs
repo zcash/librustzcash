@@ -31,7 +31,7 @@ use ::transparent::address::TransparentAddress;
 use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
     core::convert::TryFrom,
-    core2::io::{Read, Write},
+    corez::io::{Read, Write},
     zcash_encoding::CompactSize,
     zcash_protocol::consensus::BranchId,
 };
@@ -360,7 +360,7 @@ impl UnifiedSpendingKey {
     #[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
-        let mut source = core2::io::Cursor::new(encoded);
+        let mut source = corez::io::Cursor::new(encoded);
         let decoded_era = source
             .read_u32::<LittleEndian>()
             .map_err(|_| DecodingError::ReadError("era"))

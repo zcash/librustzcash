@@ -21,7 +21,7 @@ std = ["document-features"]
 solver = ["dep:cc", "std"]
 
 [dependencies]
-core2.workspace = true
+corez.workspace = true
 blake2b_simd.workspace = true
 
 # Dependencies used internally:

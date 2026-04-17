@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use core::mem::size_of;
-use core2::io::{Cursor, Read};
+use corez::io::{Cursor, Read};
 
 use crate::params::Params;
 
@@ -117,7 +117,7 @@ pub(crate) fn minimal_from_indices(p: Params, indices: &[u32]) -> Vec<u8> {
     compress_array(&array, c_bit_len + 1, byte_pad)
 }
 
-fn read_u32_be(csr: &mut Cursor<Vec<u8>>) -> core2::io::Result<u32> {
+fn read_u32_be(csr: &mut Cursor<Vec<u8>>) -> corez::io::Result<u32> {
     let mut n = [0; 4];
     csr.read_exact(&mut n)?;
     Ok(u32::from_be_bytes(n))

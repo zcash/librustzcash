@@ -3,7 +3,7 @@ use crate::encoding::ReadBytesExt;
 
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 

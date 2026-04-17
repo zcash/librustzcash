@@ -1,7 +1,7 @@
 //! Support for legacy transparent addresses and scripts.
 
 use core::fmt;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
 use zcash_protocol::consensus::NetworkType;

@@ -1,7 +1,7 @@
 //! Structs representing the components within Zcash transactions.
 
 use alloc::vec::Vec;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use super::GROTH_PROOF_SIZE;
 use zcash_protocol::value::ZatBalance;
