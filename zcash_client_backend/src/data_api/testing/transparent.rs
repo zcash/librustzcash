@@ -1219,3 +1219,204 @@ where
         (value - fee).unwrap(),
     );
 }
+
+/// Tests [`WalletWrite::mark_transparent_addresses_exposed`] by observing the effect on the
+/// address's exposure metadata via
+/// [`WalletRead::get_transparent_address_metadata`](crate::data_api::WalletRead::get_transparent_address_metadata).
+pub fn mark_transparent_addresses_exposed<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::{data_api::WalletRead, wallet::Exposure};
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = *st
+        .wallet()
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap()
+        .transparent()
+        .unwrap();
+
+    let exposure_of = |st: &TestState<_, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+                       addr: &TransparentAddress|
+     -> Exposure {
+        st.wallet()
+            .get_transparent_address_metadata(account_id, addr)
+            .unwrap()
+            .unwrap()
+            .exposure()
+    };
+
+    // Calling with a very high height does not raise an already-recorded exposure,
+    // and records the provided height if no prior exposure was tracked.
+    let initial = exposure_of(&st, &taddr);
+    let very_high = BlockHeight::from(u32::MAX);
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, very_high)])
+        .unwrap();
+    match initial {
+        Exposure::Exposed { at_height, .. } => assert_matches!(
+            exposure_of(&st, &taddr),
+            Exposure::Exposed { at_height: h, .. } if h == at_height
+        ),
+        Exposure::Unknown | Exposure::CannotKnow => assert_matches!(
+            exposure_of(&st, &taddr),
+            Exposure::Exposed { at_height: h, .. } if h == very_high
+        ),
+    }
+
+    // Calling with a lower height lowers the recorded exposure.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, BlockHeight::from(0))])
+        .unwrap();
+    assert_matches!(
+        exposure_of(&st, &taddr),
+        Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(0)
+    );
+
+    // Calling with a higher height does not raise the recorded exposure.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, BlockHeight::from(100))])
+        .unwrap();
+    assert_matches!(
+        exposure_of(&st, &taddr),
+        Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(0)
+    );
+
+    // An address not tracked by the wallet must return an error.
+    let unknown = TransparentAddress::PublicKeyHash([0u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
+            .is_err()
+    );
+
+    // An empty input is a no-op.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[])
+        .unwrap();
+}
+
+/// Tests that [`WalletWrite::mark_transparent_addresses_exposed`] correctly handles bulk
+/// input: all addresses in a successful call must be marked, and an unrecognized address
+/// must cause the entire call to be rolled back.
+pub fn mark_transparent_addresses_exposed_bulk<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::{data_api::WalletRead, wallet::Exposure};
+    use zcash_protocol::consensus::BlockHeight;
+
+    let gap_limits = GapLimits::new(5, 2, 2);
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_gap_limits(gap_limits)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let mut receivers = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap()
+        .into_iter()
+        .filter_map(|(addr, meta)| {
+            let exposure = meta.exposure();
+            meta.address_index().map(|i| (i.index(), addr, exposure))
+        })
+        .collect::<Vec<_>>();
+    receivers.sort_by_key(|(i, _, _)| *i);
+
+    // Use known-unexposed receivers for the bulk-success test, so that the post-call
+    // recorded height is exactly the one we pass in regardless of any default exposure
+    // that address generation may set on other receivers.
+    let unexposed = receivers
+        .iter()
+        .copied()
+        .filter(|(_, _, exposure)| matches!(exposure, Exposure::Unknown))
+        .collect::<Vec<_>>();
+    assert!(
+        unexposed.len() >= 2,
+        "account should have at least 2 unexposed derived receivers"
+    );
+
+    // Mark two unexposed addresses at distinct heights in a single bulk call.
+    let (_idx_a, addr_a, _) = unexposed[0];
+    let (_idx_b, addr_b, _) = unexposed[1];
+    let height_a = BlockHeight::from(10);
+    let height_b = BlockHeight::from(20);
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(addr_a, height_a), (addr_b, height_b)])
+        .unwrap();
+
+    let exposure_of = |st: &TestState<_, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+                       addr: &TransparentAddress|
+     -> Exposure {
+        st.wallet()
+            .get_transparent_address_metadata(account_id, addr)
+            .unwrap()
+            .unwrap()
+            .exposure()
+    };
+    assert_matches!(
+        exposure_of(&st, &addr_a),
+        Exposure::Exposed { at_height, .. } if at_height == height_a
+    );
+    assert_matches!(
+        exposure_of(&st, &addr_b),
+        Exposure::Exposed { at_height, .. } if at_height == height_b
+    );
+
+    // Now attempt a bulk call where the second entry is unrecognized. The whole call must
+    // fail, and the first entry must not have been partially applied. Pick a third
+    // receiver distinct from `addr_a`/`addr_b` — its prior exposure state is irrelevant
+    // since the assertion is preservation, not a specific height.
+    let (idx_c, addr_c, _) = *receivers
+        .iter()
+        .find(|(_, addr, _)| *addr != addr_a && *addr != addr_b)
+        .expect("account should have a third derived receiver");
+    let before = exposure_of(&st, &addr_c);
+    let unknown = TransparentAddress::PublicKeyHash([0x7u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[
+                (addr_c, BlockHeight::from(5)),
+                (unknown, BlockHeight::from(5)),
+            ])
+            .is_err()
+    );
+    assert_eq!(
+        exposure_of(&st, &addr_c),
+        before,
+        "exposure at index {idx_c} must not change when bulk call fails atomically"
+    );
+}
+
+/// Tests that [`WalletWrite::mark_transparent_addresses_exposed`] returns an error when
+/// asked to mark an address that the wallet does not track.
+pub fn mark_transparent_addresses_exposed_unknown_address<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let unknown = TransparentAddress::PublicKeyHash([0u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
+            .is_err()
+    );
+}

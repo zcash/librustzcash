@@ -69,6 +69,7 @@ workspace.
     - Added `WalletWrite::import_standalone_transparent_script` method.
     - Added `WalletWrite::truncate_to_chain_state` method.
     - Added `WalletWrite::rewind_to_height` method.
+    - Added `WalletWrite::mark_transparent_addresses_exposed` method.
   - Type parameters to `DecryptedTransaction` have been modified. It now
     abstracts over the transaction type, to permit use with partial or compact
     transaction data instead of full transactions.

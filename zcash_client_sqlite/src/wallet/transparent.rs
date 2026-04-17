@@ -1688,6 +1688,45 @@ pub(crate) fn schedule_next_check<P: consensus::Parameters, C: Clock, R: RngCore
         .map_err(SqliteClientError::from)
 }
 
+/// Marks each of the given transparent addresses as having been exposed to an external party
+/// at or before its paired block height. For any address whose wallet row already tracks an
+/// earlier exposure, that earlier height is retained.
+///
+/// The operation is atomic: if any address in `exposures` does not match a wallet row, the
+/// call returns [`SqliteClientError::AddressNotRecognized`] for the first such address and
+/// relies on the enclosing transaction being rolled back by the caller.
+pub(crate) fn mark_transparent_addresses_exposed<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    exposures: &[(TransparentAddress, BlockHeight)],
+) -> Result<(), SqliteClientError> {
+    if exposures.is_empty() {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "UPDATE addresses
+         SET exposed_at_height = MIN(
+             IFNULL(exposed_at_height, :height),
+             :height
+         )
+         WHERE cached_transparent_receiver_address = :addr_str",
+    )?;
+
+    for (address, exposure_height) in exposures {
+        let updated = stmt.execute(named_params! {
+            ":height": u32::from(*exposure_height),
+            ":addr_str": address.encode(params),
+        })?;
+
+        if updated == 0 {
+            return Err(SqliteClientError::AddressNotRecognized(*address));
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
 ///
@@ -2485,5 +2524,26 @@ mod tests {
         let account1_id = get_account_ref(&st.wallet().db().conn, account1_uuid).unwrap();
         assert_ne!(account0_id, account1_id);
         check(st.wallet().db(), account1_id);
+    }
+
+    #[test]
+    fn mark_transparent_addresses_exposed() {
+        zcash_client_backend::data_api::testing::transparent::mark_transparent_addresses_exposed(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn mark_transparent_addresses_exposed_bulk() {
+        zcash_client_backend::data_api::testing::transparent::mark_transparent_addresses_exposed_bulk(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn mark_transparent_addresses_exposed_unknown_address() {
+        zcash_client_backend::data_api::testing::transparent::mark_transparent_addresses_exposed_unknown_address(
+            TestDbFactory::default(),
+        );
     }
 }
