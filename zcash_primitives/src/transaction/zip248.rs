@@ -196,18 +196,19 @@ impl BundleId {
 
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
-/// The effect and auth data are stored as unparsed byte vectors so that
-/// the transaction can still be serialized. The `effect_digest` is
-/// computed using the opaque effects personalization defined in ZIP 248,
-/// allowing any wallet to derive the txid. The `auth_digest` cannot be
-/// computed without understanding the bundle type, so it is left as `None`
-/// when parsed from the wire.
+/// The effect and auth data are stored as unparsed byte vectors so that the
+/// transaction can still be serialized. Both digests are computed using the
+/// flat `Opaque Digest Personalizations` from ZIP 248, allowing any wallet
+/// to derive the txid and auth commitment even for bundle types it does
+/// not understand.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
-    /// Raw effecting-data bytes from the wire.
-    pub effect_data: Vec<u8>,
+    /// Raw compact-portion effecting-data bytes from the wire.
+    pub compact_effect_data: Vec<u8>,
+    /// Raw noncompact-portion effecting-data bytes from the wire.
+    pub noncompact_effect_data: Vec<u8>,
     /// Digest of the effecting data for the txid computation, using the
-    /// opaque effects personalization from ZIP 248 §T.3.
+    /// flat `bundle_effects_digest` from ZIP 248 §T.3.
     pub effect_digest: blake2b_simd::Hash,
     /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
@@ -783,11 +784,48 @@ impl ValuePoolDeltaEntry {
     }
 }
 
-/// Read the TLV framing for a bundle data entry: (bundleType, bundleVariant, dataLen, data).
+/// Read the wire framing for an `EffectBundleData` entry per ZIP 248:
+/// `(bundleType, bundleVariant, nCompactDataLen, vCompactData, nNoncompactDataLen, vNoncompactData)`.
+///
+/// Returns raw `(u64, u64)` for the type/variant and the two byte arrays,
+/// since the wire may carry unrecognized bundle types.
+pub fn read_effect_bundle_framing<R: Read>(
+    mut reader: R,
+) -> io::Result<((u64, u64), Vec<u8>, Vec<u8>)> {
+    let bundle_type = CompactSize::read(&mut reader)?;
+    let bundle_variant = CompactSize::read(&mut reader)?;
+    let compact_len = CompactSize::read(&mut reader)? as usize;
+    let mut compact = vec![0u8; compact_len];
+    reader.read_exact(&mut compact)?;
+    let noncompact_len = CompactSize::read(&mut reader)? as usize;
+    let mut noncompact = vec![0u8; noncompact_len];
+    reader.read_exact(&mut noncompact)?;
+    Ok(((bundle_type, bundle_variant), compact, noncompact))
+}
+
+/// Write the wire framing for an `EffectBundleData` entry.
+pub fn write_effect_bundle_framing<W: Write>(
+    mut writer: W,
+    bundle_type: u64,
+    bundle_variant: u64,
+    compact: &[u8],
+    noncompact: &[u8],
+) -> io::Result<()> {
+    CompactSize::write(&mut writer, bundle_type as usize)?;
+    CompactSize::write(&mut writer, bundle_variant as usize)?;
+    CompactSize::write(&mut writer, compact.len())?;
+    writer.write_all(compact)?;
+    CompactSize::write(&mut writer, noncompact.len())?;
+    writer.write_all(noncompact)?;
+    Ok(())
+}
+
+/// Read the wire framing for an `AuthBundleData` entry:
+/// `(bundleType, bundleVariant, nAuthDataLen, vAuthData)`.
 ///
 /// Returns raw `(u64, u64)` for the type/variant since the wire may carry
 /// unrecognized bundle types.
-pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64), Vec<u8>)> {
+pub fn read_auth_bundle_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64), Vec<u8>)> {
     let bundle_type = CompactSize::read(&mut reader)?;
     let bundle_variant = CompactSize::read(&mut reader)?;
     let data_len = CompactSize::read(&mut reader)? as usize;
@@ -796,8 +834,8 @@ pub fn read_bundle_data_framing<R: Read>(mut reader: R) -> io::Result<((u64, u64
     Ok(((bundle_type, bundle_variant), data))
 }
 
-/// Write the TLV framing for a bundle data entry.
-pub fn write_bundle_data_framing<W: Write>(
+/// Write the wire framing for an `AuthBundleData` entry.
+pub fn write_auth_bundle_framing<W: Write>(
     mut writer: W,
     bundle_type: u64,
     bundle_variant: u64,
@@ -808,24 +846,6 @@ pub fn write_bundle_data_framing<W: Write>(
     CompactSize::write(&mut writer, data.len())?;
     writer.write_all(data)?;
     Ok(())
-}
-
-/// Returns the 16-byte BLAKE2b personalization for the opaque effects digest
-/// of a bundle with the given type and variant.
-/// [ZIP 248 §T.3](https://zips.z.cash/zip-0248#t-3-effects-bundles-digest)
-///
-/// Layout: `"ZTxIdT" (6) | bundleType (4-byte LE) | 0x56 (1) | bundleVariant (1) | "Hash" (4)`
-///
-/// This is used for bundle types not understood by the wallet, allowing the
-/// txid to be computed by flat-hashing the raw `vBundleData` bytes.
-pub fn opaque_effects_personalization(bundle_type: u64, bundle_variant: u64) -> [u8; 16] {
-    let mut p = [0u8; 16];
-    p[..6].copy_from_slice(b"ZTxIdT");
-    p[6..10].copy_from_slice(&(bundle_type as u32).to_le_bytes());
-    p[10] = b'V';
-    p[11] = bundle_variant as u8;
-    p[12..16].copy_from_slice(b"Hash");
-    p
 }
 
 /// Reads and validates a sighash version 0 `sighashInfo` prefix.
@@ -879,9 +899,12 @@ pub(crate) fn consume_v6_sighash_v0_info<R: Read>(
 ///
 /// Layout: tx_in_count, TransparentInputEffecting[tx_in_count] (prevout 36 + nSequence 4),
 ///         tx_out_count, TransparentOutput[tx_out_count] (value 8 + scriptPubKey).
-pub fn write_v6_transparent_effects<W: Write>(
+///
+/// Generic over authorization because transparent effecting data is
+/// auth-independent (scriptSig lives in the authorizing data).
+pub fn write_v6_transparent_effects<W: Write, A: transparent::Authorization>(
     mut writer: W,
-    bundle: &transparent::Bundle<transparent::Authorized>,
+    bundle: &transparent::Bundle<A>,
 ) -> io::Result<()> {
     CompactSize::write(&mut writer, bundle.vin.len())?;
     for txin in &bundle.vin {
@@ -996,15 +1019,33 @@ mod tests {
     }
 
     #[test]
-    fn bundle_data_framing_roundtrip() {
+    fn effect_bundle_framing_roundtrip() {
         let bt = BundleType::Orchard.to_u64();
         let bv = BundleVariant::Default.to_u64();
-        let data = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        let compact = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        let noncompact = vec![0x11, 0x22];
 
         let mut buf = Vec::new();
-        write_bundle_data_framing(&mut buf, bt, bv, &data).unwrap();
+        write_effect_bundle_framing(&mut buf, bt, bv, &compact, &noncompact).unwrap();
 
-        let ((parsed_bt, parsed_bv), parsed_data) = read_bundle_data_framing(&buf[..]).unwrap();
+        let ((parsed_bt, parsed_bv), parsed_c, parsed_n) =
+            read_effect_bundle_framing(&buf[..]).unwrap();
+        assert_eq!(parsed_bt, bt);
+        assert_eq!(parsed_bv, bv);
+        assert_eq!(parsed_c, compact);
+        assert_eq!(parsed_n, noncompact);
+    }
+
+    #[test]
+    fn auth_bundle_framing_roundtrip() {
+        let bt = BundleType::Sapling.to_u64();
+        let bv = BundleVariant::Default.to_u64();
+        let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
+
+        let mut buf = Vec::new();
+        write_auth_bundle_framing(&mut buf, bt, bv, &data).unwrap();
+
+        let ((parsed_bt, parsed_bv), parsed_data) = read_auth_bundle_framing(&buf[..]).unwrap();
         assert_eq!(parsed_bt, bt);
         assert_eq!(parsed_bv, bv);
         assert_eq!(parsed_data, data);
@@ -1031,7 +1072,8 @@ mod tests {
             99,
             0,
             UnknownBundle {
-                effect_data: vec![1, 2, 3],
+                compact_effect_data: vec![1, 2, 3],
+                noncompact_effect_data: vec![],
                 effect_digest: blake2b_simd::Params::new()
                     .hash_length(32)
                     .personal(b"test_unknown_efx")
@@ -1050,6 +1092,6 @@ mod tests {
         let unknowns: Vec<_> = map.unknown_bundles().collect();
         assert_eq!(unknowns.len(), 1);
         assert_eq!(unknowns[0].0, &(99u64, 0u64));
-        assert_eq!(unknowns[0].1.effect_data, vec![1, 2, 3]);
+        assert_eq!(unknowns[0].1.compact_effect_data, vec![1, 2, 3]);
     }
 }

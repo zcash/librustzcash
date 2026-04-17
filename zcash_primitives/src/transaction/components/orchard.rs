@@ -184,10 +184,13 @@ pub fn read_v6_bundle(
 
 /// Writes the effecting data for an Orchard bundle in v6 format.
 /// [ZIP 248 §Orchard Effecting Data](https://zips.z.cash/zip-0248#orchard-effecting-data)
+///
+/// Generic over authorization because effecting data commits to public
+/// inputs only; the aggregated proof and signatures are in the auth data.
 #[cfg(zcash_v6)]
-pub fn write_v6_effects<W: Write>(
+pub fn write_v6_effects<W: Write, A: orchard::bundle::Authorization>(
     mut writer: W,
-    bundle: &orchard::Bundle<Authorized, ZatBalance>,
+    bundle: &orchard::Bundle<A, ZatBalance>,
 ) -> io::Result<()> {
     // nActionsOrchard + actions (820 bytes each)
     Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
@@ -391,9 +394,9 @@ pub fn write_note_ciphertext<W: Write>(
     writer.write_all(&nc.out_ciphertext)
 }
 
-pub fn write_action_without_auth<W: Write>(
+pub fn write_action_without_auth<W: Write, SA>(
     mut writer: W,
-    act: &Action<<Authorized as Authorization>::SpendAuth>,
+    act: &Action<SA>,
 ) -> io::Result<()> {
     write_value_commitment(&mut writer, act.cv_net())?;
     write_nullifier(&mut writer, act.nullifier())?;

@@ -476,24 +476,25 @@ mod zip248_tests {
     }
 
     #[test]
-    fn bundle_data_framing_empty() {
+    fn effect_bundle_framing_empty() {
         let bt = zip248::BundleType::Transparent.to_u64();
         let bv = zip248::BundleVariant::Default.to_u64();
-        let data: Vec<u8> = vec![];
 
         let mut buf = Vec::new();
-        zip248::write_bundle_data_framing(&mut buf, bt, bv, &data).unwrap();
+        zip248::write_effect_bundle_framing(&mut buf, bt, bv, &[], &[]).unwrap();
 
-        let ((parsed_bt, parsed_bv), parsed_data) =
-            zip248::read_bundle_data_framing(&buf[..]).unwrap();
+        let ((parsed_bt, parsed_bv), parsed_c, parsed_n) =
+            zip248::read_effect_bundle_framing(&buf[..]).unwrap();
         assert_eq!(parsed_bt, bt);
         assert_eq!(parsed_bv, bv);
-        assert!(parsed_data.is_empty());
+        assert!(parsed_c.is_empty());
+        assert!(parsed_n.is_empty());
     }
 
     fn test_unknown_bundle(data: &[u8]) -> zip248::UnknownBundle {
         zip248::UnknownBundle {
-            effect_data: data.to_vec(),
+            compact_effect_data: data.to_vec(),
+            noncompact_effect_data: Vec::new(),
             effect_digest: blake2b_simd::Params::new()
                 .hash_length(32)
                 .personal(b"test_unknown_efx")
@@ -559,7 +560,11 @@ mod zip248_tests {
         let unknowns: Vec<_> = tx2.bundles().unknown_bundles().collect();
         assert_eq!(unknowns.len(), 1);
         assert_eq!(unknowns[0].0, &(42u64, 0u64));
-        assert_eq!(unknowns[0].1.effect_data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(
+            unknowns[0].1.compact_effect_data,
+            vec![0xDE, 0xAD, 0xBE, 0xEF]
+        );
+        assert!(unknowns[0].1.noncompact_effect_data.is_empty());
         assert!(unknowns[0].1.auth_data.is_none());
 
         // Re-serialize should produce identical bytes.
@@ -573,20 +578,43 @@ mod zip248_tests {
     #[cfg(zcash_unstable = "nu7")]
     mod consensus_rules {
         use super::super::super::{
-            Authorized, TransactionData, TxVersion, V6ConsensusError, ZatBalance, zip248,
+            Authorized, TransactionData, TxVersion, V6ConsensusError, ZatBalance, transparent,
+            zip248,
         };
+        use ::transparent::{address::Script, bundle::TxOut};
+        use alloc::{vec, vec::Vec};
         use zcash_protocol::consensus::{BlockHeight, BranchId};
         use zcash_protocol::value::Zatoshis;
 
         fn make_v6(vp: zip248::ValuePoolDeltas) -> TransactionData<Authorized> {
+            make_v6_with_bundles(vp, zip248::BundleMap::new())
+        }
+
+        fn make_v6_with_bundles(
+            vp: zip248::ValuePoolDeltas,
+            bundles: zip248::BundleMap<Authorized>,
+        ) -> TransactionData<Authorized> {
             TransactionData::from_parts_v6(
                 TxVersion::V6,
                 BranchId::Nu7,
                 0,
                 BlockHeight::from_u32(100),
                 vp,
-                zip248::BundleMap::new(),
+                bundles,
             )
+        }
+
+        fn bundles_with_single_vout(value: u64) -> zip248::BundleMap<Authorized> {
+            let mut bundles = zip248::BundleMap::new();
+            bundles.insert_transparent(transparent::Bundle {
+                vin: Vec::new(),
+                vout: vec![TxOut::new(
+                    Zatoshis::from_u64(value).unwrap(),
+                    Script::default(),
+                )],
+                authorization: transparent::Authorized,
+            });
+            bundles
         }
 
         #[test]
@@ -664,6 +692,76 @@ mod zip248_tests {
             let tx = make_v6(vp);
             assert_eq!(tx.check_v6_consensus_rules(false), Ok(()));
         }
+
+        #[test]
+        fn transparent_value_balance_no_bundle_zero_inputs_passes() {
+            // No transparent bundle, no VP delta, no implicit input: balanced.
+            let vp = zip248::ValuePoolDeltas::empty();
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_transparent_value_balance(ZatBalance::zero()),
+                Ok(())
+            );
+        }
+
+        #[test]
+        fn transparent_value_balance_detects_mismatch() {
+            // No transparent bundle (no outputs) so expected = total_input.
+            // If we claim 1000 of implicit input but the transparent VP delta
+            // is zero, the check must fail with the observed and expected
+            // values surfaced on the error.
+            let vp = zip248::ValuePoolDeltas::empty();
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_transparent_value_balance(ZatBalance::from_i64(1000).unwrap()),
+                Err(V6ConsensusError::TransparentValueBalanceMismatch {
+                    delta: ZatBalance::zero(),
+                    expected: ZatBalance::from_i64(1000).unwrap(),
+                }),
+            );
+        }
+
+        #[test]
+        fn transparent_value_balance_matches_delta() {
+            // A transaction with +500 transparent delta and zero outputs
+            // balances against 500 of implicit input (e.g. a coinbase with
+            // 500 block subsidy and no transparent outputs).
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.set_transparent(ZatBalance::from_i64(500).unwrap());
+            let tx = make_v6(vp);
+            assert_eq!(
+                tx.check_v6_transparent_value_balance(ZatBalance::from_i64(500).unwrap()),
+                Ok(())
+            );
+        }
+
+        #[test]
+        fn transparent_value_balance_with_vout_balances() {
+            // total_input = 1000, transparent bundle sends 600 to vout, so
+            // 400 moves into the transparent value pool via the VP delta.
+            let mut vp = zip248::ValuePoolDeltas::empty();
+            vp.set_transparent(ZatBalance::from_i64(400).unwrap());
+            let tx = make_v6_with_bundles(vp, bundles_with_single_vout(600));
+            assert_eq!(
+                tx.check_v6_transparent_value_balance(ZatBalance::from_i64(1000).unwrap()),
+                Ok(())
+            );
+        }
+
+        #[test]
+        fn transparent_value_balance_with_vout_mismatch() {
+            // total_input = 1000, vout sums to 600, so expected delta = 400;
+            // but the VP delta says 0, which must be rejected.
+            let vp = zip248::ValuePoolDeltas::empty();
+            let tx = make_v6_with_bundles(vp, bundles_with_single_vout(600));
+            assert_eq!(
+                tx.check_v6_transparent_value_balance(ZatBalance::from_i64(1000).unwrap()),
+                Err(V6ConsensusError::TransparentValueBalanceMismatch {
+                    delta: ZatBalance::zero(),
+                    expected: ZatBalance::from_i64(400).unwrap(),
+                }),
+            );
+        }
     }
 
     // -- Parsing rule rejection tests ------------------------------------------
@@ -740,6 +838,19 @@ mod zip248_tests {
         }
 
         #[test]
+        fn rejects_key_rotation_in_vp_deltas() {
+            // bundleType 6 (KeyRotation) is marked ❌ for mValuePoolDeltas in
+            // the v6 registry — it has no effect on any value pool.
+            let mut buf = v6_header(BranchId::Nu7);
+            CompactSize::write(&mut *buf, 1).unwrap();
+            write_vp_entry(&mut buf, 6, 0, 1000);
+            CompactSize::write(&mut *buf, 0).unwrap();
+            CompactSize::write(&mut *buf, 0).unwrap();
+
+            assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
+        }
+
+        #[test]
         fn rejects_zero_vp_delta_value() {
             let mut buf = v6_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 1).unwrap();
@@ -755,7 +866,7 @@ mod zip248_tests {
             let mut buf = v6_header(BranchId::Nu7);
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 4, 0, &[0xAA]).unwrap();
+            zip248::write_effect_bundle_framing(&mut buf, 4, 0, &[0xAA], &[]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
@@ -768,7 +879,7 @@ mod zip248_tests {
             write_vp_entry(&mut buf, 2, 0, 100_000);
             // Effect bundle says bundleType 2 variant 1 — mismatch.
             CompactSize::write(&mut *buf, 1).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 2, 1, &[]).unwrap();
+            zip248::write_effect_bundle_framing(&mut buf, 2, 1, &[], &[]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap(); // no auth
 
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
@@ -780,7 +891,7 @@ mod zip248_tests {
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap();
             CompactSize::write(&mut *buf, 1).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 2, 0, &[0xBB]).unwrap();
+            zip248::write_auth_bundle_framing(&mut buf, 2, 0, &[0xBB]).unwrap();
 
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
         }
@@ -801,8 +912,8 @@ mod zip248_tests {
             CompactSize::write(&mut *buf, 0).unwrap(); // no VP deltas
             // Effect bundles: Orchard (3) before Transparent (0) — wrong order.
             CompactSize::write(&mut *buf, 2).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 3, 0, &[0xAA]).unwrap();
-            zip248::write_bundle_data_framing(&mut buf, 0, 0, &[0xBB]).unwrap();
+            zip248::write_effect_bundle_framing(&mut buf, 3, 0, &[0xAA], &[]).unwrap();
+            zip248::write_effect_bundle_framing(&mut buf, 0, 0, &[0xBB], &[]).unwrap();
             CompactSize::write(&mut *buf, 0).unwrap(); // no auth
             assert!(Transaction::read(&buf[..], BranchId::Nu7).is_err());
         }

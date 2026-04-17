@@ -277,9 +277,9 @@ pub(crate) fn write_output_v4<W: Write>(
     writer.write_all(output.zkproof())
 }
 
-fn write_output_v5_without_proof<W: Write>(
+fn write_output_v5_without_proof<W: Write, P>(
     mut writer: W,
-    output: &OutputDescription<GrothProofBytes>,
+    output: &OutputDescription<P>,
 ) -> io::Result<()> {
     writer.write_all(&output.cv().to_bytes())?;
     writer.write_all(output.cmu().to_bytes().as_ref())?;
@@ -606,10 +606,13 @@ pub(crate) fn read_v6_bundle(
 /// Layout: nSpends, SaplingSpendEffecting[nSpends] (cv+nullifier+rk = 96 bytes each),
 ///         nOutputs, SaplingOutput[nOutputs] (756 bytes each),
 ///         anchorSapling (32 bytes, present if nSpends > 0).
+///
+/// Generic over authorization because effecting data commits to public
+/// inputs only (spend proofs and signatures are in the authorizing data).
 #[cfg(zcash_v6)]
-pub(crate) fn write_v6_effects<W: Write>(
+pub(crate) fn write_v6_effects<W: Write, A: Authorization>(
     mut writer: W,
-    bundle: &Bundle<Authorized, ZatBalance>,
+    bundle: &Bundle<A, ZatBalance>,
 ) -> io::Result<()> {
     // nSpends + spend effecting data (cv + nullifier + rk = 96 bytes each)
     Vector::write(&mut writer, bundle.shielded_spends(), |w, s| {

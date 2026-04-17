@@ -629,31 +629,46 @@ impl<A: Authorization> TransactionData<A> {
     /// Produces v6 transaction digests per
     /// [ZIP 248 §TxId Digest](https://zips.z.cash/zip-0248#txid-digest).
     ///
-    /// The txid is a Merkle tree over five leaf categories:
-    ///   1. `header_digest` -- version, branch ID, lock_time, expiry
-    ///   2. `transparent_digests` -- prevouts, sequences, outputs (v5-style
-    ///      sub-tree, reused from ZIP 244)
-    ///   3. `sapling_digest` -- sapling effects only (auth is separate)
-    ///   4. `orchard_digest` -- orchard effects only
-    ///   5. `value_pool_deltas_digest` -- the full VP deltas map
+    /// The per-bundle digest is the flat
+    /// `bundle_effects_digest = BLAKE2b("ZTxBndEffectHash", ...)`, computed
+    /// uniformly over each bundle's `(bundleType, bundleVariant, compact,
+    /// noncompact)` bytes. This implementation puts all effecting data for
+    /// known bundle types in the compact portion and leaves the noncompact
+    /// portion empty.
     ///
-    /// The tree is assembled in `txid::to_txid` which hashes these leaves
-    /// together with a branch-ID-tagged personalization to produce the final
-    /// 32-byte txid.
-    ///
-    /// Unknown-bundle digests are supplied as-is; they were stored at parse
-    /// time (or injected by the caller) and are folded into the tree alongside
-    /// known-protocol digests.
+    /// The structured `transparent_digests` (prevouts/sequences/outputs) is
+    /// retained alongside the flat `transparent_bundle_digest` because sighash
+    /// still commits to the sub-digests individually.
     #[cfg(zcash_v6)]
     pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
-            TxIdDigester, hash_v6_header, hash_v6_orchard_effects, hash_v6_sapling_effects,
+            TxIdDigester, hash_v6_bundle_effects_compact_only, hash_v6_header,
             hash_v6_value_pool_deltas,
         };
 
         let digester = TxIdDigester;
 
-        // Unknown-bundle digests (flat hashes of opaque vBundleData bytes).
+        let transparent_bundle_digest = self.bundles.transparent().map(|tb| {
+            let (bt, bv) = zip248::BundleId::TRANSPARENT.wire_key();
+            hash_v6_bundle_effects_compact_only(bt, bv, |w| {
+                zip248::write_v6_transparent_effects(w, tb)
+            })
+        });
+
+        let sapling_digest = self.bundles.sapling().map(|sb| {
+            let (bt, bv) = zip248::BundleId::SAPLING.wire_key();
+            hash_v6_bundle_effects_compact_only(bt, bv, |w| {
+                sapling_serialization::write_v6_effects(w, sb)
+            })
+        });
+
+        let orchard_digest = self.bundles.orchard().map(|ob| {
+            let (bt, bv) = zip248::BundleId::ORCHARD.wire_key();
+            hash_v6_bundle_effects_compact_only(bt, bv, |w| {
+                orchard_serialization::write_v6_effects(w, ob)
+            })
+        });
+
         let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         for (id, ub) in self.bundles.unknown_bundles() {
@@ -664,31 +679,25 @@ impl<A: Authorization> TransactionData<A> {
         }
 
         TxDigests {
-            // Leaf 1: header fields (no auth data involved).
             header_digest: hash_v6_header(
                 self.version,
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
             ),
-            // Leaf 2: transparent effect digests (prevouts, sequences, outputs).
-            // Reuses the v5/ZIP 244 sub-tree structure.
             transparent_digests: <TxIdDigester as TransactionDigest<A>>::digest_transparent(
                 &digester,
                 self.bundles.transparent(),
             ),
-            // Leaf 3: sapling effects only (spends, outputs, value balance).
-            sapling_digest: self.bundles.sapling().map(hash_v6_sapling_effects),
-            // Leaf 4: orchard effects only (actions, flags, value balance, anchor).
-            orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
+            sapling_digest,
+            orchard_digest,
             #[cfg(zcash_unstable = "zfuture")]
             tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
                 &digester,
                 self.bundles.tze(),
             ),
-            // Leaf 5: the serialized VP deltas map.
             value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
-            // Unknown-bundle digests are folded in alongside the known leaves.
+            transparent_bundle_digest,
             unknown_effect_digests,
             unknown_auth_digests,
         }
@@ -1224,14 +1233,14 @@ impl Transaction {
 
         // --- Section 3: Effect bundles map (`mEffectBundles`) ---
         // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
-        // Each entry is a TLV: (bundleType, bundleVariant, compactSize-length, data).
-        // Keyed by raw u64 bundleType since the wire may contain
-        // unrecognized types that have no `BundleType` enum variant.
+        // Keyed by raw u64 bundleType since the wire may contain unrecognized
+        // types that have no `BundleType` enum variant.
         let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
-        let mut effect_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
+        let mut effect_data_by_type: BTreeMap<u64, (u64, Vec<u8>, Vec<u8>)> = BTreeMap::new();
         let mut last_effect_type: Option<u64> = None;
         for _ in 0..n_effect_bundles {
-            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
+            let ((bt, bv), compact, noncompact) =
+                zip248::read_effect_bundle_framing(&mut reader)?;
             if let Some(prev) = last_effect_type {
                 if bt <= prev {
                     return Err(io::Error::new(
@@ -1241,18 +1250,19 @@ impl Transaction {
                 }
             }
             last_effect_type = Some(bt);
-            effect_data_by_type.insert(bt, (bv, data));
+            effect_data_by_type.insert(bt, (bv, compact, noncompact));
         }
 
         // --- Section 4: Auth bundles map (`mAuthBundles`) ---
-        // Same TLV framing and strictly-increasing bundleType ordering as
-        // mEffectBundles. Auth data is excluded from the txid but included
-        // in the authorizing data commitment (auth_commitment_v6).
+        // Each entry encodes (bundleType, bundleVariant, nAuthDataLen, vAuthData).
+        // Same strictly-increasing bundleType ordering as mEffectBundles.
+        // Auth data is excluded from the txid but included in the authorizing
+        // data commitment (auth_commitment_v6).
         let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
         let mut auth_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
         let mut last_auth_type: Option<u64> = None;
         for _ in 0..n_auth_bundles {
-            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
+            let ((bt, bv), data) = zip248::read_auth_bundle_framing(&mut reader)?;
             if let Some(prev) = last_auth_type {
                 if bt <= prev {
                     return Err(io::Error::new(
@@ -1271,7 +1281,7 @@ impl Transaction {
         // has no effect). The bundleVariant must also match.
         for (bundle_type, (auth_variant, _)) in &auth_data_by_type {
             match effect_data_by_type.get(bundle_type) {
-                Some((effect_variant, _)) if effect_variant == auth_variant => {}
+                Some((effect_variant, _, _)) if effect_variant == auth_variant => {}
                 Some(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1297,7 +1307,7 @@ impl Transaction {
         // (mEffectBundles <-> mAuthBundles consistency was checked above; here
         // we additionally check mValuePoolDeltas against mEffectBundles.)
         for (bundle_type, vp_variant) in &vp_variants_by_type {
-            if let Some((effect_variant, _)) = effect_data_by_type.get(bundle_type) {
+            if let Some((effect_variant, _, _)) = effect_data_by_type.get(bundle_type) {
                 if effect_variant != vp_variant {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1327,6 +1337,13 @@ impl Transaction {
                 ));
             }
         }
+        // bundleType 6 (KeyRotation) has no effect on any value pool.
+        if vp_variants_by_type.contains_key(&zip248::BundleType::KeyRotation.to_u64()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v6 transaction has a KeyRotation bundle entry in mValuePoolDeltas",
+            ));
+        }
         if vp_variants_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
             || effect_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
             || auth_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
@@ -1345,26 +1362,44 @@ impl Transaction {
         // definition an unrecognized bundle type -- stored as opaque bytes.
         let mut bundles = zip248::BundleMap::new();
 
-        // Pops the (variant, data) pair for a given bundle type out of both
-        // maps. This drain-then-remainder pattern lets us avoid a second pass
-        // to separate known from unknown entries.
-        let mut take_known = |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>) {
-            let effect = effect_data_by_type.remove(&bundle_type).map(|(_, d)| d);
-            let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
-            (effect, auth)
+        // Pops the (compact, noncompact) effect pair and the auth data (if any)
+        // for a given bundle type out of both maps. For parsing known-bundle
+        // types we concatenate compact+noncompact since the ZIP 248 split for
+        // these types is not yet normative; this implementation emits all
+        // effecting data in the compact portion on write.
+        let mut take_known =
+            |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>) {
+                let effect = effect_data_by_type.remove(&bundle_type);
+                let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+                match effect {
+                    Some((_, compact, noncompact)) => (Some(compact), Some(noncompact), auth),
+                    None => (None, None, auth),
+                }
+            };
+
+        // For known bundle types we currently emit all effecting data in the
+        // compact portion, so the combined byte stream we parse is
+        // `compact || noncompact`.
+        let combine = |compact: Option<Vec<u8>>, noncompact: Option<Vec<u8>>| {
+            let (mut c, n) = (compact.unwrap_or_default(), noncompact.unwrap_or_default());
+            c.extend_from_slice(&n);
+            c
         };
 
-        let (transparent_effect, transparent_auth) =
+        let (tr_compact, tr_noncompact, transparent_auth) =
             take_known(zip248::BundleType::Transparent.to_u64());
-        if let Some(effect) = transparent_effect {
+        if tr_compact.is_some() || tr_noncompact.is_some() {
+            let effect = combine(tr_compact, tr_noncompact);
             if let Some(b) = Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
             {
                 bundles.insert_transparent(b);
             }
         }
 
-        let (sapling_effect, sapling_auth) = take_known(zip248::BundleType::Sapling.to_u64());
-        if let Some(effect) = sapling_effect {
+        let (sa_compact, sa_noncompact, sapling_auth) =
+            take_known(zip248::BundleType::Sapling.to_u64());
+        if sa_compact.is_some() || sa_noncompact.is_some() {
+            let effect = combine(sa_compact, sa_noncompact);
             let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = sapling_serialization::read_v6_bundle(
                 &effect,
@@ -1375,8 +1410,10 @@ impl Transaction {
             }
         }
 
-        let (orchard_effect, orchard_auth) = take_known(zip248::BundleType::Orchard.to_u64());
-        if let Some(effect) = orchard_effect {
+        let (or_compact, or_noncompact, orchard_auth) =
+            take_known(zip248::BundleType::Orchard.to_u64());
+        if or_compact.is_some() || or_noncompact.is_some() {
+            let effect = combine(or_compact, or_noncompact);
             let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = orchard_serialization::read_v6_bundle(
                 &effect,
@@ -1387,28 +1424,30 @@ impl Transaction {
             }
         }
 
-        // Store any remaining (unrecognized) bundles as opaque
-        // `UnknownBundle` entries. The effects digest is computed as a flat
-        // BLAKE2b-256 of the raw vBundleData bytes with a (bundleType,
-        // bundleVariant)-derived personalization per ZIP 248 §T.3, allowing
-        // wallets to compute the txid without understanding the bundle.
-        // Auth data is stored for re-serialization but no auth digest is
-        // computed — the correct algorithm is defined by the bundle's ZIP.
-        for (bundle_type, (variant, effect)) in effect_data_by_type {
+        // Store any remaining (unrecognized) bundles as opaque `UnknownBundle`
+        // entries. The flat per-bundle digests (`hash_v6_bundle_effects` and
+        // `hash_v6_bundle_auth`) let wallets compute the txid and auth
+        // commitment even without understanding the bundle.
+        for (bundle_type, (variant, compact, noncompact)) in effect_data_by_type {
             let auth = auth_data_by_type.remove(&bundle_type);
-            let effect_personal = zip248::opaque_effects_personalization(bundle_type, variant);
-            let effect_digest = blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(&effect_personal)
-                .hash(&effect);
+            let effect_digest = txid::hash_v6_bundle_effects(
+                bundle_type,
+                variant,
+                |w| w.write_all(&compact),
+                |w| w.write_all(&noncompact),
+            );
+            let auth_digest = auth
+                .as_ref()
+                .map(|(_, a)| txid::hash_v6_bundle_auth(bundle_type, variant, |w| w.write_all(a)));
             bundles.insert_unknown(
                 bundle_type,
                 variant,
                 zip248::UnknownBundle {
-                    effect_data: effect,
+                    compact_effect_data: compact,
+                    noncompact_effect_data: noncompact,
                     effect_digest,
                     auth_data: auth.map(|(_, a)| a),
-                    auth_digest: None,
+                    auth_digest,
                 },
             );
         }
@@ -1573,13 +1612,12 @@ impl Transaction {
     ///
     /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
     ///
-    /// Effect and auth bundles are serialized via a double-buffer pattern:
-    /// each bundle's payload is first written to a temporary `Vec<u8>`, then
-    /// the TLV framing (bundleType, bundleVariant, compactSize-length, data)
-    /// is written around it. This is necessary because the TLV length prefix
-    /// requires knowing the payload size before writing it to the outer
-    /// writer. `wire_key()` on `BundleId` returns the `(bundleType,
-    /// bundleVariant)` pair for each known protocol.
+    /// `EffectBundleData` splits each bundle's effecting data into a compact
+    /// and a noncompact portion. For currently-known bundle types the spec
+    /// has not yet normatively defined the split, so this implementation
+    /// emits all effecting data in the compact portion and leaves the
+    /// noncompact portion empty. Unknown bundles round-trip the
+    /// compact/noncompact split they were parsed with.
     ///
     /// `to_wire_entries()` is used for VP deltas because it merges known
     /// (typed) and unknown (opaque) entries into a single sorted sequence,
@@ -1612,83 +1650,66 @@ impl Transaction {
             entry.write(&mut writer)?;
         }
 
-        // 3. Effect bundles map -- each known bundle is double-buffered into a
-        // Vec<u8> so we can measure its length for the TLV framing. wire_key()
-        // returns the (bundleType, bundleVariant) pair from the ZIP 248 registry.
-        let mut effect_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+        // 3. Effect bundles map. Known bundle types emit all effecting data
+        // as compact; unknown bundles preserve the split they were parsed with.
+        let mut effect_bundles: Vec<(u64, u64, Vec<u8>, Vec<u8>)> = Vec::new();
 
         if let Some(tb) = self.bundles.transparent() {
             let mut buf = Vec::new();
             zip248::write_v6_transparent_effects(&mut buf, tb)?;
-            effect_bundles.push((
-                zip248::BundleId::TRANSPARENT.wire_key().0,
-                zip248::BundleId::TRANSPARENT.wire_key().1,
-                buf,
-            ));
+            let (bt, bv) = zip248::BundleId::TRANSPARENT.wire_key();
+            effect_bundles.push((bt, bv, buf, Vec::new()));
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
             sapling_serialization::write_v6_effects(&mut buf, sb)?;
-            effect_bundles.push((
-                zip248::BundleId::SAPLING.wire_key().0,
-                zip248::BundleId::SAPLING.wire_key().1,
-                buf,
-            ));
+            let (bt, bv) = zip248::BundleId::SAPLING.wire_key();
+            effect_bundles.push((bt, bv, buf, Vec::new()));
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
             orchard_serialization::write_v6_effects(&mut buf, ob)?;
+            let (bt, bv) = zip248::BundleId::ORCHARD.wire_key();
+            effect_bundles.push((bt, bv, buf, Vec::new()));
+        }
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
             effect_bundles.push((
-                zip248::BundleId::ORCHARD.wire_key().0,
-                zip248::BundleId::ORCHARD.wire_key().1,
-                buf,
+                bt,
+                bv,
+                ub.compact_effect_data.clone(),
+                ub.noncompact_effect_data.clone(),
             ));
         }
-        // Append unknown bundles (already stored as opaque bytes) and then
-        // sort everything by bundleType to achieve canonical wire order.
-        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
-            effect_bundles.push((bt, bv, ub.effect_data.clone()));
-        }
-        effect_bundles.sort_by_key(|(bt, _, _)| *bt);
+        effect_bundles.sort_by_key(|(bt, _, _, _)| *bt);
 
         CompactSize::write(&mut writer, effect_bundles.len())?;
-        for (bt, bv, data) in &effect_bundles {
-            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
+        for (bt, bv, compact, noncompact) in &effect_bundles {
+            zip248::write_effect_bundle_framing(&mut writer, *bt, *bv, compact, noncompact)?;
         }
 
-        // 4. Auth bundles map -- same double-buffer + sort pattern as effects.
-        // Transparent auth is only emitted when inputs exist (no inputs means
-        // no signatures to authorize).
+        // 4. Auth bundles map. Transparent auth is only emitted when inputs
+        // exist (no inputs means no signatures to authorize).
         let mut auth_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
 
         if let Some(tb) = self.bundles.transparent() {
             if !tb.vin.is_empty() {
                 let mut buf = Vec::new();
                 zip248::write_v6_transparent_auth(&mut buf, tb)?;
-                auth_bundles.push((
-                    zip248::BundleId::TRANSPARENT.wire_key().0,
-                    zip248::BundleId::TRANSPARENT.wire_key().1,
-                    buf,
-                ));
+                let (bt, bv) = zip248::BundleId::TRANSPARENT.wire_key();
+                auth_bundles.push((bt, bv, buf));
             }
         }
         if let Some(sb) = self.bundles.sapling() {
             let mut buf = Vec::new();
             sapling_serialization::write_v6_auth(&mut buf, sb)?;
-            auth_bundles.push((
-                zip248::BundleId::SAPLING.wire_key().0,
-                zip248::BundleId::SAPLING.wire_key().1,
-                buf,
-            ));
+            let (bt, bv) = zip248::BundleId::SAPLING.wire_key();
+            auth_bundles.push((bt, bv, buf));
         }
         if let Some(ob) = self.bundles.orchard() {
             let mut buf = Vec::new();
             orchard_serialization::write_v6_auth(&mut buf, ob)?;
-            auth_bundles.push((
-                zip248::BundleId::ORCHARD.wire_key().0,
-                zip248::BundleId::ORCHARD.wire_key().1,
-                buf,
-            ));
+            let (bt, bv) = zip248::BundleId::ORCHARD.wire_key();
+            auth_bundles.push((bt, bv, buf));
         }
         for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
             if let Some(ref auth_data) = ub.auth_data {
@@ -1699,7 +1720,7 @@ impl Transaction {
 
         CompactSize::write(&mut writer, auth_bundles.len())?;
         for (bt, bv, data) in &auth_bundles {
-            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
+            zip248::write_auth_bundle_framing(&mut writer, *bt, *bv, data)?;
         }
 
         Ok(())
@@ -1763,40 +1784,34 @@ impl Transaction {
     /// Computes the v6 authorizing data commitment per
     /// [ZIP 248 §Authorizing Data Commitment](https://zips.z.cash/zip-0248#authorizing-data-commitment).
     ///
-    /// The auth commitment is structurally parallel to the txid digest but
-    /// covers only the witness / authorization data (scriptSig, spend auth
-    /// sigs, binding sig, Orchard proof, etc.). It is used by miners and
-    /// validators to commit to the authorization without affecting the txid.
-    ///
-    /// Structure: `BLAKE2b-256(auth_bundles_digest)` with a personalization
-    /// tag that embeds the consensus branch ID.
+    /// Every bundle's auth digest is the flat
+    /// `bundle_auth_digest = BLAKE2b("ZTxAutBundleHash", compactSize(bt) ||
+    /// compactSize(bv) || vAuthData)` over the serialized authorizing data
+    /// bytes. These per-bundle digests are folded into `auth_bundles_digest`
+    /// by `hash_v6_auth_bundles`, and the final commitment is hashed under a
+    /// personalization tag that embeds the consensus branch ID.
     #[cfg(zcash_v6)]
     fn auth_commitment_v6(&self) -> Blake2bHash {
-        use txid::{
-            hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
-            hash_v6_transparent_auth, v6_bundle_digest_entries,
-        };
+        use txid::{hash_v6_auth_bundles, hash_v6_bundle_auth, v6_bundle_digest_entries};
 
-        // Per-protocol auth digests. Each covers the bundle's witness data
-        // (scriptSig for transparent, spend/binding sigs for shielded).
+        // Transparent auth is omitted for empty vin, matching `write_v6`.
         let transparent_auth_digest: Option<Blake2bHash> = self
             .data
             .bundles
             .transparent()
-            .map(Some)
-            .map(hash_v6_transparent_auth);
-        let sapling_auth_digest: Option<Blake2bHash> = self
-            .data
-            .bundles
-            .sapling()
-            .map(Some)
-            .map(hash_v6_sapling_auth);
-        let orchard_auth_digest: Option<Blake2bHash> = self
-            .data
-            .bundles
-            .orchard()
-            .map(Some)
-            .map(hash_v6_orchard_auth);
+            .filter(|tb| !tb.vin.is_empty())
+            .map(|tb| {
+                let (bt, bv) = zip248::BundleId::TRANSPARENT.wire_key();
+                hash_v6_bundle_auth(bt, bv, |w| zip248::write_v6_transparent_auth(w, tb))
+            });
+        let sapling_auth_digest: Option<Blake2bHash> = self.data.bundles.sapling().map(|sb| {
+            let (bt, bv) = zip248::BundleId::SAPLING.wire_key();
+            hash_v6_bundle_auth(bt, bv, |w| sapling_serialization::write_v6_auth(w, sb))
+        });
+        let orchard_auth_digest: Option<Blake2bHash> = self.data.bundles.orchard().map(|ob| {
+            let (bt, bv) = zip248::BundleId::ORCHARD.wire_key();
+            hash_v6_bundle_auth(bt, bv, |w| orchard_serialization::write_v6_auth(w, ob))
+        });
 
         // Unknown bundles may carry pre-computed auth digests set by the
         // caller via BundleMap::get_unknown_mut.
@@ -1807,8 +1822,6 @@ impl Transaction {
             .filter_map(|(&key, ub)| ub.auth_digest.map(|digest| (key, digest)))
             .collect();
 
-        // Merge known + unknown auth digests into a single sorted sequence,
-        // then hash them all into auth_bundles_digest.
         let auth_bundles_digest = hash_v6_auth_bundles(v6_bundle_digest_entries(
             transparent_auth_digest.as_ref(),
             sapling_auth_digest.as_ref(),
@@ -1816,8 +1829,8 @@ impl Transaction {
             &unknown_auth_digests,
         ));
 
-        // Final commitment: BLAKE2b-256 of auth_bundles_digest, personalized
-        // with the consensus branch ID to domain-separate across network upgrades.
+        // Personalize with the consensus branch ID to domain-separate the
+        // commitment across network upgrades.
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(txid::ZCASH_AUTH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
@@ -1855,6 +1868,12 @@ pub struct TxDigests<A> {
     /// v6 (ZIP 248): digest of the value pool deltas map.
     #[cfg(zcash_v6)]
     pub value_pool_deltas_digest: Option<A>,
+    /// v6 (ZIP 248): flat `bundle_effects_digest` for the transparent bundle.
+    /// The structured `transparent_digests` field is retained for sighash
+    /// use, which still commits to the prevouts/sequences/outputs sub-digests
+    /// separately.
+    #[cfg(zcash_v6)]
+    pub transparent_bundle_digest: Option<A>,
     /// v6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
     /// in `(bundleType, bundleVariant)` order. These are folded into
     /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
@@ -1961,6 +1980,20 @@ pub enum V6ConsensusError {
     /// being computed. This is itself a consensus failure because a
     /// well-formed sum must fit after the deltas are constrained to balance.
     ValueDeltaSumOverflow,
+    /// The transparent bundle's ZEC value pool delta does not equal the
+    /// total transparent input value minus the total transparent output
+    /// value. For non-coinbase transactions the total input value is the
+    /// sum of the UTXO values being spent; for coinbase transactions it is
+    /// the block subsidy plus the total transaction fees collected from
+    /// the other transactions in the block.
+    TransparentValueBalanceMismatch {
+        delta: ZatBalance,
+        expected: ZatBalance,
+    },
+    /// Arithmetic overflow or underflow while computing the transparent
+    /// bundle's value balance (summing `vout` values or subtracting them
+    /// from `total_input_value`).
+    TransparentValueBalanceOverflow,
 }
 
 #[cfg(zcash_v6)]
@@ -1999,6 +2032,15 @@ impl core::fmt::Display for V6ConsensusError {
             ),
             V6ConsensusError::ValueDeltaSumOverflow => {
                 write!(f, "value pool delta sum overflowed i64")
+            }
+            V6ConsensusError::TransparentValueBalanceMismatch { delta, expected } => write!(
+                f,
+                "transparent bundle value pool delta {} does not equal total input value minus total output value {}",
+                i64::from(*delta),
+                i64::from(*expected),
+            ),
+            V6ConsensusError::TransparentValueBalanceOverflow => {
+                write!(f, "transparent bundle value balance overflowed i64")
             }
         }
     }
@@ -2096,6 +2138,55 @@ impl<A: Authorization> TransactionData<A> {
                     });
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Checks the transparent bundle value pool delta consensus rule from
+    /// [ZIP 248 §Transparent Bundle](https://zips.z.cash/zip-0248#transparent-bundle).
+    ///
+    /// The transparent bundle has no cryptographic binding between its
+    /// contents and its `mValuePoolDeltas` entry (unlike Sapling/Orchard,
+    /// whose value commitments and binding signatures enforce the
+    /// relationship). This check must therefore be performed explicitly by a
+    /// full validator. It is separate from [`Self::check_v6_consensus_rules`]
+    /// because it requires chain context not available from the transaction
+    /// alone.
+    ///
+    /// `total_input_value` is:
+    /// - for non-coinbase transactions: the sum of the values of the UTXOs
+    ///   being spent by the transparent inputs, obtained from the UTXO set;
+    /// - for coinbase transactions: the block subsidy plus the total fees
+    ///   collected from the other transactions in the block.
+    ///
+    /// Returns `Ok(())` if the transparent bundle's ZEC VP delta equals
+    /// `total_input_value - sum(vout[*].value)`.
+    pub fn check_v6_transparent_value_balance(
+        &self,
+        total_input_value: ZatBalance,
+    ) -> Result<(), V6ConsensusError> {
+        let total_output_value = {
+            let mut acc = ZatBalance::zero();
+            if let Some(b) = self.bundles.transparent() {
+                for txout in &b.vout {
+                    acc = (acc + txout.value())
+                        .ok_or(V6ConsensusError::TransparentValueBalanceOverflow)?;
+                }
+            }
+            acc
+        };
+
+        let delta = self
+            .value_pool_deltas
+            .transparent_value()
+            .unwrap_or(ZatBalance::zero());
+
+        let expected = (total_input_value - total_output_value)
+            .ok_or(V6ConsensusError::TransparentValueBalanceOverflow)?;
+
+        if delta != expected {
+            return Err(V6ConsensusError::TransparentValueBalanceMismatch { delta, expected });
         }
 
         Ok(())
