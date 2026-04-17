@@ -43,7 +43,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
-fn transparent_sig_digest<A: TransparentAuthorizingContext>(
+pub(crate) fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {
@@ -181,7 +181,7 @@ pub fn v5_signature_hash<
     // The caller must provide the transparent digests if and only if the transaction has a
     // transparent component.
     assert_eq!(
-        tx.transparent_bundle.is_some(),
+        tx.transparent_bundle().is_some(),
         txid_parts.transparent_digests.is_some()
     );
 
@@ -190,16 +190,14 @@ pub fn v5_signature_hash<
         tx.consensus_branch_id,
         txid_parts.header_digest,
         transparent_sig_digest(
-            tx.transparent_bundle
-                .as_ref()
+            tx.transparent_bundle()
                 .zip(txid_parts.transparent_digests.as_ref()),
             signable_input,
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(zcash_unstable = "zfuture")]
-        tx.tze_bundle
-            .as_ref()
+        tx.tze_bundle()
             .zip(txid_parts.tze_digests.as_ref())
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
             .as_ref(),

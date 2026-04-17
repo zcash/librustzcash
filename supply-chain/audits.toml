@@ -127,6 +127,12 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.94 -> 1.0.97"
 
+[[audits.cfg_aliases]]
+who = "arya2 <arya2@users.noreply.github.com>"
+criteria = "safe-to-deploy"
+version = "0.2.1"
+notes = "Trivial build-time-only proc macro crate that generates cfg aliases. No unsafe code, no runtime dependencies, no I/O."
+
 [[audits.ciborium]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
