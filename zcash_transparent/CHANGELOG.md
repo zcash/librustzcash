@@ -59,6 +59,11 @@ workspace.
 - `Debug` output for `zcash_transparent::zip48::{AccountPrivKey}`
   now redacts the embedded extended key material.
 
+## [0.6.4] - 2026-04-16
+
+### Added
+- `zcash_transparent::sighash::SighashType::from_raw`
+
 ## [0.6.3] - 2025-12-17
 
 ### Added
