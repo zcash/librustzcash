@@ -21,12 +21,9 @@ workspace.
 - `zcash_primitives::transaction::TxVersion::valid_in_branch`
 
 ### Changed
-- `zcash_primitives::transaction::builder::Builder::add_transparent_p2sh_input`
-  is no longer restricted to the PCZT workflow; it can now be used with
-  `Builder::build`.
-
 - MSRV is now 1.85.1.
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has new `Coinbase` and `TargetIncompatible` variants.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
@@ -34,6 +31,8 @@ workspace.
   - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`
     instead of its constituent parts. Use `Builder::add_transparent_p2pkh_input` if you need the
     previous API.
+  - `Builder::add_transparent_p2sh_input` is no longer restricted to the PCZT
+    workflow; it can now be used with `Builder::build`.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.

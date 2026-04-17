@@ -13,6 +13,9 @@ workspace.
 ### Added
 - `zcash_address::ZcashAddress::is_transparent_only`
 
+### Changed
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+
 ### Fixed
 - `Debug` output for `zcash_address::unified::{Fvk, Ivk}` now
   redacts viewing key material instead of emitting raw key bytes.

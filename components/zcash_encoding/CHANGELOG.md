@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_encoding::ReverseHex::{encode, decode}`
 
+### Changed
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+
 ## [0.3.0] - 2025-02-21
 ### Changed
 - Migrated to `nonempty 0.11`

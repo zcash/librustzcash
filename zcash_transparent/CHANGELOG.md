@@ -34,6 +34,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_transparent::sighash::SignableInput::from_parts` now validates the
   referenced transparent input index against `&Bundle<_>` and returns
   `Result<_, InvalidInputIndex>`.

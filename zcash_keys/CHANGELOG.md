@@ -29,6 +29,7 @@ workspace.
   - `GapAddressesError`
 
 ### Changed
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_keys::keys::ReceiverRequirement::intersect`,
   `UnifiedAddressRequest::new`, `ReceiverRequirements::new`,
   `ReceiverRequirements::intersect`, and
