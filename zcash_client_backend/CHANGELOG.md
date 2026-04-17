@@ -33,6 +33,7 @@ workspace.
   - `LightdInfo` has added fields `upgrade_name`, `upgrade_height`, and `lighwallet_protocol_version`
   - `GetMempoolTxRequest` (previously named `Exclude`) has added field `pool_types`
 - `zcash_client_backend::fees::MetaSource`
+- `zcash_client_backend::scanning::ScanningKey::new`:
 - `zcash_client_backend::wallet`:
   - `transparent` module, behind the `transparent-inputs` feature flag.
   - `Note::receiver`

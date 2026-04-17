@@ -132,6 +132,18 @@ pub struct ScanningKey<Ivk, Nk, AccountId> {
     key_scope: Option<Scope>,
 }
 
+impl<Ivk, Nk, AccountId> ScanningKey<Ivk, Nk, AccountId> {
+    /// Constructs a new `ScanningKey` from its constituent parts.
+    pub fn new(ivk: Ivk, nk: Option<Nk>, account_id: AccountId, key_scope: Option<Scope>) -> Self {
+        Self {
+            ivk,
+            nk,
+            account_id,
+            key_scope,
+        }
+    }
+}
+
 impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     for ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>
 {
