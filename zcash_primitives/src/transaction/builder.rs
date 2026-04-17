@@ -1336,13 +1336,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                     unproven_orchard_bundle = Some(OrchardBundle::OrchardZSA(bundle));
                     orchard_meta = meta;
                 }
-            } else {
-                if let Some((bundle, meta)) =
-                    builder.build(&mut rng).map_err(Error::OrchardBuild)?
-                {
-                    unproven_orchard_bundle = Some(OrchardBundle::OrchardVanilla(bundle));
-                    orchard_meta = meta;
-                }
+            } else if let Some((bundle, meta)) =
+                builder.build(&mut rng).map_err(Error::OrchardBuild)?
+            {
+                unproven_orchard_bundle = Some(OrchardBundle::OrchardVanilla(bundle));
+                orchard_meta = meta;
             }
             #[cfg(not(zcash_unstable = "nu7"))]
             if let Some((bundle, meta)) = builder.build(&mut rng).map_err(Error::OrchardBuild)? {
@@ -1733,7 +1731,7 @@ mod tests {
 
     #[cfg(zcash_unstable = "nu7")]
     #[cfg(not(feature = "transparent-inputs"))]
-    use crate::zip32::AccountId;
+    use zip32::AccountId;
 
     #[cfg(zcash_unstable = "zfuture")]
     #[cfg(feature = "transparent-inputs")]

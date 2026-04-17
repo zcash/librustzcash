@@ -239,7 +239,7 @@ fn zip_0244() {
         tv: &self::data::zip_0244::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(
-            &tv.tx[..],
+            tv.tx,
             #[cfg(not(zcash_unstable = "nu7"))]
             BranchId::Nu5,
             #[cfg(zcash_unstable = "nu7")]
@@ -260,9 +260,7 @@ fn zip_0244() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .cloned()
-            .map(script::Code)
-            .map(Script)
+            .map(|s| Script(script::Code(s.to_vec())))
             .collect();
 
         let test_bundle = txdata
@@ -324,15 +322,8 @@ fn zip_0244() {
         (tdata, txdata.digest(TxIdDigester))
     }
 
-    #[allow(unused_mut)] // mutability required for the V6 case which is flagged off by default
-    let mut test_vectors = self::data::zip_0244::make_test_vectors();
-
-    // The orchard_zsa_digests test vectors include zip233_amount
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    test_vectors.extend(orchard_zsa_digests::make_test_vectors());
-
-    for tv in test_vectors {
-        let (txdata, txid_parts) = to_test_txdata(&tv);
+    fn perform_digest_tests(tv: &self::data::zip_0244::TestVector) {
+        let (txdata, txid_parts) = to_test_txdata(tv);
 
         if let Some(index) = tv.transparent_input {
             // nIn is a u32, but to actually use it we need a usize.
@@ -409,6 +400,16 @@ fn zip_0244() {
             signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
             &tv.sighash_shielded
         );
+    }
+
+    for tv in self::data::zip_0244::TEST_VECTORS {
+        perform_digest_tests(tv);
+    }
+
+    // The orchard_zsa_digests test vectors include zip233_amount
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    for tv in self::orchard_zsa_digests::TEST_VECTORS {
+        perform_digest_tests(tv);
     }
 }
 
