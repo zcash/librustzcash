@@ -816,13 +816,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
-name = "core2"
-version = "0.3.3"
+name = "corez"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
-dependencies = [
- "memchr",
-]
+checksum = "4df6f98652d30167eaeea34d77b730e07c8caba6df17bd4551842b9b8da01deb"
 
 [[package]]
 name = "cpp_demangle"
@@ -1599,7 +1596,7 @@ version = "0.2.2"
 dependencies = [
  "blake2b_simd",
  "cc",
- "core2",
+ "corez",
  "document-features",
  "hex",
 ]
@@ -2970,12 +2967,12 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.12.0"
-source = "git+https://github.com/zcash/orchard.git?rev=6b12c77260aa7fac0d804983fc31b71b584d48e0#6b12c77260aa7fac0d804983fc31b71b584d48e0"
+source = "git+https://github.com/zcash/orchard.git?rev=b0bf2670e248958c6ce7c1deed466032e0dbd4d9#b0bf2670e248958c6ce7c1deed466032e0dbd4d9"
 dependencies = [
  "aes",
  "bitvec",
  "blake2b_simd",
- "core2",
+ "corez",
  "ff",
  "fpe",
  "getset",
@@ -4127,7 +4124,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.6.2"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=e99f38a8f4685c381bb4cca94874092e50e3f7e9#e99f38a8f4685c381bb4cca94874092e50e3f7e9"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=b8a81c22f034d68f9bbd6cba728aab807b9ba2ea#b8a81c22f034d68f9bbd6cba728aab807b9ba2ea"
 dependencies = [
  "aes",
  "bellman",
@@ -4135,7 +4132,7 @@ dependencies = [
  "blake2b_simd",
  "blake2s_simd",
  "bls12_381",
- "core2",
+ "corez",
  "document-features",
  "ff",
  "fpe",
@@ -7031,7 +7028,7 @@ dependencies = [
  "assert_matches",
  "bech32",
  "bs58",
- "core2",
+ "corez",
  "f4jumble",
  "proptest",
  "zcash_encoding",
@@ -7219,7 +7216,7 @@ dependencies = [
 name = "zcash_encoding"
 version = "0.3.0"
 dependencies = [
- "core2",
+ "corez",
  "hex",
  "nonempty",
  "proptest",
@@ -7265,7 +7262,7 @@ dependencies = [
  "bls12_381",
  "bs58",
  "byteorder",
- "core2",
+ "corez",
  "document-features",
  "group",
  "hex",
@@ -7313,7 +7310,7 @@ dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
  "chacha20poly1305",
- "core2",
+ "corez",
  "criterion 0.5.1",
  "crypto-common 0.2.0-rc.1",
  "document-features",
@@ -7368,7 +7365,7 @@ dependencies = [
 name = "zcash_protocol"
 version = "0.7.2"
 dependencies = [
- "core2",
+ "corez",
  "document-features",
  "hex",
  "incrementalmerkletree",
@@ -7410,7 +7407,7 @@ version = "0.6.4"
 dependencies = [
  "bip32",
  "bs58",
- "core2",
+ "corez",
  "document-features",
  "getset",
  "hex",

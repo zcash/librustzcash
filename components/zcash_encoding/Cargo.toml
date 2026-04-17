@@ -16,7 +16,7 @@ categories = ["cryptography::cryptocurrencies", "encoding"]
 keywords = ["zcash"]
 
 [dependencies]
-core2.workspace = true
+corez.workspace = true
 hex.workspace = true
 nonempty.workspace = true
 
@@ -25,7 +25,7 @@ proptest.workspace = true
 
 [features]
 default = ["std"]
-std = ["core2/std"]
+std = ["corez/std"]
 
 [lib]
 bench = false

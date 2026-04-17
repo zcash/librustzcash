@@ -70,7 +70,7 @@ hex.workspace = true
 redjubjub.workspace = true
 
 # No-std support
-core2.workspace = true
+corez.workspace = true
 
 [dependencies.zcash_note_encryption]
 workspace = true

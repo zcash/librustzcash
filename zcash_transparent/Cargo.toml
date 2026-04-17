@@ -26,7 +26,7 @@ zip32.workspace = true
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Encodings
-core2.workspace = true
+corez.workspace = true
 
 # - Secret management
 subtle.workspace = true

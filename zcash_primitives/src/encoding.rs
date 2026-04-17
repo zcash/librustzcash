@@ -1,9 +1,9 @@
-//! Utility traits for encoding and decoding using core2.io primitives.
+//! Utility traits for encoding and decoding using corez.io primitives.
 //!
 //! This module is used in lieu of the `byteorder` crate, which uses `std::io::{Read, Write}`
 //! and therefore does not support `no_std` usage.
 use blake2b_simd::{Hash, State};
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 pub(crate) trait ReadBytesExt {
     fn read_u8(self) -> io::Result<u8>;

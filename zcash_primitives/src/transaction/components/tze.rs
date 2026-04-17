@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use core::fmt::Debug;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use crate::{
     encoding::{ReadBytesExt, WriteBytesExt},

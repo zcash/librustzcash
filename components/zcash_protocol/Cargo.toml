@@ -30,7 +30,7 @@ document-features = { workspace = true, optional = true }
 
 # - Encodings
 zcash_encoding.workspace = true
-core2.workspace = true
+corez.workspace = true
 hex.workspace = true
 
 # - Test dependencies

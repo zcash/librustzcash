@@ -20,7 +20,7 @@ use {
         Bech32, Hrp,
         primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
     },
-    core2::io::{self, Write},
+    corez::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     zcash_protocol::consensus::NetworkType,
 };

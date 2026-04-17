@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use core::fmt;
-use core2::io::Write;
+use corez::io::Write;
 
 use crate::{
     minimal::{expand_array, indices_from_minimal},

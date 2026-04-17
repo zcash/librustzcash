@@ -15,7 +15,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use core::iter::FromIterator;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 

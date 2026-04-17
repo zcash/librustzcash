@@ -33,7 +33,7 @@ rand_core.workspace = true
 # - Encodings
 bech32.workspace = true
 bs58.workspace = true
-core2.workspace = true
+corez.workspace = true
 regex = { workspace = true, optional = true }
 
 # - Transparent protocols

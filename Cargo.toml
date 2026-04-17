@@ -126,7 +126,7 @@ memuse = { version = "0.2.2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 
 # No-std support
-core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+corez = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Parallel processing
 crossbeam-channel = "0.5"
@@ -230,5 +230,5 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "e99f38a8f4685c381bb4cca94874092e50e3f7e9" }
-orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "b8a81c22f034d68f9bbd6cba728aab807b9ba2ea" }
+orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "b0bf2670e248958c6ce7c1deed466032e0dbd4d9" }

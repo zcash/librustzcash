@@ -1,7 +1,7 @@
 //! Parsers and serializers for Zcash Merkle trees.
 
 use alloc::vec::Vec;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use incrementalmerkletree::{
@@ -300,7 +300,7 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
 pub mod testing {
     use crate::encoding::{ReadBytesExt, WriteBytesExt};
     use alloc::string::String;
-    use core2::io::{self, Read, Write};
+    use corez::io::{self, Read, Write};
     use incrementalmerkletree::frontier::testing::TestNode;
     use zcash_encoding::Vector;
 

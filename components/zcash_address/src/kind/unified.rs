@@ -168,7 +168,7 @@ pub(crate) mod private {
     use alloc::vec::Vec;
     use core::cmp;
     use core::convert::{TryFrom, TryInto};
-    use core2::io::Write;
+    use corez::io::Write;
 
     use super::{ParseError, Typecode, PADDING_LEN};
     use zcash_encoding::CompactSize;
@@ -260,7 +260,7 @@ pub(crate) mod private {
         /// Parse the items of the unified container.
         fn parse_items<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Vec<Self::Item>, ParseError> {
             fn read_receiver<R: SealedItem>(
-                mut cursor: &mut core2::io::Cursor<&[u8]>,
+                mut cursor: &mut corez::io::Cursor<&[u8]>,
             ) -> Result<R, ParseError> {
                 let typecode = CompactSize::read(&mut cursor)
                     .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
@@ -318,7 +318,7 @@ pub(crate) mod private {
                 )),
             }?;
 
-            let mut cursor = core2::io::Cursor::new(encoded);
+            let mut cursor = corez::io::Cursor::new(encoded);
             let mut result = vec![];
             while cursor.position() < encoded.len().try_into().unwrap() {
                 result.push(read_receiver(&mut cursor)?);
