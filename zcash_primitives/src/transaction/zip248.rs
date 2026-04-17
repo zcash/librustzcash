@@ -197,24 +197,18 @@ impl BundleId {
 /// An opaque bundle whose type is not recognized by this implementation.
 ///
 /// The effect and auth data are stored as unparsed byte vectors so that the
-/// transaction can still be serialized. Both digests are computed using the
-/// flat `Opaque Digest Personalizations` from ZIP 248, allowing any wallet
-/// to derive the txid and auth commitment even for bundle types it does
-/// not understand.
+/// transaction can still be serialized. Digests are computed on demand using
+/// the flat `Opaque Digest Personalizations` from ZIP 248, allowing any
+/// wallet to derive the txid and auth commitment even for bundle types it
+/// does not understand.
 #[derive(Clone, Debug)]
 pub struct UnknownBundle {
     /// Raw compact-portion effecting-data bytes from the wire.
     pub compact_effect_data: Vec<u8>,
     /// Raw noncompact-portion effecting-data bytes from the wire.
     pub noncompact_effect_data: Vec<u8>,
-    /// Digest of the effecting data for the txid computation, using the
-    /// flat `bundle_effects_digest` from ZIP 248 §T.3.
-    pub effect_digest: blake2b_simd::Hash,
     /// Raw authorizing-data bytes from the wire, if present.
     pub auth_data: Option<Vec<u8>>,
-    /// Digest of the authorizing data. `None` when parsed from the wire;
-    /// set via [`BundleMap::get_unknown_mut`] before computing the auth commitment.
-    pub auth_digest: Option<blake2b_simd::Hash>,
 }
 
 // ---------------------------------------------------------------------------
@@ -358,15 +352,6 @@ impl<A: Authorization> BundleMap<A> {
     /// Insert an opaque bundle whose type is not recognized.
     pub fn insert_unknown(&mut self, raw_type: u64, raw_variant: u64, bundle: UnknownBundle) {
         self.unknown.insert((raw_type, raw_variant), bundle);
-    }
-
-    /// Returns a mutable reference to an unknown bundle, if present.
-    pub fn get_unknown_mut(
-        &mut self,
-        raw_type: u64,
-        raw_variant: u64,
-    ) -> Option<&mut UnknownBundle> {
-        self.unknown.get_mut(&(raw_type, raw_variant))
     }
 
     // -- Authorization mapping --
@@ -1074,17 +1059,7 @@ mod tests {
             UnknownBundle {
                 compact_effect_data: vec![1, 2, 3],
                 noncompact_effect_data: vec![],
-                effect_digest: blake2b_simd::Params::new()
-                    .hash_length(32)
-                    .personal(b"test_unknown_efx")
-                    .hash(&[1, 2, 3]),
                 auth_data: Some(vec![4, 5, 6]),
-                auth_digest: Some(
-                    blake2b_simd::Params::new()
-                        .hash_length(32)
-                        .personal(b"test_unknown_aut")
-                        .hash(&[4, 5, 6]),
-                ),
             },
         );
 

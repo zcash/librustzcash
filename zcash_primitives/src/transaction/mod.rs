@@ -642,8 +642,8 @@ impl<A: Authorization> TransactionData<A> {
     #[cfg(zcash_v6)]
     pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
         use txid::{
-            TxIdDigester, hash_v6_bundle_effects_compact_only, hash_v6_header,
-            hash_v6_value_pool_deltas,
+            TxIdDigester, hash_v6_bundle_auth, hash_v6_bundle_effects,
+            hash_v6_bundle_effects_compact_only, hash_v6_header, hash_v6_value_pool_deltas,
         };
 
         let digester = TxIdDigester;
@@ -671,10 +671,19 @@ impl<A: Authorization> TransactionData<A> {
 
         let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
         let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
-        for (id, ub) in self.bundles.unknown_bundles() {
-            unknown_effect_digests.push((*id, ub.effect_digest));
-            if let Some(digest) = ub.auth_digest {
-                unknown_auth_digests.push((*id, digest));
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
+            unknown_effect_digests.push((
+                (bt, bv),
+                hash_v6_bundle_effects(
+                    bt,
+                    bv,
+                    |w| w.write_all(&ub.compact_effect_data),
+                    |w| w.write_all(&ub.noncompact_effect_data),
+                ),
+            ));
+            if let Some(auth) = ub.auth_data.as_ref() {
+                unknown_auth_digests
+                    .push(((bt, bv), hash_v6_bundle_auth(bt, bv, |w| w.write_all(auth))));
             }
         }
 
@@ -1356,50 +1365,38 @@ impl Transaction {
 
         // --- Section 5: Reconstruct typed bundles from effect + auth data ---
         //
-        // The `take_known` closure removes entries from both maps for each
-        // recognized bundle type. After all known types are extracted,
-        // whatever remains in effect_data_by_type / auth_data_by_type is by
-        // definition an unrecognized bundle type -- stored as opaque bytes.
+        // For each recognized bundle type we pop its effect + auth entries out
+        // of the by-type maps; anything left over is an unrecognized bundle
+        // stored as opaque bytes. For known-bundle parsing we concatenate
+        // `compact || noncompact` since the ZIP 248 split for these types is
+        // not yet normative (this implementation emits all effecting data in
+        // the compact portion on write).
         let mut bundles = zip248::BundleMap::new();
 
-        // Pops the (compact, noncompact) effect pair and the auth data (if any)
-        // for a given bundle type out of both maps. For parsing known-bundle
-        // types we concatenate compact+noncompact since the ZIP 248 split for
-        // these types is not yet normative; this implementation emits all
-        // effecting data in the compact portion on write.
-        let mut take_known =
-            |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>) {
-                let effect = effect_data_by_type.remove(&bundle_type);
-                let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
-                match effect {
-                    Some((_, compact, noncompact)) => (Some(compact), Some(noncompact), auth),
-                    None => (None, None, auth),
-                }
-            };
-
-        // For known bundle types we currently emit all effecting data in the
-        // compact portion, so the combined byte stream we parse is
-        // `compact || noncompact`.
-        let combine = |compact: Option<Vec<u8>>, noncompact: Option<Vec<u8>>| {
-            let (mut c, n) = (compact.unwrap_or_default(), noncompact.unwrap_or_default());
-            c.extend_from_slice(&n);
-            c
+        let mut take_known_effect = |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+            let effect = effect_data_by_type
+                .remove(&bundle_type)
+                .map(|(_, c, n)| {
+                    let mut joined = c;
+                    joined.extend_from_slice(&n);
+                    joined
+                });
+            let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+            (effect, auth)
         };
 
-        let (tr_compact, tr_noncompact, transparent_auth) =
-            take_known(zip248::BundleType::Transparent.to_u64());
-        if tr_compact.is_some() || tr_noncompact.is_some() {
-            let effect = combine(tr_compact, tr_noncompact);
+        let (transparent_effect, transparent_auth) =
+            take_known_effect(zip248::BundleType::Transparent.to_u64());
+        if let Some(effect) = transparent_effect {
             if let Some(b) = Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
             {
                 bundles.insert_transparent(b);
             }
         }
 
-        let (sa_compact, sa_noncompact, sapling_auth) =
-            take_known(zip248::BundleType::Sapling.to_u64());
-        if sa_compact.is_some() || sa_noncompact.is_some() {
-            let effect = combine(sa_compact, sa_noncompact);
+        let (sapling_effect, sapling_auth) =
+            take_known_effect(zip248::BundleType::Sapling.to_u64());
+        if let Some(effect) = sapling_effect {
             let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = sapling_serialization::read_v6_bundle(
                 &effect,
@@ -1410,10 +1407,9 @@ impl Transaction {
             }
         }
 
-        let (or_compact, or_noncompact, orchard_auth) =
-            take_known(zip248::BundleType::Orchard.to_u64());
-        if or_compact.is_some() || or_noncompact.is_some() {
-            let effect = combine(or_compact, or_noncompact);
+        let (orchard_effect, orchard_auth) =
+            take_known_effect(zip248::BundleType::Orchard.to_u64());
+        if let Some(effect) = orchard_effect {
             let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
             if let Some(b) = orchard_serialization::read_v6_bundle(
                 &effect,
@@ -1425,29 +1421,17 @@ impl Transaction {
         }
 
         // Store any remaining (unrecognized) bundles as opaque `UnknownBundle`
-        // entries. The flat per-bundle digests (`hash_v6_bundle_effects` and
-        // `hash_v6_bundle_auth`) let wallets compute the txid and auth
-        // commitment even without understanding the bundle.
+        // entries. Their txid / auth-commitment contributions are recomputed
+        // from the raw bytes via `hash_v6_bundle_effects` / `hash_v6_bundle_auth`.
         for (bundle_type, (variant, compact, noncompact)) in effect_data_by_type {
-            let auth = auth_data_by_type.remove(&bundle_type);
-            let effect_digest = txid::hash_v6_bundle_effects(
-                bundle_type,
-                variant,
-                |w| w.write_all(&compact),
-                |w| w.write_all(&noncompact),
-            );
-            let auth_digest = auth
-                .as_ref()
-                .map(|(_, a)| txid::hash_v6_bundle_auth(bundle_type, variant, |w| w.write_all(a)));
+            let auth_data = auth_data_by_type.remove(&bundle_type).map(|(_, a)| a);
             bundles.insert_unknown(
                 bundle_type,
                 variant,
                 zip248::UnknownBundle {
                     compact_effect_data: compact,
                     noncompact_effect_data: noncompact,
-                    effect_digest,
-                    auth_data: auth.map(|(_, a)| a),
-                    auth_digest,
+                    auth_data,
                 },
             );
         }
@@ -1813,13 +1797,15 @@ impl Transaction {
             hash_v6_bundle_auth(bt, bv, |w| orchard_serialization::write_v6_auth(w, ob))
         });
 
-        // Unknown bundles may carry pre-computed auth digests set by the
-        // caller via BundleMap::get_unknown_mut.
         let unknown_auth_digests: Vec<((u64, u64), Blake2bHash)> = self
             .data
             .bundles
             .unknown_bundles()
-            .filter_map(|(&key, ub)| ub.auth_digest.map(|digest| (key, digest)))
+            .filter_map(|(&(bt, bv), ub)| {
+                ub.auth_data
+                    .as_ref()
+                    .map(|auth| ((bt, bv), hash_v6_bundle_auth(bt, bv, |w| w.write_all(auth))))
+            })
             .collect();
 
         let auth_bundles_digest = hash_v6_auth_bundles(v6_bundle_digest_entries(

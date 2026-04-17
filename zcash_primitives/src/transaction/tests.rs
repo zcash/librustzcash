@@ -495,12 +495,7 @@ mod zip248_tests {
         zip248::UnknownBundle {
             compact_effect_data: data.to_vec(),
             noncompact_effect_data: Vec::new(),
-            effect_digest: blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(b"test_unknown_efx")
-                .hash(data),
             auth_data: None,
-            auth_digest: None,
         }
     }
 
