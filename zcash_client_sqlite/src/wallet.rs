@@ -1886,7 +1886,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
             (last_scanned > last_completed_subtree_end)
                 .then(|| {
                     let scanned_notes = last_scanned_tree_size
-                        - u64::from(last_completed_subtree.position_range_end());
+                        .saturating_sub(u64::from(last_completed_subtree.position_range_end()));
                     let scanned_range = u64::from(last_scanned - last_completed_subtree_end);
                     let unscanned_range = u64::from(chain_tip_height - last_scanned);
 
@@ -2413,6 +2413,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
+                    rn.witness_stabilized,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2483,20 +2484,28 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            // A note is spendable if we have enough chain tip information to construct witnesses,
-            // the shard that its witness resides in is sufficiently scanned that we can construct
-            // the witness for the note, and the note has enough confirmations to be spent.
-            let is_spendable = any_spendable
-                && max_priority <= ScanPriority::Scanned
-                && confirmations_policy.confirmations_until_spendable(
-                    target_height,
-                    PoolType::Shielded(protocol),
-                    recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
-                    received_height,
-                    tx_trusted,
-                    max_shielding_input_height,
-                    tx_shielding_inputs_trusted,
-                ) == 0;
+            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+
+            // A stabilized note is unconditionally spendable. Its originating transaction has been
+            // confirmed well beyond any reasonable confirmation policy, and its witness data
+            // cannot be removed by truncation.
+            //
+            // Non-stabilized notes require more checks: we must have enough chain tip information
+            // to construct witnesses, the shard that the note resides in must be sufficiently
+            // scanned that we can construct the witness for the note, and the note has enough
+            // confirmations to be spent.
+            let is_spendable = witness_stabilized
+                || (any_spendable
+                    && max_priority <= ScanPriority::Scanned
+                    && confirmations_policy.confirmations_until_spendable(
+                        target_height,
+                        PoolType::Shielded(protocol),
+                        recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                        received_height,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    ) == 0);
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);

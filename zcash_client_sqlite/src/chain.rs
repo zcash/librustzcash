@@ -435,6 +435,28 @@ mod tests {
     }
 
     #[test]
+    fn stabilized_note_spendable_after_deep_rewind_sapling() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_after_deep_rewind_orchard() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn newly_discovered_notes_become_stabilized_sapling() {
+        testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn newly_discovered_notes_become_stabilized_orchard() {
+        testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }
