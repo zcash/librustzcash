@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::common::table_constants;
-use super::wallet_birthday;
+use super::{block_max_scanned, wallet_birthday};
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
@@ -369,6 +369,58 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .chain(extended_after);
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
+
+    // Check for any newly stabilized notes, and mark them as stabilized
+    mark_stabilized_notes(conn, params)?;
+
+    Ok(())
+}
+
+/// Marks received notes as `witness_stabilized` once their containing shard's block extent is fully
+/// Scanned and the shard's end height has at least `PRUNING_DEPTH` confirmations.
+///
+/// This means that a note within the chain-tip shard can not be marked as `witness_stabilized`,
+/// because the tip shard is by definition not complete or confirmed to the `PRUNING_DEPTH`.
+pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+) -> Result<(), SqliteClientError> {
+    fn mark_pool(
+        conn: &rusqlite::Transaction<'_>,
+        pool: &str,
+        shard_height: u8,
+        pruning_floor: u32,
+    ) -> Result<(), SqliteClientError> {
+        let sql = format!(
+            "UPDATE {pool}_received_notes
+             SET witness_stabilized = 1
+             WHERE witness_stabilized = 0
+               AND commitment_tree_position IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM {pool}_tree_shards shard
+                   WHERE shard.subtree_end_height IS NOT NULL
+                     AND shard.subtree_end_height <= :pruning_floor
+                     AND (commitment_tree_position >> :shard_height) = shard.shard_index
+                     AND shard.shard_index NOT IN (
+                         SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                     )
+               )",
+        );
+        conn.execute(
+            &sql,
+            named_params![":pruning_floor": pruning_floor, ":shard_height": shard_height],
+        )?;
+        Ok(())
+    }
+
+    if let Some(max_scanned_height) = block_max_scanned(conn, params)?.map(|m| m.block_height()) {
+        let pruning_floor: u32 = u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+
+        // Mark stabilized notes in each pool
+        mark_pool(conn, "sapling", SAPLING_SHARD_HEIGHT, pruning_floor)?;
+        #[cfg(feature = "orchard")]
+        mark_pool(conn, "orchard", ORCHARD_SHARD_HEIGHT, pruning_floor)?;
+    }
 
     Ok(())
 }

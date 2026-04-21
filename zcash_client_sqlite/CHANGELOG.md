@@ -48,6 +48,11 @@ workspace.
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a
   precomputed input size for accurate ZIP 317 fee estimation.
+- Added a `witness_stabilized` column to the `sapling_received_notes` and
+  `orchard_received_notes` tables. The column is set to 1 at the end of each
+  scan batch (and once as a backfill by the `witness_stabilized_notes`
+  migration) for notes whose containing shard is fully Scanned and whose
+  `subtree_end_height` has received at least `PRUNING_DEPTH` confirmations.
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
