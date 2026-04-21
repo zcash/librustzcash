@@ -1689,11 +1689,16 @@ mod test {
     /// 2. serialize to "0"
     /// 3. parse from "0" produces `output = Number(0)`
     /// 4. input != output
+    ///
+    /// Also excludes the exponent markers `e` and `E`, since the [`Number`] grammar allows a
+    /// number to consist of nothing but an exponent marker (with 0 integer digits and 0 exponent
+    /// digits). Alphanumeric source chars pass through URL encoding unchanged, so a single `"E"`
+    /// would round-trip to a [`Number`] instead of a [`UrlEncodedUnicodeString`].
     fn arb_non_numeric_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
         {
             let min = 1;
             let max = 1024;
-            proptest::string::string_regex(&format!("[^\\d]{{{min},{max}}}")).unwrap()
+            proptest::string::string_regex(&format!("[^\\deE]{{{min},{max}}}")).unwrap()
         }
         .prop_map(UrlEncodedUnicodeString::encode)
     }
