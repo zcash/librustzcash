@@ -3537,17 +3537,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     // truncation height, and then truncate any remaining range by setting the end
     // equal to the truncation height + 1. This sets our view of the chain tip back
     // to the retained height.
-    conn.execute(
-        "DELETE FROM scan_queue
-        WHERE block_range_start >= :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
-    conn.execute(
-        "UPDATE scan_queue
-        SET block_range_end = :new_end_height
-        WHERE block_range_end > :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
+    trim_scan_queue_to(conn, truncation_height)?;
 
     // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
     // considered to have been returned to the mempool; it _might_ be spendable in this state, but
@@ -3741,6 +3731,31 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 
     assert_eq!(truncated_height, target_height);
 
+    Ok(())
+}
+
+/// Trims the `scan_queue` so that no range extends above `max_height`.
+///
+/// Deletes any range whose start is above `max_height`, and clamps the upper bound of any
+/// remaining range that extends past `max_height`. Used by [`rewind_to_height`] to push the
+/// scan-queue rewind below the data-truncation floor without disturbing the wallet data
+/// preserved within the pruning window.
+pub(crate) fn trim_scan_queue_to(
+    conn: &rusqlite::Transaction,
+    max_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let new_end_height = u32::from(max_height + 1);
+    conn.execute(
+        "DELETE FROM scan_queue
+         WHERE block_range_start >= :new_end_height",
+        named_params![":new_end_height": new_end_height],
+    )?;
+    conn.execute(
+        "UPDATE scan_queue
+         SET block_range_end = :new_end_height
+         WHERE block_range_end > :new_end_height",
+        named_params![":new_end_height": new_end_height],
+    )?;
     Ok(())
 }
 

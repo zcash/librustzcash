@@ -13,6 +13,7 @@ use crate::{
     wallet::{
         SqlTransaction, WalletDb,
         init::{WalletMigrationError, migrations::support_legacy_sqlite},
+        trim_scan_queue_to,
     },
 };
 
@@ -172,17 +173,7 @@ fn truncate_to_height<P: consensus::Parameters>(
     // truncation height, and then truncate any remaining range by setting the end
     // equal to the truncation height + 1. This sets our view of the chain tip back
     // to the retained height.
-    conn.execute(
-        "DELETE FROM scan_queue
-        WHERE block_range_start >= :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
-    conn.execute(
-        "UPDATE scan_queue
-        SET block_range_end = :new_end_height
-        WHERE block_range_end > :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
+    trim_scan_queue_to(conn, truncation_height)?;
 
     // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
     // considered to have been returned to the mempool; it _might_ be spendable in this state, but
