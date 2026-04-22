@@ -464,6 +464,20 @@ impl Number {
             .parse(i)
     }
 
+    /// Returns `true` if this [`Number`] has at least one integer digit or a
+    /// decimal part.
+    ///
+    /// [`Number::parse`] is intentionally permissive and will accept inputs
+    /// such as `""`, `"-"`, `"e"`, or `"+E"` that contain no mantissa digits
+    /// at all. Such inputs are only meaningful via [`Number`]'s standalone API
+    /// (where they round-trip as the number zero); when resolving the
+    /// `value = number / ethereum_address / STRING` production in
+    /// [`Value::parse`], a digit-less candidate does not represent the
+    /// `number` alternative and should fall through to `STRING`.
+    pub(crate) fn has_mantissa_digits(&self) -> bool {
+        !self.integer.places.is_empty() || self.decimal.is_some()
+    }
+
     /// Returns the value of the integer portion of the number.
     ///
     /// ## Errors
@@ -810,6 +824,12 @@ impl Value {
         // Here there are some interesting corner cases:
         //
         // 1. In `number`'s spec, absolutely everything is optional, so it _never_ fails.
+        //   However, a [`Number`] that contains no mantissa digits (i.e. no integer
+        //   digits and no decimal part, such as `""`, `"-"`, `"e"`, or `"+E"`) does not
+        //   represent the `number` alternative of the `value` production, so we reject
+        //   such candidates here and let them fall through to `STRING`. This keeps
+        //   [`Number::parse`] permissive for its own callers while making [`Value::parse`]
+        //   grammar-correct.
         // 2. `ethereum_address` may be prefixed with `0` (in the hex-address case), so both number
         //   and address could be parsed. Because of 1, `number` always wins if it comes first, but
         //   even if the minimum was 1 digit `number` would still win by parsing "0", so
@@ -822,7 +842,15 @@ impl Value {
         // In practice this should be fine because values either end with `&` (in the case of
         // more parameters after it) or with the end of the input.
 
-        let mut results = [number.parse(i), ethereum_address.parse(i), string.parse(i)];
+        let number_result = match number.parse(i) {
+            Ok((_rest, Value::Number(n))) if !n.has_mantissa_digits() => {
+                Err(nom::Err::Error(ParseError::NumberMissingDigits {
+                    input: i,
+                }))
+            }
+            other => other,
+        };
+        let mut results = [number_result, ethereum_address.parse(i), string.parse(i)];
         results.sort_by_key(|a| {
             // Sort by the amount of input left over, smallest first
             a.as_ref().ok().map(|(i, _)| i.len()).unwrap_or(usize::MAX)
@@ -1689,16 +1717,11 @@ mod test {
     /// 2. serialize to "0"
     /// 3. parse from "0" produces `output = Number(0)`
     /// 4. input != output
-    ///
-    /// Also excludes the exponent markers `e` and `E`, since the [`Number`] grammar allows a
-    /// number to consist of nothing but an exponent marker (with 0 integer digits and 0 exponent
-    /// digits). Alphanumeric source chars pass through URL encoding unchanged, so a single `"E"`
-    /// would round-trip to a [`Number`] instead of a [`UrlEncodedUnicodeString`].
     fn arb_non_numeric_url_encoded_string() -> impl Strategy<Value = UrlEncodedUnicodeString> {
         {
             let min = 1;
             let max = 1024;
-            proptest::string::string_regex(&format!("[^\\deE]{{{min},{max}}}")).unwrap()
+            proptest::string::string_regex(&format!("[^\\d]{{{min},{max}}}")).unwrap()
         }
         .prop_map(UrlEncodedUnicodeString::encode)
     }
@@ -1851,6 +1874,44 @@ mod test {
         let input = expected.to_string();
         let (_output, seen) = Value::parse(&input).unwrap();
         pretty_assertions::assert_eq!(expected, seen);
+    }
+
+    /// [`Number::parse`] is deliberately permissive and will happily consume a
+    /// lone `"e"` or `"E"` (as a `Number` with no integer digits, no decimal
+    /// part, and an exponent marker with no digits). Those alphabetic inputs
+    /// are valid [`UrlEncodedUnicodeString`] content and must resolve to
+    /// [`Value::String`] under the `value = number / ethereum_address / STRING`
+    /// production, not to [`Value::Number`].
+    #[test]
+    fn parse_value_lone_exponent_marker_is_string() {
+        for input in ["e", "E"] {
+            let (rest, seen) = Value::parse(input).unwrap();
+            assert_eq!(
+                "", rest,
+                "`input` {input:?} was not fully consumed. Parsed '{seen:?}'"
+            );
+            assert_eq!(
+                Value::String(UrlEncodedUnicodeString(input.to_string())),
+                seen,
+                "expected lone exponent marker {input:?} to parse as Value::String"
+            );
+        }
+    }
+
+    /// Sanity: inputs that *do* have mantissa digits still resolve to [`Value::Number`].
+    #[test]
+    fn parse_value_number_with_mantissa_digits() {
+        for input in ["0", "1", "1e18", "666.0", "2.014e18"] {
+            let (rest, seen) = Value::parse(input).unwrap();
+            assert_eq!(
+                "", rest,
+                "`input` {input:?} was not fully consumed. Parsed '{seen:?}'"
+            );
+            assert!(
+                matches!(seen, Value::Number(_)),
+                "expected {input:?} to parse as Value::Number, got {seen:?}"
+            );
+        }
     }
 
     proptest! {
