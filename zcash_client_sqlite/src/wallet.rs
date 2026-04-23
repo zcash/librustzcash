@@ -1158,17 +1158,18 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 /// This is the SQLite-optimized implementation of
 /// [`zcash_client_backend::data_api::WalletRead::find_account_for_address`].
 ///
-/// For non-Unified addresses an exact match on the `address` column (or the
-/// `cached_transparent_receiver_address` column for transparent receivers of stored UAs) is
-/// tried first; if that misses, Sapling addresses fall back to scanning stored UAs whose
-/// `receiver_flags` indicate a matching Sapling receiver, then [`address_receiver_matches_ua`]
-/// confirms the actual overlap.
+/// Every call first tries a fast exact-match SQL query against the `addresses` table (see
+/// [`find_account_by_exact_address`]). If that misses, the lookup is delegated to an
+/// address-kind-specific fallback:
 ///
-/// For Unified Addresses an exact-match SQL query is tried first (covering both the whole
-/// UA string and its cached transparent receiver). If that misses, each account's
-/// [`UnifiedIncomingViewingKey`] is asked whether it derived one of the UA's receivers, via
-/// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]. This finds every UA that any wallet
-/// account could have produced, whether or not it was previously exposed.
+/// - For Unified Addresses, each account's [`UnifiedIncomingViewingKey`] is asked whether it
+///   derived one of the UA's receivers, via
+///   [`UnifiedIncomingViewingKey::decrypt_diversifiers`]. This finds every UA that any wallet
+///   account could have produced, whether or not it was previously exposed.
+/// - For Sapling addresses, stored UAs whose `receiver_flags` indicate a matching receiver
+///   are scanned and [`address_receiver_matches_ua`] confirms the actual overlap.
+/// - For transparent addresses, no fallback is needed: the exact-match query already covers
+///   both standalone transparent rows and transparent receivers cached on stored UAs.
 ///
 /// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
 /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers
@@ -1177,66 +1178,85 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     params: &P,
     address: &Address,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
-    let addr_str = address.encode(params);
+    use FindAccountForAddressError as E;
 
-    if let Address::Unified(unified_address) = address {
-        find_account_for_unified_address(conn, params, &addr_str, unified_address)
-    } else {
-        find_account_for_non_unified_address(conn, params, address, &addr_str)
+    let addr_str = address.encode(params);
+    // For a UA the transparent receiver (if any) may match the cached column; for non-UA
+    // addresses the same string serves both roles (the `cached_transparent_receiver_address`
+    // column only ever holds transparent addresses, so a Sapling query against it simply
+    // never matches).
+    let taddr_str = match address {
+        Address::Unified(ua) => ua
+            .transparent()
+            .map(|t| Address::Transparent(*t).encode(params)),
+        _ => Some(addr_str.clone()),
+    };
+
+    if let Some(acc) =
+        find_account_by_exact_address(conn, &addr_str, taddr_str.as_deref()).map_err(E::Backend)?
+    {
+        return Ok(Some(acc));
+    }
+
+    match address {
+        Address::Unified(ua) => find_account_for_unified_address_algebraic(conn, params, ua),
+        Address::Sapling(_) => {
+            find_account_for_shielded_address(conn, params, address, ReceiverFlags::SAPLING)
+        }
+        // For transparent addresses the exact-match query above is complete: the
+        // `transparent_index_consistency` CHECK constraint and every INSERT path into the
+        // `addresses` table guarantee that any stored UA with a transparent receiver also
+        // has `cached_transparent_receiver_address` populated. When the `transparent-inputs`
+        // feature is disabled the wallet cannot receive transparent funds, so a miss here
+        // correctly resolves to no account.
+        _ => Ok(None),
     }
 }
 
-fn find_account_for_non_unified_address<P: consensus::Parameters>(
+/// Looks for an account whose stored addresses contain an exact match for the given address
+/// string or for its transparent-receiver sub-string.
+///
+/// Returns `Some(account)` if a row's `address` column equals `addr_str`, or a row's
+/// `cached_transparent_receiver_address` column equals `taddr_str`.
+fn find_account_by_exact_address(
+    conn: &Connection,
+    addr_str: &str,
+    taddr_str: Option<&str>,
+) -> Result<Option<AccountUuid>, SqliteClientError> {
+    conn.query_row(
+        "SELECT accounts.uuid
+         FROM addresses
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE address = :addr_str
+            OR cached_transparent_receiver_address = :taddr_str
+         LIMIT 1",
+        named_params![
+            ":addr_str": addr_str,
+            ":taddr_str": taddr_str,
+        ],
+        |row| row.get::<_, Uuid>(0),
+    )
+    .optional()
+    .map(|opt| opt.map(AccountUuid::from_uuid))
+    .map_err(SqliteClientError::from)
+}
+
+fn find_account_for_shielded_address<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     address: &Address,
-    addr_str: &str,
+    shielded_flag: ReceiverFlags,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
     use FindAccountForAddressError as E;
 
-    // For non-UA addresses, first try an exact match (also covers transparent receivers
-    // cached in `cached_transparent_receiver_address`).
-    let exact_match = conn
-        .query_row(
-            "SELECT accounts.uuid
-             FROM addresses
-             JOIN accounts ON accounts.id = addresses.account_id
-             WHERE exposed_at_height IS NOT NULL
-             AND (address = :addr_str OR cached_transparent_receiver_address = :addr_str)
-             LIMIT 1",
-            named_params![":addr_str": addr_str],
-            |row| row.get::<_, Uuid>(0),
-        )
-        .optional()
-        .map(|opt| opt.map(AccountUuid::from_uuid))
-        .map_err(|e| E::Backend(e.into()))?;
-
-    if exact_match.is_some() {
-        return Ok(exact_match);
-    }
-
-    // For shielded address types, the address may be a receiver embedded in a stored UA.
-    // Query candidate UAs via `receiver_flags` and verify at the Rust level.
-    //
-    // Transparent inputs do not need a `receiver_flags` fallback here: the exact-match query
-    // above already covers transparent receivers of stored UAs. That relies on the invariant
-    // (enforced by the `transparent_index_consistency` CHECK constraint and by every INSERT
-    // path into the `addresses` table) that any stored UA with a transparent receiver also
-    // has `cached_transparent_receiver_address` populated. When the `transparent-inputs`
-    // feature is disabled the wallet cannot receive transparent funds, so a transparent
-    // address lookup correctly resolves to no account.
-    let shielded_flag: ReceiverFlags = match address {
-        Address::Sapling(_) => ReceiverFlags::SAPLING,
-        _ => return Ok(None),
-    };
-
+    // The address may be a receiver embedded in a stored UA. Query candidate UAs via
+    // `receiver_flags` and verify at the Rust level.
     let mut stmt = conn
         .prepare_cached(
             "SELECT accounts.uuid, addresses.address
              FROM addresses
              JOIN accounts ON accounts.id = addresses.account_id
-             WHERE exposed_at_height IS NOT NULL
-             AND (receiver_flags & :shielded_flag) != 0",
+             WHERE (receiver_flags & :shielded_flag) != 0",
         )
         .map_err(|e| E::Backend(e.into()))?;
 
@@ -1265,45 +1285,16 @@ fn find_account_for_non_unified_address<P: consensus::Parameters>(
     Ok(None)
 }
 
-fn find_account_for_unified_address<P: consensus::Parameters>(
+fn find_account_for_unified_address_algebraic<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
-    addr_str: &str,
     unified_address: &UnifiedAddress,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
     use FindAccountForAddressError as E;
 
-    // Fast path: the UA (or one of its transparent receivers) has already been stored
-    // verbatim for some account.
-    let taddr_str = unified_address
-        .transparent()
-        .map(|t| Address::Transparent(*t).encode(params));
-
-    let exact_match = conn
-        .query_row(
-            "SELECT accounts.uuid
-             FROM addresses
-             JOIN accounts ON accounts.id = addresses.account_id
-             WHERE address = :ua_str
-                OR cached_transparent_receiver_address = :taddr_str
-             LIMIT 1",
-            named_params![
-                ":ua_str": addr_str,
-                ":taddr_str": taddr_str,
-            ],
-            |row| row.get::<_, Uuid>(0),
-        )
-        .optional()
-        .map(|opt| opt.map(AccountUuid::from_uuid))
-        .map_err(|e| E::Backend(e.into()))?;
-
-    if exact_match.is_some() {
-        return Ok(exact_match);
-    }
-
-    // Algebraic fallback: ask each account's UIVK whether it derived any receiver of the
-    // UA. This finds every UA that any account in the wallet could have produced, whether
-    // or not it was previously exposed.
+    // Ask each account's UIVK whether it derived any receiver of the UA. This finds every
+    // UA that any account in the wallet could have produced, whether or not it was
+    // previously exposed.
     let mut found_acc_id: Option<AccountUuid> = None;
     for acc_id in get_account_ids(conn).map_err(|e| E::Backend(e.into()))? {
         let Some(account) = get_account(conn, params, acc_id).map_err(E::Backend)? else {
