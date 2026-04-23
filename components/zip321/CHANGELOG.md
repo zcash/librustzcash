@@ -8,7 +8,9 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.7.0] - PENDING
+## [Unreleased]
+
+## [0.7.0] - 2026-04-23
 
 ### Added
 - `zip321::PaymentError` enum for errors in constructing a `Payment`.
