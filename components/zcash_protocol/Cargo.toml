@@ -11,7 +11,7 @@ repository.workspace = true
 readme = "README.md"
 license.workspace = true
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.85.1"
 categories = ["cryptography::cryptocurrencies"]
 keywords = ["zcash"]
 
