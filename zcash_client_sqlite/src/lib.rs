@@ -1318,6 +1318,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.truncate_to_chain_state(chain_state))
     }
 
+    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        self.transactionally(|wdb| wdb.rewind_to_height(max_height))
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
@@ -1650,6 +1654,16 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
         wallet::truncate_to_chain_state(self, chain_state)
+    }
+
+    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        wallet::rewind_to_height(
+            self.conn.0,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            max_height,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]

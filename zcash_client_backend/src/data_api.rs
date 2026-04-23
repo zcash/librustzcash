@@ -3190,6 +3190,28 @@ pub trait WalletWrite: WalletRead {
     /// [`truncate_to_height`]: WalletWrite::truncate_to_height
     fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error>;
 
+    /// Rewinds the wallet to at most the given block height, preserving any wallet data which has
+    /// been confirmed beyond the pruning depth.
+    ///
+    /// In contrast to [`truncate_to_height`], which unconditionally deletes wallet state above
+    /// `max_height` (transaction & note data is retained, but committment trees, blocks, etc are
+    /// removed to the truncation height), this rewinds the scan queue to `max_height` but only
+    /// rewinds blocks, note commitment trees, transactions, transparent UTXO observations, and
+    /// nullifier-map entries as far back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`).
+    /// Data at or below that height is preserved. Because `PRUNING_DEPTH` is a property of chain
+    /// depth, the floor is derived from the wallet's view of the chain tip rather than from
+    /// `MAX(blocks.height)`.
+    ///
+    /// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor so
+    /// that the underlying truncation has a real checkpoint to truncate to under non-contiguous
+    /// scan orders.
+    ///
+    /// Returns the actual scan-queue rewind height (`max_height` clamped to the max scanned height
+    /// when `max_height` is above it).
+    ///
+    /// [`truncate_to_height`]: WalletWrite::truncate_to_height
+    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
+
     /// Reserves the next `n` available ephemeral addresses for the given account.
     /// This cannot be undone, so as far as possible, errors associated with transaction
     /// construction should have been reported before calling this method.

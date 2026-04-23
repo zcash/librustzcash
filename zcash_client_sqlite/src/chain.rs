@@ -402,6 +402,61 @@ mod tests {
     }
 
     #[test]
+    fn rewind_to_height_deep_sapling() {
+        testing::pool::rewind_to_height_deep::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_height_deep_orchard() {
+        testing::pool::rewind_to_height_deep::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_to_height_shallow_sapling() {
+        testing::pool::rewind_to_height_shallow::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_to_height_shallow_orchard() {
+        testing::pool::rewind_to_height_shallow::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_after_non_contiguous_scan_sapling() {
+        testing::pool::rewind_after_non_contiguous_scan::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_after_non_contiguous_scan_orchard() {
+        testing::pool::rewind_after_non_contiguous_scan::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_spendable_after_deep_rewind_sapling() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_after_deep_rewind_orchard() {
+        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn newly_discovered_notes_become_stabilized_sapling() {
+        testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn newly_discovered_notes_become_stabilized_orchard() {
+        testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }

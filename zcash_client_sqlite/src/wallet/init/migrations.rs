@@ -54,6 +54,7 @@ mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
+mod witness_stabilized_notes;
 
 use std::{rc::Rc, sync::Mutex};
 
@@ -133,10 +134,10 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
-    //                                              /               \
-    //                               v_tx_outputs_key_scopes    standalone_p2sh
-    //                                                                  |
-    //                                                           ivk_item_cache
+    //                                        /               |              \
+    //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
+    //                                                        |
+    //                                                  ivk_item_cache
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -225,6 +226,9 @@ pub(super) fn all_migrations<
         Box::new(v_tx_outputs_key_scopes::Migration),
         Box::new(standalone_p2sh::Migration),
         Box::new(ivk_item_cache::Migration {
+            params: params.clone(),
+        }),
+        Box::new(witness_stabilized_notes::Migration {
             params: params.clone(),
         }),
     ]
@@ -370,6 +374,7 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     v_tx_outputs_key_scopes::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
+    witness_stabilized_notes::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

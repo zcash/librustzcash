@@ -2946,6 +2946,10 @@ impl WalletWrite for MockWalletDb {
         Err(())
     }
 
+    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        Err(())
+    }
+
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,

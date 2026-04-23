@@ -326,6 +326,41 @@ pub(crate) fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn rewind_to_height_deep<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_to_height_deep::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn rewind_to_height_shallow<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_to_height_shallow::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_after_non_contiguous_scan::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_spendable_after_deep_rewind<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_after_deep_rewind::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn newly_discovered_notes_become_stabilized<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::newly_discovered_notes_become_stabilized::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),

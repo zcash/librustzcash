@@ -1886,7 +1886,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
             (last_scanned > last_completed_subtree_end)
                 .then(|| {
                     let scanned_notes = last_scanned_tree_size
-                        - u64::from(last_completed_subtree.position_range_end());
+                        .saturating_sub(u64::from(last_completed_subtree.position_range_end()));
                     let scanned_range = u64::from(last_scanned - last_completed_subtree_end);
                     let unscanned_range = u64::from(chain_tip_height - last_scanned);
 
@@ -2413,6 +2413,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
+                    rn.witness_stabilized,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2483,20 +2484,28 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            // A note is spendable if we have enough chain tip information to construct witnesses,
-            // the shard that its witness resides in is sufficiently scanned that we can construct
-            // the witness for the note, and the note has enough confirmations to be spent.
-            let is_spendable = any_spendable
-                && max_priority <= ScanPriority::Scanned
-                && confirmations_policy.confirmations_until_spendable(
-                    target_height,
-                    PoolType::Shielded(protocol),
-                    recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
-                    received_height,
-                    tx_trusted,
-                    max_shielding_input_height,
-                    tx_shielding_inputs_trusted,
-                ) == 0;
+            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+
+            // A stabilized note is unconditionally spendable. Its originating transaction has been
+            // confirmed well beyond any reasonable confirmation policy, and its witness data
+            // cannot be removed by truncation.
+            //
+            // Non-stabilized notes require more checks: we must have enough chain tip information
+            // to construct witnesses, the shard that the note resides in must be sufficiently
+            // scanned that we can construct the witness for the note, and the note has enough
+            // confirmations to be spent.
+            let is_spendable = witness_stabilized
+                || (any_spendable
+                    && max_priority <= ScanPriority::Scanned
+                    && confirmations_policy.confirmations_until_spendable(
+                        target_height,
+                        PoolType::Shielded(protocol),
+                        recipient_key_scope.and_then(|k| zip32::Scope::try_from(k).ok()),
+                        received_height,
+                        tx_trusted,
+                        max_shielding_input_height,
+                        tx_shielding_inputs_trusted,
+                    ) == 0);
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);
@@ -3537,17 +3546,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     // truncation height, and then truncate any remaining range by setting the end
     // equal to the truncation height + 1. This sets our view of the chain tip back
     // to the retained height.
-    conn.execute(
-        "DELETE FROM scan_queue
-        WHERE block_range_start >= :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
-    conn.execute(
-        "UPDATE scan_queue
-        SET block_range_end = :new_end_height
-        WHERE block_range_end > :new_end_height",
-        named_params![":new_end_height": u32::from(truncation_height + 1)],
-    )?;
+    trim_scan_queue_to(conn, truncation_height)?;
 
     // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
     // considered to have been returned to the mempool; it _might_ be spendable in this state, but
@@ -3741,6 +3740,113 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 
     assert_eq!(truncated_height, target_height);
 
+    Ok(())
+}
+
+/// Rewinds the wallet to at most the given block height, preserving any wallet data which has been
+/// confirmed beyond the pruning depth.
+///
+/// In contrast to [`truncate_to_height`], which unconditionally deletes wallet state above
+/// `max_height` (transaction & note data is retained, but committment trees, blocks, etc are
+/// removed to the truncation height), this rewinds the scan queue to `max_height` but only rewinds
+/// blocks, note commitment trees, transactions, transparent UTXO observations, and nullifier-map
+/// entries as far back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`). Data at or below
+/// that height is preserved. Because `PRUNING_DEPTH` is a property of chain depth, the floor is
+/// derived from the wallet's view of the chain tip rather than from `MAX(blocks.height)`.
+///
+///
+/// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor (via
+/// [`commitment_tree::min_checkpoint_id_at_or_above`]) so that [`truncate_to_height_internal`] has
+/// a real checkpoint to truncate to under non-contiguous scan orders.
+///
+/// Returns the actual scan-queue rewind height (`max_height` clamped to the max scanned height when
+/// `max_height` is above it).
+pub(crate) fn rewind_to_height<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+    max_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    let max_scanned_height = block_max_scanned(conn, params)?
+        .map(|m| m.block_height())
+        .unwrap_or_else(|| {
+            params
+                .activation_height(NetworkUpgrade::Sapling)
+                // Fall back to the genesis block in regtest mode.
+                .map_or(BlockHeight::from_u32(0), |h| h - 1)
+        });
+
+    // Compute the floor height of the pruning window
+    let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+    let truncation_target = max_height.max(pruning_floor);
+
+    // Determine the minimum sapling and orchard checkpoints within the pruning window
+    let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        conn,
+        crate::SAPLING_TABLES_PREFIX,
+        truncation_target,
+    )
+    .map_err(ShardTreeError::Storage)?;
+
+    #[cfg(feature = "orchard")]
+    {
+        // Check that Orchard checkpoint matches the Sapling checkpoint.
+        // These should always match, unless the database is corrupted.
+        let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+            conn,
+            crate::ORCHARD_TABLES_PREFIX,
+            truncation_target,
+        )
+        .map_err(ShardTreeError::Storage)?;
+        if orchard_window_floor != sapling_window_floor {
+            return Err(SqliteClientError::CorruptedData(
+                "Sapling and Orchard should have the same checkpoints".into(),
+            ));
+        }
+    }
+
+    // Combine the per-pool floors by taking the shallower (larger height).
+    let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+
+    // Use `truncate_to_height_internal` perform full truncation of data within the pruning window
+    truncate_to_height_internal(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        truncation_height,
+    )?;
+
+    // When the caller asked to rewind below the truncation_height floor, trim the scan queue the
+    // rest of the way down to `max_height` so the sync loop will re-scan the blocks between
+    // `max_height` and `data_rewind_height`.
+    trim_scan_queue_to(conn, max_height)?;
+
+    Ok(max_height.min(max_scanned_height))
+}
+
+/// Trims the `scan_queue` so that no range extends above `max_height`.
+///
+/// Deletes any range whose start is above `max_height`, and clamps the upper bound of any
+/// remaining range that extends past `max_height`. Used by [`rewind_to_height`] to push the
+/// scan-queue rewind below the data-truncation floor without disturbing the wallet data
+/// preserved within the pruning window.
+pub(crate) fn trim_scan_queue_to(
+    conn: &rusqlite::Transaction,
+    max_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let new_end_height = u32::from(max_height + 1);
+    conn.execute(
+        "DELETE FROM scan_queue
+         WHERE block_range_start >= :new_end_height",
+        named_params![":new_end_height": new_end_height],
+    )?;
+    conn.execute(
+        "UPDATE scan_queue
+         SET block_range_end = :new_end_height
+         WHERE block_range_end > :new_end_height",
+        named_params![":new_end_height": new_end_height],
+    )?;
     Ok(())
 }
 
