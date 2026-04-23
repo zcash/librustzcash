@@ -5,13 +5,13 @@
 // This module uses unsafe code for FFI into blake2b.
 #![allow(unsafe_code)]
 
-use blake2b_simd::{State, PERSONALBYTES};
+use blake2b_simd::{PERSONALBYTES, State};
 
 use std::boxed::Box;
 use std::ptr;
 use std::slice;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "C" fn blake2b_init(
     output_len: usize,
     personalization: *const [u8; PERSONALBYTES],
@@ -26,21 +26,21 @@ pub(crate) extern "C" fn blake2b_init(
     ))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "C" fn blake2b_clone(state: *const State) -> *mut State {
     unsafe { state.as_ref() }
         .map(|state| Box::into_raw(Box::new(state.clone())))
         .unwrap_or(ptr::null_mut())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "C" fn blake2b_free(state: *mut State) {
     if !state.is_null() {
         drop(unsafe { Box::from_raw(state) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "C" fn blake2b_update(state: *mut State, input: *const u8, input_len: usize) {
     let state = unsafe { state.as_mut().unwrap() };
     let input = unsafe { slice::from_raw_parts(input, input_len) };
@@ -48,7 +48,7 @@ pub(crate) extern "C" fn blake2b_update(state: *mut State, input: *const u8, inp
     state.update(input);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "C" fn blake2b_finalize(state: *mut State, output: *mut u8, output_len: usize) {
     let state = unsafe { state.as_mut().unwrap() };
     let output = unsafe { slice::from_raw_parts_mut(output, output_len) };

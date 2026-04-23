@@ -12,7 +12,7 @@ fn compress_array(array: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     assert!(bit_len >= 8);
     assert!(8 * index_bytes >= 7 + bit_len);
 
-    let in_width: usize = (bit_len + 7) / 8 + byte_pad;
+    let in_width: usize = bit_len.div_ceil(8) + byte_pad;
     let out_len = bit_len * array.len() / (8 * in_width);
 
     let mut out = Vec::with_capacity(out_len);
@@ -51,7 +51,7 @@ pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u
     assert!(bit_len >= 8);
     assert!(u32::BITS as usize >= 7 + bit_len);
 
-    let out_width = (bit_len + 7) / 8 + byte_pad;
+    let out_width = bit_len.div_ceil(8) + byte_pad;
     let out_len = 8 * out_width * vin.len() / bit_len;
 
     // Shortcut for parameters where expansion is a no-op
@@ -98,7 +98,7 @@ pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u
 pub(crate) fn minimal_from_indices(p: Params, indices: &[u32]) -> Vec<u8> {
     let c_bit_len = p.collision_bit_length();
     let index_bytes = (u32::BITS / 8) as usize;
-    let digit_bytes = ((c_bit_len + 1) + 7) / 8;
+    let digit_bytes = (c_bit_len + 1).div_ceil(8);
     assert!(digit_bytes <= index_bytes);
 
     let len_indices = indices.len() * index_bytes;
@@ -131,9 +131,9 @@ pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>
         return None;
     }
 
-    assert!(((c_bit_len + 1) + 7) / 8 <= size_of::<u32>());
+    assert!((c_bit_len + 1).div_ceil(8) <= size_of::<u32>());
     let len_indices = u32::BITS as usize * minimal.len() / (c_bit_len + 1);
-    let byte_pad = size_of::<u32>() - ((c_bit_len + 1) + 7) / 8;
+    let byte_pad = size_of::<u32>() - (c_bit_len + 1).div_ceil(8);
 
     let mut csr = Cursor::new(expand_array(minimal, c_bit_len + 1, byte_pad));
     let mut ret = Vec::with_capacity(len_indices);
@@ -151,7 +151,7 @@ pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>
 mod tests {
     use crate::minimal::minimal_from_indices;
 
-    use super::{compress_array, expand_array, indices_from_minimal, Params};
+    use super::{Params, compress_array, expand_array, indices_from_minimal};
 
     #[test]
     fn array_compression_and_expansion() {

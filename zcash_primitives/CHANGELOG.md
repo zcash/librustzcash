@@ -22,7 +22,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
-- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `equihash 0.3`.
 - Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has new `Coinbase` and `TargetIncompatible` variants.
