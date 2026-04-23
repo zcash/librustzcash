@@ -67,6 +67,8 @@ workspace.
 - Notes are now consistently treated as having "uneconomic value" if their value is less
   than **or equal to** the marginal fee. Previously, some call sites only considered
   note uneconomic if their value was less than the marginal fee.
+- `zcash_client_sqlite::WalletDb::update_chain_tip` now correctly handles tips prior to
+  Sapling activation.
 
 ## [0.19.5] - 2026-03-10
 
