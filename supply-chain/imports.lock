@@ -17,6 +17,10 @@ audited_as = "0.3.0"
 version = "0.8.0"
 audited_as = "0.7.2"
 
+[[unpublished.zcash_transparent]]
+version = "0.7.0"
+audited_as = "0.6.4"
+
 [[unpublished.zip321]]
 version = "0.7.0"
 audited_as = "0.6.0"
