@@ -1,5 +1,4 @@
-//! SQLite-backed implementation of [`ShardStore`](shardtree::store::ShardStore)
-//! for note commitment trees.
+//! SQLite-backed implementation of [`ShardStore`] for note commitment trees.
 
 use rusqlite::{self, OptionalExtension, named_params};
 use std::{

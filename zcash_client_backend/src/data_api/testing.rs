@@ -2579,6 +2579,7 @@ pub struct MockWalletDb {
     >,
     account_ids: Vec<u32>,
     addresses_by_account: HashMap<u32, Vec<AddressInfo>>,
+    ufvks_by_account: HashMap<u32, UnifiedFullViewingKey>,
 }
 
 impl MockWalletDb {
@@ -2591,6 +2592,7 @@ impl MockWalletDb {
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), 100),
             account_ids: vec![],
             addresses_by_account: HashMap::new(),
+            ufvks_by_account: HashMap::new(),
         }
     }
 
@@ -2603,6 +2605,20 @@ impl MockWalletDb {
         for (account_id, addresses) in entries {
             wallet.account_ids.push(account_id);
             wallet.addresses_by_account.insert(account_id, addresses);
+        }
+        wallet.account_ids.sort_unstable();
+        wallet
+    }
+
+    #[cfg(all(test, feature = "orchard"))]
+    pub(crate) fn from_account_ufvks(
+        network: Network,
+        entries: impl IntoIterator<Item = (u32, UnifiedFullViewingKey)>,
+    ) -> Self {
+        let mut wallet = Self::new(network);
+        for (account_id, ufvk) in entries {
+            wallet.account_ids.push(account_id);
+            wallet.ufvks_by_account.insert(account_id, ufvk);
         }
         wallet.account_ids.sort_unstable();
         wallet
@@ -2668,9 +2684,13 @@ impl WalletRead for MockWalletDb {
 
     fn get_account(
         &self,
-        _account_id: Self::AccountId,
+        account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        Ok(None)
+        Ok(self
+            .ufvks_by_account
+            .get(&account_id)
+            .cloned()
+            .map(|ufvk| (account_id, ufvk, BlockHeight::from(1))))
     }
 
     fn get_derived_account(

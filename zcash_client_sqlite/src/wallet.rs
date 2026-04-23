@@ -1157,17 +1157,21 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 ///
 /// This is the SQLite-optimized implementation of
 /// [`zcash_client_backend::data_api::WalletRead::find_account_for_address`].
-/// It issues a single SQL query instead of the double for loop required by the default
-/// implementation, using `receiver_flags` and the `cached_transparent_receiver_address`
-/// column to narrow candidates before performing Rust-level receiver verification.
 ///
 /// For non-Unified addresses an exact match on the `address` column (or the
 /// `cached_transparent_receiver_address` column for transparent receivers of stored UAs) is
-/// tried first; if that misses, shielded address types fall back to scanning stored UAs whose
-/// `receiver_flags` indicate a matching receiver.
-/// For Unified Addresses the query fetches every stored address that could share
-/// at least one receiver with the unified address (via transparent cache or shielded-receiver
-/// flags), then [`address_receiver_matches_ua`] confirms the actual overlap.
+/// tried first; if that misses, Sapling addresses fall back to scanning stored UAs whose
+/// `receiver_flags` indicate a matching Sapling receiver, then [`address_receiver_matches_ua`]
+/// confirms the actual overlap.
+///
+/// For Unified Addresses an exact-match SQL query is tried first (covering both the whole
+/// UA string and its cached transparent receiver). If that misses, each account's
+/// [`UnifiedIncomingViewingKey`] is asked whether it derived one of the UA's receivers, via
+/// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]. This finds every UA that any wallet
+/// account could have produced, whether or not it was previously exposed.
+///
+/// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
+/// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers
 pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1269,62 +1273,56 @@ fn find_account_for_unified_address<P: consensus::Parameters>(
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
     use FindAccountForAddressError as E;
 
-    // NULL when the unified_address has no transparent component
+    // Fast path: the UA (or one of its transparent receivers) has already been stored
+    // verbatim for some account.
     let taddr_str = unified_address
         .transparent()
         .map(|t| Address::Transparent(*t).encode(params));
 
-    // Only the shielded receiver bits are relevant here; the transparent receiver is
-    // matched separately via `cached_transparent_receiver_address`.
-    let shielded_flags = ReceiverFlags::from(unified_address) & ReceiverFlags::SHIELDED;
-
-    let mut base_query = conn
-        .prepare_cached(
-            "SELECT accounts.uuid, addresses.address
-                 FROM addresses
-                 JOIN accounts ON accounts.id = addresses.account_id
-                 WHERE exposed_at_height IS NOT NULL
-                 AND (
-                    address = :ua_str
-                    OR cached_transparent_receiver_address = :taddr_str
-                    OR ((:shielded_flags & receiver_flags) != 0)
-                 )",
+    let exact_match = conn
+        .query_row(
+            "SELECT accounts.uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE address = :ua_str
+                OR cached_transparent_receiver_address = :taddr_str
+             LIMIT 1",
+            named_params![
+                ":ua_str": addr_str,
+                ":taddr_str": taddr_str,
+            ],
+            |row| row.get::<_, Uuid>(0),
         )
-        .map_err(|e| E::Backend(e.into()))?;
-    let mut rows = base_query
-        .query(named_params![
-            ":ua_str": addr_str,
-            ":taddr_str": taddr_str,
-            ":shielded_flags": shielded_flags.bits(),
-        ])
+        .optional()
+        .map(|opt| opt.map(AccountUuid::from_uuid))
         .map_err(|e| E::Backend(e.into()))?;
 
-    let mut found_account_uuid: Option<AccountUuid> = None;
+    if exact_match.is_some() {
+        return Ok(exact_match);
+    }
 
-    while let Some(row) = rows
-        .next()
-        .map_err(|e| E::Backend(SqliteClientError::from(e)))?
-    {
-        let row_account_uuid: Uuid = row.get(0).map_err(|e| E::Backend(e.into()))?;
-        let row_addr_str: String = row.get(1).map_err(|e| E::Backend(e.into()))?;
-
-        let row_address = Address::decode(params, &row_addr_str).ok_or_else(|| {
-            E::Backend(SqliteClientError::CorruptedData(
-                "Not a valid Zcash recipient address".to_owned(),
-            ))
-        })?;
-
-        if address_receiver_matches_ua(&row_address, unified_address, params) {
-            let row_account_uuid = AccountUuid::from_uuid(row_account_uuid);
-            match found_account_uuid {
-                None => found_account_uuid = Some(row_account_uuid),
-                Some(prev) if prev == row_account_uuid => {}
+    // Algebraic fallback: ask each account's UIVK whether it derived any receiver of the
+    // UA. This finds every UA that any account in the wallet could have produced, whether
+    // or not it was previously exposed.
+    let mut found_acc_id: Option<AccountUuid> = None;
+    for acc_id in get_account_ids(conn).map_err(|e| E::Backend(e.into()))? {
+        let Some(account) = get_account(conn, params, acc_id).map_err(E::Backend)? else {
+            continue;
+        };
+        if !account
+            .uivk()
+            .decrypt_diversifiers(unified_address)
+            .is_empty()
+        {
+            match found_acc_id {
+                None => found_acc_id = Some(acc_id),
+                Some(prev) if prev == acc_id => {}
                 Some(_) => return Err(E::UnifiedAddressConflict),
             }
         }
     }
 
-    Ok(found_account_uuid)
+    Ok(found_acc_id)
 }
 
 pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(

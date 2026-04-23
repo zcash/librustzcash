@@ -10,15 +10,16 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_keys::keys::OutgoingViewingKey`
+- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_uivk`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::subsumes`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers` —
 - `impl {PartialEq, Eq} for zcash_keys::keys::UnifiedIncomingViewingKey`
 - `zcash_keys::keys::ReceiverRequirementError`
 - `zcash_keys::keys::transparent::DerDecodeError` (behind the
   `transparent-key-encoding` feature flag)
-- `zcash_keys::keys::OutgoingViewingKey`
-- `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`
 - `zcash_keys::keys::transparent::gap_limits` module (behind the
   `transparent-inputs` feature flag), containing:
   - `GapLimits` type (moved from `zcash_client_backend::wallet::transparent`).

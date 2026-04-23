@@ -3426,9 +3426,6 @@ pub trait WalletCommitmentTrees {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "orchard")]
-    use crate::data_api::testing::orchard::OrchardPoolTester;
-
     use crate::data_api::testing::{
         MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
@@ -3458,17 +3455,6 @@ mod tests {
         match SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&[tag; 32])) {
             Address::Sapling(pa) => pa,
             other => panic!("expected Sapling address, got {other:?}"),
-        }
-    }
-
-    #[cfg(feature = "orchard")]
-    fn orchard_address(tag: u8) -> orchard::Address {
-        match OrchardPoolTester::sk_default_address(&OrchardPoolTester::sk(&[tag; 32])) {
-            Address::Unified(ua) => ua
-                .orchard()
-                .copied()
-                .expect("orchard receiver must be present"),
-            other => panic!("expected Orchard UA, got {other:?}"),
         }
     }
 
@@ -3543,12 +3529,10 @@ mod tests {
                 zcash_protocol::consensus::Network::MainNetwork,
                 [(
                     1,
-                    vec![crate::data_api::tests::address_info_of(
-                        crate::data_api::tests::unified_account_with(
-                            Some(transparent.clone()),
-                            Some(sapling_address),
-                        ),
-                    )],
+                    vec![address_info_of(unified_account_with(
+                        Some(transparent),
+                        Some(sapling_address),
+                    ))],
                 )],
             );
             let result = wallet.find_account_for_address(
@@ -3577,33 +3561,34 @@ mod tests {
     }
 
     #[cfg(feature = "orchard")]
+    fn test_ufvk(seed_tag: u8) -> zcash_keys::keys::UnifiedFullViewingKey {
+        zcash_keys::keys::UnifiedSpendingKey::from_seed(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &[seed_tag; 32],
+            zip32::AccountId::ZERO,
+        )
+        .expect("valid seed")
+        .to_unified_full_viewing_key()
+    }
+
+    #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_unified_address_returns_account_when_receivers_map_to_same_account() {
-        let transparent_address = transparent_address_for_tag(7);
-        let sapling_address = sapling_address_for_tag(11);
-        let orchard_address = orchard_address(13);
+        use zcash_keys::keys::UnifiedAddressRequest;
 
-        let wallet = MockWalletDb::from_account_addresses(
+        let ufvk = test_ufvk(1);
+        let wallet = MockWalletDb::from_account_ufvks(
             zcash_protocol::consensus::Network::MainNetwork,
-            [(
-                1,
-                vec![
-                    address_info_of(Address::Transparent(transparent_address)),
-                    address_info_of(Address::Sapling(sapling_address)),
-                    address_info_of(unified_account_with(None, None, Some(orchard_address))),
-                ],
-            )],
+            [(1, ufvk.clone())],
         );
 
-        let ua_with_all_addresses = unified_account_with(
-            Some(transparent_address),
-            Some(sapling_address),
-            Some(orchard_address),
-        );
+        let (ua, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &ua_with_all_addresses,
+            &Address::Unified(ua),
         );
 
         assert_eq!(result.unwrap(), Some(1));
@@ -3612,27 +3597,22 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_unified_address_returns_none_when_no_receiver_matches() {
-        let wallet = MockWalletDb::from_account_addresses(
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        let wallet = MockWalletDb::from_account_ufvks(
             zcash_protocol::consensus::Network::MainNetwork,
-            [(
-                1,
-                vec![
-                    address_info_of(Address::Transparent(transparent_address_for_tag(1))),
-                    address_info_of(Address::Sapling(sapling_address_for_tag(2))),
-                    address_info_of(unified_account_with(None, None, Some(orchard_address(3)))),
-                ],
-            )],
+            [(1, test_ufvk(1))],
         );
 
-        let ua_with_different_receivers = unified_account_with(
-            Some(transparent_address_for_tag(10)),
-            Some(sapling_address_for_tag(11)),
-            Some(orchard_address(12)),
-        );
+        // A UA derived from a different seed — no account in the wallet owns any of its
+        // shielded receivers.
+        let (ua_from_other_seed, _) = test_ufvk(99)
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &ua_with_different_receivers,
+            &Address::Unified(ua_from_other_seed),
         );
 
         assert_eq!(result.unwrap(), None);
@@ -3641,26 +3621,34 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_unified_address_errors_when_receivers_map_to_different_accounts() {
-        let transparent_address = transparent_address_for_tag(21);
-        let sapling_address = sapling_address_for_tag(22);
+        use zcash_keys::keys::UnifiedAddressRequest;
 
-        let wallet = MockWalletDb::from_account_addresses(
+        let ufvk1 = test_ufvk(1);
+        let ufvk2 = test_ufvk(2);
+        let wallet = MockWalletDb::from_account_ufvks(
             zcash_protocol::consensus::Network::MainNetwork,
-            [
-                (
-                    1,
-                    vec![address_info_of(Address::Transparent(transparent_address))],
-                ),
-                (2, vec![address_info_of(Address::Sapling(sapling_address))]),
-            ],
+            [(1, ufvk1.clone()), (2, ufvk2.clone())],
         );
 
-        let invalid_unified_address =
-            unified_account_with(Some(transparent_address), Some(sapling_address), None);
+        let (ua1, _) = ufvk1
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+        let (ua2, _) = ufvk2
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+
+        // A frankenstein UA whose Sapling receiver is from account 1 and whose Orchard
+        // receiver is from account 2.
+        let frankenstein = UnifiedAddress::from_receivers(
+            Some(ua2.orchard().copied().expect("orchard receiver")),
+            Some(ua1.sapling().copied().expect("sapling receiver")),
+            None,
+        )
+        .expect("sapling+orchard UA must be valid");
 
         let result = wallet.find_account_for_address(
             &zcash_protocol::consensus::Network::MainNetwork,
-            &invalid_unified_address,
+            &Address::Unified(frankenstein),
         );
 
         assert!(matches!(
