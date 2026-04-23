@@ -2404,12 +2404,12 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
     /// Generates Orchard Merkle witnesses at a historical height.
     ///
-    /// Copies the wallet's Orchard shard data into an ephemeral in-memory database,
-    /// inserts the provided frontier at `height` as a checkpoint, and generates a
-    /// witness for each of the given note positions.
+    /// Loads the wallet's Orchard shard data into an ephemeral in-memory
+    /// `ShardStore`, inserts the provided frontier at `height` as a checkpoint,
+    /// and generates a witness for each of the given note positions.
     ///
     /// The caller must provide the valid frontier at the given height. The wallet DB
-    /// is strictly read-only; shard data is copied, not modified.
+    /// is strictly read-only; shard data is read but not modified.
     pub fn generate_orchard_witnesses_at_historical_height(
         &self,
         note_positions: &[Position],

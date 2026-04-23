@@ -31,7 +31,8 @@ workspace.
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
 - `WalletDb::generate_orchard_witnesses_at_historical_height` generates Merkle
-  witnesses at a historical height using an ephemeral in-memory tree.
+  witnesses at a historical height using an ephemeral in-memory
+  `shardtree::store::memory::MemoryShardStore`.
 
 ### Changed
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
