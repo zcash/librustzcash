@@ -11,6 +11,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `error::ParseError::NumberMissingDigits` (non-exhaustive): emitted internally
+  by `Value::parse` when a `Number` candidate has no mantissa digits.
+
+### Fixed
+- `Value::parse` no longer classifies inputs that lack any integer digits and
+  any decimal part (e.g. the lone alphabetic inputs `"e"` and `"E"`) as
+  `Value::Number`. Such inputs now correctly parse as `Value::String`, matching
+  the intent of the EIP-681 `value = number / ethereum_address / STRING`
+  grammar. `Number::parse` itself remains permissive for its standalone
+  callers.
+
 ## [0.1.0] - Tue 31 March 2026
 
 - Initial release!
