@@ -7306,7 +7306,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.26.4"
+version = "0.27.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
