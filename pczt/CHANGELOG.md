@@ -13,6 +13,7 @@ workspace.
 ### Added
 - `pczt::ExtractError`
 - `pczt::EffectsOnly`
+- `pczt::orchard::Spend::spend_auth_sig` getter (via `getset`).
 - `pczt::roles::signer`:
   - `Signer::sighash`
   - `Signer::append_transparent_signature`
