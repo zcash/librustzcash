@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-23
+
 ### Added
 - `zcash_protocol::consensus::TxIndex`
 - `zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS`

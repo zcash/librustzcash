@@ -17,6 +17,7 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated to `zcash_protocol 0.8`.
 - `zip321::Payment::new` now returns `Result<Self, PaymentError>` instead of
   `Option<Self>`, providing a meaningful error when a memo is sent to a
   transparent recipient or a zero-valued output is sent to a transparent address.
