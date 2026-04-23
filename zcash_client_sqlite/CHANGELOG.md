@@ -43,7 +43,7 @@ workspace.
   accepts an `output_filter: TransparentOutputFilter` parameter. When set to
   `CoinbaseOnly`, the SQL query restricts results to outputs from coinbase
   transactions (identified by `tx_index = 0`).
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a

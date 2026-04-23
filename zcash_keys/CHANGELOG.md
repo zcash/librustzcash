@@ -39,7 +39,7 @@ workspace.
   `Result<Self, DerDecodeError>` instead of `Result<Self, ()>` (behind the
   `transparent-key-encoding` feature flag).
 - MSRV is now 1.85.1.
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - The `std` feature flag now enables the equivalent flag on the dependencies
   `orchard`, `sapling-crypto`, `zcash_transparent`, and `zcash_address`.
 

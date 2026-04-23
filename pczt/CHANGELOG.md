@@ -21,7 +21,7 @@ workspace.
   - `Signer::apply_orchard_signature`
 
 ### Changed
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - `Pczt::into_effects` now returns `Result<TransactionData<EffectsOnly>, ExtractError>`
   instead of `Option<TransactionData<EffectsOnly>>`.
 - `pczt::roles::io_finalizer::Error` now wraps parse and extract errors
