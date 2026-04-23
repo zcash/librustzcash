@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-23
+
 ### Added
 - `zcash_address::ZcashAddress::is_transparent_only`
 

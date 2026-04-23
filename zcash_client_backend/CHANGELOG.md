@@ -46,7 +46,7 @@ workspace.
   - `impl From<orchard::Note> for Note`
 
 ### Changed
-- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zip321 0.7`, `zcash_encoding 0.4`, `zcash_protocol 0.8`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zip321 0.7`, `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`.
 - `zcash_client_backend::data_api`:
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`

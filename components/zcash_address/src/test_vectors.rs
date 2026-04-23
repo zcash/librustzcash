@@ -5,11 +5,11 @@ pub use crate::unified::address::test_vectors::TEST_VECTORS as UNIFIED;
 #[cfg(test)]
 use {
     crate::{
+        ToAddress, ZcashAddress,
         unified::{
             self,
-            address::{test_vectors::TEST_VECTORS, Receiver},
+            address::{Receiver, test_vectors::TEST_VECTORS},
         },
-        ToAddress, ZcashAddress,
     },
     alloc::string::ToString,
     core::iter,
