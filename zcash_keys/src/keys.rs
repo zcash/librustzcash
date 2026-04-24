@@ -1,6 +1,7 @@
 //! Helper functions for managing light client key material.
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::keys::TransparentKeyScope;
+use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
@@ -1758,6 +1759,34 @@ impl UnifiedIncomingViewingKey {
         self.find_address(DiversifierIndex::new(), request)
     }
 
+    /// Attempts to recover a diversifier index for each of the receivers of the given
+    /// [`UnifiedAddress`].
+    ///
+    /// Returns the empty set if no shielded receiver of `ua` can be attributed to this key.
+    /// Transparent receivers are not considered here, as recovering a diversifier index from a
+    /// transparent receiver alone is not possible without additional context.
+    pub fn decrypt_diversifiers(&self, ua: &UnifiedAddress) -> BTreeSet<DiversifierIndex> {
+        #[cfg(not(feature = "sapling"))]
+        let sapling_di: Option<DiversifierIndex> = None;
+
+        #[cfg(feature = "sapling")]
+        let sapling_di = ua
+            .sapling()
+            .zip(self.sapling().as_ref())
+            .and_then(|(receiver, ivk)| ivk.decrypt_diversifier(receiver));
+
+        #[cfg(not(feature = "orchard"))]
+        let orchard_di: Option<DiversifierIndex> = None;
+
+        #[cfg(feature = "orchard")]
+        let orchard_di = ua
+            .orchard()
+            .zip(self.orchard().as_ref())
+            .and_then(|(receiver, ivk)| ivk.diversifier_index(receiver));
+
+        sapling_di.into_iter().chain(orchard_di).collect()
+    }
+
     /// Convenience method for choosing a set of receiver requirements based upon the given unified
     /// address request and the available items of this key.
     ///
@@ -2340,6 +2369,72 @@ mod tests {
             #[cfg(feature = "transparent-inputs")]
             assert_eq!(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
         }
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "sapling",
+        feature = "orchard",
+        feature = "transparent-inputs"
+    ))]
+    fn uivk_decrypt_diversifier_matches_own_ua_and_rejects_foreign() {
+        use crate::address::UnifiedAddress;
+        use crate::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+
+        let ufvk_a = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[1u8; 32], AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key();
+        let ufvk_b = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[2u8; 32], AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key();
+
+        let (ua_a, mut di_a) = ufvk_a
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+
+        // The UIVK for A recovers the diversifier index used to derive A's own UA.
+        let uivk_a = ufvk_a.to_unified_incoming_viewing_key();
+        let ua_a_dis = uivk_a.decrypt_diversifiers(&ua_a);
+        assert_eq!(ua_a_dis.len(), 1);
+        assert_eq!(ua_a_dis.first(), Some(di_a).as_ref());
+
+        // The UIVK for B, which did not derive A's UA, returns None.
+        let uivk_b = ufvk_b.to_unified_incoming_viewing_key();
+        assert_eq!(uivk_b.decrypt_diversifiers(&ua_a).len(), 0);
+
+        // A frankenstein UA combining A's Sapling receiver with B's Orchard receiver is
+        // attributed to A (matched via Sapling, tried first).
+        let (ua_b, di_b) = ufvk_b
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        let franken = UnifiedAddress::from_receivers(
+            Some(*ua_b.orchard().unwrap()),
+            Some(*ua_a.sapling().unwrap()),
+            None,
+        )
+        .unwrap();
+
+        let franken_dis_a = uivk_a.decrypt_diversifiers(&franken);
+        assert_eq!(franken_dis_a.len(), 1);
+        assert_eq!(franken_dis_a.first(), Some(di_a).as_ref());
+
+        let franken_dis_b = uivk_b.decrypt_diversifiers(&franken);
+        assert_eq!(franken_dis_b.len(), 1);
+        assert_eq!(franken_dis_b.first(), Some(di_b).as_ref());
+
+        di_a.increment()
+            .expect("diversifier space is not exhausted");
+        let (next_ua_a, _) = ufvk_a
+            .find_address(di_a, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        let mixed_ua = UnifiedAddress::from_receivers(
+            Some(*ua_a.orchard().unwrap()),
+            Some(*next_ua_a.sapling().unwrap()),
+            None,
+        )
+        .unwrap();
+        let mixed_dis_a = uivk_a.decrypt_diversifiers(&mixed_ua);
+        assert_eq!(mixed_dis_a.len(), 2);
     }
 
     #[cfg(feature = "unstable")]

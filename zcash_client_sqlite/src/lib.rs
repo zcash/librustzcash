@@ -62,6 +62,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        error::FindAccountForAddressError,
         ll::{
             self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
             wallet::store_decrypted_tx,
@@ -750,6 +751,19 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
         wallet::list_addresses(self.conn.borrow(), &self.params, account)
+    }
+
+    /// Implements this method with a single SQL query, avoiding the O(accounts × addresses)
+    /// scan that delegating to
+    /// [`zcash_client_backend::data_api::defaults::find_account_for_address`] would require.
+    /// See [`zcash_client_backend::data_api::WalletRead::find_account_for_address`] for the
+    /// semantics.
+    fn find_account_for_address<Q: consensus::Parameters>(
+        &self,
+        params: &Q,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
+        wallet::find_account_for_address(self.conn.borrow(), params, address)
     }
 
     fn get_last_generated_address_matching(
@@ -2751,23 +2765,29 @@ mod tests {
 
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use uuid::Uuid;
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::error::FindAccountForAddressError;
     use zcash_client_backend::data_api::{
         Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
         WalletWrite,
         chain::ChainState,
         testing::{TestBuilder, TestState},
     };
+    use zcash_keys::address::UnifiedAddress;
     use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
+    use zip32::DiversifierIndex;
 
     use crate::{
         AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
 
+    use crate::testing::db::TestDb;
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
+    use zcash_protocol::local_consensus::LocalNetwork;
 
     #[test]
     fn validate_seed() {
@@ -3463,5 +3483,368 @@ mod tests {
         assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1.block_meta));
         assert_eq!(st.cache().find_block(h2).unwrap(), None);
         assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+    }
+
+    #[test]
+    fn find_account_for_address_returns_matching_account_for_own_ua() {
+        use zcash_keys::address::Address;
+
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+
+        // Asserts that looking up the exact same UA returns the owning account
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &Address::Unified(ua));
+
+        assert_eq!(result.unwrap(), Some(account.id()));
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_for_unknown_address() {
+        use zcash_keys::address::Address;
+
+        // Create a test wallet with one account
+        let st = create_test_wallet_with_one_account();
+
+        // Build a transparent address that is not present in the wallet DB
+        let unknown_address = Address::Transparent(
+            ::transparent::address::TransparentAddress::PublicKeyHash([0u8; 20]),
+        );
+
+        // Asserts that an unrelated address does not resolve to any account
+        assert_eq!(
+            st.wallet()
+                .find_account_for_address(st.network(), &unknown_address)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn find_account_for_address_returns_matching_account_for_receivers_of_own_ua() {
+        use zcash_keys::address::Address;
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+        // Asserts that looking up a receiver address extracted from the stored UA
+        // returns the owning account via the non-UA query path.
+        if let Some(taddr) = ua.transparent() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Transparent(*taddr));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+        if let Some(pa) = ua.sapling() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Sapling(*pa));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+    }
+
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    #[test]
+    fn find_account_for_ua_finds_via_transparent_receiver_cache() {
+        use crate::AccountRef;
+        use crate::wallet::transparent;
+        use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+        use zcash_keys::address::{Address, UnifiedAddress};
+        use zcash_keys::keys::ReceiverRequirement::*;
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        let acc1_id = account.id();
+
+        let account_rowid = delete_account_addresses(&mut state, acc1_id);
+
+        // Inserts in the DB one row representing a transparent address of that account
+        let transparent_address =
+            UnifiedSpendingKey::from_seed(&state.network(), &[7u8; 32], zip32::AccountId::ZERO)
+                .expect("valid seed")
+                .to_unified_full_viewing_key()
+                .default_address(UnifiedAddressRequest::unsafe_custom(Omit, Require, Require))
+                .unwrap()
+                .0
+                .transparent()
+                .cloned()
+                .expect("UA must have transparent receiver");
+
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                transparent::store_address_range(
+                    wdb.conn.0,
+                    wdb.params(),
+                    AccountRef(account_rowid),
+                    TransparentKeyScope::EXTERNAL,
+                    vec![(
+                        Address::Transparent(transparent_address),
+                        transparent_address,
+                        NonHardenedChildIndex::ZERO,
+                    )],
+                )?;
+                transparent::reserve_next_n_addresses(
+                    wdb.conn.0,
+                    wdb.params(),
+                    AccountRef(account_rowid),
+                    TransparentKeyScope::EXTERNAL,
+                    20,
+                    1,
+                )?;
+                Ok::<_, SqliteClientError>(())
+            })
+            .unwrap();
+
+        // Builds a new UA that shares the transparent receiver, but also has an
+        // Orchard receiver coming from a different seed
+        let usk_external =
+            UnifiedSpendingKey::from_seed(&state.network(), &[99u8; 32], zip32::AccountId::ZERO)
+                .expect("valid seed");
+
+        let o_external = usk_external
+            .to_unified_full_viewing_key()
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable")
+            .0
+            .orchard()
+            .cloned()
+            .expect("orchard receiver must be present");
+        let address = Address::Unified(
+            UnifiedAddress::from_receivers(Some(o_external), None, Some(transparent_address))
+                .expect("orchard+transparent UA must be valid"),
+        );
+
+        // Asserts that the unique possible account is found anyways, based on the transparent address,
+        // since there are no UA conflicts.
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    #[test]
+    fn find_account_for_ua_finds_via_sapling() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &Secret::new(vec![0u8; 32]), &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        // Expose a normal UA for that account and keep only its Sapling receiver
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+
+        let sapling_receiver = ua1
+            .sapling()
+            .cloned()
+            .expect("UA must have sapling receiver");
+
+        let address = Address::Unified(
+            {
+                #[cfg(feature = "orchard")]
+                {
+                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                {
+                    UnifiedAddress::from_receivers(Some(sapling_receiver), None)
+                }
+            }
+            .expect("sapling-only UA must be valid"),
+        );
+
+        // Asserts that the account is still found via the shielded receiver flags path
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_ua_finds_via_orchard() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &Secret::new(vec![0u8; 32]), &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        // Expose a normal UA for that account and keep only its Orchard receiver
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+
+        let orchard_receiver = ua1
+            .orchard()
+            .cloned()
+            .expect("UA must have orchard receiver");
+
+        let address = Address::Unified(
+            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None)
+                .expect("orchard-only UA must be valid"),
+        );
+
+        // Asserts that the account is still found via the shielded receiver flags path
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    /// A UA whose Sapling receiver belongs to account 1 and whose Orchard receiver
+    /// belongs to account 2 must produce a `UnifiedAddressConflict` error.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_ua_errors_when_receivers_map_to_different_accounts() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with two different accounts
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let seed1 = Secret::new(vec![0u8; 32]);
+        let seed2 = Secret::new(vec![1u8; 32]);
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &seed1, &birthday, None)
+            .unwrap();
+        let (acc2_id, _) = state
+            .wallet_mut()
+            .create_account("", &seed2, &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+        let (ua2, _) = generate_unified_address_with_all_available_keys(&mut state, acc2_id);
+
+        // Build a synthetic UA that mixes receivers from two different accounts
+        let sapling_receiver_1 = ua1.sapling().cloned().unwrap();
+        let orchard_receiver_2 = ua2.orchard().cloned().unwrap();
+
+        let invalid_address = Address::Unified(
+            UnifiedAddress::from_receivers(
+                Some(orchard_receiver_2),
+                Some(sapling_receiver_1),
+                None,
+            )
+            .expect("sapling+orchard UA must be valid"),
+        );
+
+        // Asserts that the lookup reports a conflict instead of arbitrarily choosing one account
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &invalid_address);
+        assert!(matches!(
+            result,
+            Err(FindAccountForAddressError::UnifiedAddressConflict)
+        ));
+    }
+
+    fn create_test_wallet_with_one_account() -> TestState<(), TestDb, LocalNetwork> {
+        TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build()
+    }
+
+    fn generate_unified_address_with_all_available_keys(
+        state: &mut TestState<(), TestDb, LocalNetwork>,
+        account_id: AccountUuid,
+    ) -> (UnifiedAddress, DiversifierIndex) {
+        state
+            .wallet_mut()
+            .get_next_available_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("address generation for account 1 must succeed")
+    }
+
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    fn delete_account_addresses(
+        state: &mut TestState<(), TestDb, LocalNetwork>,
+        account_id: AccountUuid,
+    ) -> i64 {
+        use rusqlite::named_params;
+
+        // Remove from the DB all the addresses associated to the account
+        let account_rowid: i64 = state
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT id FROM accounts WHERE uuid = :uuid",
+                named_params![":uuid": account_id.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        state
+            .wallet()
+            .conn()
+            .execute(
+                "DELETE FROM addresses WHERE account_id = :account_id",
+                named_params![":account_id": account_rowid],
+            )
+            .unwrap();
+        account_rowid
     }
 }

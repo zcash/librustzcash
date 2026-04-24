@@ -12,6 +12,13 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `error::FindAccountForAddressError`
+  - `WalletRead::find_account_for_address`
+  - `defaults` module, containing reference implementations of selected `WalletRead` /
+    `WalletWrite` trait methods that backend authors without an indexed implementation can
+    delegate to:
+    - `defaults::find_account_for_address`
+    - `defaults::address_receiver_matches_ua`
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module

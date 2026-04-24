@@ -84,7 +84,7 @@ use zcash_keys::{
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     PoolType, ShieldedProtocol, TxId,
-    consensus::{BlockHeight, TxIndex},
+    consensus::{self, BlockHeight, TxIndex},
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
 };
@@ -105,14 +105,15 @@ use crate::{
 use {
     crate::wallet::TransparentAddressMetadata,
     getset::{CopyGetters, Getters},
-    std::ops::Range,
     std::time::SystemTime,
-    transparent::{
-        address::TransparentAddress,
-        bundle::OutPoint,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
+
+#[cfg(all(
+    feature = "transparent-inputs",
+    any(test, feature = "test-dependencies")
+))]
+use {std::ops::Range, transparent::keys::NonHardenedChildIndex};
 
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;
@@ -124,6 +125,7 @@ use ambassador::delegatable_trait;
 use zcash_protocol::consensus::NetworkUpgrade;
 
 pub mod chain;
+pub mod defaults;
 pub mod error;
 pub mod ll;
 pub mod scanning;
@@ -679,6 +681,7 @@ impl AddressSource {
 }
 
 /// Information about an address in the wallet.
+#[derive(Clone)]
 pub struct AddressInfo {
     address: Address,
     source: AddressSource,
@@ -1160,23 +1163,19 @@ pub enum TransactionDataRequest {
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by determining the status of the specified transaction with respect to the main
     /// chain; if using `lightwalletd` for access to chain data, this may be obtained by
-    /// interpreting the results of the [`GetTransaction`] RPC method. It should then call
+    /// interpreting the results of the `GetTransaction` RPC method. It should then call
     /// [`WalletWrite::set_transaction_status`] to provide the resulting transaction status
     /// information to the wallet backend.
-    ///
-    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
     GetStatus(TxId),
     /// Transaction enhancement (download of complete raw transaction data) is requested.
     ///
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by providing complete data for the specified transaction to
     /// [`wallet::decrypt_and_store_transaction`]; if using `lightwalletd` for access to chain
-    /// state, this may be obtained via the [`GetTransaction`] RPC method. If no data is available
+    /// state, this may be obtained via the `GetTransaction` RPC method. If no data is available
     /// for the specified transaction, this should be reported to the backend using
     /// [`WalletWrite::set_transaction_status`]. A [`TransactionDataRequest::Enhancement`] request
     /// subsumes any previously existing [`TransactionDataRequest::GetStatus`] request.
-    ///
-    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
     Enhancement(TxId),
     /// Information about transactions that receive or spend funds belonging to the specified
     /// transparent address is requested.
@@ -1190,12 +1189,10 @@ pub enum TransactionDataRequest {
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by detecting transactions involving the specified address within the provided block
     /// range; if using `lightwalletd` for access to chain data, this may be performed using the
-    /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
+    /// `GetTaddressTxids` RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
     /// for each transaction so detected. If no transactions are detected within the given range,
     /// the caller should instead invoke [`WalletWrite::notify_address_checked`] with
     /// `block_end_height - 1` as the `as_of_height` argument.
-    ///
-    /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
     #[cfg(feature = "transparent-inputs")]
     TransactionsInvolvingAddress(TransactionsInvolvingAddress),
 }
@@ -1672,6 +1669,59 @@ pub trait WalletRead {
 
     /// Returns information about every address tracked for this account.
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error>;
+
+    /// Returns the wallet account that controls the given address, if any.
+    ///
+    /// Backends that can answer this query from an indexed lookup should implement it
+    /// directly. Backends without such an index can delegate to
+    /// [`defaults::find_account_for_address`], which implements the semantics described below
+    /// using [`UnifiedIncomingViewingKey::decrypt_diversifiers`] and a linear scan over
+    /// [`Self::get_account_ids`] / [`Self::list_addresses`].
+    ///
+    /// # Unified Addresses
+    ///
+    /// For a Unified Address each account's [`UnifiedIncomingViewingKey`] is asked, via
+    /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`], whether it could have derived any
+    /// shielded receiver of the UA. An account matches if at least one shielded receiver is
+    /// attributable to it — including receivers that have never been previously exposed by
+    /// the wallet. If the shielded receivers of the UA are attributable to more than one
+    /// account, this is treated as an inconsistent ("frankenstein") address and
+    /// [`FindAccountForAddressError::UnifiedAddressConflict`] is returned rather than
+    /// arbitrarily selecting one account.
+    ///
+    /// Backends are permitted to additionally resolve UAs by exact match against their
+    /// tracked-address index before (or instead of) running the UIVK-algebra step, provided
+    /// the exact-match result is consistent with at least one account identified by the
+    /// algebraic step.
+    ///
+    /// # Non-Unified Addresses
+    ///
+    /// Backends should resolve bare shielded addresses (Sapling) via the same UIVK-algebraic
+    /// path where feasible, so that an address derivable from an account's UIVK is resolved
+    /// whether or not it has been previously exposed. Backends that do not can treat a bare
+    /// shielded address as an exact-match lookup over their tracked-address index.
+    ///
+    /// Transparent and TEX addresses are resolved by exact match against tracked addresses
+    /// only, since a diversifier index cannot be recovered from a transparent receiver alone.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(account_id))` if the address is controlled by a single account known to
+    ///   this wallet.
+    /// - `Ok(None)` if no receiver of the address is recognized as belonging to any account.
+    /// - `Err(FindAccountForAddressError::Backend(_))` if the lookup fails due to a
+    ///   backend error.
+    /// - `Err(FindAccountForAddressError::UnifiedAddressConflict)` if the provided address
+    ///   is a Unified Address whose receiver components map to different accounts.
+    ///
+    /// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
+    /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers
+    /// [`FindAccountForAddressError::UnifiedAddressConflict`]: error::FindAccountForAddressError::UnifiedAddressConflict
+    fn find_account_for_address<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, error::FindAccountForAddressError<Self::Error>>;
 
     /// Returns the most recently generated unified address for the specified account that conforms
     /// to the specified address filter, if the account identifier specified refers to a valid
@@ -2820,12 +2870,13 @@ impl AccountBirthday {
 ///
 /// An account is treated as having a single root of spending authority that spans the shielded and
 /// transparent rules for the purpose of balance, transaction listing, and so forth. However,
-/// transparent keys imported via [`WalletWrite::import_standalone_transparent_pubkey`] or
-/// [`WalletWrite::import_standalone_transparent_script`] break this abstraction slightly, so
-/// wallets using this API need to be cautious to enforce the invariant that the wallet either
-/// maintains access to the keys required to spend **ALL** outputs received by the account, or that
-/// it **DOES NOT** offer any spending capability for the account, i.e. the account is treated as
-/// view-only for all user-facing operations.
+/// transparent keys imported via `WalletWrite::import_standalone_transparent_pubkey` or
+/// `WalletWrite::import_standalone_transparent_script` (available with the
+/// `transparent-key-import` feature) break this abstraction slightly, so wallets using this API
+/// need to be cautious to enforce the invariant that the wallet either maintains access to the
+/// keys required to spend **ALL** outputs received by the account, or that it **DOES NOT** offer
+/// any spending capability for the account, i.e. the account is treated as view-only for all
+/// user-facing operations.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
@@ -3347,4 +3398,287 @@ pub trait WalletCommitmentTrees {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "orchard")]
+    use crate::data_api::error::FindAccountForAddressError;
+    use crate::data_api::testing::{
+        MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    };
+
+    use transparent::address::TransparentAddress;
+    use zcash_keys::address::{Address, UnifiedAddress};
+    use zip32::DiversifierIndex;
+
+    fn derived_source() -> AddressSource {
+        AddressSource::Derived {
+            diversifier_index: DiversifierIndex::default(),
+            #[cfg(feature = "transparent-inputs")]
+            transparent_key_scope: None,
+        }
+    }
+
+    fn address_info_of(address: Address) -> AddressInfo {
+        AddressInfo::from_parts(address, derived_source())
+            .expect("test address metadata must be valid")
+    }
+
+    fn transparent_address_for_tag(tag: u8) -> TransparentAddress {
+        TransparentAddress::PublicKeyHash([tag; 20])
+    }
+
+    fn sapling_address_for_tag(tag: u8) -> sapling::PaymentAddress {
+        match SaplingPoolTester::sk_default_address(&SaplingPoolTester::sk(&[tag; 32])) {
+            Address::Sapling(pa) => pa,
+            other => panic!("expected Sapling address, got {other:?}"),
+        }
+    }
+
+    fn unified_account_with(
+        transparent: Option<TransparentAddress>,
+        sapling: Option<sapling::PaymentAddress>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
+    ) -> Address {
+        UnifiedAddress::from_receivers(
+            #[cfg(feature = "orchard")]
+            Some(orchard).flatten(),
+            Some(sapling).flatten(),
+            transparent,
+        )
+        .expect("test UA must be valid")
+        .into()
+    }
+
+    #[test]
+    fn find_account_for_transparent_address_returns_matching_account() {
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [
+                (
+                    1,
+                    vec![address_info_of(Address::Transparent(
+                        transparent_address_for_tag(1),
+                    ))],
+                ),
+                (
+                    2,
+                    vec![address_info_of(Address::Transparent(
+                        transparent_address_for_tag(2),
+                    ))],
+                ),
+            ],
+        );
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Transparent(transparent_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_transparent_receiver_in_unified_address_returns_matching_account() {
+        let transparent = transparent_address_for_tag(1);
+        let sapling_address = sapling_address_for_tag(11);
+
+        #[cfg(feature = "orchard")]
+        {
+            let wallet = MockWalletDb::from_account_addresses(
+                zcash_protocol::consensus::Network::MainNetwork,
+                [(
+                    1,
+                    vec![address_info_of(unified_account_with(
+                        Some(transparent),
+                        Some(sapling_address),
+                        None,
+                    ))],
+                )],
+            );
+            let result = wallet.find_account_for_address(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                &Address::Transparent(transparent),
+            );
+            assert_eq!(result.unwrap(), Some(1));
+        }
+        #[cfg(not(feature = "orchard"))]
+        {
+            let wallet = MockWalletDb::from_account_addresses(
+                zcash_protocol::consensus::Network::MainNetwork,
+                [(
+                    1,
+                    vec![address_info_of(unified_account_with(
+                        Some(transparent),
+                        Some(sapling_address),
+                    ))],
+                )],
+            );
+            let result = wallet.find_account_for_address(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                &Address::Transparent(transparent),
+            );
+            assert_eq!(result.unwrap(), Some(1));
+        }
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_when_simple_address_is_unknown() {
+        let address = Address::Transparent(transparent_address_for_tag(1));
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, vec![address_info_of(address)])],
+        );
+
+        let other_address = Address::Transparent(transparent_address_for_tag(9));
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &other_address,
+        );
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    fn test_ufvk(seed_tag: u8) -> zcash_keys::keys::UnifiedFullViewingKey {
+        zcash_keys::keys::UnifiedSpendingKey::from_seed(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &[seed_tag; 32],
+            zip32::AccountId::ZERO,
+        )
+        .expect("valid seed")
+        .to_unified_full_viewing_key()
+    }
+
+    #[test]
+    fn find_account_for_unified_address_returns_account_when_receivers_map_to_same_account() {
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        let ufvk = test_ufvk(1);
+        let wallet = MockWalletDb::from_account_ufvks(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, ufvk.clone())],
+        );
+
+        let (ua, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Unified(ua),
+        );
+
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_unified_address_returns_none_when_no_receiver_matches() {
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        let wallet = MockWalletDb::from_account_ufvks(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, test_ufvk(1))],
+        );
+
+        // A UA derived from a different seed — no account in the wallet owns any of its
+        // shielded receivers.
+        let (ua_from_other_seed, _) = test_ufvk(99)
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Unified(ua_from_other_seed),
+        );
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn find_account_for_sapling_address_resolves_via_uivk_algebra_when_not_previously_exposed() {
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        // A bare Sapling address derivable from an account's UIVK must resolve even when the
+        // wallet has never stored (and therefore never "exposed") that address.
+        let ufvk = test_ufvk(1);
+        let wallet = MockWalletDb::from_account_ufvks(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, ufvk.clone())],
+        );
+
+        let (ua, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+        let sapling_pa = *ua.sapling().expect("sapling receiver");
+
+        // `wallet` has no stored addresses: only the account's UFVK. The list_addresses scan
+        // would therefore miss this address; only the synthesized-UA algebraic path can
+        // resolve it.
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Sapling(sapling_pa),
+        );
+
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_for_empty_wallet() {
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            std::iter::empty(),
+        );
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Transparent(transparent_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), None);
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Sapling(sapling_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_unified_address_errors_when_receivers_map_to_different_accounts() {
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        let ufvk1 = test_ufvk(1);
+        let ufvk2 = test_ufvk(2);
+        let wallet = MockWalletDb::from_account_ufvks(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, ufvk1.clone()), (2, ufvk2.clone())],
+        );
+
+        let (ua1, _) = ufvk1
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+        let (ua2, _) = ufvk2
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+
+        // A frankenstein UA whose Sapling receiver is from account 1 and whose Orchard
+        // receiver is from account 2.
+        let frankenstein = UnifiedAddress::from_receivers(
+            Some(ua2.orchard().copied().expect("orchard receiver")),
+            Some(ua1.sapling().copied().expect("sapling receiver")),
+            None,
+        )
+        .expect("sapling+orchard UA must be valid");
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Unified(frankenstein),
+        );
+
+        assert!(matches!(
+            result,
+            Err(FindAccountForAddressError::UnifiedAddressConflict)
+        ));
+    }
 }
