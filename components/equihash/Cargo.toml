@@ -1,13 +1,13 @@
 [package]
 name = "equihash"
 description = "The Equihash Proof-of-Work function"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Jack Grigg <jack@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
-repository = "https://github.com/zcash/librustzcash"
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.56.1"
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

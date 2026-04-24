@@ -34,13 +34,7 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
-[policy.orchard]
-audit-as-crates-io = true
-
 [policy.pczt]
-audit-as-crates-io = true
-
-[policy.sapling-crypto]
 audit-as-crates-io = true
 
 [policy.zcash]
@@ -844,10 +838,6 @@ criteria = "safe-to-deploy"
 version = "11.1.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.orchard]]
-version = "0.12.0@git:b0bf2670e248958c6ce7c1deed466032e0dbd4d9"
-criteria = "safe-to-deploy"
-
 [[exemptions.ordered-float]]
 version = "2.10.1"
 criteria = "safe-to-deploy"
@@ -1166,10 +1156,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.sanitize-filename]]
 version = "0.6.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sapling-crypto]]
-version = "0.6.2@git:b8a81c22f034d68f9bbd6cba728aab807b9ba2ea"
 criteria = "safe-to-deploy"
 
 [[exemptions.scopeguard]]

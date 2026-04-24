@@ -160,13 +160,9 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
     let cmx = read_cmx(&mut reader)?;
     let encrypted_note = read_note_ciphertext(&mut reader)?;
 
-    Ok(Action::from_parts(
-        nf_old,
-        rk,
-        cmx,
-        encrypted_note,
-        cv_net,
-        (),
+    Action::from_parts(nf_old, rk, cmx, encrypted_note, cv_net, ()).ok_or(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "One or more of the inputs to Orchard action creation were consensus-invalid.",
     ))
 }
 
