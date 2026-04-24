@@ -173,6 +173,15 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
 /// Unlike `select_spendable_notes` (which applies confirmation, dust, and
 /// expiry filters for transaction construction), this returns every note
 /// that existed and was unspent at the given height.
+///
+/// Height filtering uses `transactions.mined_height`, not `transactions.block`.
+/// A transaction is considered to have occurred at its mined height as soon
+/// as the wallet learns of that height (for example, from transparent UTXO
+/// retrieval), even if the containing compact block has not been fully
+/// scanned. In practice the two columns are equivalent for the notes this
+/// query can return, because `nf IS NOT NULL` and
+/// `commitment_tree_position IS NOT NULL` already require a scan of the
+/// block that contains the receiving transaction.
 pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -184,14 +193,13 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
              rn.id AS id, t.txid, rn.action_index,
              rn.diversifier, rn.value, rn.rho, rn.rseed, rn.commitment_tree_position,
              accounts.ufvk AS ufvk, rn.recipient_key_scope,
-             t.block AS mined_height,
+             t.mined_height,
              NULL AS max_shielding_input_height
          FROM orchard_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.transaction_id
          WHERE accounts.uuid = :account_uuid
-           AND t.block IS NOT NULL
-           AND t.block <= :height
+           AND t.mined_height <= :height
            AND rn.nf IS NOT NULL
            AND rn.commitment_tree_position IS NOT NULL
            AND rn.recipient_key_scope IN (0, 1)
@@ -200,8 +208,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
                SELECT rns.orchard_received_note_id
                FROM orchard_received_note_spends rns
                JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
-               WHERE t_spend.block IS NOT NULL
-                 AND t_spend.block <= :height
+               WHERE t_spend.mined_height <= :height
            )
          ORDER BY rn.commitment_tree_position",
     )?;
