@@ -1167,9 +1167,18 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 ///   [`UnifiedIncomingViewingKey::decrypt_diversifiers`]. This finds every UA that any wallet
 ///   account could have produced, whether or not it was previously exposed.
 /// - For Sapling addresses, stored UAs whose `receiver_flags` indicate a matching receiver
-///   are scanned and [`address_receiver_matches_ua`] confirms the actual overlap.
+///   are scanned and [`address_receiver_matches_ua`] confirms the actual overlap. Unlike the
+///   reference implementation at [`defaults::find_account_for_address`], this path does
+///   **not** run UIVK algebra against the bare receiver; a bare Sapling address that is
+///   derivable from an account's UIVK but has never been exposed as the Sapling component
+///   of a tracked address will therefore resolve to `Ok(None)`. Callers that need
+///   derivability-complete resolution for a bare Sapling address can wrap it in a
+///   single-receiver [`UnifiedAddress`] and pass that instead.
 /// - For transparent addresses, no fallback is needed: the exact-match query already covers
 ///   both standalone transparent rows and transparent receivers cached on stored UAs.
+///
+/// [`defaults::find_account_for_address`]: zcash_client_backend::data_api::defaults::find_account_for_address
+/// [`UnifiedAddress`]: zcash_keys::address::UnifiedAddress
 ///
 /// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
 /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers

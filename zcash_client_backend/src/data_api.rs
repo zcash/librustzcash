@@ -1721,25 +1721,47 @@ pub trait WalletRead {
     /// Backends that can answer this query from an indexed lookup should implement it
     /// directly. Backends without such an index can delegate to
     /// [`defaults::find_account_for_address`], which implements the semantics described below
-    /// via a linear scan over [`Self::get_account_ids`] and [`Self::list_addresses`].
+    /// using [`UnifiedIncomingViewingKey::decrypt_diversifiers`] and a linear scan over
+    /// [`Self::get_account_ids`] / [`Self::list_addresses`].
     ///
     /// # Unified Addresses
     ///
-    /// For Unified Addresses, each receiver component (transparent, Sapling, Orchard) is
-    /// matched individually against the wallet's tracked addresses. All matched receivers
-    /// must resolve to the **same** account; if any two receivers map to different accounts,
-    /// this is considered an inconsistent wallet state and `Err` is returned rather than
+    /// For a Unified Address each account's [`UnifiedIncomingViewingKey`] is asked, via
+    /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`], whether it could have derived any
+    /// shielded receiver of the UA. An account matches if at least one shielded receiver is
+    /// attributable to it — including receivers that have never been previously exposed by
+    /// the wallet. If the shielded receivers of the UA are attributable to more than one
+    /// account, this is treated as an inconsistent ("frankenstein") address and
+    /// [`FindAccountForAddressError::UnifiedAddressConflict`] is returned rather than
     /// arbitrarily selecting one account.
+    ///
+    /// Backends are permitted to additionally resolve UAs by exact match against their
+    /// tracked-address index before (or instead of) running the UIVK-algebra step, provided
+    /// the exact-match result is consistent with at least one account identified by the
+    /// algebraic step.
+    ///
+    /// # Non-Unified Addresses
+    ///
+    /// Backends should resolve bare shielded addresses (Sapling) via the same UIVK-algebraic
+    /// path where feasible, so that an address derivable from an account's UIVK is resolved
+    /// whether or not it has been previously exposed. Backends that do not can treat a bare
+    /// shielded address as an exact-match lookup over their tracked-address index.
+    ///
+    /// Transparent and TEX addresses are resolved by exact match against tracked addresses
+    /// only, since a diversifier index cannot be recovered from a transparent receiver alone.
     ///
     /// # Returns
     ///
-    /// - `Ok(Some(account_id))` if the address (or, for Unified Addresses, all matched
-    ///   receiver components) is controlled by a single account known to this wallet.
+    /// - `Ok(Some(account_id))` if the address is controlled by a single account known to
+    ///   this wallet.
     /// - `Ok(None)` if no receiver of the address is recognized as belonging to any account.
     /// - `Err(FindAccountForAddressError::Backend(_))` if the lookup fails due to a
     ///   backend error.
     /// - `Err(FindAccountForAddressError::UnifiedAddressConflict)` if the provided address
     ///   is a Unified Address whose receiver components map to different accounts.
+    ///
+    /// [`UnifiedIncomingViewingKey`]: zcash_keys::keys::UnifiedIncomingViewingKey
+    /// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]: zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers
     fn find_account_for_address<P: consensus::Parameters>(
         &self,
         params: &P,

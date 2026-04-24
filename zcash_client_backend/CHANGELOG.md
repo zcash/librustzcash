@@ -22,10 +22,11 @@ workspace.
   - `defaults` module — reference implementations of selected `WalletRead`/`WalletWrite` trait
     methods that backend authors without an indexed implementation can delegate to:
     - `defaults::find_account_for_address` — reference implementation of
-      `WalletRead::find_account_for_address`. For Unified Addresses it uses each account's
-      `UnifiedIncomingViewingKey::decrypt_diversifier` to attribute receivers to accounts,
-      so it identifies any UA a wallet account could have produced (not only UAs that
-      were previously exposed).
+      `WalletRead::find_account_for_address`. For Unified Addresses (and for bare Sapling
+      addresses, treated as synthesized single-receiver UAs) it uses each account's
+      `UnifiedIncomingViewingKey::decrypt_diversifiers` to attribute receivers to accounts,
+      so it identifies any address a wallet account could have produced (not only addresses
+      that were previously exposed).
     - `defaults::address_receiver_matches_ua` — helper that tests whether an `Address`
       shares any receiver with a given `UnifiedAddress`.
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).

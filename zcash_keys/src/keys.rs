@@ -1762,7 +1762,7 @@ impl UnifiedIncomingViewingKey {
     /// Attempts to recover a diversifier index for each of the receivers of the given
     /// [`UnifiedAddress`].
     ///
-    /// Returns the empty vector if no shielded receiver of `ua` can be attributed to this key.
+    /// Returns the empty set if no shielded receiver of `ua` can be attributed to this key.
     /// Transparent receivers are not considered here, as recovering a diversifier index from a
     /// transparent receiver alone is not possible without additional context.
     pub fn decrypt_diversifiers(&self, ua: &UnifiedAddress) -> BTreeSet<DiversifierIndex> {

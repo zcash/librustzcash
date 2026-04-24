@@ -15,7 +15,7 @@ workspace.
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::subsumes_uivk`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::subsumes`
-- `zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers` —
+- `zcash_keys::keys::UnifiedIncomingViewingKey::decrypt_diversifiers`
 - `impl {PartialEq, Eq} for zcash_keys::keys::UnifiedIncomingViewingKey`
 - `zcash_keys::keys::ReceiverRequirementError`
 - `zcash_keys::keys::transparent::DerDecodeError` (behind the
