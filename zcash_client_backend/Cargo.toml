@@ -274,7 +274,7 @@ unstable = ["dep:byteorder", "zcash_keys/unstable"]
 ## Exposes APIs for unstable serialization formats. These may change at any time.
 unstable-serialization = ["dep:byteorder"]
 
-## Exposes the [`data_api::scanning::spanning_tree`] module.
+## Exposes the `data_api::scanning::spanning_tree` module.
 unstable-spanning-tree = []
 
 [lib]

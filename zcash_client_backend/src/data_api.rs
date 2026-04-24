@@ -1163,23 +1163,19 @@ pub enum TransactionDataRequest {
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by determining the status of the specified transaction with respect to the main
     /// chain; if using `lightwalletd` for access to chain data, this may be obtained by
-    /// interpreting the results of the [`GetTransaction`] RPC method. It should then call
+    /// interpreting the results of the `GetTransaction` RPC method. It should then call
     /// [`WalletWrite::set_transaction_status`] to provide the resulting transaction status
     /// information to the wallet backend.
-    ///
-    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
     GetStatus(TxId),
     /// Transaction enhancement (download of complete raw transaction data) is requested.
     ///
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by providing complete data for the specified transaction to
     /// [`wallet::decrypt_and_store_transaction`]; if using `lightwalletd` for access to chain
-    /// state, this may be obtained via the [`GetTransaction`] RPC method. If no data is available
+    /// state, this may be obtained via the `GetTransaction` RPC method. If no data is available
     /// for the specified transaction, this should be reported to the backend using
     /// [`WalletWrite::set_transaction_status`]. A [`TransactionDataRequest::Enhancement`] request
     /// subsumes any previously existing [`TransactionDataRequest::GetStatus`] request.
-    ///
-    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
     Enhancement(TxId),
     /// Information about transactions that receive or spend funds belonging to the specified
     /// transparent address is requested.
@@ -1193,12 +1189,10 @@ pub enum TransactionDataRequest {
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by detecting transactions involving the specified address within the provided block
     /// range; if using `lightwalletd` for access to chain data, this may be performed using the
-    /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
+    /// `GetTaddressTxids` RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
     /// for each transaction so detected. If no transactions are detected within the given range,
     /// the caller should instead invoke [`WalletWrite::notify_address_checked`] with
     /// `block_end_height - 1` as the `as_of_height` argument.
-    ///
-    /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
     #[cfg(feature = "transparent-inputs")]
     TransactionsInvolvingAddress(TransactionsInvolvingAddress),
 }
