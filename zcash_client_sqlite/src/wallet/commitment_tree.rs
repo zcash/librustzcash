@@ -1205,6 +1205,17 @@ pub(crate) fn check_witnesses(
 ///
 /// Example application: token holder voting. The wallet tree may have advanced past
 /// the historical height, but we need witnesses anchored at that frontier.
+///
+/// # Errors
+///
+/// - [`SqliteClientError::CommitmentTree`] if reading the wallet's shard or
+///   cap data fails, or if the shard data reconstructed from the wallet is
+///   internally inconsistent at a node the computation requires.
+/// - [`SqliteClientError::HistoricalFrontierInvalid`] if `frontier_at_height`
+///   is inconsistent with the shard data reconstructed from the wallet.
+/// - [`SqliteClientError::HistoricalWitnessUnavailable`] if a witness cannot
+///   be generated for one of the requested positions at `height` (most
+///   commonly because the wallet has not yet synced through that height).
 #[cfg(feature = "orchard")]
 pub(crate) fn generate_orchard_witnesses_at_historical_height(
     conn: &rusqlite::Connection,
@@ -1224,6 +1235,8 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
 > {
     // `get_shard_roots` returns addresses ordered by shard index, matching the
     // ascending insertion order required by `MemoryShardStore::put_shard`.
+    // Storage errors flow through `From<ShardTreeError<commitment_tree::Error>>`
+    // into `SqliteClientError::CommitmentTree`.
     let mut store = MemoryShardStore::<orchard::tree::MerkleHashOrchard, BlockHeight>::empty();
     let shard_root_level = Level::new(ORCHARD_SHARD_HEIGHT);
     let shard_roots = get_shard_roots(conn, ORCHARD_TABLES_PREFIX, shard_root_level)
@@ -1248,8 +1261,12 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
         );
 
     // Insert the frontier. `Retention::Checkpoint` causes `ShardTree` to
-    // register a checkpoint at `height` internally, so no separate
-    // `add_checkpoint` call is required.
+    // register a checkpoint at `height` internally.
+    //
+    // `MemoryShardStore::Error` is `Infallible`, so the only variants of
+    // `ShardTreeError` we can observe are `Insert` (a caller-supplied
+    // frontier inconsistent with the loaded shards) and `Query` (an
+    // inconsistency in the loaded shards themselves).
     tree.insert_frontier_nodes(
         frontier_at_height,
         Retention::Checkpoint {
@@ -1257,29 +1274,34 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
             marking: Marking::None,
         },
     )
-    .map_err(|e| {
-        SqliteClientError::CorruptedData(format!("failed to insert frontier nodes: {}", e))
+    .map_err(|e| match e {
+        ShardTreeError::Insert(e) => SqliteClientError::HistoricalFrontierInvalid(e),
+        ShardTreeError::Query(q) => SqliteClientError::CommitmentTree(ShardTreeError::Query(q)),
+        ShardTreeError::Storage(inf) => match inf {},
     })?;
 
-    // Generate witness per note position
+    // Generate a witness per note position. Any `Query` failure (or a `None`
+    // result) at this stage means the tree reconstructed from the wallet's
+    // shards does not contain enough information to compute a witness at
+    // `height`; we surface that as `HistoricalWitnessUnavailable` so the
+    // caller can either sync further or stop requesting that position.
     let mut witnesses = Vec::with_capacity(note_positions.len());
     for &pos in note_positions {
         let merkle_path = tree
             .witness_at_checkpoint_id(pos, &height)
-            .map_err(|e| {
-                SqliteClientError::CorruptedData(format!(
-                    "failed to generate witness for position {}: {} \
-                     (wallet may need to sync through historical height)",
-                    u64::from(pos),
-                    e
-                ))
+            .map_err(|e| match e {
+                ShardTreeError::Query(_) => SqliteClientError::HistoricalWitnessUnavailable {
+                    position: pos,
+                    height,
+                },
+                ShardTreeError::Insert(i) => {
+                    SqliteClientError::CommitmentTree(ShardTreeError::Insert(i))
+                }
+                ShardTreeError::Storage(inf) => match inf {},
             })?
-            .ok_or_else(|| {
-                SqliteClientError::CorruptedData(format!(
-                    "no witness available for position {} \
-                     (wallet missing shard data — sync through historical height)",
-                    u64::from(pos)
-                ))
+            .ok_or(SqliteClientError::HistoricalWitnessUnavailable {
+                position: pos,
+                height,
             })?;
 
         witnesses.push(merkle_path);

@@ -250,6 +250,11 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::StandaloneImportConflict(_) => {
             unreachable!("we do not import standalone transparent addresses in migrations")
         }
+        #[cfg(feature = "orchard")]
+        SqliteClientError::HistoricalFrontierInvalid(_)
+        | SqliteClientError::HistoricalWitnessUnavailable { .. } => {
+            unreachable!("we do not generate historical witnesses in migrations")
+        }
     }
 }
 

@@ -33,6 +33,17 @@ workspace.
 - `WalletDb::generate_orchard_witnesses_at_historical_height` generates Merkle
   witnesses at a historical height using an ephemeral in-memory
   `shardtree::store::memory::MemoryShardStore`.
+- Two new `orchard`-gated variants have been added to
+  `zcash_client_sqlite::error::SqliteClientError` to surface the failure modes
+  of `WalletDb::generate_orchard_witnesses_at_historical_height`:
+  - `HistoricalFrontierInvalid(shardtree::error::InsertionError)` —
+    the caller-supplied frontier is inconsistent with the shard data
+    reconstructed from the wallet at the requested height.
+  - `HistoricalWitnessUnavailable { position, height }` — no witness can be
+    produced for the specified position at the specified height (the wallet
+    most likely has not synced through that height).
+  Shard-read failures continue to surface via the existing
+  `SqliteClientError::CommitmentTree` variant.
 
 ### Changed
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
