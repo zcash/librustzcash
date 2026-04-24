@@ -30,6 +30,8 @@ workspace.
 - `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
+- `WalletDb::get_unspent_orchard_notes_at_historical_height` returns all Orchard
+  notes that existed and were unspent at a given height.
 
 ### Changed
 - Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
