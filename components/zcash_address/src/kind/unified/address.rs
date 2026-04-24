@@ -1,6 +1,6 @@
-use zcash_protocol::{constants, PoolType};
+use zcash_protocol::{PoolType, constants};
 
-use super::{private::SealedItem, ParseError, Typecode};
+use super::{ParseError, Typecode, private::SealedItem};
 
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
@@ -261,7 +261,7 @@ mod tests {
     use zcash_protocol::consensus::NetworkType;
 
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{Container, Encoding, private::SealedContainer},
         unified::address::testing::arb_unified_address,
     };
 

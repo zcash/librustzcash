@@ -28,7 +28,7 @@ impl Params {
         (self.n / (self.k + 1)) as usize
     }
     pub(crate) fn collision_byte_length(&self) -> usize {
-        (self.collision_bit_length() + 7) / 8
+        self.collision_bit_length().div_ceil(8)
     }
     #[cfg(test)]
     pub(crate) fn hash_length(&self) -> usize {

@@ -6,8 +6,8 @@ use core::{
 use zcash_protocol::constants;
 
 use super::{
-    private::{SealedContainer, SealedItem},
     Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedItem},
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -184,8 +184,8 @@ mod tests {
 
     use super::{Ivk, ParseError, Typecode, Uivk};
     use crate::kind::unified::{
-        private::{SealedContainer, SealedItem},
         Container, Encoding,
+        private::{SealedContainer, SealedItem},
     };
     use zcash_protocol::consensus::NetworkType;
 

@@ -32,6 +32,9 @@ workspace.
   database transaction overhead).
 
 ### Changed
+- Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
+  `zcash_protocol 0.8`, `zcash_address 0.11`, `zip321 0.7`, `zcash_transparent 0.7`, 
+  `zcash_primitives 0.27`
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
   collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
   ZIP 316 Revision 2 P2SH support.
@@ -43,7 +46,7 @@ workspace.
   accepts an `output_filter: TransparentOutputFilter` parameter. When set to
   `CoinbaseOnly`, the SQL query restricts results to outputs from coinbase
   transactions (identified by `tx_index = 0`).
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a

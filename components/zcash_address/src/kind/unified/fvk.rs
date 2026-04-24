@@ -6,8 +6,8 @@ use core::{
 use zcash_protocol::constants;
 
 use super::{
-    private::{SealedContainer, SealedItem},
     Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedItem},
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -179,8 +179,8 @@ mod tests {
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
     use crate::kind::unified::{
-        private::{SealedContainer, SealedItem},
         Container, Encoding,
+        private::{SealedContainer, SealedItem},
     };
     use zcash_protocol::consensus::NetworkType;
 

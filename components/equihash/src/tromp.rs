@@ -15,7 +15,7 @@ struct CEqui {
 }
 
 #[link(name = "equitromp")]
-extern "C" {
+unsafe extern "C" {
     #[allow(improper_ctypes)]
     fn equi_new(
         blake2b_clone: extern "C" fn(state: *const State) -> *mut State,
@@ -50,27 +50,27 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
     // SAFETY: caller must supply a valid `eq` instance.
     //
     // Review Note: nsols is set to zero in C++ here
-    equi_setstate(eq, curr_state);
+    unsafe { equi_setstate(eq, curr_state) };
 
     // Initialization done, start algo driver.
-    equi_digit0(eq, 0);
-    equi_clearslots(eq);
+    unsafe { equi_digit0(eq, 0) };
+    unsafe { equi_clearslots(eq) };
     // SAFETY: caller must supply a `p` instance that matches the hard-coded values in the C code.
     for r in 1..p.k {
         if (r & 1) != 0 {
-            equi_digitodd(eq, r, 0)
+            unsafe { equi_digitodd(eq, r, 0) }
         } else {
-            equi_digiteven(eq, r, 0)
+            unsafe { equi_digiteven(eq, r, 0) }
         };
-        equi_clearslots(eq);
+        unsafe { equi_clearslots(eq) };
     }
     // Review Note: nsols is increased here, but only if the solution passes the strictly ordered check.
     // With 256 nonces, we get to around 6/9 digits strictly ordered.
-    equi_digitK(eq, 0);
+    unsafe { equi_digitK(eq, 0) };
 
-    let solutions = {
-        let nsols = equi_nsols(eq);
-        let sols = equi_sols(eq);
+    {
+        let nsols = unsafe { equi_nsols(eq) };
+        let sols = unsafe { equi_sols(eq) };
         let solution_len = 1 << p.k;
         //println!("{nsols} solutions of length {solution_len} at {sols:?}");
 
@@ -78,7 +78,7 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
         // - caller must supply a `p` instance that matches the hard-coded values in the C code.
         // - `sols` is a single allocation containing at least `nsols` solutions.
         // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
-        let solutions: &[u32] = slice::from_raw_parts(sols, nsols * solution_len);
+        let solutions: &[u32] = unsafe { slice::from_raw_parts(sols, nsols * solution_len) };
 
         /*
         println!(
@@ -105,21 +105,19 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
         solutions.sort();
         solutions.dedup();
 
-        solutions
-    };
+        /*
+        println!(
+            "{} solutions as cloned vectors of length {:?}",
+            solutions.len(),
+            solutions
+                .iter()
+                .map(|solution| solution.len())
+                .collect::<Vec<_>>()
+        );
+        */
 
-    /*
-    println!(
-        "{} solutions as cloned vectors of length {:?}",
-        solutions.len(),
         solutions
-            .iter()
-            .map(|solution| solution.len())
-            .collect::<Vec<_>>()
-    );
-    */
-
-    solutions
+    }
 }
 
 /// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with

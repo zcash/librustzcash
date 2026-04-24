@@ -1592,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "equihash"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "blake2b_simd",
  "cc",
@@ -2966,8 +2966,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.12.0"
-source = "git+https://github.com/zcash/orchard.git?rev=b0bf2670e248958c6ce7c1deed466032e0dbd4d9#b0bf2670e248958c6ce7c1deed466032e0dbd4d9"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a36733033adae631acacf46f542f027d508d9025d14797d9b35059494c99eb3"
 dependencies = [
  "aes",
  "bitvec",
@@ -4123,8 +4124,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.6.2"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=b8a81c22f034d68f9bbd6cba728aab807b9ba2ea#b8a81c22f034d68f9bbd6cba728aab807b9ba2ea"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d70756ede56b5e4dd417979777bd87ddb83dfcbd0815dbf8175a9920537f8a0"
 dependencies = [
  "aes",
  "bellman",
@@ -7023,7 +7025,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7214,7 +7216,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_encoding"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "corez",
  "hex",
@@ -7304,7 +7306,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.26.4"
+version = "0.27.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
@@ -7363,7 +7365,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "corez",
  "document-features",
@@ -7403,7 +7405,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "bip32",
  "bs58",
@@ -7494,7 +7496,7 @@ dependencies = [
 
 [[package]]
 name = "zip321"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64",
  "nom",

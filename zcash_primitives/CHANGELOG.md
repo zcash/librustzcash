@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.27.0] - PENDING
+## [0.27.0] - 2026-04-23
 
 ### Added
 - `zcash_primitives::block`:
@@ -22,7 +22,8 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `equihash 0.3`,
+  `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_transparent 0.7`.
 - Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has new `Coinbase` and `TargetIncompatible` variants.

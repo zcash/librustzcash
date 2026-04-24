@@ -10,7 +10,7 @@ use core::num::TryFromIntError;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use bech32::{primitives::decode::CheckedHrpstring, Bech32m, Checksum, Hrp};
+use bech32::{Bech32m, Checksum, Hrp, primitives::decode::CheckedHrpstring};
 
 use zcash_protocol::consensus::NetworkType;
 
@@ -170,7 +170,7 @@ pub(crate) mod private {
     use core::convert::{TryFrom, TryInto};
     use corez::io::Write;
 
-    use super::{ParseError, Typecode, PADDING_LEN};
+    use super::{PADDING_LEN, ParseError, Typecode};
     use zcash_encoding::CompactSize;
     use zcash_protocol::consensus::NetworkType;
 

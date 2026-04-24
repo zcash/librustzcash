@@ -524,7 +524,7 @@ impl From<Infallible> for BalanceError {
 pub mod testing {
     use proptest::prelude::prop_compose;
 
-    use super::{ZatBalance, Zatoshis, MAX_BALANCE, MAX_MONEY};
+    use super::{MAX_BALANCE, MAX_MONEY, ZatBalance, Zatoshis};
 
     prop_compose! {
         pub fn arb_zat_balance()(amt in -MAX_BALANCE..MAX_BALANCE) -> ZatBalance {
