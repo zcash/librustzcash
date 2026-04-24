@@ -12,9 +12,9 @@ use std::{
     sync::Arc,
 };
 
-use incrementalmerkletree::{Address, Hashable, Level, Marking, Position, Retention};
+use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
-    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags, ShardTree,
+    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
     error::{QueryError, ShardTreeError},
     store::{Checkpoint, ShardStore, TreeState},
 };
@@ -29,7 +29,9 @@ use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
 use crate::{error::SqliteClientError, sapling_tree};
 
 #[cfg(feature = "orchard")]
-use shardtree::store::memory::MemoryShardStore;
+use incrementalmerkletree::Marking;
+#[cfg(feature = "orchard")]
+use shardtree::{ShardTree, store::memory::MemoryShardStore};
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
@@ -1220,8 +1222,6 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
     >,
     SqliteClientError,
 > {
-    let frontier_position = frontier_at_height.position();
-
     // `get_shard_roots` returns addresses ordered by shard index, matching the
     // ascending insertion order required by `MemoryShardStore::put_shard`.
     let mut store = MemoryShardStore::<orchard::tree::MerkleHashOrchard, BlockHeight>::empty();
@@ -1247,7 +1247,9 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
             store, 1,
         );
 
-    // Insert frontier + checkpoint
+    // Insert the frontier. `Retention::Checkpoint` causes `ShardTree` to
+    // register a checkpoint at `height` internally, so no separate
+    // `add_checkpoint` call is required.
     tree.insert_frontier_nodes(
         frontier_at_height,
         Retention::Checkpoint {
@@ -1258,10 +1260,6 @@ pub(crate) fn generate_orchard_witnesses_at_historical_height(
     .map_err(|e| {
         SqliteClientError::CorruptedData(format!("failed to insert frontier nodes: {}", e))
     })?;
-
-    tree.store_mut()
-        .add_checkpoint(height, Checkpoint::at_position(frontier_position))
-        .expect("add_checkpoint is infallible");
 
     // Generate witness per note position
     let mut witnesses = Vec::with_capacity(note_positions.len());
