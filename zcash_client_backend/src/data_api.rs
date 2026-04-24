@@ -3404,9 +3404,10 @@ pub trait WalletCommitmentTrees {
 mod tests {
     use super::*;
 
-    use crate::data_api::{
-        error::FindAccountForAddressError,
-        testing::{MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
+    #[cfg(feature = "orchard")]
+    use crate::data_api::error::FindAccountForAddressError;
+    use crate::data_api::testing::{
+        MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
 
     use transparent::address::TransparentAddress;
@@ -3539,7 +3540,6 @@ mod tests {
         assert_eq!(result.unwrap(), None);
     }
 
-    #[cfg(feature = "orchard")]
     fn test_ufvk(seed_tag: u8) -> zcash_keys::keys::UnifiedFullViewingKey {
         zcash_keys::keys::UnifiedSpendingKey::from_seed(
             &zcash_protocol::consensus::Network::MainNetwork,
@@ -3550,7 +3550,6 @@ mod tests {
         .to_unified_full_viewing_key()
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_unified_address_returns_account_when_receivers_map_to_same_account() {
         use zcash_keys::keys::UnifiedAddressRequest;
@@ -3573,7 +3572,6 @@ mod tests {
         assert_eq!(result.unwrap(), Some(1));
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_unified_address_returns_none_when_no_receiver_matches() {
         use zcash_keys::keys::UnifiedAddressRequest;
@@ -3597,7 +3595,6 @@ mod tests {
         assert_eq!(result.unwrap(), None);
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_sapling_address_resolves_via_uivk_algebra_when_not_previously_exposed() {
         use zcash_keys::keys::UnifiedAddressRequest;

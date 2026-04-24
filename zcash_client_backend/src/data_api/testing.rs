@@ -2610,7 +2610,7 @@ impl MockWalletDb {
         wallet
     }
 
-    #[cfg(all(test, feature = "orchard"))]
+    #[cfg(test)]
     pub(crate) fn from_account_ufvks(
         network: Network,
         entries: impl IntoIterator<Item = (u32, UnifiedFullViewingKey)>,

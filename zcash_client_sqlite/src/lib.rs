@@ -3493,7 +3493,7 @@ mod tests {
         let account = state.test_account().cloned().unwrap();
         let acc1_id = account.id();
 
-        let account_rowid = remove_account_from_db(&mut state, acc1_id);
+        let account_rowid = delete_account_addresses(&mut state, acc1_id);
 
         // Inserts in the DB one row representing a transparent address of that account
         let transparent_address =
@@ -3743,9 +3743,9 @@ mod tests {
     }
 
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    fn remove_account_from_db(
+    fn delete_account_addresses(
         state: &mut TestState<(), TestDb, LocalNetwork>,
-        acc1_id: AccountUuid,
+        account_id: AccountUuid,
     ) -> i64 {
         use rusqlite::named_params;
 
@@ -3755,7 +3755,7 @@ mod tests {
             .conn()
             .query_row(
                 "SELECT id FROM accounts WHERE uuid = :uuid",
-                named_params![":uuid": acc1_id.expose_uuid()],
+                named_params![":uuid": account_id.expose_uuid()],
                 |row| row.get(0),
             )
             .unwrap();
