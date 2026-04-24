@@ -3,7 +3,11 @@
 use std::error;
 use std::fmt;
 
+#[cfg(feature = "orchard")]
+use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
+#[cfg(feature = "orchard")]
+use shardtree::error::InsertionError;
 use shardtree::error::ShardTreeError;
 
 #[cfg(feature = "transparent-key-import")]
@@ -116,6 +120,35 @@ pub enum SqliteClientError {
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
 
+    /// The caller-supplied frontier passed to
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`] is
+    /// inconsistent with the shard data reconstructed from the wallet at the
+    /// requested height.
+    ///
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`]:
+    /// crate::WalletDb::generate_orchard_witnesses_at_historical_height
+    #[cfg(feature = "orchard")]
+    HistoricalFrontierInvalid(InsertionError),
+
+    /// A witness could not be generated for the specified position at the
+    /// specified historical height in a call to
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`].
+    ///
+    /// The wallet most likely has not synced through `height`, the checkpoint
+    /// at `height` has been pruned, or `position` does not belong to the
+    /// wallet.
+    ///
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`]:
+    /// crate::WalletDb::generate_orchard_witnesses_at_historical_height
+    #[cfg(feature = "orchard")]
+    HistoricalWitnessUnavailable {
+        /// The note commitment tree position for which a witness was
+        /// requested.
+        position: Position,
+        /// The historical height at which the witness was requested.
+        height: BlockHeight,
+    },
+
     /// The block at the specified height was not available from the block cache.
     CacheMiss(BlockHeight),
 
@@ -187,6 +220,8 @@ impl error::Error for SqliteClientError {
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
             SqliteClientError::AddressGeneration(e) => Some(e),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalFrontierInvalid(e) => Some(e),
             _ => None,
         }
     }
@@ -271,6 +306,17 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::CommitmentTree(err) => write!(
                 f,
                 "An error occurred accessing or updating note commitment tree data: {err}."
+            ),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalFrontierInvalid(err) => write!(
+                f,
+                "The frontier supplied to generate_orchard_witnesses_at_historical_height is inconsistent with the wallet's shard data: {err}"
+            ),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalWitnessUnavailable { position, height } => write!(
+                f,
+                "No witness is available for position {} at height {height} (the wallet may need to sync through this height).",
+                u64::from(*position),
             ),
             SqliteClientError::CacheMiss(height) => write!(
                 f,

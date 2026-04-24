@@ -2428,6 +2428,53 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
             height,
         )
     }
+
+    /// Generates Orchard Merkle witnesses at a historical height.
+    ///
+    /// Loads the wallet's Orchard shard data into an ephemeral in-memory
+    /// `ShardStore`, inserts the provided frontier at `height` as a checkpoint,
+    /// and generates a witness for each of the given note positions.
+    ///
+    /// The caller must provide the valid frontier at the given height. The wallet DB
+    /// is strictly read-only; shard data is read but not modified.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - [`SqliteClientError::CommitmentTree`] if reading the wallet's shard
+    ///   or cap data fails, or if the shard data reconstructed from the
+    ///   wallet is internally inconsistent at a node the computation
+    ///   requires.
+    /// - [`SqliteClientError::HistoricalFrontierInvalid`] if
+    ///   `frontier_at_height` is inconsistent with the shard data
+    ///   reconstructed from the wallet at `height`.
+    /// - [`SqliteClientError::HistoricalWitnessUnavailable`] if a witness
+    ///   cannot be generated for one of `note_positions` at `height` (most
+    ///   commonly because the wallet has not yet synced through that
+    ///   height).
+    pub fn generate_orchard_witnesses_at_historical_height(
+        &self,
+        note_positions: &[Position],
+        frontier_at_height: incrementalmerkletree::frontier::NonEmptyFrontier<
+            orchard::tree::MerkleHashOrchard,
+        >,
+        height: BlockHeight,
+    ) -> Result<
+        Vec<
+            incrementalmerkletree::MerklePath<
+                orchard::tree::MerkleHashOrchard,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >,
+        >,
+        SqliteClientError,
+    > {
+        wallet::commitment_tree::generate_orchard_witnesses_at_historical_height(
+            self.conn.borrow(),
+            note_positions,
+            frontier_at_height,
+            height,
+        )
+    }
 }
 
 /// A handle for the SQLite block source.
