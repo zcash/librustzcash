@@ -3620,6 +3620,55 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     #[test]
+    fn find_account_for_sapling_address_resolves_via_uivk_algebra_when_not_previously_exposed() {
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        // A bare Sapling address derivable from an account's UIVK must resolve even when the
+        // wallet has never stored (and therefore never "exposed") that address.
+        let ufvk = test_ufvk(1);
+        let wallet = MockWalletDb::from_account_ufvks(
+            zcash_protocol::consensus::Network::MainNetwork,
+            [(1, ufvk.clone())],
+        );
+
+        let (ua, _) = ufvk
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable");
+        let sapling_pa = *ua.sapling().expect("sapling receiver");
+
+        // `wallet` has no stored addresses: only the account's UFVK. The list_addresses scan
+        // would therefore miss this address; only the synthesized-UA algebraic path can
+        // resolve it.
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Sapling(sapling_pa),
+        );
+
+        assert_eq!(result.unwrap(), Some(1));
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_for_empty_wallet() {
+        let wallet = MockWalletDb::from_account_addresses(
+            zcash_protocol::consensus::Network::MainNetwork,
+            std::iter::empty(),
+        );
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Transparent(transparent_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), None);
+
+        let result = wallet.find_account_for_address(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &Address::Sapling(sapling_address_for_tag(1)),
+        );
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
     fn find_account_for_unified_address_errors_when_receivers_map_to_different_accounts() {
         use zcash_keys::keys::UnifiedAddressRequest;
 

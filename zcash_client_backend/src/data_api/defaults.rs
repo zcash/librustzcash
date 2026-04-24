@@ -29,15 +29,20 @@ pub fn address_receiver_matches_ua<P: consensus::Parameters>(
 
 /// Reference implementation of [`WalletRead::find_account_for_address`].
 ///
-/// For Unified Addresses this iterates the wallet's accounts and, for each, asks the account's
-/// [`UnifiedIncomingViewingKey`] whether it derived any receiver of the address (see
-/// [`UnifiedIncomingViewingKey::decrypt_diversifiers`]). An account matches if at least one of
-/// the UA's shielded receivers is attributable to it. If more than one account matches, the
-/// UA's receivers are inconsistent across accounts and `UnifiedAddressConflict` is returned.
+/// Any address whose shielded component can be represented as a [`UnifiedAddress`] — either
+/// directly, or by synthesizing a single-receiver UA around a bare Sapling address — is
+/// first resolved via UIVK algebra: each account's
+/// [`UnifiedIncomingViewingKey::decrypt_diversifiers`] is asked whether it could have derived
+/// any shielded receiver of the (possibly synthesized) UA. An account matches if at least
+/// one shielded receiver is attributable to it, which finds addresses the account could
+/// produce even if they have never been exposed. If more than one account matches,
+/// [`FindAccountForAddressError::UnifiedAddressConflict`] is returned.
 ///
-/// For non-Unified Addresses this falls back to a linear scan over each account's tracked
-/// addresses via [`WalletRead::list_addresses`], returning the first account that holds a
-/// matching address (as an exact match, or as a receiver embedded in a stored UA).
+/// If the algebraic step does not resolve a match (or the address has no shielded receiver,
+/// as is the case for transparent and TEX addresses), this falls back to a linear scan over
+/// each account's tracked addresses via [`WalletRead::list_addresses`], returning the first
+/// account that holds a matching address (as an exact match, or as a receiver embedded in a
+/// stored UA).
 ///
 /// Backends that can answer this query more efficiently (e.g. via an indexed database
 /// lookup) should implement [`WalletRead::find_account_for_address`] directly rather than
@@ -52,7 +57,26 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
     params: &P,
     address: &Address,
 ) -> Result<Option<W::AccountId>, FindAccountForAddressError<W::Error>> {
-    if let Address::Unified(ua) = address {
+    // Promote bare shielded addresses to a synthesized single-receiver UA so that every
+    // address with a shielded component is resolved through the same UIVK algebra. The
+    // synthesized UA is owned by this local binding; `shielded_ua` borrows from either the
+    // original address or this binding.
+    let synthesized_ua;
+    let shielded_ua: Option<&UnifiedAddress> = match address {
+        Address::Unified(ua) => Some(ua),
+        Address::Sapling(pa) => {
+            synthesized_ua = UnifiedAddress::from_receivers(
+                #[cfg(feature = "orchard")]
+                None,
+                Some(*pa),
+                None,
+            );
+            synthesized_ua.as_ref()
+        }
+        Address::Transparent(_) | Address::Tex(_) => None,
+    };
+
+    if let Some(ua) = shielded_ua {
         let mut found_acc_id: Option<W::AccountId> = None;
         for acc_id in wallet.get_account_ids()? {
             let Some(account) = wallet.get_account(acc_id)? else {
@@ -66,28 +90,32 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
                 }
             }
         }
-        Ok(found_acc_id)
-    } else {
-        // Non-UA addresses have a single receiver, so no cross-account conflict is
-        // possible; return the first match.
-        let zcash_address = address.to_zcash_address(params);
-        for acc_id in wallet.get_account_ids()? {
-            for addr_info in wallet.list_addresses(acc_id)? {
-                let stored = addr_info.address();
-                if stored == address {
+        if found_acc_id.is_some() {
+            return Ok(found_acc_id);
+        }
+    }
+
+    // Fall back to a linear scan over each account's tracked addresses. This handles
+    // addresses with no shielded component (transparent and TEX) as well as UAs whose
+    // shielded receivers are not derivable from any account's UIVK but whose transparent
+    // receiver matches a stored address.
+    let zcash_address = address.to_zcash_address(params);
+    for acc_id in wallet.get_account_ids()? {
+        for addr_info in wallet.list_addresses(acc_id)? {
+            let stored = addr_info.address();
+            if stored == address {
+                return Ok(Some(acc_id));
+            }
+            if let Address::Unified(stored_ua) = stored {
+                if stored_ua
+                    .as_understood_receivers()
+                    .iter()
+                    .any(|r| r.corresponds(&zcash_address))
+                {
                     return Ok(Some(acc_id));
-                }
-                if let Address::Unified(stored_ua) = stored {
-                    if stored_ua
-                        .as_understood_receivers()
-                        .iter()
-                        .any(|r| r.corresponds(&zcash_address))
-                    {
-                        return Ok(Some(acc_id));
-                    }
                 }
             }
         }
-        Ok(None)
     }
+    Ok(None)
 }
