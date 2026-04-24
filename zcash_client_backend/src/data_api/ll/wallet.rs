@@ -183,10 +183,6 @@ impl<SE, TE> From<GapAddressesError<SE>> for PutBlocksError<SE, TE> {
 }
 
 /// A trait alias capturing the database capabilities required by [`put_blocks`].
-///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be maintained as new
-/// blocks are scanned.
 #[cfg(not(feature = "transparent-inputs"))]
 pub trait PutBlocksDbT<SE, TE, AR>:
     LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>
@@ -201,9 +197,11 @@ impl<T: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>, SE,
 
 /// A trait alias capturing the database capabilities required by [`put_blocks`].
 ///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be maintained as new
-/// blocks are scanned.
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be maintained as new blocks are
+/// scanned.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
 #[cfg(feature = "transparent-inputs")]
 pub trait PutBlocksDbT<SE, TE, AR>:
     LowLevelWalletWrite<Error = SE>
@@ -556,10 +554,6 @@ where
 type GapError<DbT> = <DbT as LowLevelWalletRead>::Error;
 
 /// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
-///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be regenerated after
-/// storing a decrypted transaction.
 #[cfg(not(feature = "transparent-inputs"))]
 pub trait StoreDecryptedTxDbT: LowLevelWalletWrite {}
 
@@ -571,9 +565,11 @@ type GapError<DbT> = GapAddressesError<<DbT as LowLevelWalletRead>::Error>;
 
 /// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
 ///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be regenerated after
-/// storing a decrypted transaction.
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be regenerated after storing a
+/// decrypted transaction.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
 #[cfg(feature = "transparent-inputs")]
 pub trait StoreDecryptedTxDbT:
     LowLevelWalletWrite
