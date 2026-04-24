@@ -188,7 +188,10 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
     account: AccountUuid,
     height: BlockHeight,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let mut stmt = conn.prepare_cached(
+    let external_scope = KeyScope::EXTERNAL.encode();
+    let internal_scope = KeyScope::INTERNAL.encode();
+
+    let mut stmt = conn.prepare_cached(&format!(
         "SELECT
              rn.id AS id, t.txid, rn.action_index,
              rn.diversifier, rn.value, rn.rho, rn.rseed, rn.commitment_tree_position,
@@ -202,7 +205,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
            AND t.mined_height <= :height
            AND rn.nf IS NOT NULL
            AND rn.commitment_tree_position IS NOT NULL
-           AND rn.recipient_key_scope IN (0, 1)
+           AND rn.recipient_key_scope IN ({external_scope}, {internal_scope})
            AND accounts.ufvk IS NOT NULL
            AND rn.id NOT IN (
                SELECT rns.orchard_received_note_id
@@ -211,7 +214,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
                WHERE t_spend.mined_height <= :height
            )
          ORDER BY rn.commitment_tree_position",
-    )?;
+    ))?;
 
     let rows = stmt.query_and_then(
         named_params![
