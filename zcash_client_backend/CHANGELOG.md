@@ -12,23 +12,13 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
-  - `FindAccountForAddressError` — error type returned by `WalletRead::find_account_for_address`,
-    with variants `Backend(E)` for storage errors and `UnifiedAddressConflict` when receivers
-    of a Unified Address map to different accounts.
-  - `WalletRead::find_account_for_address` — required trait method that resolves the wallet
-    account controlling a given address. For Unified Addresses it detects cross-account
-    receiver conflicts and returns `FindAccountForAddressError::UnifiedAddressConflict` in
-    that case.
-  - `defaults` module — reference implementations of selected `WalletRead`/`WalletWrite` trait
-    methods that backend authors without an indexed implementation can delegate to:
-    - `defaults::find_account_for_address` — reference implementation of
-      `WalletRead::find_account_for_address`. For Unified Addresses (and for bare Sapling
-      addresses, treated as synthesized single-receiver UAs) it uses each account's
-      `UnifiedIncomingViewingKey::decrypt_diversifiers` to attribute receivers to accounts,
-      so it identifies any address a wallet account could have produced (not only addresses
-      that were previously exposed).
-    - `defaults::address_receiver_matches_ua` — helper that tests whether an `Address`
-      shares any receiver with a given `UnifiedAddress`.
+  - `error::FindAccountForAddressError`
+  - `WalletRead::find_account_for_address`
+  - `defaults` module, containing reference implementations of selected `WalletRead` /
+    `WalletWrite` trait methods that backend authors without an indexed implementation can
+    delegate to:
+    - `defaults::find_account_for_address`
+    - `defaults::address_receiver_matches_ua`
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
   - `ll` module

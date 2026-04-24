@@ -2734,7 +2734,8 @@ impl WalletRead for MockWalletDb {
         &self,
         params: &P,
         address: &zcash_keys::address::Address,
-    ) -> Result<Option<Self::AccountId>, super::FindAccountForAddressError<Self::Error>> {
+    ) -> Result<Option<Self::AccountId>, super::error::FindAccountForAddressError<Self::Error>>
+    {
         super::defaults::find_account_for_address(self, params, address)
     }
 

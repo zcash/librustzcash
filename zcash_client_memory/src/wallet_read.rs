@@ -7,8 +7,9 @@ use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
 use zcash_client_backend::data_api::{
-    AddressInfo, BlockMetadata, FindAccountForAddressError, NullifierQuery,
-    ReceivedTransactionOutput, WalletRead, WalletSummary, Zip32Derivation, defaults,
+    AddressInfo, BlockMetadata, NullifierQuery, ReceivedTransactionOutput, WalletRead,
+    WalletSummary, Zip32Derivation, defaults,
+    error::FindAccountForAddressError,
     scanning::ScanRange,
     wallet::{ConfirmationsPolicy, TargetHeight},
 };

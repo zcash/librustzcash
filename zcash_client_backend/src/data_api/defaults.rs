@@ -12,7 +12,7 @@
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::consensus;
 
-use super::{Account, FindAccountForAddressError, WalletRead};
+use super::{Account, WalletRead, error::FindAccountForAddressError};
 
 /// Returns `true` if `address` contains any receiver that matches one of the receivers of the
 /// given [`UnifiedAddress`].

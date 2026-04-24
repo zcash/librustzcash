@@ -66,7 +66,7 @@ use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use std::{
     collections::HashMap,
-    fmt::{self, Debug},
+    fmt::Debug,
     hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
@@ -1606,46 +1606,6 @@ pub trait InputSource {
     }
 }
 
-/// Errors that may occur when resolving the account controlling an address.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum FindAccountForAddressError<E> {
-    /// Error returned by the underlying wallet backend.
-    Backend(E),
-
-    /// A Unified Address whose receivers map to different accounts.
-    UnifiedAddressConflict,
-}
-
-impl<E> From<E> for FindAccountForAddressError<E> {
-    fn from(err: E) -> Self {
-        Self::Backend(err)
-    }
-}
-
-impl<E: fmt::Display> fmt::Display for FindAccountForAddressError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FindAccountForAddressError::Backend(e) => {
-                write!(f, "Wallet backend error: {e}")
-            }
-            FindAccountForAddressError::UnifiedAddressConflict => write!(
-                f,
-                "Receivers of the provided Unified Address map to different wallet accounts."
-            ),
-        }
-    }
-}
-
-impl<E: std::error::Error + 'static> std::error::Error for FindAccountForAddressError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            FindAccountForAddressError::Backend(e) => Some(e),
-            FindAccountForAddressError::UnifiedAddressConflict => None,
-        }
-    }
-}
-
 /// Read-only operations required for light wallet functions.
 ///
 /// This trait defines the read-only portion of the storage interface atop which
@@ -1766,7 +1726,7 @@ pub trait WalletRead {
         &self,
         params: &P,
         address: &zcash_keys::address::Address,
-    ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>>;
+    ) -> Result<Option<Self::AccountId>, error::FindAccountForAddressError<Self::Error>>;
 
     /// Returns the most recently generated unified address for the specified account that conforms
     /// to the specified address filter, if the account identifier specified refers to a valid
@@ -3448,8 +3408,9 @@ pub trait WalletCommitmentTrees {
 mod tests {
     use super::*;
 
-    use crate::data_api::testing::{
-        MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    use crate::data_api::{
+        error::FindAccountForAddressError,
+        testing::{MockWalletDb, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
 
     use transparent::address::TransparentAddress;
