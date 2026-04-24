@@ -2408,6 +2408,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
     /// Unlike [`InputSource::select_unspent_notes`] (which applies confirmation,
     /// dust, and expiry filters for transaction construction), this returns every
     /// note that existed and was unspent at the given height.
+    ///
+    /// This function does not verify that a Merkle witness can be constructed
+    /// for each returned note at `height`. Witness construction is a separate
+    /// concern intended to be handled by the callers. As an example, a companion
+    /// `WalletDb::generate_orchard_witnesses_at_historical_height` returns an
+    /// actionable error for any position the wallet cannot witness at `height`
+    /// (for example, because the wallet has not synced through `height`, the checkpoint was pruned,
+    /// or the position does not belong to the wallet).
     pub fn get_unspent_orchard_notes_at_historical_height(
         &self,
         account: AccountUuid,
