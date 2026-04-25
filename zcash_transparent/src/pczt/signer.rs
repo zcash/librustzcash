@@ -31,6 +31,8 @@ impl super::Input {
 
     /// Signs the transparent spend with the given spend authorizing key.
     ///
+    /// The `expected_amount` must be derived from a context trusted by the signer.
+    ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
@@ -223,4 +225,68 @@ pub enum SignerError {
         expected: Zatoshis,
         updater_provided: Zatoshis,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+
+    use zcash_protocol::{value::Zatoshis, TxId};
+    use zcash_script::script;
+
+    use super::SignerError;
+    use crate::{pczt::Input, sighash::SighashType};
+
+    fn input_with_value(value: Zatoshis) -> Input {
+        Input {
+            prevout_txid: TxId::from_bytes([0; 32]),
+            prevout_index: 0,
+            sequence: None,
+            required_time_lock_time: None,
+            required_height_lock_time: None,
+            script_sig: None,
+            value,
+            script_pubkey: script::FromChain::parse(&script::Code(vec![])).unwrap(),
+            redeem_script: None,
+            partial_signatures: BTreeMap::new(),
+            sighash_type: SighashType::ALL,
+            bip32_derivation: BTreeMap::new(),
+            ripemd160_preimages: BTreeMap::new(),
+            sha256_preimages: BTreeMap::new(),
+            hash160_preimages: BTreeMap::new(),
+            hash256_preimages: BTreeMap::new(),
+            proprietary: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn sign_rejects_value_mismatch() {
+        let updater_provided = Zatoshis::from_u64(1000).unwrap();
+        let expected = Zatoshis::from_u64(2000).unwrap();
+        let mut input = input_with_value(updater_provided);
+
+        let secp = secp256k1::Secp256k1::new();
+        let sk = secp256k1::SecretKey::from_slice(&[1; 32]).unwrap();
+
+        let err = input
+            .sign(
+                0,
+                |_| panic!("value mismatch must fail before sighash calculation"),
+                &sk,
+                &secp,
+                expected,
+            )
+            .unwrap_err();
+
+        match err {
+            SignerError::ValueMismatch {
+                expected: err_expected,
+                updater_provided: err_updater_provided,
+            } => {
+                assert_eq!(err_expected, expected);
+                assert_eq!(err_updater_provided, updater_provided);
+            }
+            err => panic!("unexpected signer error: {err:?}"),
+        }
+    }
 }
