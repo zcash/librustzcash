@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use zcash_protocol::value::Zatoshis;
 use zcash_script::solver;
 
 use crate::{
@@ -45,10 +46,22 @@ impl super::Input {
         calculate_sighash: F,
         sk: &secp256k1::SecretKey,
         secp: &secp256k1::Secp256k1<C>,
+        expected_amount: Zatoshis,
     ) -> Result<(), SignerError>
     where
         F: FnOnce(SignableInput) -> [u8; 32],
     {
+        // ZIP-244 binds the input amount into the sighash. If the updater-provided
+        // `self.value` differs from what the caller believes the amount to be, the
+        // signature will be rejected at consensus. Convert that documented
+        // caller-responsibility into a compiler-enforced precondition.
+        if self.value != expected_amount {
+            return Err(SignerError::ValueMismatch {
+                expected: expected_amount,
+                updater_provided: self.value,
+            });
+        }
+
         let pubkey = sk.public_key(secp).serialize();
         let p2pkh_addr = TransparentAddress::from_pubkey_bytes(&pubkey);
 
@@ -201,4 +214,13 @@ pub enum SignerError {
     /// The provided `sk` does not match any pubkey involved with spend control of the
     /// input's spent coin.
     WrongSpendingKey,
+    /// The updater-provided `Input::value` does not match the caller-supplied
+    /// `expected_amount`. ZIP-244 binds the amount into the sighash, so signing
+    /// with a mismatched value would produce a signature rejected at consensus.
+    /// The caller is expected to derive `expected_amount` from already-trusted
+    /// context (the spend record being signed) before invoking the signer.
+    ValueMismatch {
+        expected: Zatoshis,
+        updater_provided: Zatoshis,
+    },
 }
