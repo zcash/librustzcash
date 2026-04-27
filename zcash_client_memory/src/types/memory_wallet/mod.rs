@@ -325,10 +325,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         &self.received_notes
     }
 
-    // TODO: Update this if we switch from using a vec to store received notes to
-    // someething with more efficient lookups
     pub(crate) fn get_received_note(&self, note_id: NoteId) -> Option<&ReceivedNote> {
-        self.received_notes.iter().find(|v| v.note_id() == note_id)
+        self.received_notes.find_by_note_id(&note_id)
     }
 
     pub(crate) fn mark_sapling_note_spent(
@@ -338,10 +336,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     ) -> Result<(), Error> {
         let note_id = self
             .received_notes
-            .iter()
-            .filter(|v| v.nullifier() == Some(&Nullifier::Sapling(nf)))
-            .map(|v| v.note_id())
-            .next()
+            .find_by_nullifier(&Nullifier::Sapling(nf))
+            .map(|n| n.note_id())
             .ok_or(Error::NoteNotFound)?;
         self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
@@ -501,10 +497,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     ) -> Result<(), Error> {
         let note_id = self
             .received_notes
-            .iter()
-            .filter(|v| v.nullifier() == Some(&Nullifier::Orchard(nf)))
-            .map(|v| v.note_id())
-            .next()
+            .find_by_nullifier(&Nullifier::Orchard(nf))
+            .map(|n| n.note_id())
             .ok_or(Error::NoteNotFound)?;
         self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
@@ -1038,7 +1032,6 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    #[allow(unreachable_code, unused_variables)] //FIXME: need address key scope detection
     pub(crate) fn put_transparent_output(
         &mut self,
         output: &WalletTransparentOutput,
@@ -1089,7 +1082,6 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         };
 
         // insert into transparent_received_outputs table. Update if it exists
-        #[allow(clippy::diverging_sub_expression)] // FIXME
         match self
             .transparent_received_outputs
             .entry(output.outpoint().clone())
@@ -1101,11 +1093,19 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 entry.get_mut().txout = output.txout().clone();
             }
             Entry::Vacant(entry) => {
+                // Look up the key scope for this address by checking ephemeral,
+                // unified, and legacy transparent addresses in the account
+                let key_scope = self
+                    .accounts
+                    .get(*receiving_account)
+                    .and_then(|account| account.find_key_scope_for_transparent_address(address))
+                    .unwrap_or(::transparent::keys::TransparentKeyScope::EXTERNAL);
+
                 entry.insert(ReceivedTransparentOutput::new(
                     txid,
                     *receiving_account,
                     *address,
-                    todo!("look up the key scope for the address"),
+                    key_scope,
                     output.txout().clone(),
                     max_observed_unspent.unwrap_or(BlockHeight::from(0)),
                 ));
@@ -1142,5 +1142,27 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                     .is_none_or(|range| meta.address_index().is_some_and(|i| range.contains(&i)))
             })
             .collect::<Vec<_>>())
+    }
+
+    // Public accessor methods for transaction history feature
+
+    /// Returns a reference to the received notes table for transaction history queries
+    pub fn received_notes(&self) -> &ReceivedNoteTable {
+        &self.received_notes
+    }
+
+    /// Returns a reference to the sent notes table for transaction history queries
+    pub fn sent_notes(&self) -> &SentNoteTable {
+        &self.sent_notes
+    }
+
+    /// Returns a reference to the transaction table for transaction history queries
+    pub fn tx_table(&self) -> &TransactionTable {
+        &self.tx_table
+    }
+
+    /// Returns the block_time for a given block height, if the block is in the wallet's cache
+    pub fn get_block_time(&self, height: BlockHeight) -> Option<u32> {
+        self.blocks.get(&height).map(|block| block.block_time)
     }
 }

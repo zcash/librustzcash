@@ -10,6 +10,7 @@ message ReceivedTransparentOutput {
   string address = 3;
   TxOut txout = 4;
   optional uint32 max_observed_unspent_height = 5;
+  optional uint32 key_scope = 6;  // transparent key scope (0=EXTERNAL, 1=INTERNAL, 2=EPHEMERAL)
 }
 
 message TxOut {

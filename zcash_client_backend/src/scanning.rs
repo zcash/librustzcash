@@ -631,6 +631,7 @@ where
 /// Tracks the scanner's position within the note commitment trees, in order to calculate
 /// received note positions.
 struct PositionTracker {
+    block_height: BlockHeight,
     sapling_tree_position: u32,
     sapling_final_tree_size: u32,
     #[cfg(feature = "orchard")]
@@ -640,17 +641,35 @@ struct PositionTracker {
 }
 
 impl PositionTracker {
-    fn sapling_note_position(&self, output_idx: usize) -> Position {
-        Position::from(u64::from(
-            self.sapling_tree_position + u32::try_from(output_idx).unwrap(),
-        ))
+    fn sapling_note_position(&self, output_idx: usize) -> Result<Position, ScanError> {
+        let idx = u32::try_from(output_idx).map_err(|_| ScanError::TreeSizeInvalid {
+            protocol: ShieldedProtocol::Sapling,
+            at_height: self.block_height,
+        })?;
+        let pos = self
+            .sapling_tree_position
+            .checked_add(idx)
+            .ok_or(ScanError::TreeSizeInvalid {
+                protocol: ShieldedProtocol::Sapling,
+                at_height: self.block_height,
+            })?;
+        Ok(Position::from(u64::from(pos)))
     }
 
     #[cfg(feature = "orchard")]
-    fn orchard_note_position(&self, output_idx: usize) -> Position {
-        Position::from(u64::from(
-            self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
-        ))
+    fn orchard_note_position(&self, output_idx: usize) -> Result<Position, ScanError> {
+        let idx = u32::try_from(output_idx).map_err(|_| ScanError::TreeSizeInvalid {
+            protocol: ShieldedProtocol::Orchard,
+            at_height: self.block_height,
+        })?;
+        let pos = self
+            .orchard_tree_position
+            .checked_add(idx)
+            .ok_or(ScanError::TreeSizeInvalid {
+                protocol: ShieldedProtocol::Orchard,
+                at_height: self.block_height,
+            })?;
+        Ok(Position::from(u64::from(pos)))
     }
 }
 
@@ -713,7 +732,7 @@ fn find_received<
     block_height: BlockHeight,
     last_commitments_in_block: bool,
     txid: TxId,
-    note_position: impl Fn(usize) -> Position,
+    note_position: impl Fn(usize) -> Result<Position, ScanError>,
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
     decoded: &[(D, Output)],
@@ -723,10 +742,13 @@ fn find_received<
         &[(D, Output)],
     ) -> Vec<Option<((D::Note, D::Recipient, M), usize)>>,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
-) -> (
-    Vec<WalletOutput<D::Note, Nf, AccountId>>,
-    Vec<(NoteCommitment, Retention<BlockHeight>)>,
-) {
+) -> Result<
+    (
+        Vec<WalletOutput<D::Note, Nf, AccountId>>,
+        Vec<(NoteCommitment, Retention<BlockHeight>)>,
+    ),
+    ScanError,
+> {
     // Check for incoming notes while incrementing tree and witnesses
     let (decrypted_opts, decrypted_len) = if let Some(collect_results) = batch_results {
         let mut decrypted = collect_results(txid);
@@ -798,7 +820,7 @@ fn find_received<
             // - Notes created by consolidation transactions.
             // - Notes sent from one account to itself.
             let is_change = spent_from_accounts.contains(key.account_id());
-            let note_commitment_tree_position = note_position(output_idx);
+            let note_commitment_tree_position = note_position(output_idx)?;
             let nf = key.nf(&note, note_commitment_tree_position);
 
             shielded_outputs.push(WalletOutput::from_parts(
@@ -816,7 +838,7 @@ fn find_received<
         note_commitments.push((node, retention))
     }
 
-    (shielded_outputs, note_commitments)
+    Ok((shielded_outputs, note_commitments))
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

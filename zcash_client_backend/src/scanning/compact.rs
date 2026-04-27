@@ -281,7 +281,7 @@ where
 
         let (sapling_outputs, mut sapling_nc) = find_received(
             cur_height,
-            pos_tracker.compact_tx_contains_last_sapling_outputs_in_block(&tx),
+            pos_tracker.compact_tx_contains_last_sapling_outputs_in_block(&tx)?,
             txid,
             |output_idx| pos_tracker.sapling_note_position(output_idx),
             &scanning_keys.sapling,
@@ -313,14 +313,14 @@ where
                     .collect()
             },
             |output| sapling::Node::from_cmu(&output.cmu),
-        );
+        )?;
         sapling_note_commitments.append(&mut sapling_nc);
         let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
 
         #[cfg(feature = "orchard")]
         let (orchard_outputs, mut orchard_nc) = find_received(
             cur_height,
-            pos_tracker.compact_tx_contains_last_orchard_actions_in_block(&tx),
+            pos_tracker.compact_tx_contains_last_orchard_actions_in_block(&tx)?,
             txid,
             |output_idx| pos_tracker.orchard_note_position(output_idx),
             &scanning_keys.orchard,
@@ -350,7 +350,7 @@ where
                     .collect()
             },
             |output| MerkleHashOrchard::from_cmx(&output.cmx()),
-        );
+        )?;
         #[cfg(feature = "orchard")]
         orchard_note_commitments.append(&mut orchard_nc);
 
@@ -372,7 +372,7 @@ where
             ));
         }
 
-        pos_tracker.increment_over_compact_tx(&tx);
+        pos_tracker.increment_over_compact_tx(&tx)?;
     }
 
     pos_tracker.check_end_of_compact_block_consistency(cur_height, block.chain_metadata)?;
@@ -450,7 +450,10 @@ impl PositionTracker {
                                 .map(&tx_output_count)
                                 .sum::<usize>()
                                 .try_into()
-                                .expect("Shielded output count cannot exceed a u32");
+                                .map_err(|_| ScanError::TreeSizeInvalid {
+                                    protocol,
+                                    at_height,
+                                })?;
 
                             // The default for `final_tree_size(m)` is zero, so we need to
                             // check that the subtraction will not underflow; if it would
@@ -476,8 +479,18 @@ impl PositionTracker {
                     .vtx
                     .iter()
                     .map(tx_output_count)
-                    .map(|tx_outputs| u32::try_from(tx_outputs).unwrap())
-                    .sum::<u32>();
+                    .try_fold(0u32, |acc, count| {
+                        let count = u32::try_from(count).map_err(|_| {
+                            ScanError::TreeSizeInvalid {
+                                protocol,
+                                at_height,
+                            }
+                        })?;
+                        acc.checked_add(count).ok_or(ScanError::TreeSizeInvalid {
+                            protocol,
+                            at_height,
+                        })
+                    })?;
 
             Ok((start_tree_size, end_tree_size))
         }
@@ -506,6 +519,7 @@ impl PositionTracker {
         )?;
 
         Ok(Self {
+            block_height: block.height(),
             sapling_tree_position: sapling_prior_tree_size,
             sapling_final_tree_size,
             #[cfg(feature = "orchard")]
@@ -515,27 +529,46 @@ impl PositionTracker {
         })
     }
 
-    fn compact_tx_contains_last_sapling_outputs_in_block(&self, tx: &CompactTx) -> bool {
-        self.sapling_tree_position
-            + u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32")
-            == self.sapling_final_tree_size
+    fn compact_tx_contains_last_sapling_outputs_in_block(
+        &self,
+        tx: &CompactTx,
+    ) -> Result<bool, ScanError> {
+        let count = u32::try_from(tx.outputs.len()).map_err(|_| ScanError::TreeSizeInvalid {
+            protocol: ShieldedProtocol::Sapling,
+            at_height: self.block_height,
+        })?;
+        Ok(self.sapling_tree_position + count == self.sapling_final_tree_size)
     }
 
     #[cfg(feature = "orchard")]
-    fn compact_tx_contains_last_orchard_actions_in_block(&self, tx: &CompactTx) -> bool {
-        self.orchard_tree_position
-            + u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32")
-            == self.orchard_final_tree_size
+    fn compact_tx_contains_last_orchard_actions_in_block(
+        &self,
+        tx: &CompactTx,
+    ) -> Result<bool, ScanError> {
+        let count = u32::try_from(tx.actions.len()).map_err(|_| ScanError::TreeSizeInvalid {
+            protocol: ShieldedProtocol::Orchard,
+            at_height: self.block_height,
+        })?;
+        Ok(self.orchard_tree_position + count == self.orchard_final_tree_size)
     }
 
-    fn increment_over_compact_tx(&mut self, tx: &CompactTx) {
-        self.sapling_tree_position +=
-            u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
+    fn increment_over_compact_tx(&mut self, tx: &CompactTx) -> Result<(), ScanError> {
+        self.sapling_tree_position += u32::try_from(tx.outputs.len()).map_err(|_| {
+            ScanError::TreeSizeInvalid {
+                protocol: ShieldedProtocol::Sapling,
+                at_height: self.block_height,
+            }
+        })?;
         #[cfg(feature = "orchard")]
         {
-            self.orchard_tree_position +=
-                u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
+            self.orchard_tree_position += u32::try_from(tx.actions.len()).map_err(|_| {
+                ScanError::TreeSizeInvalid {
+                    protocol: ShieldedProtocol::Orchard,
+                    at_height: self.block_height,
+                }
+            })?;
         }
+        Ok(())
     }
 
     fn check_end_of_compact_block_consistency(
@@ -543,12 +576,23 @@ impl PositionTracker {
         at_height: BlockHeight,
         chain_metadata: Option<ChainMetadata>,
     ) -> Result<(), ScanError> {
-        // It is a programming error to construct `PositionTracker` from a `CompactBlock`
-        // and then not call `PositionTracker::increment_over_tx` on every transaction
-        // within the block.
-        assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
+        if self.sapling_tree_position != self.sapling_final_tree_size {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedProtocol::Sapling,
+                at_height,
+                given: self.sapling_final_tree_size,
+                computed: self.sapling_tree_position,
+            });
+        }
         #[cfg(feature = "orchard")]
-        assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
+        if self.orchard_tree_position != self.orchard_final_tree_size {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedProtocol::Orchard,
+                at_height,
+                given: self.orchard_final_tree_size,
+                computed: self.orchard_tree_position,
+            });
+        }
 
         if let Some(chain_meta) = chain_metadata {
             if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
