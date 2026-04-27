@@ -127,7 +127,9 @@ fn transparent_to_orchard() {
 
     // Apply signatures.
     let mut signer = Signer::new(pczt).unwrap();
-    signer.sign_transparent(0, &transparent_sk).unwrap();
+    signer
+        .sign_transparent(0, &transparent_sk, Zatoshis::const_from_u64(1_000_000))
+        .unwrap();
     let pczt = signer.finish();
     check_round_trip(&pczt);
 
@@ -292,7 +294,9 @@ fn transparent_p2sh_multisig_to_orchard() {
     // If we only sign with one of the signers, we can't finalize spends.
     {
         let mut signer = Signer::new(pczt.clone()).unwrap();
-        signer.sign_transparent(0, &transparent_sks[0]).unwrap();
+        signer
+            .sign_transparent(0, &transparent_sks[0], Zatoshis::const_from_u64(1_000_000))
+            .unwrap();
         assert!(matches!(
             SpendFinalizer::new(signer.finish()).finalize_spends(),
             Err(pczt::roles::spend_finalizer::Error::TransparentFinalize(
@@ -304,7 +308,9 @@ fn transparent_p2sh_multisig_to_orchard() {
     // Sign the input with all three signers.
     let mut signer = Signer::new(pczt).unwrap();
     for sk in &transparent_sks {
-        signer.sign_transparent(0, sk).unwrap();
+        signer
+            .sign_transparent(0, sk, Zatoshis::const_from_u64(1_000_000))
+            .unwrap();
     }
     let pczt = signer.finish();
     check_round_trip(&pczt);
