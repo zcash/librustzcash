@@ -781,7 +781,7 @@ impl proposal::Proposal {
                                                             out.index,
                                                         )
                                                     })?
-                                                    .into_wallet_output(),
+                                                    .without_account_id(),
                                             );
                                         }
                                     }

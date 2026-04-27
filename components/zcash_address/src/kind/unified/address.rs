@@ -475,7 +475,10 @@ mod tests {
         // Unknown receiver does not count for any pool type
         let with_unknown = Address(vec![
             Receiver::Orchard([0; 43]),
-            Receiver::Unknown { typecode: 0xAA, data: vec![0; 32] },
+            Receiver::Unknown {
+                typecode: 0xAA,
+                data: vec![0; 32],
+            },
         ]);
         assert!(!with_unknown.has_receiver_of_type(PoolType::SAPLING));
         // Unknown receiver is NOT counted as transparent

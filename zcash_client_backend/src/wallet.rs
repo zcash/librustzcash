@@ -7,6 +7,7 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
+    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
 use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
@@ -21,16 +22,13 @@ use zcash_protocol::{
 use zcash_script::script;
 use zip32::Scope;
 
-use crate::fees::sapling as sapling_fees;
+use crate::{TransferType, fees::sapling as sapling_fees};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-    std::time::SystemTime,
-};
+use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -173,17 +171,20 @@ impl<AccountId> WalletTx<AccountId> {
 
 /// A transparent output controlled by the wallet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletTransparentOutput {
+pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
     txout: TxOut,
     mined_height: Option<BlockHeight>,
+    transfer_type: TransferType,
+    account_id: AccountId,
+    recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
     /// The known serialized input size for this output, if available.
     /// This is set for P2SH outputs where the redeem script is known.
     known_input_size: Option<usize>,
 }
 
-impl WalletTransparentOutput {
+impl<AccountId> WalletTransparentOutput<AccountId> {
     /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
     ///
     /// Returns `None` if the recipient address for the provided [`TxOut`] cannot be
@@ -192,16 +193,39 @@ impl WalletTransparentOutput {
         outpoint: OutPoint,
         txout: TxOut,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
+        transfer_type: TransferType,
+        account_id: AccountId,
+        recipient_key_scope: Option<TransparentKeyScope>,
+    ) -> Option<Self> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
                 mined_height,
+                transfer_type,
+                account_id,
+                recipient_key_scope,
                 recipient_address,
                 known_input_size: None,
             })
+    }
+
+    /// Strips the `AccountId` from this output struct.
+    ///
+    /// Used by the ZIP 321 Proposal type.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn without_account_id(self) -> WalletTransparentOutput<()> {
+        WalletTransparentOutput {
+            outpoint: self.outpoint,
+            txout: self.txout,
+            mined_height: self.mined_height,
+            transfer_type: self.transfer_type,
+            account_id: (),
+            recipient_key_scope: self.recipient_key_scope,
+            recipient_address: self.recipient_address,
+            known_input_size: self.known_input_size,
+        }
     }
 
     /// Sets the known serialized input size for this output.
@@ -218,6 +242,11 @@ impl WalletTransparentOutput {
         &self.outpoint
     }
 
+    /// The index of the output in the transaction that created this output.
+    pub fn index(&self) -> usize {
+        self.outpoint.n() as usize
+    }
+
     /// Returns the transaction output itself.
     pub fn txout(&self) -> &TxOut {
         &self.txout
@@ -226,6 +255,25 @@ impl WalletTransparentOutput {
     /// Returns the height at which the UTXO was mined, if any.
     pub fn mined_height(&self) -> Option<BlockHeight> {
         self.mined_height
+    }
+
+    /// Returns the transparent key scope at which this address was derived, if known.
+    ///
+    /// This metadata MUST be returned for any transparent address derived by the wallet;
+    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
+    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
+    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.recipient_key_scope
+    }
+
+    /// The identifier for the account to which the output belongs.
+    pub fn transfer_type(&self) -> TransferType {
+        self.transfer_type
+    }
+
+    /// The identifier for the account to which the output belongs.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
     }
 
     /// Returns the wallet address that received the UTXO.
@@ -239,7 +287,7 @@ impl WalletTransparentOutput {
     }
 }
 
-impl transparent_fees::InputView for WalletTransparentOutput {
+impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<AccountId> {
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }

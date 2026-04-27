@@ -48,7 +48,7 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::TxOut},
+    ::transparent::{address::TransparentAddress, bundle::TxOut, keys::TransparentKeyScope},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
@@ -598,7 +598,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error> {
         tracing::debug!("put_received_transparent_utxo");
         #[cfg(feature = "transparent-inputs")]
@@ -840,6 +840,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                             ),
                             txout.clone(),
                             d_tx.mined_height(),
+                            TransferType::Incoming,
+                            account_id,
+                            // TODO: Get from somewhere
+                            None,
                         )
                         .unwrap();
                         self.put_transparent_output(
@@ -1169,6 +1173,11 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                             outpoint.clone(),
                             TxOut::new(output.value(), ephemeral_address.script().into()),
                             None,
+                            // TODO: What should this be?
+                            TransferType::WalletInternal,
+                            // TODO: Should this be the sending or receiving account?
+                            *receiving_account,
+                            Some(TransparentKeyScope::EPHEMERAL),
                         )
                         .unwrap();
                         self.put_transparent_output(&txo, receiving_account, true)?;

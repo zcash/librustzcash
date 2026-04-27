@@ -3433,6 +3433,9 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                                     ),
                                     TxOut::new(output.value(), taddr.script().into()),
                                     None,
+                                    TransferType::Outgoing,
+                                    *sent_tx.account_id(),
+                                    Some(TransparentKeyScope::EXTERNAL)
                                 )
                                 .expect(
                                     "can extract a recipient address from an internal address script",
@@ -3505,6 +3508,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         outpoint.clone(),
                         TxOut::new(output.value(), ephemeral_address.script().into()),
                         None,
+                        // TODO: Is this correct?
+                        TransferType::Outgoing,
+                        *sent_tx.account_id(),
+                        Some(TransparentKeyScope::EPHEMERAL),
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
                     sent_tx.target_height().into(),

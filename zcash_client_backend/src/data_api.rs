@@ -1013,84 +1013,6 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     }
 }
 
-/// An unspent transparent output belonging to the wallet, along with derivation key metadata (if
-/// available).
-#[derive(Clone, Debug)]
-#[cfg(feature = "transparent-inputs")]
-pub struct WalletUtxo {
-    wallet_output: WalletTransparentOutput,
-    recipient_key_scope: Option<TransparentKeyScope>,
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl WalletUtxo {
-    /// Constructs a new [`WalletUtxo`] from its constituent parts.
-    pub fn new(
-        wallet_output: WalletTransparentOutput,
-        recipient_key_scope: Option<TransparentKeyScope>,
-    ) -> Self {
-        Self {
-            wallet_output,
-            recipient_key_scope,
-        }
-    }
-
-    /// Returns the [`WalletTransparentOutput`] data for this UTXO.
-    pub fn wallet_output(&self) -> &WalletTransparentOutput {
-        &self.wallet_output
-    }
-
-    /// Consumes this value and returns the [`WalletTransparentOutput`] data for this UTXO.
-    pub fn into_wallet_output(self) -> WalletTransparentOutput {
-        self.wallet_output
-    }
-
-    /// Returns the [`OutPoint`] corresponding to the UTXO.
-    pub fn outpoint(&self) -> &OutPoint {
-        self.wallet_output.outpoint()
-    }
-
-    /// Returns the transaction output itself.
-    pub fn txout(&self) -> &transparent::bundle::TxOut {
-        self.wallet_output.txout()
-    }
-
-    /// Returns the height at which the UTXO was mined, if any.
-    pub fn mined_height(&self) -> Option<BlockHeight> {
-        self.wallet_output.mined_height()
-    }
-
-    /// Returns the wallet address that received the UTXO.
-    pub fn recipient_address(&self) -> &TransparentAddress {
-        self.wallet_output().recipient_address()
-    }
-
-    /// Returns the value of the UTXO
-    pub fn value(&self) -> Zatoshis {
-        self.wallet_output().value()
-    }
-
-    /// Returns the transparent key scope at which this address was derived, if known.
-    ///
-    /// This metadata MUST be returned for any transparent address derived by the wallet;
-    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
-    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
-    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
-        self.recipient_key_scope
-    }
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl zcash_primitives::transaction::fees::transparent::InputView for WalletUtxo {
-    fn outpoint(&self) -> &OutPoint {
-        self.wallet_output.outpoint()
-    }
-
-    fn coin(&self) -> &transparent::bundle::TxOut {
-        self.wallet_output.txout()
-    }
-}
-
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1567,7 +1489,7 @@ pub trait InputSource {
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletUtxo>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -1593,7 +1515,7 @@ pub trait InputSource {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: TransparentOutputFilter,
-    ) -> Result<Vec<WalletUtxo>, Self::Error> {
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -2066,7 +1988,10 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         _outpoint: &OutPoint,
         _spendable_as_of: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<
+        Option<WalletTransparentOutput<<Self as WalletRead>::AccountId>>,
+        <Self as InputSource>::Error,
+    > {
         unimplemented!(
             "WalletTest::get_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -3183,7 +3108,7 @@ pub trait WalletWrite: WalletRead {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.

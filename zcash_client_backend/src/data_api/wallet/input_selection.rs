@@ -598,7 +598,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .compute_balance::<_, DbT::NoteRef>(
                             params,
                             target_height,
-                            &[] as &[WalletTransparentOutput],
+                            &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                             &tr1_transparent_outputs,
                             &sapling::EmptyBundleView,
                             #[cfg(feature = "orchard")]
@@ -619,7 +619,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     let tr1_balance = change_strategy.compute_balance::<_, DbT::NoteRef>(
                         params,
                         target_height,
-                        &[] as &[WalletTransparentOutput],
+                        &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                         &tr1_transparent_outputs,
                         &sapling::EmptyBundleView,
                         #[cfg(feature = "orchard")]
@@ -638,7 +638,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
-                &[] as &[WalletTransparentOutput],
+                &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
@@ -1117,7 +1117,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                         .then_some(utxo.recipient_address())
                 }));
                 input_addrs.extend(utxos.iter().map(|utxo| utxo.recipient_address()));
-                inputs.extend(utxos.into_iter().map(|utxo| utxo.into_wallet_output()));
+                inputs.extend(utxos.into_iter().map(|utxo| utxo.without_account_id()));
 
                 // Funds may be spent from at most one ephemeral address at a time. If there are no
                 // ephemeral addresses, we allow shielding from multiple transparent addresses.
