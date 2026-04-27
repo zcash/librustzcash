@@ -46,6 +46,12 @@ workspace.
     most likely has not synced through that height).
   Shard-read failures continue to surface via the existing
   `SqliteClientError::CommitmentTree` variant.
+- `impl zcash_client_backend::data_api::WalletWrite::mark_transparent_addresses_exposed()`
+  (behind the `transparent-inputs` feature flag). Updates the `exposed_at_height`
+  column of each provided transparent address to the lesser of the existing
+  value and the provided height. The operation is atomic: if any address is not
+  tracked by the wallet, no updates are applied and the call returns
+  `SqliteClientError::AddressNotRecognized` identifying the first such address.
 
 ### Changed
 - Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 

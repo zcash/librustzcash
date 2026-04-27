@@ -1363,6 +1363,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_addresses_exposed(
+        &mut self,
+        exposures: &[(TransparentAddress, BlockHeight)],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.mark_transparent_addresses_exposed(exposures))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn notify_address_checked(
         &mut self,
         request: TransactionsInvolvingAddress,
@@ -1727,6 +1735,18 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             &mut self.rng,
             address,
             offset_seconds,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_addresses_exposed(
+        &mut self,
+        exposures: &[(TransparentAddress, BlockHeight)],
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::mark_transparent_addresses_exposed(
+            self.conn.0,
+            &self.params,
+            exposures,
         )
     }
 

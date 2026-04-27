@@ -7,7 +7,7 @@ use core::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
 ///
-/// Defined in [ZIP 316][zip-0316].
+/// Defined in [ZIP 316](https://zips.z.cash/zip-0316).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
@@ -475,7 +475,10 @@ mod tests {
         // Unknown receiver does not count for any pool type
         let with_unknown = Address(vec![
             Receiver::Orchard([0; 43]),
-            Receiver::Unknown { typecode: 0xAA, data: vec![0; 32] },
+            Receiver::Unknown {
+                typecode: 0xAA,
+                data: vec![0; 32],
+            },
         ]);
         assert!(!with_unknown.has_receiver_of_type(PoolType::SAPLING));
         // Unknown receiver is NOT counted as transparent

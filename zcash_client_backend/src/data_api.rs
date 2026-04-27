@@ -3316,6 +3316,31 @@ pub trait WalletWrite: WalletRead {
         )
     }
 
+    /// Informs the wallet backend that the given transparent addresses are known to have been
+    /// exposed externally at or before the block height paired with each address.
+    ///
+    /// This method is intended for use when a wallet has learned, through means outside the
+    /// observation of the chain by this backend, that addresses under the wallet's control have
+    /// been disclosed to an external party. Calling this method ensures that the wallet's exposure
+    /// metadata accounts for the earlier disclosures.
+    ///
+    /// If the wallet already tracks an earlier exposure for an address, the earlier height is
+    /// retained.
+    ///
+    /// The operation is atomic: if any address in `exposures` is not known to the wallet,
+    /// implementations must roll back all updates performed during the call and return an
+    /// implementation-defined error identifying the first unrecognized address.
+    /// Passing an empty slice is a no-op.
+    #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_addresses_exposed(
+        &mut self,
+        _exposures: &[(TransparentAddress, BlockHeight)],
+    ) -> Result<(), Self::Error> {
+        unimplemented!(
+            "WalletWrite::mark_transparent_addresses_exposed must be overridden for wallets to use the `transparent-inputs` feature"
+        )
+    }
+
     /// Notifies the wallet backend that the given query for transactions involving a particular
     /// address has completed evaluation.
     ///
