@@ -7342,7 +7342,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
