@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-04-27
+
 ### Added
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`
@@ -25,8 +27,6 @@ workspace.
 - `impl zcash_keys::keys::transparent::gap_limits::AddressStore for WalletDb`
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
-- Implement standalone P2SH address import support
-  - `impl zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_script()`
 - `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
   enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
   database transaction overhead).
@@ -46,12 +46,6 @@ workspace.
     most likely has not synced through that height).
   Shard-read failures continue to surface via the existing
   `SqliteClientError::CommitmentTree` variant.
-- `impl zcash_client_backend::data_api::WalletWrite::mark_transparent_addresses_exposed()`
-  (behind the `transparent-inputs` feature flag). Updates the `exposed_at_height`
-  column of each provided transparent address to the lesser of the existing
-  value and the provided height. The operation is atomic: if any address is not
-  tracked by the wallet, no updates are applied and the call returns
-  `SqliteClientError::AddressNotRecognized` identifying the first such address.
 
 ### Changed
 - Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
