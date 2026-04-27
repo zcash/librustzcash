@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-27
+
 ### Added
 - `pczt::ExtractError`
 - `pczt::EffectsOnly`

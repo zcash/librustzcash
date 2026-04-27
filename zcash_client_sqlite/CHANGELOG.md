@@ -56,7 +56,7 @@ workspace.
 ### Changed
 - Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
   `zcash_protocol 0.8`, `zcash_address 0.11`, `zip321 0.7`, `zcash_transparent 0.7`, 
-  `zcash_primitives 0.27`, `zcash_proofs 0.27`, `zcash_keys 0.13`,
+  `zcash_primitives 0.27`, `zcash_proofs 0.27`, `zcash_keys 0.13`, `pczt 0.6`,
   `zcash_client_backend 0.22`
 - The `accounts` table now stores IVK item caches instead of FVK item caches for
   collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
