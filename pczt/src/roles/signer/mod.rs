@@ -116,6 +116,11 @@ impl Signer {
     /// that consensus will reject. Caller derives `expected_amount` from already-trusted
     /// context (the spend record being signed) before invoking the signer. The check is
     /// compiler-enforced via [`transparent::pczt::SignerError::ValueMismatch`].
+    ///
+    /// This check does not replace the caller's broader responsibility to perform
+    /// semantic validity checks on the PCZT before signing. The caller must still
+    /// verify recipients, outputs, change amounts, fees, and any policy-specific
+    /// expectations against trusted context.
     pub fn sign_transparent(
         &mut self,
         index: usize,
@@ -174,8 +179,8 @@ impl Signer {
 
         // Consistency of input value is now checked at the input.sign() boundary via the
         // `expected_amount: Zatoshis` precondition; see `transparent::pczt::Input::sign`
-        // and `SignerError::ValueMismatch`. The closure `f` is responsible for threading
-        // the caller-supplied expected amount through to that check.
+        // and `SignerError::ValueMismatch`. Other semantic checks remain the caller's
+        // responsibility before invoking the signer.
 
         // Generate or apply the signature.
         f(input, &self.tx_data, &self.txid_parts, &self.secp).map_err(Error::TransparentSign)?;
