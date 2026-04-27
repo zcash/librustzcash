@@ -80,6 +80,15 @@ workspace.
     having no economic value in `zcash_client_sqlite`.
   - `chain::scan_cached_blocks` now requires `DbT::AccountId: Sync` (in addition
     to its existing `Send + 'static` bounds).
+  - `chain::scan_cached_blocks` now uses External-only IVKs for batch trial
+    decryption when the scan range extends the fully-scanned chain tip
+    (`from_height == block_fully_scanned() + 1`). Internal-scope change notes
+    are recovered by a targeted per-transaction pass triggered by a nullifier
+    match, an External-IVK match, or the shielding pattern (transparent inputs
+    + shielded outputs + no shielded spends). Non-contiguous scan ranges
+    continue to use both IVKs in the batch. This halves ECDH key-agreement
+    work per output for the common ongoing-sync case without changing
+    wallet-visible behavior.
   - `error::Error::MemoForbidden` has been replaced by
     `Error::Payment(zip321::PaymentError)`, which can represent both
     memo-to-transparent and zero-valued-transparent-output errors.

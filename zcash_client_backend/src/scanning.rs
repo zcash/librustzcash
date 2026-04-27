@@ -284,6 +284,23 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
     pub fn from_account_ufvks(
         ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
     ) -> Self {
+        Self::from_account_ufvks_with_scopes(ufvks, &[Scope::External, Scope::Internal])
+    }
+
+    /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
+    /// using only the specified scopes for key derivation.
+    ///
+    /// Passing `&[Scope::External]` omits internal (change) keys from the key set,
+    /// which is used by [`scan_cached_blocks`] to halve the key-agreement work per
+    /// output during batch trial decryption. Change notes are instead recovered by
+    /// a targeted Internal-IVK pass on wallet-relevant transactions identified by
+    /// nullifier matching, External-IVK matching, or the shielding transaction pattern.
+    ///
+    /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
+    pub(crate) fn from_account_ufvks_with_scopes(
+        ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
+        scopes: &[Scope],
+    ) -> Self {
         #![allow(clippy::type_complexity)]
 
         let mut sapling: HashMap<
@@ -302,7 +319,7 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 
         for (account_id, ufvk) in ufvks {
             if let Some(dfvk) = ufvk.sapling() {
-                for scope in [Scope::External, Scope::Internal] {
+                for &scope in scopes {
                     sapling.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
@@ -317,7 +334,7 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
 
             #[cfg(feature = "orchard")]
             if let Some(fvk) = ufvk.orchard() {
-                for scope in [Scope::External, Scope::Internal] {
+                for &scope in scopes {
                     orchard.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
@@ -618,10 +635,15 @@ where
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
+    // The legacy scan_block API passes both External + Internal IVKs in
+    // scanning_keys, so no targeted Internal pass is needed. Pass an empty
+    // ScanningKeys for internal_keys.
+    let empty_internal = ScanningKeys::empty();
     compact::scan_block_with_runners::<_, _, _, (), ()>(
         params,
         block,
         scanning_keys,
+        &empty_internal,
         nullifiers,
         prior_block_metadata,
         None,
@@ -699,7 +721,7 @@ fn find_spent<
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn find_received<
+pub(crate) fn find_received<
     AccountId: Copy + Eq + Hash,
     D: BatchDomain,
     M,

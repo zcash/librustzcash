@@ -157,6 +157,7 @@ use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::{self, BlockHeight};
+use zip32::Scope;
 
 use crate::{
     data_api::WalletWrite,
@@ -603,7 +604,47 @@ where
     let account_ufvks = data_db
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
-    let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
+
+    // Determine whether this scan range is contiguous with the wallet's fully-scanned
+    // chain tip. If so, blocks are being appended linearly (the common case for ongoing
+    // sync) and we can safely use External-only IVKs for the batch — Internal/change
+    // notes are recovered by the targeted three-trigger check inside
+    // scan_block_with_runners. If non-contiguous (ChainTip jump, FoundNote backfill,
+    // etc.), blocks may be scanned out of order, which means the wallet might not yet
+    // know the nullifiers being spent. In that case, fall back to both IVKs for
+    // correctness.
+    let fully_scanned = data_db.block_fully_scanned().map_err(Error::Wallet)?;
+    let is_contiguous = fully_scanned
+        .as_ref()
+        .is_some_and(|meta| from_height == meta.block_height() + 1);
+
+    let scopes = if is_contiguous {
+        tracing::debug!(
+            "scan_cached_blocks: EXTERNAL-ONLY batch from height {} (contiguous with fully-scanned {})",
+            from_height,
+            fully_scanned.as_ref().map(|m| m.block_height()).unwrap(),
+        );
+        vec![Scope::External]
+    } else {
+        tracing::debug!(
+            "scan_cached_blocks: BOTH IVKs batch from height {} (non-contiguous, fully-scanned: {:?})",
+            from_height,
+            fully_scanned.as_ref().map(|m| m.block_height()),
+        );
+        vec![Scope::External, Scope::Internal]
+    };
+
+    let scanning_keys = ScanningKeys::from_account_ufvks_with_scopes(
+        account_ufvks.iter().map(|(id, ufvk)| (*id, ufvk.clone())),
+        &scopes,
+    );
+    let internal_keys = if is_contiguous {
+        ScanningKeys::from_account_ufvks_with_scopes(account_ufvks, &[Scope::Internal])
+    } else {
+        // Both scopes are already in scanning_keys; no separate Internal pass needed.
+        drop(account_ufvks);
+        ScanningKeys::empty()
+    };
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
@@ -633,6 +674,7 @@ where
                 params,
                 block,
                 &scanning_keys,
+                &internal_keys,
                 &nullifiers,
                 prior_block_metadata.as_ref(),
                 Some(&mut runners),
