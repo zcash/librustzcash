@@ -290,18 +290,23 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             #[cfg(feature = "orchard")]
             orchard_start_position: Position,
         }
-        let start_positions = blocks.first().map(|block| BlockPositions {
-            height: block.height(),
-            sapling_start_position: Position::from(
-                u64::from(block.sapling().final_tree_size())
-                    - u64::try_from(block.sapling().commitments().len()).unwrap(),
-            ),
-            #[cfg(feature = "orchard")]
-            orchard_start_position: Position::from(
-                u64::from(block.orchard().final_tree_size())
-                    - u64::try_from(block.orchard().commitments().len()).unwrap(),
-            ),
-        });
+        let start_positions = blocks
+            .first()
+            .map(|block| {
+                Ok::<_, Error>(BlockPositions {
+                    height: block.height(),
+                    sapling_start_position: Position::from(
+                        u64::from(block.sapling().final_tree_size())
+                            - u64::try_from(block.sapling().commitments().len())?,
+                    ),
+                    #[cfg(feature = "orchard")]
+                    orchard_start_position: Position::from(
+                        u64::from(block.orchard().final_tree_size())
+                            - u64::try_from(block.orchard().commitments().len())?,
+                    ),
+                })
+            })
+            .transpose()?;
 
         let mut sapling_commitments = vec![];
         #[cfg(feature = "orchard")]
@@ -322,7 +327,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
                 // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
                 for spend in transaction.sapling_spends() {
-                    println!(
+                    tracing::debug!(
                         "marking note {:?} as spent in transaction {:?}",
                         spend.nf(),
                         txid
@@ -413,11 +418,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                 _transactions: transactions.keys().cloned().collect(),
                 _memos: memos,
                 sapling_commitment_tree_size: Some(block.sapling().final_tree_size()),
-                sapling_output_count: Some(block.sapling().commitments().len().try_into().unwrap()),
+                sapling_output_count: Some(block.sapling().commitments().len().try_into()?),
                 #[cfg(feature = "orchard")]
                 orchard_commitment_tree_size: Some(block.orchard().final_tree_size()),
                 #[cfg(feature = "orchard")]
-                orchard_action_count: Some(block.orchard().commitments().len().try_into().unwrap()),
+                orchard_action_count: Some(block.orchard().commitments().len().try_into()?),
             };
 
             // Insert transaction metadata into the transaction table
@@ -709,7 +714,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     );
                 }
                 TransferType::Incoming => {
-                    todo!("store decrypted tx sapling incoming")
+                    // Store incoming Sapling note
+                    let received_note =
+                        ReceivedNote::from_decrypted_sapling_output(d_tx.tx().txid(), output)?;
+                    self.received_notes.insert_received_note(received_note);
                 }
             }
         }
@@ -780,7 +788,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     );
                 }
                 TransferType::Incoming => {
-                    todo!("store decrypted tx orchard incoming")
+                    // Store incoming Orchard note
+                    let received_note =
+                        ReceivedNote::from_decrypted_orchard_output(d_tx.tx().txid(), output)?;
+                    self.received_notes.insert_received_note(received_note);
                 }
             }
         }
@@ -836,12 +847,14 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         let wallet_transparent_output = WalletTransparentOutput::from_parts(
                             OutPoint::new(
                                 d_tx.tx().txid().into(),
-                                u32::try_from(output_index).unwrap(),
+                                u32::try_from(output_index)?,
                             ),
                             txout.clone(),
                             d_tx.mined_height(),
                         )
-                        .unwrap();
+                        .ok_or(Error::CorruptedData(
+                            "transparent output has no recipient address".to_string(),
+                        ))?;
                         self.put_transparent_output(
                             &wallet_transparent_output,
                             &account_id,
@@ -1257,7 +1270,10 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         _request: TransactionsInvolvingAddress,
         _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
-        todo!()
+        // No-op for now - this notifies that an address range was checked for transactions.
+        // In the sqlite implementation, this updates address metadata tracking.
+        // For the memory wallet, we don't need to track this state.
+        Ok(())
     }
 
     #[cfg(feature = "transparent-key-import")]

@@ -186,13 +186,12 @@ where
         &self,
         protocol: zcash_protocol::ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<NoteId, Note>>, Error> {
-        Ok(self
-            .received_notes
+        self.received_notes
             .iter()
             .filter(|rn| rn.note.protocol() == protocol)
             .cloned()
-            .map(Into::into)
-            .collect())
+            .map(TryInto::try_into)
+            .collect()
     }
 
     /// Returns the note IDs for shielded notes sent by the wallet in a particular
