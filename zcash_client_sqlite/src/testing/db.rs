@@ -1,3 +1,6 @@
+// Required to avoid warnings on deprecated `Delegate`'d trait methods.
+#![allow(deprecated)]
+
 use ambassador::Delegate;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;

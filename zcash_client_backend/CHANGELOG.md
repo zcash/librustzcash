@@ -8,6 +8,12 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Deprecated
+- `zcash_client_backend::data_api::WalletWrite::truncate_to_height` has been
+  deprecated. Use `truncate_to_chain_state` or `rewind_to_height` instead.
+
 ## [0.22.0] - 2026-04-27
 
 ### Added

@@ -415,7 +415,7 @@ where
 
             // Rewind to the chosen height.
             db_data
-                .truncate_to_height(rewind_height)
+                .rewind_to_height(rewind_height)
                 .map_err(Error::Wallet)?;
 
             // Delete cached blocks from rewind_height onwards.

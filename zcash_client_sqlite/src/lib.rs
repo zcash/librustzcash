@@ -1324,6 +1324,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.store_transactions_to_be_sent(transactions))
     }
 
+    #[allow(deprecated)]
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
         self.transactionally(|wdb| wdb.truncate_to_height(max_height))
     }

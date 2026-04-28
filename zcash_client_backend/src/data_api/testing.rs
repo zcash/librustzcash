@@ -807,8 +807,8 @@ where
     /// Truncates the test wallet and block cache to the specified height, discarding all data from
     /// blocks at heights greater than the specified height, excluding transaction data that may
     /// not be recoverable from the chain.
-    pub fn truncate_to_height(&mut self, height: BlockHeight) {
-        self.wallet_mut().truncate_to_height(height).unwrap();
+    pub fn rewind_to_height(&mut self, height: BlockHeight) {
+        self.wallet_mut().rewind_to_height(height).unwrap();
         self.cache.truncate_to_height(height);
         self.cached_blocks.split_off(&(height + 1));
         self.latest_block_height = Some(height);
@@ -818,7 +818,7 @@ where
     /// height but does not truncate the block cache. This is useful for circumstances when you
     /// want to re-scan a set of cached blocks.
     pub fn truncate_to_height_retaining_cache(&mut self, height: BlockHeight) {
-        self.wallet_mut().truncate_to_height(height).unwrap();
+        self.wallet_mut().rewind_to_height(height).unwrap();
         self.latest_block_height = Some(height);
     }
 }
@@ -2986,10 +2986,7 @@ impl WalletWrite for MockWalletDb {
         Ok(())
     }
 
-    fn truncate_to_height(
-        &mut self,
-        _block_height: BlockHeight,
-    ) -> Result<BlockHeight, Self::Error> {
+    fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
         Err(())
     }
 
@@ -2997,7 +2994,8 @@ impl WalletWrite for MockWalletDb {
         Err(())
     }
 
-    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+    #[allow(deprecated)]
+    fn truncate_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
         Err(())
     }
 

@@ -3230,6 +3230,7 @@ pub trait WalletWrite: WalletRead {
     /// There may be restrictions on heights to which it is possible to truncate. Specifically, it
     /// will only be possible to truncate to heights at which is is possible to create a witness
     /// given the current state of the wallet's note commitment tree.
+    #[deprecated(note = "use truncate_to_chain_state or rewind_to_height instead")]
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
 
     /// Truncates the wallet database to the specified chain state.

@@ -4207,6 +4207,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     );
 }
 
+#[allow(deprecated)]
 pub fn data_db_truncation<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     Dsf: DataStoreFactory,
@@ -4268,6 +4269,7 @@ where
     );
 }
 
+#[allow(deprecated)]
 pub fn truncate_to_chain_state<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     Dsf: DataStoreFactory,
@@ -5593,7 +5595,7 @@ where
 
     // Now, fully truncate back to the reorg height. This should leave the tree in a state
     // where it can be added to with arbitrary notes.
-    st.truncate_to_height(reorg_height);
+    st.rewind_to_height(reorg_height);
 
     // Generate some new random blocks
     for _ in 0..10 {

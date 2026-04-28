@@ -301,9 +301,7 @@ where
     );
 
     // Unmine the shielding transaction via a reorg.
-    st.wallet_mut()
-        .truncate_to_height(mined_height - 1)
-        .unwrap();
+    st.wallet_mut().rewind_to_height(mined_height - 1).unwrap();
     assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
 
     // The wallet should still have zero transparent balance.
