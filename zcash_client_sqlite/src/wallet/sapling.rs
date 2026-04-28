@@ -535,6 +535,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn z_to_t_account_detection() {
+        testing::pool::z_to_t_account_detection::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn change_note_spends_succeed() {
         testing::pool::change_note_spends_succeed::<SaplingPoolTester>()
     }
