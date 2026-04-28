@@ -9,6 +9,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-27
+
 ### Added
 - `zcash_keys::keys::OutgoingViewingKey`
 - `zcash_keys::keys::UnifiedFullViewingKey::select_ovk`

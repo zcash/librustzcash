@@ -3145,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7039,7 +7039,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.21.2"
+version = "0.22.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7160,7 +7160,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.19.5"
+version = "0.20.0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7254,7 +7254,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7342,7 +7342,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "bellman",
  "blake2b_simd",

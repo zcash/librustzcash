@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-27
+
 ### Added
 - `pczt::ExtractError`
 - `pczt::EffectsOnly`
@@ -22,7 +24,7 @@ workspace.
 
 ### Changed
 - Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zcash_protocol 0.8`, 
-  `zcash_transparent 0.7`, `zcash_primitives 0.27`.
+  `zcash_transparent 0.7`, `zcash_primitives 0.27`, `zcash_proofs 0.27`.
 - `Pczt::into_effects` now returns `Result<TransactionData<EffectsOnly>, ExtractError>`
   instead of `Option<TransactionData<EffectsOnly>>`.
 - `pczt::roles::io_finalizer::Error` now wraps parse and extract errors

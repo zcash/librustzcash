@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.22.0] - PLANNED
+## [0.22.0] - 2026-04-27
 
 ### Added
 - `zcash_client_backend::data_api`:
@@ -55,7 +55,8 @@ workspace.
 ### Changed
 - Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zip321 0.7`,
   `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`,
-  `zcash_transparent 0.7`, `zcash_primitives 0.27`.
+  `zcash_transparent 0.7`, `zcash_primitives 0.27`, `zcash_proofs 0.27`,
+  `zcash_keys 0.13`, `pczt 0.6`.
 - `zcash_client_backend::data_api`:
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`

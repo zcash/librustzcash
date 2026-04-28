@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-04-27
+
 ### Changed
 - MSRV is now 1.85.1.
 - Migrated to `sapling-crypto 0.7`, `zcash_primitives 0.27`.
