@@ -45,7 +45,7 @@ zcash_protocol = { version = "0.7.2", path = "components/zcash_protocol", defaul
 zip321 = { version = "0.6", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
-zcash_tachyon = { git = "https://github.com/tachyon-zcash/tachyon.git", rev = "2c6b0e0478698a654471d47cd9d2c4589aa7ecb9", default-features = false }
+zcash_tachyon = { git = "https://github.com/S1nus/tachyon.git", rev = "ef33123ba06984caff80eaca4e80b0694b4a0731", default-features = false }
 zcash_primitives = { version = "0.26", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.26", path = "zcash_proofs", default-features = false }
 
