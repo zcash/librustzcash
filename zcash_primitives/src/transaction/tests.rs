@@ -426,85 +426,88 @@ fn tachyon_v6_test_vectors() {
         assert!(tx.tachyon_bundle().is_none());
     }
 
-    // V6_TX_TACHYON_NO_STAMP: 1 action, no stamp, value_balance = 0
+    // V6_TX_TACHYON_STRIPPED: 1 action, Adjunct stamp (post-aggregation), value_balance = 0
     {
-        let tx = read_and_roundtrip(&V6_TX_TACHYON_NO_STAMP);
+        let tx = read_and_roundtrip(&V6_TX_TACHYON_STRIPPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
-        assert_eq!(bundle.actions.len(), 1);
-        assert!(bundle.stamp.is_none());
-        assert_eq!(bundle.value_balance, 0);
+        let stripped = match bundle {
+            zcash_tachyon::TachyonBundle::Stripped(s) => s,
+            zcash_tachyon::TachyonBundle::Stamped(_) => panic!("expected Stripped variant"),
+        };
+        assert_eq!(stripped.actions.len(), 1);
+        assert_eq!(stripped.value_balance, 0);
 
-        // Verify action field values match zebra vector generation
-        let action = &bundle.actions[0];
-        // cv = EpAffine::generator() in zebra
+        let action = &stripped.actions[0];
         let cv_point: EpAffine = action.cv.into();
         assert_eq!(cv_point, EpAffine::generator());
-        // rk derived from seed [0x42; 64]
         assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
-        // sig = [0x01; 64]
         assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
-        // binding_sig = [0x02; 64]
-        assert_eq!(<[u8; 64]>::from(bundle.binding_sig), [0x02u8; 64]);
+        assert_eq!(<[u8; 64]>::from(stripped.binding_sig), [0x02u8; 64]);
+        // Adjunct.wtxid set to [0xEE; 64] in zebra fixture.
+        assert_eq!(stripped.stamp.wtxid, [0xEEu8; 64]);
     }
 
-    // V6_TX_TACHYON_WITH_STAMP: 1 action, stamp with 1 tachygram, value_balance = 100
+    // V6_TX_TACHYON_STAMPED: 1 action, stamp with 1 tachygram, value_balance = 100
     {
-        let tx = read_and_roundtrip(&V6_TX_TACHYON_WITH_STAMP);
+        let tx = read_and_roundtrip(&V6_TX_TACHYON_STAMPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
-        assert_eq!(bundle.actions.len(), 1);
-        assert_eq!(bundle.value_balance, 100);
+        let stamped = match bundle {
+            zcash_tachyon::TachyonBundle::Stamped(s) => s,
+            zcash_tachyon::TachyonBundle::Stripped(_) => panic!("expected Stamped variant"),
+        };
+        assert_eq!(stamped.actions.len(), 1);
+        assert_eq!(stamped.value_balance, 100);
 
-        // Verify action fields
-        let action = &bundle.actions[0];
+        let action = &stamped.actions[0];
         let cv_point: EpAffine = action.cv.into();
         assert_eq!(cv_point, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
         assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
-        assert_eq!(<[u8; 64]>::from(bundle.binding_sig), [0x02u8; 64]);
+        assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
 
-        // Verify stamp contents match zebra's fp_from_seed construction
-        let stamp = bundle.stamp.as_ref().expect("expected stamp");
-        assert_eq!(stamp.tachygrams.len(), 1);
-        let tg_fp: Fp = stamp.tachygrams[0].into();
+        assert_eq!(stamped.stamp.tachygrams.len(), 1);
+        let tg_fp: Fp = (&stamped.stamp.tachygrams[0]).into();
         assert_eq!(tg_fp, Fp::from_uniform_bytes(&[0xAAu8; 64]));
-        let anchor_fp: Fp = stamp.anchor.into();
-        assert_eq!(anchor_fp, Fp::from_uniform_bytes(&[0xBBu8; 64]));
+        // Zebra fixture builds the anchor by reading 64 zero bytes through
+        // tachyon's wire format (height 0, commitment from [0; 32]).
+        let expected_anchor = zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap();
+        assert_eq!(stamped.stamp.anchor, expected_anchor);
     }
 
     // V6_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300
     {
         let tx = read_and_roundtrip(&V6_TX_TACHYON_MULTI_ACTION);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
-        assert_eq!(bundle.actions.len(), 2);
-        assert_eq!(bundle.value_balance, 300);
+        let stamped = match bundle {
+            zcash_tachyon::TachyonBundle::Stamped(s) => s,
+            zcash_tachyon::TachyonBundle::Stripped(_) => panic!("expected Stamped variant"),
+        };
+        assert_eq!(stamped.actions.len(), 2);
+        assert_eq!(stamped.value_balance, 300);
 
-        // Verify action 1: cv=generator, rk from seed [0x42; 64], sig=[0x01; 64]
-        let action1 = &bundle.actions[0];
+        let action1 = &stamped.actions[0];
         let cv1: EpAffine = action1.cv.into();
         assert_eq!(cv1, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action1.rk), EXPECTED_RK_42);
         assert_eq!(<[u8; 64]>::from(action1.sig), [0x01u8; 64]);
 
-        // Verify action 2: cv=generator, rk from seed [0x43; 64], sig=[0x03; 64]
-        let action2 = &bundle.actions[1];
+        let action2 = &stamped.actions[1];
         let cv2: EpAffine = action2.cv.into();
         assert_eq!(cv2, EpAffine::generator());
         assert_eq!(<[u8; 32]>::from(action2.rk), EXPECTED_RK_43);
         assert_eq!(<[u8; 64]>::from(action2.sig), [0x03u8; 64]);
 
-        assert_eq!(<[u8; 64]>::from(bundle.binding_sig), [0x02u8; 64]);
+        assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
 
-        // Verify stamp: 3 tachygrams from seeds [0xAA, 0xCC, 0xDD; 64], anchor from [0xBB; 64]
-        let stamp = bundle.stamp.as_ref().expect("expected stamp");
-        assert_eq!(stamp.tachygrams.len(), 3);
-        let tg1: Fp = stamp.tachygrams[0].into();
-        let tg2: Fp = stamp.tachygrams[1].into();
-        let tg3: Fp = stamp.tachygrams[2].into();
+        assert_eq!(stamped.stamp.tachygrams.len(), 3);
+        let tg1: Fp = (&stamped.stamp.tachygrams[0]).into();
+        let tg2: Fp = (&stamped.stamp.tachygrams[1]).into();
+        let tg3: Fp = (&stamped.stamp.tachygrams[2]).into();
         assert_eq!(tg1, Fp::from_uniform_bytes(&[0xAAu8; 64]));
         assert_eq!(tg2, Fp::from_uniform_bytes(&[0xCCu8; 64]));
         assert_eq!(tg3, Fp::from_uniform_bytes(&[0xDDu8; 64]));
-        let anchor_fp: Fp = stamp.anchor.into();
-        assert_eq!(anchor_fp, Fp::from_uniform_bytes(&[0xBBu8; 64]));
+        let expected_anchor = zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap();
+        assert_eq!(stamped.stamp.anchor, expected_anchor);
     }
 }
 
