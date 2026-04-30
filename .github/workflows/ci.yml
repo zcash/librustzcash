@@ -323,14 +323,14 @@ jobs:
         run: |
           echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
           cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Copy pinned dependencies into synthetic crate
+        run: cp crates/Cargo.lock ci-build/
       - name: Add zcash_proofs as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_proofs
       - name: Add zcash_client_backend as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --path ../crates/zcash_client_backend
-      - name: Copy pinned dependencies into synthetic crate
-        run: cp crates/Cargo.lock ci-build/
       - name: Add target
         working-directory: ./ci-build
         run: rustup target add ${{ matrix.target }}
@@ -372,6 +372,8 @@ jobs:
       - name: Add no_std pragma to lib.rs
         run: |
           echo "#![no_std]" > ./ci-build/src/lib.rs
+      - name: Copy pinned dependencies into synthetic crate
+        run: cp crates/Cargo.lock ci-build/
       - name: Add zcash_keys as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_keys
@@ -384,8 +386,6 @@ jobs:
       - name: Add lazy_static with the spin_no_std feature
         working-directory: ./ci-build
         run: cargo add lazy_static --features "spin_no_std"
-      - name: Copy pinned dependencies into synthetic crate
-        run: cp crates/Cargo.lock ci-build/
       - name: Add target
         working-directory: ./ci-build
         run: rustup target add ${{ matrix.target }}
