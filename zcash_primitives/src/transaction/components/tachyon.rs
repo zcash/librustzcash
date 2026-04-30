@@ -15,10 +15,7 @@ pub fn read_v6_bundle<R: Read>(reader: R) -> io::Result<Option<TachyonBundle>> {
 }
 
 /// Writes a tachyon bundle in v6 transaction format.
-pub fn write_v6_bundle<W: Write>(
-    bundle: Option<&TachyonBundle>,
-    mut writer: W,
-) -> io::Result<()> {
+pub fn write_v6_bundle<W: Write>(bundle: Option<&TachyonBundle>, mut writer: W) -> io::Result<()> {
     match bundle {
         None => writer.write_all(&[0u8]),
         Some(bundle) => bundle.write(&mut writer),

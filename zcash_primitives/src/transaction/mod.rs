@@ -546,8 +546,7 @@ impl<A: Authorization> TransactionData<A> {
                                 zcash_tachyon::TachyonBundle::Stamped(s) => s.value_balance,
                                 zcash_tachyon::TachyonBundle::Stripped(s) => s.value_balance,
                             };
-                            ZatBalance::try_from(value_balance)
-                                .map_err(|_| BalanceError::Overflow)
+                            ZatBalance::try_from(value_balance).map_err(|_| BalanceError::Overflow)
                         },
                     )?,
                     #[cfg(all(
