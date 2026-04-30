@@ -3,7 +3,11 @@
 use std::error;
 use std::fmt;
 
+#[cfg(feature = "orchard")]
+use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
+#[cfg(feature = "orchard")]
+use shardtree::error::InsertionError;
 use shardtree::error::ShardTreeError;
 
 #[cfg(feature = "transparent-key-import")]
@@ -78,7 +82,10 @@ pub enum SqliteClientError {
     /// this error is (safe rewind height, requested height). If no safe rewind height can be
     /// determined, the safe rewind height member will be `None`.
     RequestedRewindInvalid {
+        /// The height to which it is possible to safely rewind, or `None` if no safe
+        /// rewind height could be determined.
         safe_rewind_height: Option<BlockHeight>,
+        /// The block height that was requested for the rewind.
         requested_height: BlockHeight,
     },
 
@@ -89,7 +96,7 @@ pub enum SqliteClientError {
     AccountUnknown,
 
     /// The account being added collides with an existing account in the wallet with the given ID.
-    /// The collision can be on the seed and ZIP-32 account index, or a shared FVK component.
+    /// The collision can be on the seed and ZIP-32 account index, or a shared IVK component.
     AccountCollision(AccountUuid),
 
     /// The account was imported, and ZIP-32 derivation information is not known for it.
@@ -112,6 +119,35 @@ pub enum SqliteClientError {
     /// An error occurred in inserting data into or accessing data from one of the wallet's note
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
+
+    /// The caller-supplied frontier passed to
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`] is
+    /// inconsistent with the shard data reconstructed from the wallet at the
+    /// requested height.
+    ///
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`]:
+    /// crate::WalletDb::generate_orchard_witnesses_at_historical_height
+    #[cfg(feature = "orchard")]
+    HistoricalFrontierInvalid(InsertionError),
+
+    /// A witness could not be generated for the specified position at the
+    /// specified historical height in a call to
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`].
+    ///
+    /// The wallet most likely has not synced through `height`, the checkpoint
+    /// at `height` has been pruned, or `position` does not belong to the
+    /// wallet.
+    ///
+    /// [`WalletDb::generate_orchard_witnesses_at_historical_height`]:
+    /// crate::WalletDb::generate_orchard_witnesses_at_historical_height
+    #[cfg(feature = "orchard")]
+    HistoricalWitnessUnavailable {
+        /// The note commitment tree position for which a witness was
+        /// requested.
+        position: Position,
+        /// The historical height at which the witness was requested.
+        height: BlockHeight,
+    },
 
     /// The block at the specified height was not available from the block cache.
     CacheMiss(BlockHeight),
@@ -164,17 +200,16 @@ pub enum SqliteClientError {
     /// [`TransactionsInvolvingAddress`]: zcash_client_backend::data_api::TransactionsInvolvingAddress
     #[cfg(feature = "transparent-inputs")]
     NotificationMismatch {
+        /// The expected ending block height.
         expected: BlockHeight,
+        /// The actual ending block height returned.
         actual: BlockHeight,
     },
 
-    #[cfg(feature = "transparent-inputs")]
-    GapAddresses,
-
-    /// An attempt to import a transparent pubkey failed because that pubkey had already been
+    /// An attempt to import a standalone transparent address failed because it had already been
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
-    PubkeyImportConflict(Uuid),
+    StandaloneImportConflict(Uuid),
 }
 
 impl error::Error for SqliteClientError {
@@ -185,6 +220,8 @@ impl error::Error for SqliteClientError {
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
             SqliteClientError::AddressGeneration(e) => Some(e),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalFrontierInvalid(e) => Some(e),
             _ => None,
         }
     }
@@ -270,6 +307,17 @@ impl fmt::Display for SqliteClientError {
                 f,
                 "An error occurred accessing or updating note commitment tree data: {err}."
             ),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalFrontierInvalid(err) => write!(
+                f,
+                "The frontier supplied to generate_orchard_witnesses_at_historical_height is inconsistent with the wallet's shard data: {err}"
+            ),
+            #[cfg(feature = "orchard")]
+            SqliteClientError::HistoricalWitnessUnavailable { position, height } => write!(
+                f,
+                "No witness is available for position {} at height {height} (the wallet may need to sync through this height).",
+                u64::from(*position),
+            ),
             SqliteClientError::CacheMiss(height) => write!(
                 f,
                 "Requested height {height} does not exist in the block cache."
@@ -303,13 +351,6 @@ impl fmt::Display for SqliteClientError {
                     u128::from(*i)
                 )
             }
-            #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::GapAddresses => {
-                write!(
-                    f,
-                    "An error occured while generating a transparent gap addresses"
-                )
-            }
             SqliteClientError::AddressReuse(address_str, txids) => {
                 write!(
                     f,
@@ -334,10 +375,10 @@ impl fmt::Display for SqliteClientError {
                 )
             }
             #[cfg(feature = "transparent-key-import")]
-            SqliteClientError::PubkeyImportConflict(uuid) => {
+            SqliteClientError::StandaloneImportConflict(uuid) => {
                 write!(
                     f,
-                    "The given transparent pubkey is already managed by account {uuid}"
+                    "The given standalone transparent address is already managed by account {uuid}"
                 )
             }
         }

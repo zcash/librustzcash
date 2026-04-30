@@ -69,6 +69,10 @@ impl TransactionEntry {
         }
     }
 
+    pub(crate) fn tx_index(&self) -> Option<u32> {
+        self.tx_index
+    }
+
     #[cfg(test)]
     pub(crate) fn fee(&self) -> Option<Zatoshis> {
         self.fee

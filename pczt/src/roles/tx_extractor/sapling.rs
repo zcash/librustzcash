@@ -3,19 +3,8 @@ use sapling::{
     BatchValidator, Bundle,
     bundle::Authorized,
     circuit::{OutputVerifyingKey, SpendVerifyingKey},
-    pczt::Unbound,
 };
 use zcash_protocol::value::ZatBalance;
-
-pub(super) fn extract_bundle(
-    bundle: crate::sapling::Bundle,
-) -> Result<Option<Bundle<Unbound, ZatBalance>>, SaplingError> {
-    bundle
-        .into_parsed()
-        .map_err(SaplingError::Parse)?
-        .extract()
-        .map_err(SaplingError::Extract)
-}
 
 pub(super) fn verify_bundle(
     bundle: &Bundle<Authorized, ZatBalance>,
@@ -41,5 +30,4 @@ pub enum SaplingError {
     ConsensusRuleViolation,
     Extract(sapling::pczt::TxExtractorError),
     InvalidProofsOrSignatures,
-    Parse(sapling::pczt::ParseError),
 }

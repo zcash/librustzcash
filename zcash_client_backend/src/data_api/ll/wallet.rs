@@ -1,4 +1,6 @@
-use std::{hash::Hash, ops::Range};
+use std::collections::BTreeMap;
+use std::hash::Hash;
+use std::ops::Range;
 
 use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator},
@@ -6,8 +8,9 @@ use rayon::{
 };
 use tracing::{debug, info, trace, warn};
 
-use incrementalmerkletree::{Marking, Position, Retention};
-use shardtree::error::ShardTreeError;
+use incrementalmerkletree::{Hashable, Marking, Position, Retention, frontier::Frontier};
+use shardtree::{LocatedPrunableTree, ShardTree, error::ShardTreeError, store::ShardStore};
+use transparent::address::TransparentAddress;
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
@@ -41,12 +44,7 @@ use {
 };
 
 #[cfg(feature = "orchard")]
-use {
-    crate::data_api::ORCHARD_SHARD_HEIGHT,
-    incrementalmerkletree::frontier::Frontier,
-    shardtree::store::{Checkpoint, ShardStore as _},
-    std::collections::BTreeMap,
-};
+use {crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint};
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
@@ -185,10 +183,6 @@ impl<SE, TE> From<GapAddressesError<SE>> for PutBlocksError<SE, TE> {
 }
 
 /// A trait alias capturing the database capabilities required by [`put_blocks`].
-///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be maintained as new
-/// blocks are scanned.
 #[cfg(not(feature = "transparent-inputs"))]
 pub trait PutBlocksDbT<SE, TE, AR>:
     LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>
@@ -203,9 +197,11 @@ impl<T: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>, SE,
 
 /// A trait alias capturing the database capabilities required by [`put_blocks`].
 ///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be maintained as new
-/// blocks are scanned.
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be maintained as new blocks are
+/// scanned.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
 #[cfg(feature = "transparent-inputs")]
 pub trait PutBlocksDbT<SE, TE, AR>:
     LowLevelWalletWrite<Error = SE>
@@ -231,7 +227,8 @@ impl<
 /// # Parameters
 /// - `wallet_db`: A handle to the underlying data store.
 /// - `from_state`: The note commitment tree state as of the end of the last block prior to the
-///   first block in the provided block vector.
+///   first block in the provided block vector; [`PutBlocksError::NonSequentialBlocks`] will be
+///   returned if this invariant is violated.
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
@@ -245,32 +242,29 @@ where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
 {
-    struct BlockPositions {
-        height: BlockHeight,
-        sapling_start_position: Position,
-        #[cfg(feature = "orchard")]
-        orchard_start_position: Position,
-    }
-
     if blocks.is_empty() {
         return Ok(());
     }
 
     let initial_block = blocks.first().expect("blocks is known to be nonempty");
-    assert!(from_state.block_height() + 1 == initial_block.height());
-
-    let start_positions = BlockPositions {
-        height: initial_block.height(),
-        sapling_start_position: Position::from(
-            u64::from(initial_block.sapling().final_tree_size())
-                - u64::try_from(initial_block.sapling().commitments().len()).unwrap(),
-        ),
-        #[cfg(feature = "orchard")]
-        orchard_start_position: Position::from(
-            u64::from(initial_block.orchard().final_tree_size())
-                - u64::try_from(initial_block.orchard().commitments().len()).unwrap(),
-        ),
-    };
+    let mut initial_block_sequential = from_state.block_height() + 1 == initial_block.height();
+    {
+        initial_block_sequential &= from_state.final_sapling_tree().tree_size()
+            + u64::try_from(initial_block.sapling().commitments().len()).unwrap()
+            == u64::from(initial_block.sapling().final_tree_size());
+    }
+    #[cfg(feature = "orchard")]
+    {
+        initial_block_sequential &= from_state.final_orchard_tree().tree_size()
+            + u64::try_from(initial_block.orchard().commitments().len()).unwrap()
+            == u64::from(initial_block.orchard().final_tree_size());
+    }
+    if !initial_block_sequential {
+        return Err(PutBlocksError::NonSequentialBlocks {
+            prev_height: from_state.block_height(),
+            block_height: initial_block.height(),
+        });
+    }
 
     let mut sapling_commitments = vec![];
     #[cfg(feature = "orchard")]
@@ -320,47 +314,74 @@ where
                 .map_err(PutBlocksError::Storage)?;
 
             // Mark notes as spent and remove them from the scanning cache
-            for spend in tx.sapling_spends() {
-                wallet_db
-                    .mark_sapling_note_spent(spend.nf(), tx_ref)
-                    .map_err(PutBlocksError::Storage)?;
-            }
-            #[cfg(feature = "orchard")]
-            for spend in tx.orchard_spends() {
-                wallet_db
-                    .mark_orchard_note_spent(spend.nf(), tx_ref)
-                    .map_err(PutBlocksError::Storage)?;
-            }
+            mark_notes_spent(
+                wallet_db,
+                tx_ref,
+                #[cfg(feature = "transparent-inputs")]
+                None.iter(),
+                tx.sapling_spends().iter().map(|spend| spend.nf()),
+                #[cfg(feature = "orchard")]
+                tx.orchard_spends().iter().map(|spend| spend.nf()),
+            )
+            .map_err(PutBlocksError::Storage)?;
 
-            for output in tx.sapling_outputs() {
+            // TODO: Pass in the actual network parameters even though we don't need them.
+            let params: Option<&consensus::Network> = None;
+
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.sapling_outputs(),
                 // Check whether this note was spent in a later block range that
                 // we previously scanned.
-                let spent_in = output
-                    .nf()
-                    .map(|nf| wallet_db.detect_sapling_spend(nf))
-                    .transpose()
-                    .map_err(PutBlocksError::Storage)?
-                    .flatten();
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_sapling_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_sapling_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
 
-                wallet_db
-                    .put_received_sapling_note(output, tx_ref, Some(block.height()), spent_in)
-                    .map_err(PutBlocksError::Storage)?;
-            }
             #[cfg(feature = "orchard")]
-            for output in tx.orchard_outputs() {
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.orchard_outputs(),
                 // Check whether this note was spent in a later block range that
                 // we previously scanned.
-                let spent_in = output
-                    .nf()
-                    .map(|nf| wallet_db.detect_orchard_spend(nf))
-                    .transpose()
-                    .map_err(PutBlocksError::Storage)?
-                    .flatten();
-
-                wallet_db
-                    .put_received_orchard_note(output, tx_ref, Some(block.height()), spent_in)
-                    .map_err(PutBlocksError::Storage)?;
-            }
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_orchard_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_orchard_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
         }
 
         // Insert the new nullifiers from this block into the nullifier map.
@@ -446,156 +467,54 @@ where
     if let Some(last_scanned_height) = last_scanned_height {
         // Create subtrees from the note commitments in parallel.
         const CHUNK_SIZE: usize = 1024;
-        let sapling_subtrees = sapling_commitments
-            .par_chunks_mut(CHUNK_SIZE)
-            .enumerate()
-            .filter_map(|(i, chunk)| {
-                let start = start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
-                let end = start + chunk.len() as u64;
-
-                shardtree::LocatedTree::from_iter(
-                    start..end,
-                    SAPLING_SHARD_HEIGHT.into(),
-                    chunk.iter_mut().map(|n| n.take().expect("always Some")),
-                )
-            })
-            .map(|res| (res.subtree, res.checkpoints))
-            .collect::<Vec<_>>();
-
-        #[cfg(feature = "orchard")]
-        let orchard_subtrees = orchard_commitments
-            .par_chunks_mut(CHUNK_SIZE)
-            .enumerate()
-            .filter_map(|(i, chunk)| {
-                let start = start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
-                let end = start + chunk.len() as u64;
-
-                shardtree::LocatedTree::from_iter(
-                    start..end,
-                    ORCHARD_SHARD_HEIGHT.into(),
-                    chunk.iter_mut().map(|n| n.take().expect("always Some")),
-                )
-            })
-            .map(|res| (res.subtree, res.checkpoints))
-            .collect::<Vec<_>>();
-
-        // Collect the complete set of Sapling checkpoints
-        #[cfg(feature = "orchard")]
-        let sapling_checkpoint_positions: BTreeMap<BlockHeight, Position> = sapling_subtrees
-            .iter()
-            .flat_map(|(_, checkpoints)| checkpoints.iter())
-            .map(|(k, v)| (*k, *v))
-            .collect();
-
-        #[cfg(feature = "orchard")]
-        let orchard_checkpoint_positions: BTreeMap<BlockHeight, Position> = orchard_subtrees
-            .iter()
-            .flat_map(|(_, checkpoints)| checkpoints.iter())
-            .map(|(k, v)| (*k, *v))
-            .collect();
-
-        #[cfg(feature = "orchard")]
-        fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
-            // An iterator of checkpoints heights for which we wish to ensure that
-            // checkpoints exists.
-            ensure_heights: I,
-            // The map of checkpoint positions from which we will draw note commitment tree
-            // position information for the newly created checkpoints.
-            existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
-            // The frontier whose position will be used for an inserted checkpoint when
-            // there is no preceding checkpoint in existing_checkpoint_positions.
-            state_final_tree: &Frontier<H, DEPTH>,
-        ) -> Vec<(BlockHeight, Checkpoint)> {
-            ensure_heights
-                .flat_map(|ensure_height| {
-                    existing_checkpoint_positions
-                        .range::<BlockHeight, _>(..=*ensure_height)
-                        .last()
-                        .map_or_else(
-                            || {
-                                Some((
-                                    *ensure_height,
-                                    state_final_tree
-                                        .value()
-                                        .map_or_else(Checkpoint::tree_empty, |t| {
-                                            Checkpoint::at_position(t.position())
-                                        }),
-                                ))
-                            },
-                            |(existing_checkpoint_height, position)| {
-                                if *existing_checkpoint_height < *ensure_height {
-                                    Some((*ensure_height, Checkpoint::at_position(*position)))
-                                } else {
-                                    // The checkpoint already exists, so we don't need to
-                                    // do anything.
-                                    None
-                                }
-                            },
-                        )
-                        .into_iter()
-                })
-                .collect::<Vec<_>>()
-        }
-
-        #[cfg(feature = "orchard")]
-        let (missing_sapling_checkpoints, missing_orchard_checkpoints) = (
-            ensure_checkpoints(
-                orchard_checkpoint_positions.keys(),
-                &sapling_checkpoint_positions,
-                from_state.final_sapling_tree(),
-            ),
-            ensure_checkpoints(
-                sapling_checkpoint_positions.keys(),
-                &orchard_checkpoint_positions,
-                from_state.final_orchard_tree(),
-            ),
+        let sapling_subtrees = build_subtrees::<_, SAPLING_SHARD_HEIGHT>(
+            Position::from(from_state.final_sapling_tree().tree_size()),
+            &mut sapling_commitments,
+            CHUNK_SIZE,
         );
+
+        #[cfg(feature = "orchard")]
+        let orchard_subtrees = build_subtrees::<_, ORCHARD_SHARD_HEIGHT>(
+            Position::from(from_state.final_orchard_tree().tree_size()),
+            &mut orchard_commitments,
+            CHUNK_SIZE,
+        );
+
+        // Ensure that we have the same set of checkpoints across all trees.
+        #[cfg(feature = "orchard")]
+        let (missing_sapling_checkpoints, missing_orchard_checkpoints) = {
+            let sapling_checkpoint_positions = checkpoint_positions(&sapling_subtrees);
+            let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
+            (
+                ensure_checkpoints(
+                    orchard_checkpoint_positions.keys(),
+                    &sapling_checkpoint_positions,
+                    from_state.final_sapling_tree(),
+                ),
+                ensure_checkpoints(
+                    sapling_checkpoint_positions.keys(),
+                    &orchard_checkpoint_positions,
+                    from_state.final_orchard_tree(),
+                ),
+            )
+        };
 
         // Update the Sapling note commitment tree with all newly read note commitments
         {
-            let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
-            wallet_db.with_sapling_tree_mut::<_, _, PutBlocksError<SE, TE>>(|sapling_tree| {
-                debug!(
-                    "Sapling initial tree size at {:?}: {:?}",
+            let mut sapling_subtrees = sapling_subtrees.into_iter();
+            #[cfg(feature = "orchard")]
+            let mut missing_checkpoints = missing_sapling_checkpoints.into_iter();
+            wallet_db.with_sapling_tree_mut(|sapling_tree| {
+                update_tree(
+                    "Sapling",
+                    from_state.final_sapling_tree(),
                     from_state.block_height(),
-                    from_state.final_sapling_tree().tree_size()
-                );
-                // We insert the frontier with `Checkpoint` retention because we need to be
-                // able to truncate the tree back to this point.
-                sapling_tree.insert_frontier(
-                    from_state.final_sapling_tree().clone(),
-                    Retention::Checkpoint {
-                        id: from_state.block_height(),
-                        marking: Marking::Reference,
-                    },
-                )?;
-
-                for (tree, checkpoints) in &mut sapling_subtrees_iter {
-                    sapling_tree.insert_tree(tree, checkpoints)?;
-                }
-
-                // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height.
-                // We skip all checkpoints below the minimum retained checkpoint in the
-                // Sapling tree, because branches below this height may be pruned.
-                #[cfg(feature = "orchard")]
-                {
-                    let min_checkpoint_height = sapling_tree
-                        .store()
-                        .min_checkpoint_id()
-                        .map_err(ShardTreeError::Storage)?
-                        .expect("At least one checkpoint was inserted (by insert_frontier)");
-
-                    for (height, checkpoint) in &missing_sapling_checkpoints {
-                        if *height > min_checkpoint_height {
-                            sapling_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
-                        }
-                    }
-                }
-
-                Ok(())
+                    sapling_tree,
+                    &mut sapling_subtrees,
+                    #[cfg(feature = "orchard")]
+                    &mut missing_checkpoints,
+                )
+                .map_err(PutBlocksError::ShardTree)
             })?;
         }
 
@@ -603,58 +522,24 @@ where
         #[cfg(feature = "orchard")]
         {
             let mut orchard_subtrees = orchard_subtrees.into_iter();
-            wallet_db.with_orchard_tree_mut::<_, _, PutBlocksError<SE, TE>>(|orchard_tree| {
-                debug!(
-                    "Orchard initial tree size at {:?}: {:?}",
+            let mut missing_checkpoints = missing_orchard_checkpoints.into_iter();
+            wallet_db.with_orchard_tree_mut(|orchard_tree| {
+                update_tree(
+                    "Orchard",
+                    from_state.final_orchard_tree(),
                     from_state.block_height(),
-                    from_state.final_orchard_tree().tree_size()
-                );
-                // We insert the frontier with `Checkpoint` retention because we need to be
-                // able to truncate the tree back to this point.
-                orchard_tree.insert_frontier(
-                    from_state.final_orchard_tree().clone(),
-                    Retention::Checkpoint {
-                        id: from_state.block_height(),
-                        marking: Marking::Reference,
-                    },
-                )?;
-
-                for (tree, checkpoints) in &mut orchard_subtrees {
-                    orchard_tree.insert_tree(tree, checkpoints)?;
-                }
-
-                // Ensure we have an Orchard checkpoint for each checkpointed Sapling block height.
-                // We skip all checkpoints below the minimum retained checkpoint in the
-                // Orchard tree, because branches below this height may be pruned.
-                {
-                    let min_checkpoint_height = orchard_tree
-                        .store()
-                        .min_checkpoint_id()
-                        .map_err(ShardTreeError::Storage)?
-                        .expect("At least one checkpoint was inserted (by insert_frontier)");
-
-                    for (height, checkpoint) in &missing_orchard_checkpoints {
-                        if *height > min_checkpoint_height {
-                            debug!(
-                                "Adding missing Orchard checkpoint for height: {:?}: {:?}",
-                                height,
-                                checkpoint.position()
-                            );
-                            orchard_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
-                        }
-                    }
-                }
-                Ok(())
+                    orchard_tree,
+                    &mut orchard_subtrees,
+                    &mut missing_checkpoints,
+                )
+                .map_err(PutBlocksError::ShardTree)
             })?;
         }
 
         wallet_db
             .notify_scan_complete(
                 Range {
-                    start: start_positions.height,
+                    start: from_state.block_height() + 1,
                     end: last_scanned_height + 1,
                 },
                 &note_positions,
@@ -669,10 +554,6 @@ where
 type GapError<DbT> = <DbT as LowLevelWalletRead>::Error;
 
 /// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
-///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be regenerated after
-/// storing a decrypted transaction.
 #[cfg(not(feature = "transparent-inputs"))]
 pub trait StoreDecryptedTxDbT: LowLevelWalletWrite {}
 
@@ -684,9 +565,11 @@ type GapError<DbT> = GapAddressesError<<DbT as LowLevelWalletRead>::Error>;
 
 /// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
 ///
-/// When the `transparent-inputs` feature is enabled, this additionally requires
-/// [`AddressStore`] so that transparent gap addresses can be regenerated after
-/// storing a decrypted transaction.
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be regenerated after storing a
+/// decrypted transaction.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
 #[cfg(feature = "transparent-inputs")]
 pub trait StoreDecryptedTxDbT:
     LowLevelWalletWrite
@@ -789,37 +672,27 @@ where
         wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
 
-    // Mark Sapling notes as spent when we observe their nullifiers.
-    for spend in d_tx
-        .tx()
-        .sapling_bundle()
-        .iter()
-        .flat_map(|b| b.shielded_spends().iter())
-    {
-        wallet_db.mark_sapling_note_spent(spend.nullifier(), tx_ref)?;
-    }
-
-    // Mark Orchard notes as spent when we observe their nullifiers.
-    #[cfg(feature = "orchard")]
-    for action in d_tx
-        .tx()
-        .orchard_bundle()
-        .iter()
-        .flat_map(|b| b.actions().iter())
-    {
-        wallet_db.mark_orchard_note_spent(action.nullifier(), tx_ref)?;
-    }
-
-    // If any of the utxos spent in the transaction are ours, mark them as spent.
-    #[cfg(feature = "transparent-inputs")]
-    for txin in d_tx
-        .tx()
-        .transparent_bundle()
-        .iter()
-        .flat_map(|b| b.vin.iter())
-    {
-        wallet_db.mark_transparent_utxo_spent(txin.prevout(), tx_ref)?;
-    }
+    mark_notes_spent(
+        wallet_db,
+        tx_ref,
+        #[cfg(feature = "transparent-inputs")]
+        d_tx.tx()
+            .transparent_bundle()
+            .iter()
+            .flat_map(|b| b.vin.iter())
+            .map(|txin| txin.prevout()),
+        d_tx.tx()
+            .sapling_bundle()
+            .iter()
+            .flat_map(|b| b.shielded_spends().iter())
+            .map(|spend| spend.nullifier()),
+        #[cfg(feature = "orchard")]
+        d_tx.tx()
+            .orchard_bundle()
+            .iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| action.nullifier()),
+    )?;
 
     // A flag used to determine whether it is necessary to query for transactions that
     // provided transparent inputs to this transaction, in order to be able to correctly
@@ -851,12 +724,13 @@ where
 
     put_shielded_outputs(
         wallet_db,
-        params,
+        Some(params),
         tx_ref,
         funding_account,
         d_tx.sapling_outputs(),
-        |wallet_db, output, tx_ref| {
-            wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), None)
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), spent_in)
         },
         |_account_id| {
             #[cfg(feature = "transparent-inputs")]
@@ -867,12 +741,13 @@ where
     #[cfg(feature = "orchard")]
     put_shielded_outputs(
         wallet_db,
-        params,
+        Some(params),
         tx_ref,
         funding_account,
         d_tx.orchard_outputs(),
-        |wallet_db, output, tx_ref| {
-            wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), None)
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), spent_in)
         },
         |_account_id| {
             #[cfg(feature = "transparent-inputs")]
@@ -964,7 +839,11 @@ where
             .flat_map(|b| b.vout.iter())
             .enumerate()
         {
-            if let Some(address) = txout.recipient_address() {
+            let script_kind = txout.script_kind();
+            if let Some(address) = script_kind
+                .as_ref()
+                .and_then(TransparentAddress::from_script_kind)
+            {
                 debug!(
                     "{:?} output {} has recipient {}",
                     d_tx.tx().txid(),
@@ -1009,9 +888,8 @@ where
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
-                    let recipient_address = wallet_db
-                        .select_receiving_address(account_uuid, &receiver)?
-                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+                    let recipient_address =
+                        external_address(wallet_db, params, account_uuid, receiver)?;
 
                     #[cfg(not(feature = "transparent-inputs"))]
                     let recipient_address = receiver.to_zcash_address(params.network_type());
@@ -1028,6 +906,13 @@ where
                         value: txout.value(),
                     });
                 }
+            } else if let Some(script_kind) = script_kind {
+                warn!(
+                    "Ignoring unsupported script kind '{}' for tx {} output {}",
+                    script_kind.as_str(),
+                    d_tx.tx().txid(),
+                    output_index
+                );
             } else {
                 warn!(
                     "Unable to determine recipient address for tx {} output {}",
@@ -1043,17 +928,57 @@ where
     }
 }
 
+fn mark_notes_spent<'a, DbT>(
+    wallet_db: &mut DbT,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    #[cfg(feature = "transparent-inputs")] transparent_prevouts: impl Iterator<
+        Item = &'a transparent::bundle::OutPoint,
+    >,
+    sapling_nfs: impl Iterator<Item = &'a sapling::Nullifier>,
+    #[cfg(feature = "orchard")] orchard_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+{
+    // If any of the utxos spent in the transaction are ours, mark them as spent.
+    #[cfg(feature = "transparent-inputs")]
+    for outpoint in transparent_prevouts {
+        wallet_db.mark_transparent_utxo_spent(outpoint, tx_ref)?;
+    }
+
+    // Mark Sapling notes as spent when we observe their nullifiers.
+    for nf in sapling_nfs {
+        wallet_db.mark_sapling_note_spent(nf, tx_ref)?;
+    }
+
+    // Mark Orchard notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for nf in orchard_nfs {
+        wallet_db.mark_orchard_note_spent(nf, tx_ref)?;
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn put_shielded_outputs<DbT, P, Output>(
     wallet_db: &mut DbT,
-    params: &P,
+    params: Option<&P>,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
     funding_account: Option<DbT::AccountId>,
     outputs: &[Output],
+    detect_note_spent_in: impl Fn(
+        &mut DbT,
+        &Output,
+    ) -> Result<
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
+        <DbT as LowLevelWalletRead>::Error,
+    >,
     put_received_note: impl Fn(
         &mut DbT,
         &Output,
         <DbT as LowLevelWalletRead>::TxRef,
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
     ) -> Result<(), <DbT as LowLevelWalletRead>::Error>,
     mut on_external_account: impl FnMut(<DbT as LowLevelWalletRead>::AccountId),
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
@@ -1064,34 +989,25 @@ where
     Output::Note: Clone,
 {
     for output in outputs {
-        match output.transfer_type() {
+        let sent_output = match output.transfer_type() {
             TransferType::Outgoing => {
                 let note = output.note().clone().into();
-                let receiver = note.receiver();
-                let value = note.value();
 
-                let recipient = {
-                    let recipient_address = wallet_db
-                        .select_receiving_address(output.account_id(), &receiver)?
-                        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
-
-                    Recipient::External {
-                        recipient_address,
-                        output_pool: Output::POOL_TYPE,
-                    }
+                let recipient = Recipient::External {
+                    recipient_address: external_address(
+                        wallet_db,
+                        params.expect("present when outgoing is possible (store_decrypted_tx)"),
+                        output.account_id(),
+                        note.receiver(),
+                    )?,
+                    output_pool: Output::POOL_TYPE,
                 };
 
-                wallet_db.put_sent_output(
-                    output.account_id(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    value,
-                    output.memo(),
-                )?;
+                Some((output.account_id(), recipient, note.value()))
             }
             TransferType::WalletInternal => {
-                put_received_note(wallet_db, output, tx_ref)?;
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
 
                 let note = output.note().clone().into();
                 let value = note.value();
@@ -1102,49 +1018,47 @@ where
                     note: Box::new(note),
                 };
 
-                wallet_db.put_sent_output(
-                    output.account_id(),
-                    tx_ref,
-                    output.index(),
-                    &recipient,
-                    value,
-                    output.memo(),
-                )?;
+                Some((output.account_id(), recipient, value))
             }
             TransferType::Incoming => {
-                put_received_note(wallet_db, output, tx_ref)?;
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
                 on_external_account(output.account_id());
 
                 if let Some(account_id) = funding_account {
                     let note = output.note().clone().into();
-                    let receiver = note.receiver();
                     let value = note.value();
 
                     // Even if the recipient address is external, record the send as internal.
                     let recipient = Recipient::InternalAccount {
                         receiving_account: output.account_id(),
-                        external_address: {
-                            Some(
-                                wallet_db
-                                    .select_receiving_address(output.account_id(), &receiver)?
-                                    .unwrap_or_else(|| {
-                                        receiver.to_zcash_address(params.network_type())
-                                    }),
-                            )
-                        },
+                        external_address: Some(external_address(
+                            wallet_db,
+                            params.expect(
+                                "present when funding_account is known (store_decrypted_tx)",
+                            ),
+                            output.account_id(),
+                            note.receiver(),
+                        )?),
                         note: Box::new(note),
                     };
 
-                    wallet_db.put_sent_output(
-                        account_id,
-                        tx_ref,
-                        output.index(),
-                        &recipient,
-                        value,
-                        output.memo(),
-                    )?;
+                    Some((account_id, recipient, value))
+                } else {
+                    None
                 }
             }
+        };
+
+        if let Some((from_account_uuid, recipient, value)) = sent_output {
+            wallet_db.put_sent_output(
+                from_account_uuid,
+                tx_ref,
+                output.index(),
+                &recipient,
+                value,
+                output.memo(),
+            )?;
         }
     }
 
@@ -1202,6 +1116,168 @@ where
             sent_t_output.value,
             None,
         )?;
+    }
+
+    Ok(())
+}
+
+/// Returns the most likely account address that corresponds to the given [`Receiver`].
+fn external_address<DbT, P>(
+    wallet_db: &DbT,
+    params: &P,
+    account_id: DbT::AccountId,
+    receiver: Receiver,
+) -> Result<zcash_address::ZcashAddress, <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletRead,
+    P: consensus::Parameters,
+{
+    let recipient_address = wallet_db
+        .select_receiving_address(account_id, &receiver)?
+        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+
+    Ok(recipient_address)
+}
+
+/// Creates subtrees from note commitments in parallel.
+///
+/// `commitments` is an `&mut [Option<_>]` to emulate move semantics inside a `rayon`
+/// parallel iterator.
+fn build_subtrees<H, const SHARD_HEIGHT: u8>(
+    start_position: Position,
+    commitments: &mut [Option<(H, Retention<BlockHeight>)>],
+    chunk_size: usize,
+) -> Vec<(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)>
+where
+    H: Clone + PartialEq + Hashable + Send + Sync,
+{
+    commitments
+        .par_chunks_mut(chunk_size)
+        .enumerate()
+        .filter_map(|(i, chunk)| {
+            let start = start_position + (i * chunk_size) as u64;
+            let end = start + chunk.len() as u64;
+
+            shardtree::LocatedTree::from_iter(
+                start..end,
+                SHARD_HEIGHT.into(),
+                chunk.iter_mut().map(|n| n.take().expect("always Some")),
+            )
+        })
+        .map(|res| (res.subtree, res.checkpoints))
+        .collect()
+}
+
+/// Produces an overall set of checkpoints from a list of subtrees.
+#[cfg(feature = "orchard")]
+fn checkpoint_positions<H>(
+    subtrees: &[(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)],
+) -> BTreeMap<BlockHeight, Position> {
+    subtrees
+        .iter()
+        .flat_map(|(_, checkpoints)| checkpoints.iter())
+        .map(|(k, v)| (*k, *v))
+        .collect()
+}
+
+#[cfg(feature = "orchard")]
+fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
+    // An iterator of checkpoints heights for which we wish to ensure that
+    // checkpoints exists.
+    ensure_heights: I,
+    // The map of checkpoint positions from which we will draw note commitment tree
+    // position information for the newly created checkpoints.
+    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
+    // The frontier whose position will be used for an inserted checkpoint when
+    // there is no preceding checkpoint in existing_checkpoint_positions.
+    state_final_tree: &Frontier<H, DEPTH>,
+) -> Vec<(BlockHeight, Checkpoint)> {
+    ensure_heights
+        .flat_map(|ensure_height| {
+            existing_checkpoint_positions
+                .range::<BlockHeight, _>(..=*ensure_height)
+                .last()
+                .map_or_else(
+                    || {
+                        Some((
+                            *ensure_height,
+                            state_final_tree
+                                .value()
+                                .map_or_else(Checkpoint::tree_empty, |t| {
+                                    Checkpoint::at_position(t.position())
+                                }),
+                        ))
+                    },
+                    |(existing_checkpoint_height, position)| {
+                        if *existing_checkpoint_height < *ensure_height {
+                            Some((*ensure_height, Checkpoint::at_position(*position)))
+                        } else {
+                            // The checkpoint already exists, so we don't need to
+                            // do anything.
+                            None
+                        }
+                    },
+                )
+                .into_iter()
+        })
+        .collect::<Vec<_>>()
+}
+
+/// Updates the given note commitment tree with all newly read note commitments starting
+/// at the block `frontier_height + 1`.
+fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    protocol: &'static str,
+    frontier: &Frontier<S::H, DEPTH>,
+    frontier_height: BlockHeight,
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
+    #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
+) -> Result<(), ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Clone + PartialEq + Hashable,
+{
+    debug!(
+        "{protocol} initial tree size at {frontier_height:?}: {:?}",
+        frontier.tree_size()
+    );
+    // We insert the frontier with `Checkpoint` retention because we need to be
+    // able to truncate the tree back to this point.
+    tree.insert_frontier(
+        frontier.clone(),
+        Retention::Checkpoint {
+            id: frontier_height,
+            marking: Marking::Reference,
+        },
+    )?;
+
+    for (subtree, checkpoints) in subtrees {
+        tree.insert_tree(subtree, checkpoints)?;
+    }
+
+    // Ensure we have a tree checkpoint for each checkpointed block height.
+    // We skip all checkpoints below the minimum retained checkpoint in the
+    // tree, because branches below this height may be pruned.
+    #[cfg(feature = "orchard")]
+    {
+        let min_checkpoint_height = tree
+            .store()
+            .min_checkpoint_id()
+            .map_err(ShardTreeError::Storage)?
+            .expect("At least one checkpoint was inserted (by insert_frontier)");
+
+        for (height, checkpoint) in missing_checkpoints {
+            if height > min_checkpoint_height {
+                debug!(
+                    "Adding missing {protocol} checkpoint for height: {:?}: {:?}",
+                    height,
+                    checkpoint.position()
+                );
+                tree.store_mut()
+                    .add_checkpoint(height, checkpoint.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+        }
     }
 
     Ok(())

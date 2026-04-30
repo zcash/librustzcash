@@ -65,7 +65,7 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
           save-if: ${{ matrix.state == 'all-features' }}
@@ -134,7 +134,7 @@ jobs:
           all-pools: ${{ matrix.all-pools || false }}
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
           save-if: ${{ matrix.state == 'all-features' }}
@@ -191,7 +191,7 @@ jobs:
           all-pools: false
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
           save-if: "false"
@@ -245,7 +245,7 @@ jobs:
         with:
           all-features: ${{ matrix.all-features || false }}
           extra-features: ${{ matrix.extra_flags || '' }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
           save-if: "false"
@@ -271,7 +271,7 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: latest
       - uses: dtolnay/rust-toolchain@stable
@@ -419,7 +419,7 @@ jobs:
       # unstable in-progress code) because this action doesn't support spaces within CLI
       # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
       - name: Run clippy
-        uses: auguwu/clippy-action@94a9ff2f6920180b89e5c03d121d0af04a9d3e03 # 1.4.0
+        uses: auguwu/clippy-action@9817d076b82df0194935be9db6154c56ac07b317 # 1.5.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: ${{ inputs.target }}
@@ -453,7 +453,7 @@ jobs:
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
-        uses: auguwu/clippy-action@94a9ff2f6920180b89e5c03d121d0af04a9d3e03 # 1.4.0
+        uses: auguwu/clippy-action@9817d076b82df0194935be9db6154c56ac07b317 # 1.5.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: ${{ inputs.target }}
@@ -501,6 +501,16 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  readme-graph:
+    name: Readme dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check consistency
+        run: python3 .github/helpers/check-dep-graph.py
+
   protobuf:
     name: protobuf consistency
     runs-on: ubuntu-latest
@@ -511,7 +521,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
-        uses: supplypike/setup-bin@1fafb085795af4a3f183502f3a9dffa8f7b83217 # v5.0.0
+        uses: supplypike/setup-bin@8365380a806a88e7a0f0d07059b175ca2f5418d7 # v5.0.1
         with:
           uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
           name: 'protoc'

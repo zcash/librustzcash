@@ -10,7 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-27
+
 ### Added
+- `pczt::ExtractError`
+- `pczt::EffectsOnly`
+- `pczt::orchard::Spend::spend_auth_sig` getter (via `getset`).
 - `pczt::roles::signer`:
   - `Signer::sighash`
   - `Signer::append_transparent_signature`
@@ -18,7 +23,27 @@ workspace.
   - `Signer::apply_orchard_signature`
 
 ### Changed
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `zcash_protocol 0.8`, 
+  `zcash_transparent 0.7`, `zcash_primitives 0.27`, `zcash_proofs 0.27`.
+- `Pczt::into_effects` now returns `Result<TransactionData<EffectsOnly>, ExtractError>`
+  instead of `Option<TransactionData<EffectsOnly>>`.
+- `pczt::roles::io_finalizer::Error` now wraps parse and extract errors
+  via `Extract(ExtractError)` instead of individual variants.
+- `pczt::roles::signer::Error` now wraps parse and extract errors
+  via `Extract(ExtractError)` instead of individual variants.
+- `pczt::roles::tx_extractor::Error` now wraps parse and extract errors
+  via `Extract(ExtractError)` instead of `Global(GlobalError)`,
+  `IncompatibleLockTimes`, and protocol-specific `Parse` variants.
+
+### Removed
+- `pczt::roles::tx_extractor::GlobalError` (replaced by `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::TransparentError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::SaplingError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::tx_extractor::OrchardError::Parse` (parse errors now
+  flow through `pczt::ExtractError`).
+- `pczt::roles::signer::EffectsOnly` (use `pczt::EffectsOnly` instead).
 
 ## [0.4.1, 0.5.1] - 2026-02-26
 

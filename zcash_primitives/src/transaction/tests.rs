@@ -145,15 +145,17 @@ fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+            Some(n) => SignableInput::Transparent(
+                ::transparent::sighash::SignableInput::from_parts(
+                    tx.transparent_bundle().unwrap(),
                     SighashType::parse(tv.hash_type as u8).unwrap(),
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
                     Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
-                ))
-            }
+                )
+                .unwrap(),
+            ),
             _ => SignableInput::Shielded,
         };
 
@@ -169,15 +171,17 @@ fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+            Some(n) => SignableInput::Transparent(
+                ::transparent::sighash::SignableInput::from_parts(
+                    tx.transparent_bundle().unwrap(),
                     SighashType::parse(tv.hash_type as u8).unwrap(),
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
                     Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
-                ))
-            }
+                )
+                .unwrap(),
+            ),
             _ => SignableInput::Shielded,
         };
 
@@ -314,13 +318,17 @@ fn zip_0244() {
             let value = bundle.authorization.input_amounts[index];
             let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
             let signable_input = |hash_type| {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    hash_type,
-                    index,
-                    script_pubkey,
-                    script_pubkey,
-                    value,
-                ))
+                SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        hash_type,
+                        index,
+                        script_pubkey,
+                        script_pubkey,
+                        value,
+                    )
+                    .unwrap(),
+                )
             };
 
             assert_eq!(

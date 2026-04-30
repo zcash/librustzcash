@@ -11,8 +11,6 @@
 #![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
-// Temporary until we have addressed all Result<T, ()> cases.
-#![allow(clippy::result_unit_err)]
 
 use bellman::groth16::{PreparedVerifyingKey, VerifyingKey, prepare_verifying_key};
 use bls12_381::Bls12;

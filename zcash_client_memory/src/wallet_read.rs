@@ -8,10 +8,13 @@ use secrecy::{ExposeSecret, SecretVec};
 use shardtree::store::ShardStore as _;
 use zcash_client_backend::data_api::{
     AddressInfo, BlockMetadata, NullifierQuery, ReceivedTransactionOutput, WalletRead,
-    WalletSummary, Zip32Derivation,
+    WalletSummary, Zip32Derivation, defaults,
+    error::FindAccountForAddressError,
     scanning::ScanRange,
     wallet::{ConfirmationsPolicy, TargetHeight},
 };
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::data_api::{TransparentBalances, TransparentKeyOrigin};
 use zcash_client_backend::{
     data_api::{
         Account as _, AccountBalance, AccountSource, Balance, Progress, Ratio, SeedRelevance,
@@ -34,10 +37,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    transparent::{
-        address::TransparentAddress,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zip32::Scope,
 };
@@ -692,7 +692,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         tracing::debug!("get_transparent_balances");
 
         let mut balances = HashMap::new();
@@ -708,9 +708,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         }) {
             if self.utxo_is_spendable(outpoint, target_height, confirmations_policy)? {
                 let address = txo.address;
+                let key_origin = TransparentKeyOrigin::Derived {
+                    scope: txo.key_scope,
+                };
                 let entry = balances
                     .entry(address)
-                    .or_insert((txo.key_scope, Balance::ZERO));
+                    .or_insert((key_origin, Balance::ZERO));
 
                 entry.1.add_spendable_value(txo.txout.value())?;
             }
@@ -730,6 +733,14 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
     fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
         todo!()
+    }
+
+    fn find_account_for_address<Q: consensus::Parameters>(
+        &self,
+        params: &Q,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
+        defaults::find_account_for_address(self, params, address)
     }
 
     fn get_last_generated_address_matching(
