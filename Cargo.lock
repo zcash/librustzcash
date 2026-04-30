@@ -7337,7 +7337,6 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_protocol",
  "zcash_script",
- "zcash_spec",
  "zcash_tachyon",
  "zcash_transparent",
  "zip32",

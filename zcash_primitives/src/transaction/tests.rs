@@ -399,7 +399,7 @@ fn zip_0244() {
 fn tachyon_v6_test_vectors() {
     use self::data::tachyon_vectors::*;
     use ff::FromUniformBytes;
-    use group::prime::PrimeCurveAffine;
+    use pasta_curves::group::prime::PrimeCurveAffine;
     use pasta_curves::{EpAffine, Fp};
 
     // Expected rk bytes for rk_from_seed([0x42; 64]) — derived from zebra's
