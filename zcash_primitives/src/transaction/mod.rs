@@ -402,6 +402,8 @@ impl Clone for TransactionData<Authorized> {
             sprout_bundle: self.sprout_bundle.clone(),
             sapling_bundle: self.sapling_bundle.clone(),
             orchard_bundle: self.orchard_bundle.clone(),
+            #[cfg(zcash_unstable = "nu7")]
+            tachyon_bundle: self.tachyon_bundle.clone(),
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: self.tze_bundle.clone(),
         }
