@@ -848,6 +848,27 @@ pub(crate) fn stabilized_note_rewind_un_mines_shard_completion<T: ShieldedPoolTe
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn note_in_recently_completed_shard_spendable_once_confirmed<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_in_recently_completed_shard_spendable_once_confirmed::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_settled_height_invalidated_by_reorg<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_settled_height_invalidated_by_reorg::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),

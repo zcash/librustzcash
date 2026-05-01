@@ -22,10 +22,13 @@ workspace.
 - `zcash_client_backend::data_api::testing::pool::{b_note_stable_across_rewind_below_birthday,
   completed_shard_note_spendable_across_older_birthday_import,
   completed_shard_note_spendable_after_rewind_once_window_rescanned,
+  note_in_recently_completed_shard_spendable_once_confirmed,
   open_shard_note_spendable_across_older_birthday_import,
   reorg_below_scanned_height_is_a_continuity_error,
+  shard_completeness_derives_from_scan_queue,
   stabilized_note_rewind_above_shard_end,
-  stabilized_note_rewind_un_mines_shard_completion}`
+  stabilized_note_rewind_un_mines_shard_completion,
+  stabilized_note_settled_height_invalidated_by_reorg}`
 
 ### Changed
 - `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
