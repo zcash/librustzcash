@@ -643,7 +643,7 @@ mod tests {
         // First call: the non-Scanned gap lies inside shard 0's extent, so the note must
         // NOT stabilize.
         let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(&tx, &network).unwrap();
+        mark_stabilized_notes(&tx).unwrap();
         tx.commit().unwrap();
 
         assert_eq!(
@@ -678,7 +678,7 @@ mod tests {
             .unwrap();
 
         let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(&tx, &network).unwrap();
+        mark_stabilized_notes(&tx).unwrap();
         tx.commit().unwrap();
 
         assert_eq!(

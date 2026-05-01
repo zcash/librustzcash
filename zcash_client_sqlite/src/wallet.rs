@@ -3976,9 +3976,13 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
         .map(|m| m.block_height())
     {
         if target_height < max_scanned_height {
-            // Compute the floor height of the pruning window.
-            let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
-            let truncation_target = target_height.max(pruning_floor);
+            // The lowest height in the chain-tip pruning window; truncation must not
+            // go below this, because the shardtree retains checkpoints only for the
+            // window. `scanning::pruning_floor` returns the highest height *outside*
+            // the window (heights strictly greater are inside), so the inclusive
+            // lower bound of the window is `pruning_floor + 1`.
+            let lowest_window_checkpoint = scanning::pruning_floor(max_scanned_height) + 1;
+            let truncation_target = target_height.max(lowest_window_checkpoint);
 
             // Determine the minimum sapling and orchard checkpoints within the pruning window.
             let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
@@ -4010,7 +4014,7 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             }
 
             // Combine the per-pool floors by taking the shallower (larger height).
-            let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+            let truncation_height = sapling_window_floor.unwrap_or(lowest_window_checkpoint);
 
             // Use `truncate_to_height_internal` to perform full truncation of data within the
             // pruning window.
