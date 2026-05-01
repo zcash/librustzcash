@@ -7,8 +7,12 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use incrementalmerkletree::{Level, Position, frontier::Frontier};
-use rand::{Rng, RngCore};
+use incrementalmerkletree::{
+    Address as TreeAddress, Level, Position, Retention,
+    frontier::{Frontier, NonEmptyFrontier},
+};
+use rand::{Rng, RngCore, SeedableRng};
+use rand_chacha::ChaChaRng;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 
@@ -110,9 +114,13 @@ use dsl::{TestDsl, TestNoteConfig};
 pub trait ShieldedPoolTester {
     const SHIELDED_PROTOCOL: ShieldedPool;
 
+    /// The level of a shard root within this pool's note commitment tree (the
+    /// number of leaves in a shard is `1 << SHARD_HEIGHT`).
+    const SHARD_HEIGHT: u8;
+
     type Sk;
     type Fvk: TestFvk;
-    type MerkleTreeHash;
+    type MerkleTreeHash: incrementalmerkletree::Hashable + Clone;
     type Note;
 
     fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
@@ -156,6 +164,59 @@ pub trait ShieldedPoolTester {
         st: &mut TestState<Cache, DbT, P>,
         shard_index: u64,
     ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
+
+    /// Inserts a single subtree-root stub into the wallet's note commitment tree
+    /// at the given address, treating `hash` as the opaque root of an otherwise
+    /// unrealized subtree.
+    ///
+    /// Used by tests that need to construct realistic shard-boundary state
+    /// without materializing every leaf within a shard. See
+    /// [`super::shard_stub`] for the helper that decomposes a leaf range into
+    /// the minimal set of stub addresses.
+    fn insert_subtree_stub<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        addr: TreeAddress,
+        hash: Self::MerkleTreeHash,
+    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
+
+    /// Returns a fresh random hash suitable for use as an opaque subtree-root
+    /// stub for this pool.
+    fn random_subtree_hash(rng: impl RngCore) -> Self::MerkleTreeHash;
+
+    /// Returns this pool's final-tree frontier from the given chain state.
+    fn pool_frontier_in_chain_state(
+        chain_state: &chain::ChainState,
+    ) -> Frontier<Self::MerkleTreeHash, { super::shard_stub::NOTE_COMMITMENT_TREE_DEPTH }>;
+
+    /// Builds a [`chain::ChainState`] in which this pool's final-tree frontier
+    /// is `pool_frontier`, while the other pool's frontier is taken from
+    /// `other_pools_chain_state`.
+    fn build_chain_state_with_pool_frontier(
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        pool_frontier: Frontier<
+            Self::MerkleTreeHash,
+            { super::shard_stub::NOTE_COMMITMENT_TREE_DEPTH },
+        >,
+        other_pools_chain_state: &chain::ChainState,
+    ) -> chain::ChainState;
+
+    /// Reads the root of the subtree at `addr` from the wallet's note
+    /// commitment tree, treating positions strictly greater than `truncate_at`
+    /// as empty.
+    fn read_tree_root<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        addr: TreeAddress,
+        truncate_at: Position,
+    ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
+
+    /// Inserts the given non-empty frontier into the wallet's note commitment
+    /// tree, with the given leaf retention.
+    fn insert_frontier_into_tree<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        frontier: NonEmptyFrontier<Self::MerkleTreeHash>,
+        leaf_retention: Retention<BlockHeight>,
+    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
 
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64;
 
@@ -5231,16 +5292,23 @@ where
     // Test plan:
     // 1. Set up a wallet with an initial chain state whose tree has shard 0 fully
     //    cached and shard 1 one position short of full (frontier at position
-    //    `2 * 2^16 - 2 = 131070`). The frontier lives in a partial shard 1 rather
-    //    than at a shard boundary; a boundary-aligned frontier would cause
+    //    `2 * 2^16 - 2 = 131070`). The frontier sits inside partial shard 1 rather
+    //    than on a shard boundary; a boundary-aligned frontier would cause
     //    `prior_subtree_roots` to cache shard 1 and then `insert_frontier` would
     //    fail trying to reinstall its leaf into the cached-leaf-form shard.
-    // 2. Scan a single block of 65537 outputs. The first output finishes shard 1
-    //    (position 131071) and the remaining 65536 outputs fill all of shard 2
-    //    (positions 131072..196607). Three of those outputs are wallet-owned and
-    //    land at the first, middle, and last slots of shard 2 (tree positions
-    //    131072, 163840, and 196607); every other slot is non-wallet filler.
-    // 3. Declare shard 2 complete at `note_height` via `put_subtree_roots(2, ...)`
+    // 2a. Scan a small block (`block_a`) of 3 outputs: 1 filler at position
+    //     131071 (finishes shard 1) + 2 wallet notes at 131072, 131073 (the
+    //     first two slots of shard 2). After scanning, the tree's frontier
+    //     is at position 131073.
+    // 2b. Call `fake_advance_to` to advance the wallet's tree to position
+    //     196607 (frontier at 196606), inserting random subtree-root stubs
+    //     for the gap [131074, 196606) and a synthetic frontier at 196606.
+    //     This bridges the middle of shard 2 without scanning ~65k filler
+    //     outputs.
+    // 2c. Scan a small block (`block_b`) of 1 output: 1 wallet note at
+    //     position 196607 (the last slot of shard 2). After scanning, shard 2
+    //     is fully populated (real-stub-real) and its root is computable.
+    // 3. Declare shard 2 complete at `note_b_height` via `put_subtree_roots(2, ...)`
     //    so `mark_stabilized_notes` has the `subtree_end_height` it needs to flip
     //    the shard 2 notes' `witness_stabilized` flag once the pruning floor rises
     //    above the shard.
@@ -5248,17 +5316,22 @@ where
     //    3 (positions 196608+), pushing the pruning-floor checkpoint's tree
     //    position into shard 3 so `shardtree::truncate_shards(3)` — invoked by the
     //    upcoming rewind — preserves shard 2 and every row it indexes.
-    // 5. Deep-rewind to a height below `note_height` and verify `scan_queue` is
-    //    rewound all the way to the target.
+    // 5. Deep-rewind to a height below the wallet's birthday and verify
+    //    `scan_queue` is rewound all the way to the target.
     // 6. Before restoring the chain tip: the balance path reads the witness_stabilized
     //    flag directly, so `get_spendable_balance` must return the full
     //    three-note sum; the spend path requires a chain tip for the anchor, so
-    //    `propose_transfer` must fail with `ScanRequired`/`InsufficientFunds`.
-    // 7. Call `update_chain_tip(pre_rewind_tip)` and re-verify the balance.
-    // 8. Build and sign an actual spend — exercising the full note-selection and
-    //    witness-construction path — and assert it produces exactly one tx.
+    //    `propose_transfer` must fail with `ScanRequired` or `InsufficientFunds`
+    //    (and in the `InsufficientFunds` case the reported `available` must be
+    //    zero, since note selection cannot run without a tip).
+    // 7. Call `update_chain_tip(pre_rewind_tip)` and confirm the chain tip is
+    //    restored exactly. `get_spendable_balance` must again return the full
+    //    three-note sum.
+    // 8. Build and sign a fixed-value spend — exercising the full
+    //    note-selection and witness-construction path — and assert it produces
+    //    exactly one tx.
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+    use crate::data_api::{ll::wallet::PRUNING_DEPTH, testing::shard_stub};
 
     const SHARD_HEIGHT: u32 = 16;
     const SHARD_POSITIONS: u32 = 1 << SHARD_HEIGHT; // 65536
@@ -5330,48 +5403,63 @@ where
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let filler_value = Zatoshis::const_from_u64(1000);
 
-    // Step 2: scan a single block whose outputs finish shard 1 and fill all of
-    // shard 2. Three wallet outputs at the first, middle, and last slots of
-    // shard 2; everything else is non-wallet filler. Distinct wallet-output
-    // values keep failures easier to diagnose.
-    let note_values = [
-        Zatoshis::const_from_u64(100_000),
-        Zatoshis::const_from_u64(200_000),
-        Zatoshis::const_from_u64(150_000),
+    // Wallet note values: distinct values keep failures easier to diagnose.
+    // Two notes land at the start of shard 2 (in `block_a`); one lands at the
+    // last slot of shard 2 (in `block_b`).
+    let note_a_values = [
+        Zatoshis::const_from_u64(100_000), // position 131072
+        Zatoshis::const_from_u64(200_000), // position 131073
     ];
-    let total_note_value = note_values.iter().sum::<Option<Zatoshis>>().unwrap();
-    // Shard 2 spans tree positions 2 * 2^16 .. 3 * 2^16 - 1 = 131072..196607.
-    let note_tree_positions: [u32; 3] = [
-        2 * SHARD_POSITIONS,                       // first slot of shard 2
-        2 * SHARD_POSITIONS + SHARD_POSITIONS / 2, // middle slot of shard 2
-        3 * SHARD_POSITIONS - 1,                   // last slot of shard 2
-    ];
+    let note_b_value = Zatoshis::const_from_u64(150_000); // position 196607
+    let total_note_value = note_a_values
+        .iter()
+        .copied()
+        .chain([note_b_value])
+        .sum::<Option<Zatoshis>>()
+        .unwrap();
 
-    let scan_block_size: u32 = SHARD_POSITIONS + 1; // finish shard 1 + fill shard 2
-    let first_scanned_position: u32 = initial_tree_size; // = 131071
-    let mut outputs = Vec::with_capacity(scan_block_size as usize);
-    let mut next_wallet_ix = 0;
-    for offset in 0..scan_block_size {
-        let tree_pos = first_scanned_position + offset;
-        if next_wallet_ix < note_tree_positions.len()
-            && tree_pos == note_tree_positions[next_wallet_ix]
-        {
-            outputs.push(FakeCompactOutput::new(
-                dfvk.clone(),
-                AddressType::DefaultExternal,
-                note_values[next_wallet_ix],
-            ));
-            next_wallet_ix += 1;
-        } else {
-            outputs.push(FakeCompactOutput::new(
-                not_our_key.clone(),
-                AddressType::DefaultExternal,
-                filler_value,
-            ));
-        }
-    }
-    let (note_height, _, _) = st.generate_next_block_multi(&outputs);
-    st.scan_cached_blocks(note_height, 1);
+    // Step 2a: scan `block_a`. 1 filler finishes shard 1 (position 131071); 2
+    // wallet notes occupy the first two slots of shard 2 (positions 131072,
+    // 131073). After scanning, the tree's frontier sits at position 131073.
+    let block_a_outputs = vec![
+        FakeCompactOutput::new(
+            not_our_key.clone(),
+            AddressType::DefaultExternal,
+            filler_value,
+        ),
+        FakeCompactOutput::new(dfvk.clone(), AddressType::DefaultExternal, note_a_values[0]),
+        FakeCompactOutput::new(dfvk.clone(), AddressType::DefaultExternal, note_a_values[1]),
+    ];
+    let (note_a_height, _, _) = st.generate_next_block_multi(&block_a_outputs);
+    st.scan_cached_blocks(note_a_height, 1);
+
+    // Step 2b: fake-advance to position 196607 (frontier at 196606), inserting
+    // random subtree stubs for [131074, 196606) and a synthetic frontier at
+    // 196606. The synthetic-block height is `note_a_height + 1`; the next real
+    // block (`block_b`) will be at `note_a_height + 2`.
+    let advance_height = note_a_height + 1;
+    let target_position: u64 = 3 * u64::from(SHARD_POSITIONS) - 1; // 196607
+    let mut advance_rng = ChaChaRng::seed_from_u64(0xfa1e_0adc);
+    shard_stub::fake_advance_to::<T, _, _, _>(
+        &mut st,
+        advance_height,
+        BlockHash([0xab; 32]),
+        target_position,
+        &mut advance_rng,
+    )
+    .expect("fake_advance_to should succeed");
+
+    // Step 2c: scan `block_b`. Single wallet note at position 196607 (the last
+    // slot of shard 2). After scanning, shard 2 is fully populated.
+    let block_b_outputs = vec![FakeCompactOutput::new(
+        dfvk.clone(),
+        AddressType::DefaultExternal,
+        note_b_value,
+    )];
+    let (note_b_height, _, _) = st.generate_next_block_multi(&block_b_outputs);
+    st.scan_cached_blocks(note_b_height, 1);
+
+    let note_height = note_b_height;
 
     // Pick a rewind target well below the wallet's birthday so the rewind
     // drops every initially-seeded scan_queue row — exercising the case where
