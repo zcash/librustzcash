@@ -2720,7 +2720,7 @@ dependencies = [
 [[package]]
 name = "mock_ragu"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon?rev=38b3e16ae68b3114e091af36ad68b657d18ac4e9#38b3e16ae68b3114e091af36ad68b657d18ac4e9"
+source = "git+https://github.com/tachyon-zcash/tachyon?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -7420,10 +7420,10 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon?rev=38b3e16ae68b3114e091af36ad68b657d18ac4e9#38b3e16ae68b3114e091af36ad68b657d18ac4e9"
+source = "git+https://github.com/tachyon-zcash/tachyon?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
- "core2",
+ "corez",
  "ff",
  "group",
  "halo2_poseidon",
