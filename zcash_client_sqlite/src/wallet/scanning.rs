@@ -376,11 +376,13 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Marks received notes as `witness_stabilized` once their containing shard's block extent is fully
-/// Scanned and the shard's end height has at least `PRUNING_DEPTH` confirmations.
+/// Sets `witness_anchor_stable` on received notes whose containing shard's block extent is
+/// fully scanned and whose shard end height has received at least `PRUNING_DEPTH`
+/// confirmations. The stored value is the shard's `subtree_end_height` — the anchor at which
+/// the leaf-level path from the note to the shard root has been finalized.
 ///
-/// This means that a note within the chain-tip shard can not be marked as `witness_stabilized`,
-/// because the tip shard is by definition not complete or confirmed to the `PRUNING_DEPTH`.
+/// A note within the chain-tip shard cannot be stabilized by this function, because the
+/// chain-tip shard does not yet have a `subtree_end_height` value.
 pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
@@ -393,8 +395,18 @@ pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     ) -> Result<(), SqliteClientError> {
         let sql = format!(
             "UPDATE {pool}_received_notes
-             SET witness_stabilized = 1
-             WHERE witness_stabilized = 0
+             SET witness_anchor_stable = (
+                 SELECT shard.subtree_end_height
+                 FROM {pool}_tree_shards shard
+                 WHERE shard.subtree_end_height IS NOT NULL
+                   AND shard.subtree_end_height <= :pruning_floor
+                   AND ({pool}_received_notes.commitment_tree_position >> :shard_height)
+                       = shard.shard_index
+                   AND shard.shard_index NOT IN (
+                       SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                   )
+             )
+             WHERE witness_anchor_stable IS NULL
                AND commitment_tree_position IS NOT NULL
                AND EXISTS (
                    SELECT 1 FROM {pool}_tree_shards shard

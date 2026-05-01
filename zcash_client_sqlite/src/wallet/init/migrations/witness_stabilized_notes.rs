@@ -6,13 +6,19 @@
 
 use std::collections::HashSet;
 
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 use zcash_protocol::consensus;
 
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+
 use super::account_delete_cascade;
+use crate::PRUNING_DEPTH;
+use crate::wallet::block_max_scanned;
 use crate::wallet::init::WalletMigrationError;
-use crate::wallet::scanning::mark_stabilized_notes;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x64925567_65ae_495e_b6cf_d5f56e99e422);
 
@@ -55,7 +61,44 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         )?;
 
         // Backfill: Identify any notes which have stable witness data, and mark them as such.
-        mark_stabilized_notes(transaction, &self.params)?;
+        // The SQL is inlined here so this migration remains stable even if
+        // `crate::wallet::scanning::mark_stabilized_notes` later evolves to write a
+        // different column.
+        if let Some(max_scanned_height) =
+            block_max_scanned(transaction, &self.params)?.map(|m| m.block_height())
+        {
+            let pruning_floor: u32 =
+                u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+            for (pool, shard_height) in [
+                ("sapling", SAPLING_SHARD_HEIGHT),
+                #[cfg(feature = "orchard")]
+                ("orchard", ORCHARD_SHARD_HEIGHT),
+            ] {
+                let sql = format!(
+                    "UPDATE {pool}_received_notes
+                     SET witness_stabilized = 1
+                     WHERE witness_stabilized = 0
+                       AND commitment_tree_position IS NOT NULL
+                       AND EXISTS (
+                           SELECT 1 FROM {pool}_tree_shards shard
+                           WHERE shard.subtree_end_height IS NOT NULL
+                             AND shard.subtree_end_height <= :pruning_floor
+                             AND (commitment_tree_position >> :shard_height)
+                                 = shard.shard_index
+                             AND shard.shard_index NOT IN (
+                                 SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                             )
+                       )"
+                );
+                transaction.execute(
+                    &sql,
+                    named_params![
+                        ":pruning_floor": pruning_floor,
+                        ":shard_height": shard_height,
+                    ],
+                )?;
+            }
+        }
 
         Ok(())
     }
@@ -416,6 +459,7 @@ mod tests {
     fn gap_in_scanned_coverage_prevents_stabilization() {
         use zcash_client_backend::data_api::scanning::ScanPriority;
 
+        use crate::wallet::init::migrations::witness_anchor_stable;
         use crate::wallet::scanning::{mark_stabilized_notes, priority_code};
 
         let network = Network::TestNetwork;
@@ -425,14 +469,14 @@ mod tests {
 
         let seed_bytes = vec![0xab; 32];
 
-        // Migrate through `witness_stabilized_notes` so the schema is in its final state.
-        // Because there is no scan_queue / blocks / shards seeded yet, the migration's
-        // backfill is a no-op and the column default (0) applies to all rows we're about
-        // to insert.
+        // Migrate through `witness_anchor_stable` so `mark_stabilized_notes` has its
+        // target column to write into. The intermediate `witness_stabilized` column is
+        // dropped along the way; the runtime behavior under test is preserved through
+        // the new `witness_anchor_stable` column.
         WalletMigrator::new()
             .with_seed(Secret::new(seed_bytes.clone()))
             .ignore_seed_relevance()
-            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .init_or_migrate_to(&mut db_data, &[witness_anchor_stable::MIGRATION_ID])
             .unwrap();
 
         // Scenario: the `scan_queue` partition covers `[birthday, chain_tip_exclusive)`
@@ -587,7 +631,9 @@ mod tests {
 
         let read_stabilized = |conn: &rusqlite::Connection, table: &str, pk_col: &str| -> i64 {
             conn.query_row(
-                &format!("SELECT witness_stabilized FROM {table} WHERE {pk_col} = 0"),
+                &format!(
+                    "SELECT witness_anchor_stable IS NOT NULL FROM {table} WHERE {pk_col} = 0"
+                ),
                 [],
                 |row| row.get(0),
             )

@@ -2539,7 +2539,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT accounts.uuid, rn.id, rn.value, rn.is_change, rn.recipient_key_scope,
                     scan_state.max_priority,
-                    rn.witness_stabilized,
+                    rn.witness_anchor_stable,
                     t.mined_height,
                     IFNULL(t.trust_status, 0) AS trust_status,
                     MAX(tt.mined_height) AS max_shielding_input_height,
@@ -2610,7 +2610,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
 
-            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+            let witness_anchor_stable = row
+                .get::<_, Option<u32>>("witness_anchor_stable")?
+                .map(BlockHeight::from);
+            let witness_stabilized = witness_anchor_stable.is_some();
 
             // A stabilized note is unconditionally spendable. Its originating transaction has been
             // confirmed well beyond any reasonable confirmation policy, and its witness data
