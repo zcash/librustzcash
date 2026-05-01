@@ -3973,6 +3973,13 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         )?;
     }
 
+    // After truncation the chain-tip pruning window may contain ranges whose priority is
+    // no longer `Scanned`. Stamp the window with `Anchor` priority so that re-establishing
+    // a usable anchor takes precedence over normal forward sync. If the window is fully
+    // `Scanned` already (e.g. the truncation didn't actually mutate any blocks), the
+    // dominance rule preserves those ranges and this is effectively a no-op.
+    scanning::mark_anchor_priority_window(conn)?;
+
     Ok(truncation_height)
 }
 
@@ -4292,31 +4299,6 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
         .map_err(RewindError::DataSource)?;
     }
 
-    // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
-    // forcing re-scan of any blocks that previously appeared above the target. This both
-    // re-queues the blocks above the truncation floor (which truncate_to_height_internal
-    // already trimmed) and overrides any `Scanned`/`Historic` entries in the
-    // `(target_height, truncation_height]` window that survived a deep rewind, so the sync
-    // loop will re-scan them. With `force_rescans = true` the only entries this preserves are
-    // those whose priority would dominate `Historic` even under a forced rescan
-    // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
-    // and cannot overwrite anything.
-    if let Some(t) = chain_tip
-        && target_height < t
-    {
-        let rescan_range = (target_height + 1)..(t + 1);
-        replace_queue_entries::<SqliteClientError>(
-            conn,
-            &rescan_range,
-            std::iter::once(ScanRange::from_parts(
-                rescan_range.clone(),
-                ScanPriority::Historic,
-            )),
-            true,
-        )
-        .map_err(RewindError::DataSource)?;
-    }
-
     let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
     #[cfg(feature = "orchard")]
     let new_orchard_tree_size = Some(chain_state.final_orchard_tree().tree_size());
@@ -4338,6 +4320,34 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             ],
         )
         .map_err(|e| RewindError::DataSource(e.into()))?;
+    }
+
+    // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
+    // forcing re-scan of any blocks that previously appeared above the target. This both
+    // re-queues the blocks above the truncation floor (which truncate_to_height_internal
+    // already trimmed) and overrides any `Scanned`/`Historic` entries in the
+    // `(target_height, truncation_height]` window that survived a deep rewind, so the sync
+    // loop will re-scan them.
+    if let Some(chain_tip) = chain_tip
+        && target_height < chain_tip
+    {
+        let rescan_range = new_birthday..(chain_tip + 1);
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &rescan_range,
+            std::iter::once(ScanRange::from_parts(
+                rescan_range.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )
+        .map_err(RewindError::DataSource)?;
+
+        // Re-stamp the chain-tip pruning window with `Anchor` priority. The Historic
+        // rewrite above downgrades the window's previously-Scanned ranges; the wallet's
+        // existing stabilized notes now require those blocks to be re-scanned before
+        // they can be reported as spendable again.
+        scanning::mark_anchor_priority_window(conn).map_err(RewindError::DataSource)?;
     }
 
     Ok(())

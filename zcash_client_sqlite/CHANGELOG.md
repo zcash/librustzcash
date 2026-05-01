@@ -126,6 +126,15 @@ workspace.
   A cross-account duplicate for which no unique record can be verified by derivation causes
   the migration to abort.
 
+- After any operation that disturbs the wallet's anchor —
+  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
+  or importing an account whose birthday is below the prior wallet
+  birthday — the chain-tip pruning window is stamped with
+  `ScanPriority::Anchor`. The spendability rule reports zero spendable
+  balance until the wallet has scanned through the affected range; the
+  serve-`Anchor`-first ordering on `scan_queue` makes this happen
+  automatically under `suggest_scan_ranges`.
+
 ### Fixed
 - Deriving a transparent address that was previously imported as a standalone receiver now
   upgrades the existing address record in place to its derived form, instead of failing on the

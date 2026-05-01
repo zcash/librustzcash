@@ -40,6 +40,7 @@ pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
         OpenAdjacent => 30,
         FoundNote => 40,
         ChainTip => 50,
+        Anchor => 55,
         Verify => 60,
     }
 }
@@ -53,9 +54,60 @@ pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
         30 => Some(OpenAdjacent),
         40 => Some(FoundNote),
         50 => Some(ChainTip),
+        55 => Some(Anchor),
         60 => Some(Verify),
         _ => None,
     }
+}
+
+/// Stamps the chain-tip pruning window with [`ScanPriority::Anchor`], clamped so it does
+/// not overlap pre-birthday `Ignored` ranges. Existing `Scanned` ranges in the window are
+/// preserved (the dominance rule in the spanning tree's `insert` keeps `Scanned` over
+/// `Anchor` when `force_rescans` is false); any range with priority less than `Anchor` and
+/// at or above the wallet's birthday is upgraded so that re-establishing a usable anchor
+/// takes precedence over normal forward sync.
+///
+/// The window is `(max(chain_tip - PRUNING_DEPTH, wallet_birthday - 1), chain_tip]`. If
+/// either `chain_tip_height` or `wallet_birthday` is unset, this is a no-op.
+///
+/// This must be called after operations that mutate `scan_queue` priorities or shift
+/// `chain_tip_height` in ways that can leave the pruning window with non-`Scanned` overlap:
+/// rewind, truncate-to-height, truncate-to-chain-state, and account import are the current
+/// triggers.
+pub(crate) fn mark_anchor_priority_window(
+    conn: &rusqlite::Transaction<'_>,
+) -> Result<(), SqliteClientError> {
+    let chain_tip = match super::chain_tip_height(conn)? {
+        Some(h) => h,
+        None => return Ok(()),
+    };
+
+    let wallet_birthday = match wallet_birthday(conn)? {
+        Some(h) => h,
+        None => return Ok(()),
+    };
+
+    let chain_tip_u32 = u32::from(chain_tip);
+    let pruning_floor_u32 = chain_tip_u32.saturating_sub(PRUNING_DEPTH);
+    let birthday_u32 = u32::from(wallet_birthday);
+    // The window's inclusive lower bound is the larger of `pruning_floor + 1` and
+    // `wallet_birthday`; we never stamp Anchor priority on pre-birthday blocks (which are
+    // `Ignored` and must stay that way).
+    let window_start = std::cmp::max(pruning_floor_u32 + 1, birthday_u32);
+    // `chain_tip_exclusive` is the half-open upper bound of the scan range — i.e.
+    // `chain_tip + 1`, so the chain tip itself is included in the stamped window.
+    let chain_tip_exclusive = chain_tip_u32 + 1;
+    if window_start >= chain_tip_exclusive {
+        return Ok(());
+    }
+
+    let range = BlockHeight::from(window_start)..BlockHeight::from(chain_tip_exclusive);
+    replace_queue_entries::<SqliteClientError>(
+        conn,
+        &range,
+        std::iter::once(ScanRange::from_parts(range.clone(), ScanPriority::Anchor)),
+        false,
+    )
 }
 
 pub(crate) fn suggest_scan_ranges(
@@ -694,7 +746,7 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        VERIFY_LOOKAHEAD,
+        PRUNING_DEPTH, VERIFY_LOOKAHEAD,
         error::SqliteClientError,
         testing::{
             BlockCache,
@@ -1096,9 +1148,17 @@ pub(crate) mod tests {
             )
             .unwrap();
 
+        // After `create_account` the scan_queue is rewritten to mark the post-birthday
+        // range as `Historic`, and the chain-tip pruning window is then stamped with
+        // `Anchor` priority so that a usable spend anchor can be (re-)established as
+        // soon as those blocks are scanned.
+        let pruning_window_start = u32::from(new_tip).saturating_sub(PRUNING_DEPTH) + 1;
         let expected = vec![
-            // The account's birthday onward is marked for recovery.
-            scan_range(wallet_birthday.into()..chain_end, Historic),
+            // The chain-tip pruning window has Anchor priority.
+            scan_range(pruning_window_start..chain_end, Anchor),
+            // Between the birthday and the pruning window, the original Historic
+            // priority remains.
+            scan_range(wallet_birthday.into()..pruning_window_start, Historic),
             // The range up to the wallet's birthday height is ignored.
             scan_range(sap_active.into()..wallet_birthday.into(), Ignored),
         ];
