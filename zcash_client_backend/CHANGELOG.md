@@ -12,6 +12,19 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
+- The following utilities for fake note commitment tree construction have been
+  added under the `test-dependencies` feature:
+  - `zcash_client_backend::data_api::testing::pool::ShieldedPoolTester::`
+    - `SHARD_HEIGHT`
+    - `insert_subtree_stub`,
+    - `random_subtree_hash`,
+    - `read_tree_root`,
+    - `insert_frontier_into_tree`,
+    - `pool_frontier_in_chain_state`,
+    - `build_chain_state_with_pool_frontier`
+  - `zcash_client_backend::data_api::testing::shard_stub`
+    - `level_index_decomposition{start, end, max_level}`
+    - `fake_advance_to{st, advance_height, advance_block_hash, target_position, rng}`
 
 ### Changed
 - `zcash_client_backend::data_api::WalletWrite`:
