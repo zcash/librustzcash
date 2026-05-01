@@ -1,7 +1,7 @@
 //! Support for legacy transparent addresses and scripts.
 
 use core::fmt;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
 use zcash_protocol::consensus::NetworkType;
@@ -14,7 +14,7 @@ use zcash_script::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use sha2::{Digest, Sha256};
+use crate::util::hash160;
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
 #[derive(Clone)]
@@ -150,13 +150,20 @@ impl TransparentAddress {
 
     /// Returns the address that this Script contains, if any.
     pub fn from_script_pubkey(script_pubkey: &script::PubKey) -> Option<Self> {
-        solver::standard(script_pubkey).and_then(|script_kind| match script_kind {
+        solver::standard(script_pubkey)
+            .as_ref()
+            .and_then(Self::from_script_kind)
+    }
+
+    /// Returns the address that this `ScriptKind` contains, if any.
+    pub fn from_script_kind(script_kind: &solver::ScriptKind) -> Option<Self> {
+        match script_kind {
             solver::ScriptKind::PubKeyHash { hash } => {
-                Some(TransparentAddress::PublicKeyHash(hash))
+                Some(TransparentAddress::PublicKeyHash(*hash))
             }
-            solver::ScriptKind::ScriptHash { hash } => Some(TransparentAddress::ScriptHash(hash)),
+            solver::ScriptKind::ScriptHash { hash } => Some(TransparentAddress::ScriptHash(*hash)),
             _ => None,
-        })
+        }
     }
 
     /// Generate the `scriptPubKey` corresponding to this address.
@@ -189,9 +196,7 @@ impl TransparentAddress {
     /// Derives the P2PKH transparent address corresponding to the given pubkey bytes.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn from_pubkey_bytes(pubkey: &[u8; 33]) -> Self {
-        TransparentAddress::PublicKeyHash(
-            *ripemd::Ripemd160::digest(Sha256::digest(pubkey)).as_ref(),
-        )
+        TransparentAddress::PublicKeyHash(hash160::hash(pubkey))
     }
 
     /// Encodes this transparent address for the given network type.

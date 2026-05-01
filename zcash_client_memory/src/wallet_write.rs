@@ -1065,6 +1065,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         todo!()
     }
 
+    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        todo!()
+    }
+
     fn import_account_hd(
         &mut self,
         _account_name: &str,
@@ -1261,6 +1265,15 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         &mut self,
         _account: Self::AccountId,
         _pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: zcash_script::script::Redeem,
     ) -> Result<(), Self::Error> {
         todo!()
     }

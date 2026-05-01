@@ -1,7 +1,7 @@
 use crate::encoding::{StateWrite, WriteBytesExt};
 use core::borrow::Borrow;
 use core::convert::TryFrom;
-use core2::io::Write;
+use corez::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params};
 use ff::PrimeField;

@@ -5,7 +5,7 @@
 //! is part of `TachyonBundle::read`; the `None` case must explicitly write the
 //! `0x00` byte since `TachyonBundle::write` only emits `0x01`/`0x02`.
 
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use zcash_tachyon::TachyonBundle;
 

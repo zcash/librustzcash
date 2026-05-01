@@ -36,20 +36,20 @@ categories = ["cryptography::cryptocurrencies"]
 # part of a public API, and which can be updated without a SemVer bump.
 [workspace.dependencies]
 # Intra-workspace dependencies
-equihash = { version = "0.2", path = "components/equihash", default-features = false }
-zcash_address = { version = "0.10", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.21", path = "zcash_client_backend" }
-zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.12", path = "zcash_keys", default-features = false  }
-zcash_protocol = { version = "0.7.2", path = "components/zcash_protocol", default-features = false }
-zip321 = { version = "0.6", path = "components/zip321" }
+equihash = { version = "0.3", path = "components/equihash", default-features = false }
+zcash_address = { version = "0.11", path = "components/zcash_address", default-features = false }
+zcash_client_backend = { version = "0.22", path = "zcash_client_backend" }
+zcash_encoding = { version = "0.4", path = "components/zcash_encoding", default-features = false }
+zcash_keys = { version = "0.13", path = "zcash_keys", default-features = false  }
+zcash_protocol = { version = "0.8", path = "components/zcash_protocol", default-features = false }
+zip321 = { version = "0.7", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
 zcash_tachyon = { git = "https://github.com/tachyon-zcash/tachyon", rev = "38b3e16ae68b3114e091af36ad68b657d18ac4e9", default-features = false }
-zcash_primitives = { version = "0.26", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.26", path = "zcash_proofs", default-features = false }
+zcash_primitives = { version = "0.27", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "0.27", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.5", path = "pczt" }
+pczt = { version = "0.6", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
@@ -66,10 +66,10 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.8"
 jubjub = "0.10"
 redjubjub = { version = "0.8", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.6", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
-orchard = { version = "0.12", default-features = false }
+orchard = { version = "0.13", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -78,8 +78,8 @@ block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
 crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
-transparent = { package = "zcash_transparent", version = "0.6.2", path = "zcash_transparent", default-features = false }
-zcash_script = { version = "0.4.2", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.7.0", path = "zcash_transparent", default-features = false }
+zcash_script = { version = "0.4.3", default-features = false }
 zeroize = { version = "1.7", default-features = false }
 
 # Boilerplate & missing stdlib
@@ -127,7 +127,7 @@ memuse = { version = "0.2.2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 
 # No-std support
-core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+corez = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Parallel processing
 crossbeam-channel = "0.5"

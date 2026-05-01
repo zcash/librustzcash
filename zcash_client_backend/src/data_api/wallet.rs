@@ -44,6 +44,8 @@ use std::{
 use shardtree::error::{QueryError, ShardTreeError};
 
 use super::InputSource;
+#[cfg(feature = "transparent-inputs")]
+use super::TransparentOutputFilter;
 use crate::{
     data_api::{
         Account, MaxSpendMode, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
@@ -56,13 +58,11 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
-};
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
     prover::{OutputProver, SpendProver},
 };
+use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -90,16 +90,18 @@ use {
         proposal::StepOutput,
         wallet::{TransparentAddressMetadata, TransparentAddressSource},
     },
-    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
+    transparent::bundle::TxOut,
 };
+
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script::{self as zs_script, Evaluable};
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
-    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -108,6 +110,7 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::consensus::NetworkConstants,
 };
@@ -369,6 +372,20 @@ where
 ///
 /// See [`ZIP 315`] for details including the definitions of "trusted" and "untrusted" notes.
 ///
+/// An error indicating that a [`ConfirmationsPolicy`] could not be constructed because the
+/// trusted confirmation count exceeds the untrusted confirmation count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfirmationsPolicyError;
+
+impl core::fmt::Display for ConfirmationsPolicyError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Trusted confirmations must not exceed untrusted confirmations"
+        )
+    }
+}
+
 /// [`ZIP 315`]: https://zips.z.cash/zip-0315
 #[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
@@ -416,7 +433,7 @@ impl ConfirmationsPolicy {
     /// provided values.
     ///
     /// The number of confirmations required for trusted notes must be less than or equal to the
-    /// number of confirmations required for untrusted notes; this returns `Err(())` if this
+    /// number of confirmations required for untrusted notes; this returns an error if this
     /// invariant is violated.
     ///
     /// WARNING: This should only be used with great care to avoid problems of transaction
@@ -425,9 +442,9 @@ impl ConfirmationsPolicy {
         trusted: NonZeroU32,
         untrusted: NonZeroU32,
         #[cfg(feature = "transparent-inputs")] allow_zero_conf_shielding: bool,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ConfirmationsPolicyError> {
         if trusted > untrusted {
-            Err(())
+            Err(ConfirmationsPolicyError)
         } else {
             Ok(Self {
                 trusted,
@@ -716,7 +733,7 @@ where
             None,
             vec![],
         )
-        .ok_or(Error::MemoForbidden)?,
+        .map_err(Error::Payment)?,
     ])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
@@ -774,7 +791,7 @@ where
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
     if memo.is_some() && !recipient.can_receive_memo() {
-        return Err(Error::MemoForbidden);
+        return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
     }
 
     let proposal = propose_send_max(
@@ -796,6 +813,9 @@ where
 
 /// Constructs a proposal to shield all of the funds belonging to the provided set of
 /// addresses.
+///
+/// The `output_filter` parameter controls which transparent outputs are eligible for
+/// inclusion in the proposal. See [`TransparentOutputFilter`] for details.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -808,6 +828,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
+    output_filter: TransparentOutputFilter,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -833,6 +854,7 @@ where
             to_account,
             (chain_tip_height + 1).into(),
             confirmations_policy,
+            output_filter,
         )
         .map_err(Error::from)
 }
@@ -853,7 +875,7 @@ struct StepResult<AccountId> {
 pub struct SpendingKeys {
     usk: UnifiedSpendingKey,
     #[cfg(feature = "transparent-key-import")]
-    standalone_transparent_keys: HashMap<TransparentAddress, secp256k1::SecretKey>,
+    standalone_transparent_keys: HashMap<TransparentAddress, Vec<secp256k1::SecretKey>>,
 }
 
 impl SpendingKeys {
@@ -862,7 +884,7 @@ impl SpendingKeys {
         usk: UnifiedSpendingKey,
         #[cfg(feature = "transparent-key-import")] standalone_transparent_keys: HashMap<
             TransparentAddress,
-            secp256k1::SecretKey,
+            Vec<secp256k1::SecretKey>,
         >,
     ) -> Self {
         Self {
@@ -1320,34 +1342,47 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_p2pkh_input =
+        let mut add_transparent_input =
             |builder: &mut Builder<_, _>,
              utxos_spent: &mut Vec<_>,
              recipient_address: &TransparentAddress,
              outpoint: OutPoint,
              txout: TxOut|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                let pubkey = match metadata_from_address(recipient_address)?.source() {
+                let metadata = metadata_from_address(recipient_address)?;
+                match metadata.source() {
                     TransparentAddressSource::Derived {
                         scope,
                         address_index,
-                    } => ufvk
-                        .transparent()
-                        .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                        .derive_address_pubkey(*scope, *address_index)
-                        .expect("spending key derivation should not fail"),
+                    } => {
+                        let pubkey = ufvk
+                            .transparent()
+                            .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
+                            .derive_address_pubkey(*scope, *address_index)
+                            .expect("spending key derivation should not fail");
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
+                    }
                     #[cfg(feature = "transparent-key-import")]
-                    TransparentAddressSource::Standalone(pubkey) => *pubkey,
-                };
-
-                utxos_spent.push(outpoint.clone());
-                builder.add_transparent_p2pkh_input(pubkey, outpoint, txout)?;
+                    TransparentAddressSource::StandalonePubkey(pubkey) => {
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2pkh_input(*pubkey, outpoint, txout)?;
+                    }
+                    #[cfg(feature = "transparent-key-import")]
+                    TransparentAddressSource::StandaloneScript(redeem_script) => {
+                        let from_chain =
+                            zs_script::FromChain::parse(&zs_script::Code(redeem_script.to_bytes()))
+                                .map_err(|_| ::transparent::builder::Error::UnsupportedScript)?;
+                        utxos_spent.push(outpoint.clone());
+                        builder.add_transparent_p2sh_input(from_chain, outpoint, txout)?;
+                    }
+                }
 
                 Ok(())
             };
 
         for utxo in proposal_step.transparent_inputs() {
-            add_transparent_p2pkh_input(
+            add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
                 utxo.recipient_address(),
@@ -1370,7 +1405,7 @@ where
                 .ok_or(ProposalError::ReferenceError(*input_ref))?
                 .vout[outpoint.n() as usize];
 
-            add_transparent_p2pkh_input(
+            add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
                 &address,
@@ -1472,7 +1507,7 @@ where
              to: TransparentAddress|
              -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
                 if payment.memo().is_some() {
-                    return Err(Error::MemoForbidden);
+                    return Err(Error::Payment(zip321::PaymentError::TransparentMemo));
                 }
                 builder.add_transparent_output(&to, payment_amount)?;
                 transparent_output_meta.push((
@@ -1692,21 +1727,31 @@ where
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
     for (_address, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(match address_metadata.source() {
+        match address_metadata.source() {
             TransparentAddressSource::Derived {
                 scope,
                 address_index,
-            } => spending_keys
-                .usk
-                .transparent()
-                .derive_secret_key(*scope, *address_index)
-                .expect("spending key derivation should not fail"),
+            } => {
+                transparent_signing_set.add_key(
+                    spending_keys
+                        .usk
+                        .transparent()
+                        .derive_secret_key(*scope, *address_index)
+                        .expect("spending key derivation should not fail"),
+                );
+            }
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => *spending_keys
-                .standalone_transparent_keys
-                .get(&_address)
-                .ok_or(Error::AddressNotRecognized(_address))?,
-        });
+            TransparentAddressSource::StandalonePubkey(_)
+            | TransparentAddressSource::StandaloneScript(_) => {
+                let keys = spending_keys
+                    .standalone_transparent_keys
+                    .get(&_address)
+                    .ok_or(Error::AddressNotRecognized(_address))?;
+                for key in keys {
+                    transparent_signing_set.add_key(*key);
+                }
+            }
+        }
     }
     let sapling_extsks = &[
         spending_keys.usk.sapling().clone(),
@@ -2077,7 +2122,8 @@ where
                                     address_index,
                                 } => Some((index, *scope, *address_index)),
                                 #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressSource::Standalone(_) => None,
+                                TransparentAddressSource::StandalonePubkey(_)
+                                | TransparentAddressSource::StandaloneScript(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();
@@ -2612,6 +2658,7 @@ where
         from_addrs,
         to_account,
         confirmations_policy,
+        TransparentOutputFilter::All,
     )?;
 
     create_proposed_transactions(

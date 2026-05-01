@@ -32,10 +32,19 @@ fn pub_prefix<P: consensus::Parameters>(params: &P) -> Prefix {
 /// A [ZIP 48] private key at the P2SH level `m/48'/<coin_type>'/<account>'/133000'`.
 ///
 /// [ZIP 48]: https://zips.z.cash/zip-0048
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AccountPrivKey {
     origin: KeyOrigin,
     key: ExtendedPrivateKey<SecretKey>,
+}
+
+impl core::fmt::Debug for AccountPrivKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AccountPrivKey")
+            .field("origin", &self.origin)
+            .field("key", &"...")
+            .finish()
+    }
 }
 
 impl AccountPrivKey {

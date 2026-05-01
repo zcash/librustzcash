@@ -23,6 +23,7 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod ivk_item_cache;
 mod nullifier_map;
 mod orchard_received_notes;
 mod orchard_shardtree;
@@ -32,6 +33,7 @@ mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
+mod standalone_p2sh;
 mod support_legacy_sqlite;
 mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
@@ -52,6 +54,7 @@ mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
+mod witness_stabilized_notes;
 
 use std::{rc::Rc, sync::Mutex};
 
@@ -131,8 +134,10 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
-    //                                                      |
-    //                                           v_tx_outputs_key_scopes
+    //                                        /               |              \
+    //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
+    //                                                        |
+    //                                                  ivk_item_cache
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -219,6 +224,13 @@ pub(super) fn all_migrations<
         Box::new(add_transaction_trust_marker::Migration),
         Box::new(account_delete_cascade::Migration),
         Box::new(v_tx_outputs_key_scopes::Migration),
+        Box::new(standalone_p2sh::Migration),
+        Box::new(ivk_item_cache::Migration {
+            params: params.clone(),
+        }),
+        Box::new(witness_stabilized_notes::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 
@@ -359,7 +371,11 @@ pub const V_0_18_5: &[Uuid] = &[
 pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
-pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[v_tx_outputs_key_scopes::MIGRATION_ID];
+pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
+    v_tx_outputs_key_scopes::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    witness_stabilized_notes::MIGRATION_ID,
+];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

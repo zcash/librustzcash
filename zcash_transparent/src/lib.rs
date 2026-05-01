@@ -16,6 +16,7 @@ pub mod coinbase;
 pub mod keys;
 pub mod pczt;
 pub mod sighash;
+pub mod util;
 #[cfg(feature = "transparent-inputs")]
 pub mod zip48;
 

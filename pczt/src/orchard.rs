@@ -111,6 +111,7 @@ pub struct Spend {
     ///
     /// This is set by the Signer.
     #[serde_as(as = "Option<[_; 64]>")]
+    #[getset(get = "pub")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
     /// The [raw encoding] of the Orchard payment address that received the note being spent.

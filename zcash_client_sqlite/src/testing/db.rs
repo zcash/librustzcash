@@ -33,7 +33,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    ShieldedProtocol, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
 };
 use zip32::DiversifierIndex;
 
@@ -45,11 +45,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::TransparentAddressMetadata,
-    ::transparent::{
-        address::TransparentAddress,
-        bundle::OutPoint,
-        keys::{NonHardenedChildIndex, TransparentKeyScope},
-    },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };

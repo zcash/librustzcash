@@ -1,0 +1,6 @@
+# Seeds for failure cases propance has generated in the past. It is
+# temporary automatically reproduced before any new cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b040fce0ef8c3a97cea73b1d467f4a1b2bc3e3e017e41d96b091c125d2b2b57e # shrunk from prop_zip321_roundtrip_uri

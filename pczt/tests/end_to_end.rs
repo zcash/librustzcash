@@ -152,28 +152,36 @@ fn transparent_to_orchard() {
         Some(
             v5_signature_hash(
                 &tx_effects,
-                &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
-                        (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
-                        (zcash_script::signature::SignedOutputs::All, true) => {
-                            SighashType::ALL_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, false) => {
-                            SighashType::SINGLE
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, true) => {
-                            SighashType::SINGLE_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
-                        (zcash_script::signature::SignedOutputs::None, true) => {
-                            SighashType::NONE_ANYONECANPAY
-                        }
-                    },
-                    0,
-                    &Script(script_code.clone()),
-                    coin.script_pubkey(),
-                    coin.value(),
-                )),
+                &SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                            (zcash_script::signature::SignedOutputs::All, false) => {
+                                SighashType::ALL
+                            }
+                            (zcash_script::signature::SignedOutputs::All, true) => {
+                                SighashType::ALL_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, false) => {
+                                SighashType::SINGLE
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, true) => {
+                                SighashType::SINGLE_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::None, false) => {
+                                SighashType::NONE
+                            }
+                            (zcash_script::signature::SignedOutputs::None, true) => {
+                                SighashType::NONE_ANYONECANPAY
+                            }
+                        },
+                        0,
+                        &Script(script_code.clone()),
+                        coin.script_pubkey(),
+                        coin.value(),
+                    )
+                    .unwrap(),
+                ),
                 &tx_digests,
             )
             .as_ref()
@@ -322,28 +330,36 @@ fn transparent_p2sh_multisig_to_orchard() {
         Some(
             v5_signature_hash(
                 &tx_effects,
-                &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
-                        (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
-                        (zcash_script::signature::SignedOutputs::All, true) => {
-                            SighashType::ALL_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, false) => {
-                            SighashType::SINGLE
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, true) => {
-                            SighashType::SINGLE_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
-                        (zcash_script::signature::SignedOutputs::None, true) => {
-                            SighashType::NONE_ANYONECANPAY
-                        }
-                    },
-                    0,
-                    &Script(script_code.clone()),
-                    coin.script_pubkey(),
-                    coin.value(),
-                )),
+                &SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                            (zcash_script::signature::SignedOutputs::All, false) => {
+                                SighashType::ALL
+                            }
+                            (zcash_script::signature::SignedOutputs::All, true) => {
+                                SighashType::ALL_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, false) => {
+                                SighashType::SINGLE
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, true) => {
+                                SighashType::SINGLE_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::None, false) => {
+                                SighashType::NONE
+                            }
+                            (zcash_script::signature::SignedOutputs::None, true) => {
+                                SighashType::NONE_ANYONECANPAY
+                            }
+                        },
+                        0,
+                        &Script(script_code.clone()),
+                        coin.script_pubkey(),
+                        coin.value(),
+                    )
+                    .unwrap(),
+                ),
                 &tx_digests,
             )
             .as_ref()

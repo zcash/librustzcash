@@ -1,6 +1,26 @@
 
 # cargo-vet imports lock
 
+[[unpublished.pczt]]
+version = "0.6.0"
+audited_as = "0.5.1"
+
+[[unpublished.zcash_client_backend]]
+version = "0.22.0"
+audited_as = "0.21.2"
+
+[[unpublished.zcash_client_sqlite]]
+version = "0.20.0"
+audited_as = "0.19.5"
+
+[[unpublished.zcash_keys]]
+version = "0.13.0"
+audited_as = "0.12.0"
+
+[[unpublished.zcash_proofs]]
+version = "0.27.0"
+audited_as = "0.26.1"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -15,12 +35,19 @@ user-id = 5946
 user-login = "jrmuizel"
 user-name = "Jeff Muizelaar"
 
+[[publisher.eip681]]
+version = "0.1.0"
+when = "2026-03-30"
+user-id = 67525
+user-login = "schell"
+user-name = "Schell Carl Scivally"
+
 [[publisher.equihash]]
-version = "0.2.2"
-when = "2025-03-05"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.3.0"
+when = "2026-04-24"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.f4jumble]]
 version = "0.1.1"
@@ -79,11 +106,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.12.0"
-when = "2025-12-05"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.13.0"
+when = "2026-04-22"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
 version = "0.5.1"
@@ -93,11 +120,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.sapling-crypto]]
-version = "0.6.0"
-when = "2025-12-05"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.7.0"
+when = "2026-04-21"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.schemerz]]
 version = "0.2.0"
@@ -435,29 +462,29 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.10.1"
-when = "2025-10-20"
+version = "0.11.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.21.1"
-when = "2026-02-27"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.21.2"
+when = "2026-03-10"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.19.4"
-when = "2026-02-27"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.19.5"
+when = "2026-03-10"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_encoding]]
-version = "0.3.0"
-when = "2025-02-21"
+version = "0.4.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -484,8 +511,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.26.4"
-when = "2025-12-18"
+version = "0.27.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -498,8 +525,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.7.2"
-when = "2025-12-11"
+version = "0.8.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -519,8 +546,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.6.3"
-when = "2025-12-18"
+version = "0.7.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -533,8 +560,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.6.0"
-when = "2025-10-02"
+version = "0.7.0"
+when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -1036,6 +1063,15 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.2.4"
 notes = "Implements a concurrency primitive with atomics, and is not obviously incorrect"
+
+[[audits.bytecode-alliance.audits.unarray]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+version = "0.1.4"
+notes = """
+Crate is sound, albeit leaky, and not actively malicious. Probably not the best
+crate to use in practice but it's suitable for testing dependencies.
+"""
 
 [[audits.bytecode-alliance.audits.vcpkg]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -2228,6 +2264,11 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.2.14 -> 0.2.15"
 
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.3.3 -> 0.3.4"
+
 [[audits.isrg.audits.hmac]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -2749,6 +2790,31 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.27 -> 0.3.28"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.getrandom]]
+who = "Chris Martin <cmartin@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.15 -> 0.3.1"
+notes = """
+I've looked over all unsafe code, and it appears to be safe, fully initializing the rng buffers.
+In addition, I've checked Linux, Windows, Mac, and Android more thoroughly against API
+documentation.
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.getrandom]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.3.1 -> 0.3.3"
+notes = """
+Biggest non-trivial change is a new UEFI back-end, which looks reasonable to
+the best of my ability: There's some trickiness on initialization but doesn't
+look unsafe, at worse it leaks, and it might not if the relevant pointers are
+static/non-owning. Other changes also look reasonable too: some tweaks to
+inlining and a syscall-based linux back-end, whose relevant unsafe code looks
+reasonable.
+"""
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.hashbrown]]

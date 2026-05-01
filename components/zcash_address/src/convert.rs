@@ -5,7 +5,7 @@ use std::error::Error;
 
 use zcash_protocol::consensus::NetworkType;
 
-use crate::{kind::*, AddressKind, ZcashAddress};
+use crate::{AddressKind, ZcashAddress, kind::*};
 
 /// An error indicating that an address type is not supported for conversion.
 #[derive(Debug)]

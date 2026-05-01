@@ -566,7 +566,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, Dec::Memo>> {
+    ) -> HashMap<usize, DecryptedOutput<IvkTag, D, Dec::Memo>> {
         self.pending_results
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of
@@ -583,7 +583,7 @@ where
                         |OutputIndex {
                              output_index,
                              value,
-                         }| { ((txid, output_index), value) },
+                         }| { (output_index, value) },
                     )
                     .collect()
             })

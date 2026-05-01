@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## Unreleased
 
+## [v0.4.1] - 2026-02-20
+
+### Added
+- `README.md`
+
+### Changed
+- Designate `GetBlockNullifiers` and `GetBlockRangeNullifiers` as deprecated
+- Document `GetBlock` transparent data behavior
+- Clarify documentation of `GetBlockNullifiers` and `GetBlockRangeNullifiers`
+
 ## [v0.4.0] - 2025-12-03
 
 ### Added
