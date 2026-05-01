@@ -400,9 +400,9 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_anchor_stable INTEGER,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -417,9 +417,9 @@ pub(super) const INDEX_SAPLING_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_sapling_received_notes_tx ON sapling_received_notes (
     transaction_id ASC
 )"#;
-pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
-CREATE INDEX idx_sapling_received_notes_witness_stabilized ON sapling_received_notes (
-    witness_stabilized
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE: &str = r#"
+CREATE INDEX idx_sapling_received_notes_witness_anchor_stable ON sapling_received_notes (
+    witness_anchor_stable
 )"#;
 
 /// A junction table between received Sapling notes and the transactions that spend them.
@@ -494,10 +494,10 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL DEFAULT 2,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_anchor_stable INTEGER,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -512,9 +512,9 @@ pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_orchard_received_notes_tx ON orchard_received_notes (
     transaction_id ASC
 )"#;
-pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
-CREATE INDEX idx_orchard_received_notes_witness_stabilized ON orchard_received_notes (
-    witness_stabilized
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE: &str = r#"
+CREATE INDEX idx_orchard_received_notes_witness_anchor_stable ON orchard_received_notes (
+    witness_anchor_stable
 )"#;
 
 /// A junction table between received Orchard notes and the transactions that spend them.
@@ -570,10 +570,10 @@ CREATE TABLE ironwood_received_notes (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
-    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     note_version INTEGER NOT NULL,
     lock_expiry_height INTEGER,
     lock_owner BLOB,
+    witness_anchor_stable INTEGER,
     UNIQUE (transaction_id, action_index)
 )";
 pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT: &str = "
@@ -588,9 +588,9 @@ pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_TX: &str = "
 CREATE INDEX idx_ironwood_received_notes_tx ON ironwood_received_notes (
     transaction_id ASC
 )";
-pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = "
-CREATE INDEX idx_ironwood_received_notes_witness_stabilized ON ironwood_received_notes (
-    witness_stabilized
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_ANCHOR_STABLE: &str = "
+CREATE INDEX idx_ironwood_received_notes_witness_anchor_stable ON ironwood_received_notes (
+    witness_anchor_stable
 )";
 
 /// A junction table between received Ironwood notes and the transactions that spend them.

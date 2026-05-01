@@ -183,6 +183,7 @@ migration_modules!(
     v_tx_outputs_transparent_addresses,
     v_tx_outputs_use_legacy_false,
     wallet_summaries,
+    witness_anchor_stable,
     witness_stabilized_notes,
     zip318_classification,
 );
@@ -274,9 +275,9 @@ pub(super) fn all_migrations<
     //                             .----------------'           /                  \
     //                             |  add_transparent_receiver_address_index        \
     //                             |               |                                 \
-    //                             |      standalone_address               ironwood_received_notes ----------------
-    //                             |                                        /         |          \                  \
-    //                             |                     ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
+    //                             |      standalone_address               ironwood_received_notes -------------------------------------.
+    //                             |                                        /         |          \                  \                    \
+    //                             |                     ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging  witness_anchor_stable
     //                             |                             |          \         |
     //                             |                             |           \ v_address_uses_ironwood
     //                             |                             |            \
@@ -403,6 +404,9 @@ pub(super) fn all_migrations<
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
         Box::new(fix_v_transactions_multi_account_totals::Migration),
+        Box::new(witness_anchor_stable::Migration {
+            _params: params.clone(),
+        }),
     ]
 }
 
