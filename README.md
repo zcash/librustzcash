@@ -3,6 +3,18 @@
 This repository contains a (work-in-progress) set of Rust crates for working
 with Zcash.
 
+⚠️ IMPORTANT: The only way to check Zcash consensus validity is to use a Zcash
+consensus node. ⚠️
+
+The public API surfaces of these crates include many APIs that are used by the
+zcashd and Zebra node implementations, as well as other critical components in
+the Zcash ecosystem, but none of them expose any way to check consensus validity
+of transactions. In particular, APIs for parsing transactions only check a subset
+of validity constraints. The specific subset they check is not sufficient to
+guarantee any meaningful user-level validity constraints, and is not necessarily
+stable over time, or consistent with other implementations of parsers for Zcash
+transactions.
+
 <!-- START mermaid-dependency-graph -->
 
 ```mermaid
