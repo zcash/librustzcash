@@ -6714,6 +6714,73 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
     );
 }
 
+/// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
+/// stabilized in the open tip shard, whose shard the server later reports complete while the
+/// blocks between the wallet's scanned tip and the shard's end remain unscanned, must not be
+/// reported spendable: the wallet holds no leaves for that region, so no witness against any
+/// later anchor can be built. Scanning the region restores spendability.
+pub fn shard_completeness_derives_from_scan_queue<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // Offline: the server reports the note's shard complete at `shard_end`, the tip advances
+    // to `new_tip`, and the wallet scans only the pruning window at the new tip. The blocks
+    // between the old tip and `shard_end` stay unscanned.
+    let shard_end = scanned_tip + 300;
+    let new_tip = scanned_tip + 400;
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            shard_end,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    for _ in 0..(new_tip - scanned_tip) {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let window_start = new_tip - (PRUNING_DEPTH - 1);
+    st.scan_cached_blocks(window_start, PRUNING_DEPTH as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "the note's shard has unscanned blocks below the pruning window, so the note is not \
+         witnessable and must not be reported spendable",
+    );
+
+    // Scanning the unscanned region makes the shard scan-clean and the note spendable.
+    st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,

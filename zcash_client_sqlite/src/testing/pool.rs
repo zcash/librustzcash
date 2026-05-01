@@ -815,6 +815,13 @@ pub(crate) fn stabilized_note_rewind_un_mines_shard_completion<T: ShieldedPoolTe
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),

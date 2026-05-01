@@ -499,6 +499,17 @@ mod tests {
     }
 
     #[test]
+    fn shard_completeness_derives_from_scan_queue_sapling() {
+        testing::pool::shard_completeness_derives_from_scan_queue::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn shard_completeness_derives_from_scan_queue_orchard() {
+        testing::pool::shard_completeness_derives_from_scan_queue::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }
