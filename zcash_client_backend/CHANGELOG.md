@@ -19,7 +19,13 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestState::truncate_cache_to_height`
 - `zcash_client_backend::scanning::ScanError::BlockHashMismatch`
 - `zcash_client_backend::data_api::ll::PutBlockMetaError`
-- `zcash_client_backend::data_api::testing::pool::{reorg_below_scanned_height_is_a_continuity_error}`
+- `zcash_client_backend::data_api::testing::pool::{b_note_stable_across_rewind_below_birthday,
+  completed_shard_note_spendable_across_older_birthday_import,
+  completed_shard_note_spendable_after_rewind_once_window_rescanned,
+  open_shard_note_spendable_across_older_birthday_import,
+  reorg_below_scanned_height_is_a_continuity_error,
+  stabilized_note_rewind_above_shard_end,
+  stabilized_note_rewind_un_mines_shard_completion}`
 
 ### Changed
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
@@ -47,6 +53,10 @@ workspace.
   holds keys for only some protocols. They return
   `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
   pool for which the spending key holds no key.
+
+### Removed
+- `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
+  newly_discovered_notes_become_stabilized}`.
 
 ## [0.25.0] - 2026-10-21
 

@@ -848,20 +848,48 @@ pub(crate) fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester>() {
     )
 }
 
-#[cfg(feature = "expensive-tests")]
-pub(crate) fn stabilized_note_spendable_after_deep_rewind<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_after_deep_rewind::<T, _>(
+pub(crate) fn b_note_stable_across_rewind_below_birthday<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::b_note_stable_across_rewind_below_birthday::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
 }
 
-#[cfg(feature = "expensive-tests")]
-pub(crate) fn newly_discovered_notes_become_stabilized<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::newly_discovered_notes_become_stabilized::<T, _>(
+pub(crate) fn completed_shard_note_spendable_across_older_birthday_import<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::completed_shard_note_spendable_across_older_birthday_import::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+pub(crate) fn open_shard_note_spendable_across_older_birthday_import<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::open_shard_note_spendable_across_older_birthday_import::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn completed_shard_note_spendable_after_rewind_once_window_rescanned<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::completed_shard_note_spendable_after_rewind_once_window_rescanned::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_rewind_above_shard_end<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_rewind_above_shard_end::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn stabilized_note_rewind_un_mines_shard_completion<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_rewind_un_mines_shard_completion::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
