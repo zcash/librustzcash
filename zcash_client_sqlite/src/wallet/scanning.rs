@@ -66,6 +66,42 @@ pub(crate) fn pruning_floor(chain_tip: BlockHeight) -> BlockHeight {
     BlockHeight::from(u32::from(chain_tip).saturating_sub(PRUNING_DEPTH))
 }
 
+/// Returns true when no `scan_queue` range in the chain-tip pruning window has
+/// [`ScanPriority::Anchor`] priority. This is the wallet-level precondition for treating
+/// any stabilized note as spendable under the new rule: `Anchor` is the priority the
+/// wallet stamps on the pruning window after operations that disturb the anchor
+/// (rewind, truncate, account import), and as long as any such range remains
+/// unprocessed, the cap state needed to witness stabilized notes can't be reliably
+/// reconstructed.
+///
+/// Non-`Anchor` higher priorities (`Verify`, `ChainTip`, `Historic`, etc.) represent
+/// ordinary forward-sync work and don't gate this check — a wallet with a partial-sync
+/// gap below the anchor can still spend stabilized notes whose shard is itself
+/// scan-clean.
+pub(crate) fn tip_window_fully_scanned(
+    conn: &rusqlite::Connection,
+    chain_tip: BlockHeight,
+) -> Result<bool, SqliteClientError> {
+    let pruning_floor_u32 = u32::from(pruning_floor(chain_tip));
+    let chain_end = u32::from(chain_tip) + 1;
+    let anchor_code = priority_code(&ScanPriority::Anchor);
+    conn.query_row(
+        "SELECT NOT EXISTS(
+             SELECT 1 FROM scan_queue
+             WHERE block_range_start < :chain_end
+               AND block_range_end > :pruning_floor
+               AND priority = :anchor_priority
+         )",
+        named_params![
+            ":chain_end": chain_end,
+            ":pruning_floor": pruning_floor_u32,
+            ":anchor_priority": anchor_code,
+        ],
+        |row| row.get(0),
+    )
+    .map_err(SqliteClientError::from)
+}
+
 /// Stamps the chain-tip pruning window with [`ScanPriority::Anchor`], clamped so it does
 /// not overlap pre-birthday `Ignored` ranges. Existing `Scanned` ranges in the window are
 /// preserved (the dominance rule in the spanning tree's `insert` keeps `Scanned` over

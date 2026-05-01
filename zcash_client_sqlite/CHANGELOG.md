@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- The spendability rule for shielded notes now uses a per-note
+  `witness_anchor_stable` column on `*_received_notes` (replacing the prior
+  boolean `witness_stabilized` flag). The stored value is a *floor*: the
+  lowest anchor height at which the wallet has the data needed to construct
+  this note's witness. A note is spendable when its floor lies at or below
+  the chosen anchor, no `scan_queue` range overlapping the chain-tip pruning
+  window has the new `ScanPriority::Anchor` priority, the chosen anchor's
+  tree root is constructable, and the note has met its confirmations-policy
+  threshold. Migration to this schema is automatic.
 - After any operation that disturbs the wallet's anchor —
   `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
   or importing an account whose birthday is below the prior wallet
