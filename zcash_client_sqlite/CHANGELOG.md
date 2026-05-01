@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- After any operation that disturbs the wallet's anchor —
+  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
+  or importing an account whose birthday is below the prior wallet
+  birthday — the chain-tip pruning window is stamped with
+  `ScanPriority::Anchor`. The spendability rule reports zero spendable
+  balance until the wallet has scanned through the affected range; the
+  serve-`Anchor`-first ordering on `scan_queue` makes this happen
+  automatically under `suggest_scan_ranges`.
+
 ## [0.20.2] - 2026-05-07
 
 ### Fixed

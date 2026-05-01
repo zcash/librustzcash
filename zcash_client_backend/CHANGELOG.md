@@ -12,6 +12,11 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::scanning::ScanPriority::Anchor`, slotted
+  between `ChainTip` and `Verify`. Backends stamp `scan_queue` ranges with
+  this priority after operations that disturb the wallet's anchor; the
+  spendability rule treats any `Anchor`-priority range overlapping the
+  chain-tip pruning window as blocking.
 - The following utilities for fake note commitment tree construction have been
   added under the `test-dependencies` feature:
   - `zcash_client_backend::data_api::testing::pool::ShieldedPoolTester::`
