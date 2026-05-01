@@ -44,6 +44,12 @@ workspace.
   `SqliteClientError::BlockConflict`, so
   `zcash_client_backend::data_api::chain::scan_cached_blocks` reports it as
   `Error::Scan(ScanError::BlockHashMismatch)`.
+- After any operation that disturbs the wallet's anchor —
+  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
+  or importing an account whose birthday is below the prior wallet
+  birthday — the chain-tip pruning window is given the priority
+  `ScanPriority::Anchor`, so `suggest_scan_ranges` returns it ahead of every
+  range other than `Verify` ranges.
 
 ## [0.23.0-pre.2] - 2026-10-13
 

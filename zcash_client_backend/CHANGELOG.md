@@ -91,6 +91,8 @@ workspace.
   expiry modulus at heights from NU7 activation.
 - `zcash_client_backend::data_api::WalletWrite` has a new required method
   `set_account_name`.
+- `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
+  `Anchor`, ordered between `ChainTip` and `Verify`.
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
   returns `Result<(), PutBlockMetaError<Self::Error>>`. An implementation that
   already holds a block at the given height with a different hash returns
