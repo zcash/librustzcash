@@ -23,6 +23,12 @@ pub enum ScanPriority {
     FoundNote,
     /// Blocks that must be scanned to complete the latest note commitment tree shard.
     ChainTip,
+    /// Blocks within the chain-tip pruning window that must be scanned for any value reported as
+    /// spendable to remain spendable. After operations that mutate `scan_queue` priorities
+    /// (rewind, truncate, account import), the wallet stamps this priority on the
+    /// `(chain_tip - PRUNING_DEPTH, chain_tip]` window so that re-establishing a usable anchor
+    /// takes precedence over normal forward sync.
+    Anchor,
     /// A previously scanned range that must be verified to check it is still in the
     /// main chain, has highest priority.
     Verify,

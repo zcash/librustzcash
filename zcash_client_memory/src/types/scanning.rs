@@ -176,6 +176,7 @@ mod serialization {
                     ScanPriority::OpenAdjacent => proto::ScanPriority::OpenAdjacent as i32,
                     ScanPriority::FoundNote => proto::ScanPriority::FoundNote as i32,
                     ScanPriority::ChainTip => proto::ScanPriority::ChainTip as i32,
+                    ScanPriority::Anchor => proto::ScanPriority::ChainTip as i32, //FIXME
                     ScanPriority::Verify => proto::ScanPriority::Verify as i32,
                 },
             }
