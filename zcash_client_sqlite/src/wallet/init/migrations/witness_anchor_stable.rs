@@ -1,20 +1,18 @@
 //! Replaces the boolean `witness_stabilized` flag on received-note tables with a
-//! `witness_anchor_stable` column whose value is the containing shard's
-//! `subtree_end_height` at the time of stabilization. The new column carries the same
-//! "this note's witness data is durable" information as the old flag, plus the
-//! specific anchor height up to which the leaf-level path has been finalized.
+//! `witness_anchor_stable` column recording the lowest anchor at which each note's
+//! witness is durably constructable, then drops the old flag.
 //!
-//! This migration is semantics-preserving: every row that previously had
-//! `witness_stabilized = 1` ends up with a non-NULL `witness_anchor_stable`, and
-//! every row that had `witness_stabilized = 0` ends up with `NULL`. Subsequent
-//! migrations and code may use the height value for finer-grained spendability
-//! decisions.
-//!
-//! The backfill performs a per-row lookup of `subtree_end_height` against the matching
-//! shard, derived from `commitment_tree_position >> shard_height`.
+//! The column is **recomputed from authoritative tree and scan state**, not converted
+//! from the old boolean. The released `witness_stabilized_notes` migration set that
+//! boolean using an earlier pruning-floor formula (`block_max_scanned - (PRUNING_DEPTH
+//! - 1)`); recomputing here — mirroring the current `mark_stabilized_notes` first-time
+//! stabilize rule — brings a migrated wallet into exact agreement with one synced fresh
+//! under the current rule, and additionally stabilizes notes in the active (tip) shard,
+//! which the boolean never covered. The boolean value is therefore ignored entirely.
 
 use std::collections::HashSet;
 
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
@@ -24,7 +22,10 @@ use zcash_protocol::consensus;
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::witness_stabilized_notes;
-use crate::{SAPLING_TABLES_PREFIX, wallet::init::WalletMigrationError};
+use crate::{
+    SAPLING_TABLES_PREFIX,
+    wallet::{chain_tip_height, init::WalletMigrationError, scanning::pruning_floor},
+};
 
 #[cfg(feature = "orchard")]
 use crate::ORCHARD_TABLES_PREFIX;
@@ -66,31 +67,59 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                ADD COLUMN witness_anchor_stable INTEGER;",
         )?;
 
-        // Backfill: for every previously-stabilized row, look up the shard's
-        // subtree_end_height. The old `mark_stabilized_notes` predicate required
-        // `subtree_end_height IS NOT NULL` for stabilization, so the lookup is
-        // guaranteed to find a height for every row with witness_stabilized = 1.
-        let backfill = |table_prefix: &str, shard_height: u8| -> String {
-            format!(
-                "UPDATE {table_prefix}_received_notes
-                 SET witness_anchor_stable = (
-                     SELECT subtree_end_height
-                     FROM {table_prefix}_tree_shards
-                     WHERE shard_index =
-                         ({table_prefix}_received_notes.commitment_tree_position >> {shard_height})
-                 )
-                 WHERE witness_stabilized = 1"
-            )
-        };
-        transaction.execute_batch(&backfill(SAPLING_TABLES_PREFIX, SAPLING_SHARD_HEIGHT))?;
-        #[cfg(feature = "orchard")]
-        transaction.execute_batch(&backfill(ORCHARD_TABLES_PREFIX, ORCHARD_SHARD_HEIGHT))?;
-        // Without the `orchard` feature the orchard tables exist but no orchard
-        // received notes can have been recorded, so the backfill is unnecessary; we
-        // still drop the column below so the schema matches across feature
-        // configurations.
-        #[cfg(not(feature = "orchard"))]
-        let _ = backfill;
+        // Backfill: recompute each note's anchor-stable height from authoritative tree and
+        // scan state, mirroring `scanning::mark_stabilized_notes`'s first-time-stabilize arm
+        // at the time this migration was authored. The old `witness_stabilized` boolean is
+        // deliberately *not* consulted; see the module docs. The SQL is inlined rather than
+        // calling `mark_stabilized_notes` so this migration stays stable as that helper evolves.
+        //
+        // For each note whose containing shard has no unscanned ranges, the stored height is
+        // the maximum of three lower bounds on a usable anchor: the note's own `t.block`, the
+        // pruning floor, and the shard's `subtree_end_height` (`NULL`, coalesced to 0, for the
+        // active chain-tip shard). See `mark_stabilized_notes` for the rationale of each term.
+        if let Some(chain_tip) = chain_tip_height(transaction)? {
+            let pruning_floor: u32 = u32::from(pruning_floor(chain_tip));
+            let backfill = |table_prefix: &str| -> String {
+                format!(
+                    "UPDATE {table_prefix}_received_notes
+                     SET witness_anchor_stable = max(
+                         (SELECT t.block
+                          FROM transactions t
+                          WHERE t.id_tx = {table_prefix}_received_notes.transaction_id),
+                         :pruning_floor,
+                         IFNULL(
+                             (SELECT shard.subtree_end_height
+                              FROM {table_prefix}_tree_shards shard
+                              WHERE shard.shard_index
+                                    = ({table_prefix}_received_notes.commitment_tree_position
+                                       >> :shard_height)),
+                             0
+                         )
+                     )
+                     WHERE commitment_tree_position IS NOT NULL
+                       AND (commitment_tree_position >> :shard_height) NOT IN (
+                           SELECT shard_index FROM v_{table_prefix}_shard_unscanned_ranges
+                       )"
+                )
+            };
+            transaction.execute(
+                &backfill(SAPLING_TABLES_PREFIX),
+                named_params![
+                    ":pruning_floor": pruning_floor,
+                    ":shard_height": SAPLING_SHARD_HEIGHT,
+                ],
+            )?;
+            #[cfg(feature = "orchard")]
+            transaction.execute(
+                &backfill(ORCHARD_TABLES_PREFIX),
+                named_params![
+                    ":pruning_floor": pruning_floor,
+                    ":shard_height": ORCHARD_SHARD_HEIGHT,
+                ],
+            )?;
+            #[cfg(not(feature = "orchard"))]
+            let _ = backfill;
+        }
 
         // Replace the old column and its index with one keyed on the new column.
         transaction.execute_batch(
@@ -140,13 +169,19 @@ mod tests {
         test_migrate(&[MIGRATION_ID]);
     }
 
-    /// End-to-end exercise of the backfill: seed pre-migration rows with each of the
-    /// four combinations of {`witness_stabilized` ∈ {0, 1}} × {shard has
-    /// `subtree_end_height` ∈ {Some, None}}, run the migration, and confirm that
-    /// `witness_anchor_stable` ends up with the shard's `subtree_end_height` exactly
-    /// when `witness_stabilized` was 1 (and otherwise NULL).
+    /// End-to-end exercise of the recompute backfill: under a fully-`Scanned` queue, seed a
+    /// note in a completed (buried) shard, a note in the active (tip) shard, and a note with
+    /// no commitment-tree position; run the migration; and confirm `witness_anchor_stable` is
+    /// the three-way `max(t.block, pruning_floor, subtree_end_height)` for the notes in
+    /// scan-clean shards — including the tip-shard note, which the old boolean never covered —
+    /// and `NULL` for the positionless note. The pre-migration `witness_stabilized` value is
+    /// irrelevant (left at its default), since the backfill recomputes from tree/scan state.
     #[test]
     fn migrate_backfills_anchor_heights() {
+        use zcash_client_backend::data_api::scanning::ScanPriority;
+
+        use crate::wallet::scanning::priority_code;
+
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
@@ -160,10 +195,17 @@ mod tests {
             .init_or_migrate_to(&mut db_data, DEPENDENCIES)
             .unwrap();
 
+        // Heights well above the NU5 testnet activation (1,842,420) so each shard's extent
+        // overlaps the scan_queue range. `chain_tip_height` reads `MAX(block_range_end) - 1`
+        // from `scan_queue`, so a range ending at `chain_tip + 1` yields `chain_tip`, and the
+        // migration's `pruning_floor(chain_tip) = chain_tip - PRUNING_DEPTH`.
         let base: u32 = 2_000_000;
-        let stable_block_height: u32 = base + 301;
-        let last_scanned: u32 = stable_block_height + (PRUNING_DEPTH - 1);
         let birthday_height: u32 = base;
+        let buried_shard_end: u32 = base + 250; // shard 0 subtree_end_height (below pruning floor)
+        let pruning_floor_h: u32 = base + 301;
+        let chain_tip: u32 = pruning_floor_h + PRUNING_DEPTH;
+        let low_block: u32 = base + 10; // a tx mined well below the pruning floor
+        let tip_block: u32 = base + 350; // a tx mined above the pruning floor
 
         let usk =
             UnifiedSpendingKey::from_seed(&network, &seed_bytes, zip32::AccountId::ZERO).unwrap();
@@ -187,78 +229,91 @@ mod tests {
             )
             .unwrap();
 
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO transactions (id_tx, txid, min_observed_height)
-                 VALUES (1, X'00', 1)",
-                [],
-            )
-            .unwrap();
+        // A `blocks` row per mined height the transactions reference (`transactions.block`
+        // is FK-bound to `blocks`).
+        for height in [low_block, tip_block] {
+            db_data
+                .conn
+                .execute(
+                    "INSERT INTO blocks (
+                         height, hash, time,
+                         sapling_tree, sapling_commitment_tree_size
+                     ) VALUES (:height, zeroblob(32), 0, X'', 0)",
+                    named_params![":height": height],
+                )
+                .unwrap();
+        }
 
+        // Two transactions pinned to a mined `block`: a low one for the buried-shard and
+        // positionless notes, and one above the pruning floor for the tip-shard note.
+        for (id_tx, block) in [(1u32, low_block), (2u32, tip_block)] {
+            db_data
+                .conn
+                .execute(
+                    "INSERT INTO transactions (id_tx, txid, block, mined_height, min_observed_height)
+                     VALUES (:id_tx, :txid, :block, :block, :block)",
+                    named_params![
+                        ":id_tx": id_tx,
+                        ":txid": vec![id_tx as u8; 32],
+                        ":block": block,
+                    ],
+                )
+                .unwrap();
+        }
+
+        // A single contiguous `Scanned` range over `[birthday, chain_tip + 1)`: every shard is
+        // scan-clean (nothing above `Scanned` overlaps), so the backfill's unscanned-range
+        // gate admits all positioned notes.
         db_data
             .conn
             .execute(
                 "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (:start, :end, 10)",
+                 VALUES (:start, :end, :scanned)",
                 named_params![
                     ":start": birthday_height,
-                    ":end": last_scanned + 1,
+                    ":end": chain_tip + 1,
+                    ":scanned": priority_code(&ScanPriority::Scanned),
                 ],
             )
             .unwrap();
 
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO blocks (
-                     height, hash, time,
-                     sapling_tree, sapling_commitment_tree_size
-                 ) VALUES (:height, X'0000000000000000000000000000000000000000000000000000000000000000', 0,
-                          X'', 0)",
-                named_params![":height": last_scanned],
-            )
-            .unwrap();
-
         // Two shards:
-        //   shard 0: subtree_end_height = stable_block_height
-        //   shard 1: subtree_end_height = NULL (active shard)
+        //   shard 0: subtree_end_height = buried_shard_end (completed, below pruning floor)
+        //   shard 1: subtree_end_height = NULL (active tip shard)
         for pool in ["sapling", "orchard"] {
             db_data
                 .conn
                 .execute(
                     &format!(
                         "INSERT INTO {pool}_tree_shards (shard_index, subtree_end_height)
-                         VALUES (0, :stable), (1, NULL)"
+                         VALUES (0, :buried), (1, NULL)"
                     ),
-                    named_params![":stable": stable_block_height],
+                    named_params![":buried": buried_shard_end],
                 )
                 .unwrap();
         }
 
-        // Sapling seed rows. Each row's pre-migration `witness_stabilized` value is
-        // set explicitly; the migration translates 1's into the matching shard's
-        // `subtree_end_height` and leaves 0's as NULL.
-        let sapling_pos_shard_0: i64 = 1;
+        // Seed rows: a buried-shard note (tx 1), a tip-shard note (tx 2), and a positionless
+        // note (tx 1). `witness_stabilized` is left at its default — the backfill ignores it.
+        // `position` of `None` exercises the `commitment_tree_position IS NOT NULL` gate.
+        let pos_shard_0: i64 = 1;
         let sapling_pos_shard_1: i64 = 1 << SAPLING_SHARD_HEIGHT;
-
-        for (output_index, position, witness_stabilized) in [
-            (0, sapling_pos_shard_0, 1), // stabilized in completed shard
-            (1, sapling_pos_shard_0, 0), // not stabilized but in completed shard
-            (2, sapling_pos_shard_1, 0), // not stabilized, in active shard
+        for (output_index, transaction_id, position) in [
+            (0, 1, Some(pos_shard_0)),         // buried shard
+            (1, 2, Some(sapling_pos_shard_1)), // active tip shard
+            (2, 1, None),                      // no position
         ] {
             db_data
                 .conn
                 .execute(
                     "INSERT INTO sapling_received_notes (
                          transaction_id, output_index, account_id,
-                         diversifier, value, rcm, is_change,
-                         commitment_tree_position, witness_stabilized
-                     ) VALUES (1, :output_index, 1, X'00', 0, X'00', 0, :position, :stabilized)",
+                         diversifier, value, rcm, is_change, commitment_tree_position
+                     ) VALUES (:transaction_id, :output_index, 1, X'00', 0, X'00', 0, :position)",
                     named_params![
+                        ":transaction_id": transaction_id,
                         ":output_index": output_index,
                         ":position": position,
-                        ":stabilized": witness_stabilized,
                     ],
                 )
                 .unwrap();
@@ -266,26 +321,23 @@ mod tests {
 
         #[cfg(feature = "orchard")]
         {
-            let orchard_pos_shard_0: i64 = 1;
             let orchard_pos_shard_1: i64 = 1 << ORCHARD_SHARD_HEIGHT;
-
-            for (action_index, position, witness_stabilized) in [
-                (0, orchard_pos_shard_0, 1),
-                (1, orchard_pos_shard_0, 0),
-                (2, orchard_pos_shard_1, 0),
+            for (action_index, transaction_id, position) in [
+                (0, 1, Some(pos_shard_0)),
+                (1, 2, Some(orchard_pos_shard_1)),
+                (2, 1, None),
             ] {
                 db_data
                     .conn
                     .execute(
                         "INSERT INTO orchard_received_notes (
                              transaction_id, action_index, account_id,
-                             diversifier, value, rho, rseed, is_change,
-                             commitment_tree_position, witness_stabilized
-                         ) VALUES (1, :action_index, 1, X'00', 0, X'00', X'00', 0, :position, :stabilized)",
+                             diversifier, value, rho, rseed, is_change, commitment_tree_position
+                         ) VALUES (:transaction_id, :action_index, 1, X'00', 0, X'00', X'00', 0, :position)",
                         named_params![
+                            ":transaction_id": transaction_id,
                             ":action_index": action_index,
                             ":position": position,
-                            ":stabilized": witness_stabilized,
                         ],
                     )
                     .unwrap();
@@ -313,26 +365,26 @@ mod tests {
             rows
         };
 
-        // The single row that had `witness_stabilized = 1` ends up with the matching
-        // shard's `subtree_end_height`; the others end up NULL.
+        // Buried-shard note: `max(low_block, pruning_floor, buried_shard_end)` = the pruning
+        // floor (it lifts the stored height above the shard's own end). Tip-shard note:
+        // `max(tip_block, pruning_floor, 0)` = `tip_block` (the note's own block dominates).
+        // Positionless note: excluded by the gate, so `NULL`.
+        let expected = vec![
+            (0, Some(i64::from(pruning_floor_h))),
+            (1, Some(i64::from(tip_block))),
+            (2, None),
+        ];
         assert_eq!(
             read("sapling_received_notes", "output_index"),
-            vec![
-                (0, Some(i64::from(stable_block_height))),
-                (1, None),
-                (2, None),
-            ],
-            "sapling backfill must translate witness_stabilized=1 rows to subtree_end_height",
+            expected,
+            "sapling backfill must record max(t.block, pruning_floor, subtree_end_height) for \
+             scan-clean shards and NULL for positionless notes",
         );
 
         #[cfg(feature = "orchard")]
         assert_eq!(
             read("orchard_received_notes", "action_index"),
-            vec![
-                (0, Some(i64::from(stable_block_height))),
-                (1, None),
-                (2, None),
-            ],
+            expected,
             "orchard backfill must match the sapling behavior",
         );
     }
