@@ -20,6 +20,8 @@ workspace.
   `From<zcash_client_backend::data_api::PutBlocksError<WE>>`.
 
 ### Changed
+- `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
+  `Anchor`, ordered between `ChainTip` and `Verify`.
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` reports a block at
   an already-scanned height whose hash differs from the hash the wallet recorded
   there as `Error::Scan(ScanError::BlockHashMismatch)`, a continuity error at that
