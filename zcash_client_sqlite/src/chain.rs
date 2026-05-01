@@ -457,43 +457,77 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "expensive-tests")]
-    #[cfg_attr(
-        feature = "ignore-expensive-tests",
-        ignore = "covered by the expensive-test CI matrix"
-    )]
-    fn stabilized_note_spendable_after_deep_rewind_sapling() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    fn b_note_stable_across_rewind_below_birthday_sapling() {
+        testing::pool::b_note_stable_across_rewind_below_birthday::<SaplingPoolTester>()
     }
 
     #[test]
-    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
-    #[cfg_attr(
-        feature = "ignore-expensive-tests",
-        ignore = "covered by the expensive-test CI matrix"
-    )]
-    fn stabilized_note_spendable_after_deep_rewind_orchard() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    #[cfg(feature = "orchard")]
+    fn b_note_stable_across_rewind_below_birthday_orchard() {
+        testing::pool::b_note_stable_across_rewind_below_birthday::<OrchardPoolTester>()
     }
 
     #[test]
-    #[cfg(feature = "expensive-tests")]
-    #[cfg_attr(
-        feature = "ignore-expensive-tests",
-        ignore = "covered by the expensive-test CI matrix"
-    )]
-    fn newly_discovered_notes_become_stabilized_sapling() {
-        testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
+    fn completed_shard_note_spendable_across_older_birthday_import_sapling() {
+        testing::pool::completed_shard_note_spendable_across_older_birthday_import::<
+            SaplingPoolTester,
+        >()
     }
 
     #[test]
-    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
-    #[cfg_attr(
-        feature = "ignore-expensive-tests",
-        ignore = "covered by the expensive-test CI matrix"
-    )]
-    fn newly_discovered_notes_become_stabilized_orchard() {
-        testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
+    #[cfg(feature = "orchard")]
+    fn completed_shard_note_spendable_across_older_birthday_import_orchard() {
+        testing::pool::completed_shard_note_spendable_across_older_birthday_import::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
+    fn open_shard_note_spendable_across_older_birthday_import_sapling() {
+        testing::pool::open_shard_note_spendable_across_older_birthday_import::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn open_shard_note_spendable_across_older_birthday_import_orchard() {
+        testing::pool::open_shard_note_spendable_across_older_birthday_import::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn completed_shard_note_spendable_after_rewind_once_window_rescanned_sapling() {
+        testing::pool::completed_shard_note_spendable_after_rewind_once_window_rescanned::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn completed_shard_note_spendable_after_rewind_once_window_rescanned_orchard() {
+        testing::pool::completed_shard_note_spendable_after_rewind_once_window_rescanned::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
+    fn stabilized_note_rewind_above_shard_end_sapling() {
+        testing::pool::stabilized_note_rewind_above_shard_end::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_rewind_above_shard_end_orchard() {
+        testing::pool::stabilized_note_rewind_above_shard_end::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_rewind_un_mines_shard_completion_sapling() {
+        testing::pool::stabilized_note_rewind_un_mines_shard_completion::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_rewind_un_mines_shard_completion_orchard() {
+        testing::pool::stabilized_note_rewind_un_mines_shard_completion::<OrchardPoolTester>()
     }
 
     #[test]
