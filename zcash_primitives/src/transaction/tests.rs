@@ -23,6 +23,9 @@ use super::components::tze;
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
 
+#[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
+use crate::transaction::TxVersion;
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
 

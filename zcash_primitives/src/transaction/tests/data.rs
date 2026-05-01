@@ -1,3 +1,5 @@
+#![allow(clippy::large_const_arrays)]
+
 pub mod tx_read_write {
     // TxID: 64f0bd7fe30ce23753358fe3a2dc835b8fba9c0274c4e2c54a6f73114cb55639
     // From testnet block 280003.
