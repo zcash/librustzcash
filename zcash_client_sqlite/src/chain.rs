@@ -435,14 +435,36 @@ mod tests {
     }
 
     #[test]
-    fn stabilized_note_spendable_after_deep_rewind_sapling() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    fn rewind_below_birthday_sapling() {
+        testing::pool::rewind_below_birthday::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn stabilized_note_spendable_after_deep_rewind_orchard() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    fn rewind_below_birthday_orchard() {
+        testing::pool::rewind_below_birthday::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_between_birthday_and_pruning_floor_sapling() {
+        testing::pool::rewind_between_birthday_and_pruning_floor::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_between_birthday_and_pruning_floor_orchard() {
+        testing::pool::rewind_between_birthday_and_pruning_floor::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn rewind_within_pruning_window_sapling() {
+        testing::pool::rewind_within_pruning_window::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn rewind_within_pruning_window_orchard() {
+        testing::pool::rewind_within_pruning_window::<OrchardPoolTester>()
     }
 
     #[test]

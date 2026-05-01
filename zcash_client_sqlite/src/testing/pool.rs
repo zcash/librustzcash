@@ -347,8 +347,22 @@ pub(crate) fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester>() {
     )
 }
 
-pub(crate) fn stabilized_note_spendable_after_deep_rewind<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_after_deep_rewind::<T, _>(
+pub(crate) fn rewind_below_birthday<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_below_birthday::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn rewind_between_birthday_and_pruning_floor<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_between_birthday_and_pruning_floor::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn rewind_within_pruning_window<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_within_pruning_window::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
