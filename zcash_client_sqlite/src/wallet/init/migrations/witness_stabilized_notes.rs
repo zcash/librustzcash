@@ -6,12 +6,20 @@
 
 use std::collections::HashSet;
 
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_protocol::{ShieldedPool, consensus};
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_protocol::consensus;
+
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::{account_delete_cascade, ironwood_shardtree};
-use crate::wallet::{init::WalletMigrationError, scanning::mark_stabilized_notes};
+use crate::{
+    PRUNING_DEPTH,
+    wallet::{block_max_scanned, init::WalletMigrationError},
+};
 
 /// Adds a `witness_stabilized` flag to received-note tables, indicating that the note's containing
 /// shard's block extent has been fully scanned and that the shard's end height has received at
@@ -65,17 +73,45 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // Backfill: Identify any notes which have stable witness data, and mark them as such.
         // Only the Sapling and Orchard received-note tables exist at this point in the migration
-        // DAG; the Ironwood table is introduced by a later migration (already stabilization-aware),
-        // so it is intentionally excluded from this backfill.
-        mark_stabilized_notes(
-            transaction,
-            &self.params,
-            &[
-                ShieldedPool::Sapling,
+        // DAG; the Ironwood table is introduced by a later migration, so it is intentionally
+        // excluded from this backfill. The SQL is inlined here so this migration remains stable
+        // even if `crate::wallet::scanning::mark_stabilized_notes` later evolves to write a
+        // different column.
+        if let Some(max_scanned_height) =
+            block_max_scanned(transaction, &self.params)?.map(|m| m.block_height())
+        {
+            let pruning_floor: u32 =
+                u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+            for (pool, shard_height) in [
+                ("sapling", SAPLING_SHARD_HEIGHT),
                 #[cfg(feature = "orchard")]
-                ShieldedPool::Orchard,
-            ],
-        )?;
+                ("orchard", ORCHARD_SHARD_HEIGHT),
+            ] {
+                let sql = format!(
+                    "UPDATE {pool}_received_notes
+                     SET witness_stabilized = 1
+                     WHERE witness_stabilized = 0
+                       AND commitment_tree_position IS NOT NULL
+                       AND EXISTS (
+                           SELECT 1 FROM {pool}_tree_shards shard
+                           WHERE shard.subtree_end_height IS NOT NULL
+                             AND shard.subtree_end_height <= :pruning_floor
+                             AND (commitment_tree_position >> :shard_height)
+                                 = shard.shard_index
+                             AND shard.shard_index NOT IN (
+                                 SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                             )
+                       )"
+                );
+                transaction.execute(
+                    &sql,
+                    named_params![
+                        ":pruning_floor": pruning_floor,
+                        ":shard_height": shard_height,
+                    ],
+                )?;
+            }
+        }
 
         Ok(())
     }
@@ -98,7 +134,10 @@ mod tests {
         PRUNING_DEPTH, WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::{
-            init::{WalletMigrator, migrations::tests::test_migrate},
+            init::{
+                WalletMigrator,
+                migrations::{tests::test_migrate, witness_anchor_stable},
+            },
             scanning::{mark_stabilized_notes, priority_code},
         },
     };
@@ -444,14 +483,14 @@ mod tests {
 
         let seed_bytes = vec![0xab; 32];
 
-        // Migrate through `witness_stabilized_notes` so the schema is in its final state.
-        // Because there is no scan_queue / blocks / shards seeded yet, the migration's
-        // backfill is a no-op and the column default (0) applies to all rows we're about
-        // to insert.
+        // Migrate through `witness_anchor_stable` so `mark_stabilized_notes` has its
+        // target column to write into. The intermediate `witness_stabilized` column is
+        // dropped along the way; the runtime behavior under test is preserved through
+        // the new `witness_anchor_stable` column.
         WalletMigrator::new()
             .with_seed(Secret::new(seed_bytes.clone()))
             .ignore_seed_relevance()
-            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .init_or_migrate_to(&mut db_data, &[witness_anchor_stable::MIGRATION_ID])
             .unwrap();
 
         // Scenario: the `scan_queue` partition covers `[birthday, chain_tip_exclusive)`
@@ -606,7 +645,9 @@ mod tests {
 
         let read_stabilized = |conn: &rusqlite::Connection, table: &str, pk_col: &str| -> i64 {
             conn.query_row(
-                &format!("SELECT witness_stabilized FROM {table} WHERE {pk_col} = 0"),
+                &format!(
+                    "SELECT witness_anchor_stable IS NOT NULL FROM {table} WHERE {pk_col} = 0"
+                ),
                 [],
                 |row| row.get(0),
             )
