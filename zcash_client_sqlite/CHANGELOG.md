@@ -126,6 +126,19 @@ workspace.
   A cross-account duplicate for which no unique record can be verified by derivation causes
   the migration to abort.
 
+- The spendability rule for shielded notes now uses a per-note
+  `witness_anchor_stable` column on `*_received_notes` (replacing the prior
+  boolean `witness_stabilized` flag). The stored value is a block-height
+  *floor* on the anchors that can witness the note: the wallet has the data
+  needed to construct this note's witness for any anchor at or above that
+  height. (It is a block height, not itself an anchor height.) A note is
+  spendable when this floor lies at or below the chosen anchor; no
+  `scan_queue` range above `Scanned` priority overlaps the chain-tip pruning
+  window; the note's witness region below that window is durable (its shard is
+  complete, or its floor reaches the bottom of the window with no unscanned
+  range in between); the chosen anchor's tree root is constructable; and the
+  note has met its confirmations-policy threshold. Migration to this schema is
+  automatic.
 - After any operation that disturbs the wallet's anchor —
   `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
   or importing an account whose birthday is below the prior wallet
