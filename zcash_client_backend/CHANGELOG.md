@@ -28,6 +28,8 @@ workspace.
   stabilized_note_rewind_un_mines_shard_completion}`
 
 ### Changed
+- `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
+  `Anchor`, ordered between `ChainTip` and `Verify`.
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_block_meta` now
   returns `Result<(), PutBlockMetaError<Self::Error>>`. An implementation that
   already holds a block at the given height with a different hash returns
