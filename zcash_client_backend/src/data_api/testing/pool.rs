@@ -176,6 +176,18 @@ const RECOVERY_A_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(150_000);
 /// [`build_two_account_recovery_fixture`] fixture.
 const RECOVERY_B_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(80_000);
 
+/// The order in which [`build_shard_1_note_fixture`] scans the block holding the wallet note
+/// (Block A) and the block completing shard 1 (Block B).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shard1ScanOrder {
+    /// Scan Block A, then Block B, then record shard 1's root. The wallet discovers the note while
+    /// shard 1 is open.
+    NoteFirst,
+    /// Scan Block B, record shard 1's root, then scan Block A. The wallet discovers the note in a
+    /// completed shard.
+    CompletionFirst,
+}
+
 /// Shared construction for the stable- and tip-shard fixtures. Both fixtures
 /// use the same initial chain state and two real blocks (Block A places a
 /// wallet note in shard 1's interior, Block B's scan completes shard 1 via
@@ -187,6 +199,8 @@ const RECOVERY_B_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(80_000);
 /// * [`build_tip_shard_fixture`] appends only 5 trailing blocks, leaving
 ///   the wallet's birthday inside the chain-tip pruning window so the note
 ///   stabilizes against the active-shard interpretation.
+///
+/// `scan_order` selects whether the wallet discovers the note before or after shard 1 completes.
 ///
 /// The block cache also holds [`PRE_BIRTHDAY_BLOCKS`] empty blocks *below*
 /// the account birthday. These are never scanned during fixture setup —
@@ -225,6 +239,7 @@ fn build_shard_1_note_fixture<T, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
     trailing_filler_blocks: u32,
+    scan_order: Shard1ScanOrder,
 ) -> (
     TestState<impl TestCache, Dsf::DataStore, LocalNetwork>,
     <Dsf as DataStoreFactory>::AccountId,
@@ -354,7 +369,9 @@ where
         ));
     }
     let (block_a_height, _, _) = st.generate_next_block_multi(&block_a_outputs);
-    st.scan_cached_blocks(block_a_height, 1);
+    if scan_order == Shard1ScanOrder::NoteFirst {
+        st.scan_cached_blocks(block_a_height, 1);
+    }
 
     // Block B at `birthday + 1`: 30 outputs at positions 131051..131080.
     // Outputs 1..21 fill the remaining slots of shard 1 (positions
@@ -387,6 +404,9 @@ where
         &[CommitmentTreeRoot::from_parts(block_b_height, shard_1_root)],
     )
     .unwrap();
+    if scan_order == Shard1ScanOrder::CompletionFirst {
+        st.scan_cached_blocks(block_a_height, 1);
+    }
 
     // Trailing filler blocks past Block B, each adding 1 non-wallet output to
     // shard 2.
@@ -425,7 +445,12 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    build_shard_1_note_fixture::<T, Dsf>(ds_factory, cache, PRUNING_DEPTH + 10)
+    build_shard_1_note_fixture::<T, Dsf>(
+        ds_factory,
+        cache,
+        PRUNING_DEPTH + 10,
+        Shard1ScanOrder::NoteFirst,
+    )
 }
 
 /// Builds a fixture in which the wallet's shard 1 contains a real wallet
@@ -456,7 +481,7 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    build_shard_1_note_fixture::<T, Dsf>(ds_factory, cache, 5)
+    build_shard_1_note_fixture::<T, Dsf>(ds_factory, cache, 5, Shard1ScanOrder::NoteFirst)
 }
 
 /// Builds a two-account fixture backed by a single contiguous run of real blocks, used by the
@@ -6943,9 +6968,9 @@ pub fn open_shard_note_spendable_across_older_birthday_import<T, Dsf>(
 /// cases the rewrite range starts above shard 1 and so leaves the shard's
 /// scan-state untouched. We pick `birthday + 5` as a representative target.
 ///
-/// Under the corrected spendability rule, shard 1 stays scan-clean across
-/// the rewind, so only the chain-tip pruning window needs to be rescanned to
-/// restore the note's `spendable` status.
+/// The note's settled height is shard 1's end, below the truncation height, so
+/// the rewind keeps it, and only the chain-tip pruning window needs to be
+/// rescanned to restore the note's `spendable` status.
 pub fn stabilized_note_rewind_above_shard_end<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
@@ -6986,8 +7011,8 @@ where
 
     // Rescan only the chain-tip pruning window. Shard 1's extent
     // `(shard_0_end, birthday + 1]` sits below the rewrite range, so the
-    // shard is still scan-clean. The corrected rule should restore the note
-    // to `spendable`.
+    // note's settled height survives the rewind, and rescanning the window
+    // restores the note to `spendable`.
     let chain_tip = st
         .wallet()
         .chain_height()
@@ -7026,12 +7051,10 @@ where
 /// 131001..131080). Shard 1's last leaf (position 131071) is among those
 /// discarded, so shard 1 reverts from complete to partial.
 ///
-/// Under the corrected spendability rule, the note must not be reported as
-/// spendable while its containing shard is partial -- even though
-/// `witness_settled_height` is still set. Recovery requires rescanning from
-/// the lowered birthday through the chain tip — all genuine cached blocks —
-/// so that shard 1's leaves are reinserted and the shard returns to
-/// complete + scan-clean.
+/// The truncation clears the note's settled height, so the note must not be
+/// reported as spendable. Recovery requires rescanning from the lowered
+/// birthday through the chain tip — all genuine cached blocks — so that
+/// shard 1's leaves are reinserted and the note stabilizes again.
 pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
@@ -7049,7 +7072,7 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
 
     // Baseline: the note is stabilized via the active-shard interpretation
     // (witness_settled_height = birthday = Block A's height), and the rule
-    // accepts it because shard 1 is currently scan-clean.
+    // accepts it because every block above that height has been scanned.
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
         SHARD_1_NOTE_VALUE,
@@ -7075,7 +7098,7 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
         Zatoshis::ZERO,
-        "after rewind the window's `Anchor` priority and the partial shard withhold the note",
+        "after rewind the cleared settled height withholds the note",
     );
 
     // Recover by re-scanning every cached block from the lowered birthday
@@ -7083,7 +7106,7 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
     // blocks, Block A, Block B, and the 5 trailing fillers. The block cache
     // is contiguous across the original birthday, so a single
     // `scan_cached_blocks` call drives the full re-scan. After this, shard 1
-    // is complete and scan-clean again.
+    // is complete and the note has a settled height again.
     let new_birthday = rewind_target + 1;
     let recovery_block_count = 49 + 1 + 1 + 5;
     st.scan_cached_blocks(new_birthday, recovery_block_count as usize);
@@ -7100,6 +7123,321 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
         account_id,
         &usk,
         SHARD_1_NOTE_VALUE,
+    );
+}
+
+/// A note that the wallet discovers in a shard completed within the last `min_confirmations`
+/// blocks has a settled height at the shard's end, above the anchor height. The note is
+/// spendable, and a transaction spending it can be built, as soon as it has the required
+/// confirmations.
+pub fn note_in_recently_completed_shard_spendable_once_confirmed<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let confirmations = ConfirmationsPolicy::default().untrusted();
+    let policy = ConfirmationsPolicy::new_symmetrical(
+        confirmations,
+        #[cfg(feature = "transparent-inputs")]
+        false,
+    );
+
+    // The fixture's chain tip is `birthday + 1 + trailing_blocks`, and the note is mined at
+    // `birthday`, so the note has `trailing_blocks + 2` confirmations: one fewer than required.
+    let trailing_blocks = confirmations.get() - 3;
+    let (mut st, account_id, usk) = build_shard_1_note_fixture::<T, Dsf>(
+        ds_factory,
+        cache,
+        trailing_blocks,
+        Shard1ScanOrder::CompletionFirst,
+    );
+    assert_eq!(st.get_spendable_balance(account_id, policy), Zatoshis::ZERO);
+
+    // One more block confirms the note. The anchor height is then the note's own block, below
+    // shard 1's end at `birthday + 1`.
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let (h, _, _) = st.generate_next_block(
+        &not_our_key,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(1000),
+    );
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE
+    );
+
+    let to = T::sk_default_address(&T::sk(&[0xcc; 32]));
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &GreedyInputSelector::new(),
+            &change_strategy,
+            request,
+            policy,
+        )
+        .unwrap();
+    let txids = st
+        .create_proposed_transactions::<std::convert::Infallible, _, std::convert::Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap();
+    assert_eq!(txids.len(), 1);
+}
+
+/// Shard completeness is a property of the scan queue, not of the subtree-root table. A note
+/// stabilized in the open tip shard, whose shard the server later reports complete while the
+/// blocks between the wallet's scanned tip and the shard's end remain unscanned, must not be
+/// reported spendable: the wallet holds no leaves for that region, so no witness against any
+/// later anchor can be built. Scanning the region restores spendability.
+pub fn shard_completeness_derives_from_scan_queue<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let value = Zatoshis::const_from_u64(500_000);
+    let (note_height, _, _) = st.add_a_single_note_checking_balance(value);
+    let account_id = st.test_account().unwrap().id();
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    let policy = ConfirmationsPolicy::default();
+
+    // Bury the note beyond the pruning depth so that it stabilizes while its shard is open.
+    let buried_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..buried_blocks {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    st.scan_cached_blocks(note_height + 1, buried_blocks as usize);
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+
+    // Offline: the server reports the note's shard complete at `shard_end`, the tip advances
+    // to `new_tip`, and the wallet scans only the pruning window at the new tip. The blocks
+    // between the old tip and `shard_end` stay unscanned.
+    let shard_end = scanned_tip + 300;
+    let new_tip = scanned_tip + 400;
+    T::put_subtree_roots(
+        &mut st,
+        0,
+        &[CommitmentTreeRoot::from_parts(
+            shard_end,
+            T::empty_tree_leaf(),
+        )],
+    )
+    .unwrap();
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    for _ in 0..(new_tip - scanned_tip) {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, filler_value);
+    }
+    let window_start = new_tip - (PRUNING_DEPTH - 1);
+    st.scan_cached_blocks(window_start, PRUNING_DEPTH as usize);
+
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "the note's shard has unscanned blocks below the pruning window, so the note is not \
+         witnessable and must not be reported spendable",
+    );
+
+    // Scanning the unscanned region makes the note spendable.
+    st.scan_cached_blocks(scanned_tip + 1, (window_start - scanned_tip - 1) as usize);
+    assert_eq!(st.get_spendable_balance(account_id, policy), value);
+}
+
+/// A note's settled height (`witness_settled_height`) is a claim about the chain the wallet
+/// was observing when the height was written: every block bearing on the note's witness
+/// context up to that height has been scanned, so the wallet's determination of witness
+/// constructability is grounded in chain data it has verified. A rewind that truncates wallet
+/// state below a settled height discards the scanned blocks and tree data backing that claim,
+/// so the claim must not survive the truncation.
+///
+/// This test drives the false positive that arises if it does. A change note is mined at
+/// the chain tip and stabilizes with its settled height at its own mined height. A reorg then
+/// rewinds the wallet three blocks below that height, and the same transaction is
+/// re-mined two blocks lower on the new chain, with a non-wallet output in the block
+/// directly above it that the wallet does not (yet) scan. Once the new chain advances far
+/// enough that the unscanned block falls below the chain-tip pruning window, the
+/// window-scanned check no longer sees the gap, and the stale settled height — exactly at
+/// the gap's upper boundary — vouches that the region between the note and the window is
+/// durably scanned. Every spendability check then passes and the wallet reports the note
+/// spendable, even though that determination rests on blocks that exist only on the
+/// reorged-away chain: the unscanned gap on the new chain has been neither
+/// hash-chain-verified nor checked for spends of the wallet's notes.
+///
+/// The truncation must instead clear the settled height. The note then re-stabilizes from
+/// new-chain data only once the gap is scanned, so the wallet reports zero
+/// spendable value while the gap remains, and the note becomes spendable when the gap is
+/// scanned.
+pub fn stabilized_note_settled_height_invalidated_by_reorg<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Baseline: the fixture note is stabilized and spendable.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable under the default policy",
+    );
+
+    // Spend the fixture note, producing a wallet transaction whose change note carries
+    // the settled height under test. (A received note cannot be used here: re-mining
+    // the *same* transaction at a different height is what lets the note row keep its
+    // settled height across the reorg, and only wallet-created transactions can be mined
+    // into the fake chain twice.) The proposal is created against the fixture chain
+    // state, before the additional blocks below are generated, so input selection can
+    // only see the fixture note.
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy,
+        )
+        .unwrap();
+    let txid = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap()[0];
+
+    // Extend the old chain by three scanned blocks: a second wallet note, a non-wallet
+    // filler, and the transaction created above. The second wallet note is structural:
+    // it occupies the first note-commitment-tree position that the upcoming rewind
+    // truncates away. A marked (wallet-note) leaf keeps its pruned sibling's hash stored
+    // explicitly, so truncating at its boundary cleanly splits the pair; were the leaf a
+    // pruned non-wallet commitment, truncation would leave behind a merged hash node
+    // spanning the boundary, and re-scanning the divergent chain would hit a note
+    // commitment tree insertion conflict instead of exercising the spendability rule.
+    let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
+    let extra_note_value = Zatoshis::const_from_u64(25000);
+    let (extra_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, extra_note_value);
+
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+
+    let (tx_height, _) = st.generate_next_block_including(txid);
+
+    // Scan all three blocks in a single batch. This matters for the tree surgery below:
+    // scanning in one batch writes no batch-boundary frontier (and thus no cached
+    // interior-node hash annotations) above the rewind target, so truncating there and
+    // re-scanning the divergent chain does not conflict with stale annotations. The
+    // change note lands in the open chain-tip shard, which has no unscanned range after
+    // the batch, so it stabilizes immediately with its settled height at its own mined
+    // height (above the pruning floor).
+    st.scan_cached_blocks(extra_height, 3);
+
+    // The wallet's whole balance is now the change note plus the second wallet note (the
+    // fixture note is spent). The reorg below permanently un-mines the second note, so
+    // the recovered balance at the end of the test is the change value alone.
+    let change_value = (st.get_total_balance(account_id) - extra_note_value)
+        .expect("balance covers the extra note value");
+    assert!(change_value > Zatoshis::ZERO);
+
+    // Reorg: rewind the wallet to three blocks below the transaction's mined height —
+    // just below the second wallet note. This truncates the tree data above the rewind
+    // target, including everything the change note's settled height vouches for, and
+    // un-mines both the transaction and the second note. The block cache is truncated
+    // separately so that the chain regenerated below diverges from the reorged-away one.
+    let rewind_target = tx_height - 3;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed");
+    st.truncate_cache_to_height(rewind_target);
+
+    // On the new chain, the same transaction is re-mined two blocks lower than before
+    // (the second wallet note is not re-mined at all)...
+    let (remine_height, _) = st.generate_next_block_including(txid);
+    assert_eq!(remine_height, tx_height - 2);
+
+    // ...with a non-wallet output in the block directly above it. The output makes the
+    // gap material: the wallet can obtain that commitment's value only by scanning the
+    // gap block or by trusting a server-supplied frontier, and until the block is
+    // scanned it may conceal spends of the wallet's notes.
+    let (gap_height, _, _) =
+        st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+    assert_eq!(gap_height, tx_height - 1);
+
+    // Extend the new chain with single-output filler blocks (empty blocks would leave
+    // the note commitment tree without checkpoints at the new heights, clamping the
+    // wallet's anchor selection below the region under test) until the gap block sits
+    // just below the pruning window of the new tip
+    // (`new_tip - PRUNING_DEPTH = gap_height + 1`).
+    let mut new_tip = gap_height;
+    for _ in 0..(PRUNING_DEPTH + 1) {
+        new_tip = st
+            .generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value)
+            .0;
+    }
+
+    // Scan the re-mined transaction's block, then everything above the gap block, which
+    // is deliberately left unscanned: it is the only hole in the wallet's view of the
+    // new chain, and it lies below the pruning window, where only the note's settled
+    // height guards against it.
+    st.scan_cached_blocks(remine_height, 1);
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    st.scan_cached_blocks(gap_height + 1, (PRUNING_DEPTH + 1) as usize);
+
+    // The change note's old settled height (its old-chain mined height) sits exactly at
+    // the top of the unscanned gap; were it to survive the truncation, it would vouch that
+    // the gap does not matter and the note would be reported spendable. The truncation
+    // must instead have cleared it, and the note must not have re-stabilized while its
+    // shard holds the unscanned gap.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "a settled height written on the reorged-away chain must not vouch for \
+         spendability while the new chain has an unscanned gap below the pruning window",
+    );
+
+    // Scanning the gap block closes the hole: the change note re-stabilizes from
+    // new-chain data and becomes spendable.
+    st.scan_cached_blocks(gap_height, 1);
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        change_value,
+        "closing the gap must restore spendability of the change note",
     );
 }
 
