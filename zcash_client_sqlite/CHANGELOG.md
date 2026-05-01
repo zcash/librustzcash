@@ -24,6 +24,12 @@ workspace.
   commitment tree conflict as `PutBlocksError::Continuity` rather than as
   `SqliteClientError::PutBlocksCommitmentTree`, which now carries only other
   note commitment tree errors.
+- After any operation that disturbs the wallet's anchor —
+  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
+  or importing an account whose birthday is below the prior wallet
+  birthday — the chain-tip pruning window is given the priority
+  `ScanPriority::Anchor`, so `suggest_scan_ranges` returns it ahead of every
+  range other than `Verify` ranges.
 
 ### Fixed
 - Unified addresses that the wallet generates to fill its transparent gap limit
