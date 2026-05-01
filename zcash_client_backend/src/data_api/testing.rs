@@ -41,6 +41,8 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
 };
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
 
@@ -74,9 +76,12 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::{TransactionsInvolvingAddress, wallet::input_selection::ShieldingSelector},
-    crate::{data_api::Balance, wallet::TransparentAddressMetadata},
-    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    super::{
+        TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
+        wallet::input_selection::ShieldingSelector,
+    },
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::address::TransparentAddress,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
@@ -396,6 +401,10 @@ impl<A: Account> Account for TestAccount<A> {
 
     fn name(&self) -> Option<&str> {
         self.account.name()
+    }
+
+    fn birthday_height(&self) -> BlockHeight {
+        self.account.birthday_height()
     }
 
     fn source(&self) -> &AccountSource {
@@ -821,7 +830,7 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId:
-        std::fmt::Debug + ConditionallySelectable + Default + Send + 'static,
+        std::fmt::Debug + ConditionallySelectable + Default + Send + Sync + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) -> ScanSummary {
@@ -1091,6 +1100,7 @@ where
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn propose_shielding<InputsT, ChangeT>(
         &mut self,
@@ -1100,6 +1110,7 @@ where
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
         confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1120,6 +1131,7 @@ where
             from_addrs,
             to_account,
             confirmations_policy,
+            output_filter,
         )
     }
 
@@ -1409,7 +1421,14 @@ pub struct InitialChainState {
 /// Trait representing the ability to construct a new data store for use in a test.
 pub trait DataStoreFactory {
     type Error: core::fmt::Debug;
-    type AccountId: std::fmt::Debug + ConditionallySelectable + Default + Hash + Eq + Send + 'static;
+    type AccountId: std::fmt::Debug
+        + ConditionallySelectable
+        + Default
+        + Hash
+        + Eq
+        + Send
+        + Sync
+        + 'static;
     type Account: Account<AccountId = Self::AccountId> + Clone;
     type DsError: core::fmt::Debug;
     type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
@@ -2558,6 +2577,9 @@ pub struct MockWalletDb {
         { ORCHARD_SHARD_HEIGHT * 2 },
         ORCHARD_SHARD_HEIGHT,
     >,
+    account_ids: Vec<u32>,
+    addresses_by_account: HashMap<u32, Vec<AddressInfo>>,
+    ufvks_by_account: HashMap<u32, UnifiedFullViewingKey>,
 }
 
 impl MockWalletDb {
@@ -2568,7 +2590,38 @@ impl MockWalletDb {
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), 100),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), 100),
+            account_ids: vec![],
+            addresses_by_account: HashMap::new(),
+            ufvks_by_account: HashMap::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_account_addresses(
+        network: Network,
+        entries: impl IntoIterator<Item = (u32, Vec<AddressInfo>)>,
+    ) -> Self {
+        let mut wallet = Self::new(network);
+        for (account_id, addresses) in entries {
+            wallet.account_ids.push(account_id);
+            wallet.addresses_by_account.insert(account_id, addresses);
+        }
+        wallet.account_ids.sort_unstable();
+        wallet
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_account_ufvks(
+        network: Network,
+        entries: impl IntoIterator<Item = (u32, UnifiedFullViewingKey)>,
+    ) -> Self {
+        let mut wallet = Self::new(network);
+        for (account_id, ufvk) in entries {
+            wallet.account_ids.push(account_id);
+            wallet.ufvks_by_account.insert(account_id, ufvk);
+        }
+        wallet.account_ids.sort_unstable();
+        wallet
     }
 }
 
@@ -2623,17 +2676,21 @@ impl InputSource for MockWalletDb {
 impl WalletRead for MockWalletDb {
     type Error = ();
     type AccountId = u32;
-    type Account = (Self::AccountId, UnifiedFullViewingKey);
+    type Account = (Self::AccountId, UnifiedFullViewingKey, BlockHeight);
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self.account_ids.clone())
     }
 
     fn get_account(
         &self,
-        _account_id: Self::AccountId,
+        account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        Ok(None)
+        Ok(self
+            .ufvks_by_account
+            .get(&account_id)
+            .cloned()
+            .map(|ufvk| (account_id, ufvk, BlockHeight::from(1))))
     }
 
     fn get_derived_account(
@@ -2665,8 +2722,21 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
-        Ok(vec![])
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        Ok(self
+            .addresses_by_account
+            .get(&account)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn find_account_for_address<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, super::error::FindAccountForAddressError<Self::Error>>
+    {
+        super::defaults::find_account_for_address(self, params, address)
     }
 
     fn get_last_generated_address_matching(
@@ -2776,7 +2846,7 @@ impl WalletRead for MockWalletDb {
         _account: Self::AccountId,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -2859,6 +2929,15 @@ impl WalletWrite for MockWalletDb {
         todo!()
     }
 
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: Self::AccountId,
+        _script: script::Redeem,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
@@ -2915,6 +2994,10 @@ impl WalletWrite for MockWalletDb {
     }
 
     fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
+        Err(())
+    }
+
+    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
         Err(())
     }
 

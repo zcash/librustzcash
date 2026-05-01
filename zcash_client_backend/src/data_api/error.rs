@@ -72,8 +72,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// An error occurred building a new transaction.
     Builder(builder::Error<FeeError>),
 
-    /// It is forbidden to provide a memo when constructing a transparent output.
-    MemoForbidden,
+    /// An error occurred constructing a payment for the transaction.
+    Payment(zip321::PaymentError),
 
     /// Attempted to send change to an unsupported pool.
     ///
@@ -211,10 +211,7 @@ where
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
-            Error::MemoForbidden => write!(
-                f,
-                "It is not possible to send a memo to a transparent address."
-            ),
+            Error::Payment(e) => write!(f, "An error occurred constructing a payment: {e}"),
             Error::UnsupportedChangeType(t) => write!(
                 f,
                 "Attempted to send change to an unsupported pool type: {t}"
@@ -441,5 +438,45 @@ impl<DE, TE, SE, FE, CE, N> From<pczt::roles::tx_extractor::Error>
 {
     fn from(e: pczt::roles::tx_extractor::Error) -> Self {
         Error::Pczt(PcztError::Extraction(e))
+    }
+}
+
+/// Errors that may occur when resolving the account controlling an address.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FindAccountForAddressError<E> {
+    /// Error returned by the underlying wallet backend.
+    Backend(E),
+
+    /// A Unified Address whose receivers map to different accounts.
+    UnifiedAddressConflict,
+}
+
+impl<E> From<E> for FindAccountForAddressError<E> {
+    fn from(err: E) -> Self {
+        Self::Backend(err)
+    }
+}
+
+impl<E: Display> Display for FindAccountForAddressError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FindAccountForAddressError::Backend(e) => {
+                write!(f, "Wallet backend error: {e}")
+            }
+            FindAccountForAddressError::UnifiedAddressConflict => write!(
+                f,
+                "Receivers of the provided Unified Address map to different wallet accounts."
+            ),
+        }
+    }
+}
+
+impl<E: error::Error + 'static> error::Error for FindAccountForAddressError<E> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            FindAccountForAddressError::Backend(e) => Some(e),
+            FindAccountForAddressError::UnifiedAddressConflict => None,
+        }
     }
 }

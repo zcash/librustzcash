@@ -63,6 +63,14 @@ pub enum ParseError<'a> {
     /// Unexpected leftover input after parsing.
     #[snafu(display("Unexpected leftover input: {input}"))]
     UnexpectedLeftoverInput { input: &'a str },
+
+    /// A [`Number`] candidate had no mantissa digits (no integer digits and no
+    /// decimal part), and so does not represent the `number` alternative of
+    /// the `value` grammar production.
+    ///
+    /// [`Number`]: crate::parse::Number
+    #[snafu(display("Number candidate has no mantissa digits at: {input}"))]
+    NumberMissingDigits { input: &'a str },
 }
 
 impl<'a> nom::error::ParseError<&'a str> for ParseError<'a> {

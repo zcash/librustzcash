@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use assert_matches::assert_matches;
 
-use ::transparent::{
+use sapling::zip32::ExtendedSpendingKey;
+use transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
 };
-use sapling::zip32::ExtendedSpendingKey;
 use zcash_keys::{
     address::Address,
     keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
@@ -14,10 +14,17 @@ use zcash_keys::{
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
+#[cfg(feature = "transparent-key-import")]
+use {
+    crate::wallet::TransparentAddressSource,
+    zcash_script::{descriptor::sh, script},
+};
+
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
+        Account as _, Balance, InputSource as _, TransparentOutputFilter, WalletRead as _,
+        WalletTest as _, WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
@@ -67,7 +74,12 @@ fn check_balance<DSF>(
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                confirmations_policy,
+                TransparentOutputFilter::All
+            )
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
@@ -125,7 +137,8 @@ where
         st.wallet().get_spendable_transparent_outputs(
             taddr,
             target_height,
-            ConfirmationsPolicy::MIN
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -147,7 +160,12 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                TransparentOutputFilter::All
+            )
             .as_deref(),
         Ok(&[])
     );
@@ -162,7 +180,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, TransparentOutputFilter::All)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -533,4 +551,872 @@ where
     // sent to any of the set of {addresses in the gap limit range | address prior to the gap}.
     let query_height = st.wallet().utxo_query_height(account_uuid).unwrap();
     assert_eq!(query_height, h0);
+}
+
+/// Builds a test 1-of-1 multisig redeem script from a single keypair.
+#[cfg(feature = "transparent-key-import")]
+fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
+    use secp256k1::{Secp256k1, SecretKey};
+    use zcash_script::pattern::check_multisig;
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    let redeem_script = script::Component(
+        check_multisig(1, &[&pubkey.serialize()], false)
+            .unwrap()
+            .into_iter()
+            .collect(),
+    );
+    (redeem_script, secret_key)
+}
+
+/// Tests that importing a standalone transparent public key succeeds.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+}
+
+/// Tests that importing the same pubkey twice to the same account is idempotent.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_idempotent<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // First import
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+
+    // Snapshot state after first import
+    let receivers_before = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // Second import to same account should also succeed (idempotent)
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account_id, pubkey),
+        Ok(_)
+    );
+
+    // Verify wallet state is unchanged
+    let receivers_after = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    assert_eq!(receivers_before.len(), receivers_after.len());
+
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+    let metadata = receivers_after
+        .get(&taddr)
+        .expect("address should be present");
+    assert!(matches!(
+        metadata.source(),
+        TransparentAddressSource::StandalonePubkey(_)
+    ));
+}
+
+/// Tests that importing the same pubkey to a different account fails.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_conflict<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secp256k1::{Secp256k1, SecretKey};
+    use secrecy::Secret;
+
+    use crate::data_api::{AccountBirthday, chain::ChainState};
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account1_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import to first account
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account1_id, pubkey),
+        Ok(_)
+    );
+
+    // Create a second account
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let seed2 = Secret::new(vec![42u8; 32]);
+    let (account2_id, _) = st
+        .wallet_mut()
+        .create_account("account2", &seed2, &birthday, None)
+        .unwrap();
+
+    // Import same pubkey to second account should fail
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_pubkey(account2_id, pubkey),
+        Err(_)
+    );
+}
+
+/// Tests that a UTXO received at a standalone P2PKH address is reflected in the wallet balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_pubkey_balance<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    use crate::data_api::wallet::ConfirmationsPolicy;
+    use secp256k1::{Secp256k1, SecretKey};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import the public key.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .unwrap();
+
+    // Derive the P2PKH address.
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake UTXO at the P2PKH address.
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Verify the balance is reflected via get_transparent_balances.
+    let target_height = TargetHeight::from(height + 1);
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    assert_eq!(
+        balances.get(&taddr).map(|(_, b)| b.spendable_value()),
+        Some(value),
+    );
+
+    // Verify the UTXO is returned by get_spendable_transparent_outputs.
+    let utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &taddr,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(utxos.len(), 1);
+    assert_eq!(utxos[0].value(), value);
+}
+
+/// Tests spending from a standalone P2PKH address by shielding its balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_from_standalone_pubkey<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::data_api::wallet::{self, SpendingKeys};
+    use secp256k1::{Secp256k1, SecretKey};
+    use std::collections::HashMap;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Create a keypair and derive the P2PKH address.
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+
+    // Import the public key.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .unwrap();
+
+    // Derive the P2PKH address.
+    let taddr = TransparentAddress::from_pubkey(&pubkey);
+
+    // Initialize chain data with blocks (needed for shielding transaction creation).
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Create a fake UTXO at the P2PKH address.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Build SpendingKeys with the standalone key for the P2PKH address.
+    let mut standalone_keys = HashMap::new();
+    standalone_keys.insert(taddr, vec![secret_key]);
+    let spending_keys = SpendingKeys::new(
+        account.usk().clone(),
+        #[cfg(feature = "transparent-key-import")]
+        standalone_keys,
+    );
+
+    // Shield the P2PKH UTXO.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
+    let network = *st.network();
+    let txids = wallet::shield_transparent_funds(
+        st.wallet_mut(),
+        &network,
+        &prover,
+        &prover,
+        &input_selector,
+        &change_strategy,
+        value,
+        &spending_keys,
+        &[taddr],
+        account_id,
+        ConfirmationsPolicy::MIN,
+    )
+    .unwrap();
+
+    assert!(!txids.is_empty());
+
+    // The wallet should have zero transparent balance after shielding.
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
+
+    // The shielded balance should now include the value minus the fee.
+    let fee = st
+        .get_tx_from_history(*txids.first())
+        .unwrap()
+        .unwrap()
+        .fee_paid()
+        .expect("fee should be known for wallet-created transactions");
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .unwrap()
+        .unwrap();
+    let account_balance = summary.account_balances().get(&account_id).unwrap();
+    assert_eq!(
+        account_balance
+            .sapling_balance()
+            .change_pending_confirmation(),
+        (value - fee).unwrap(),
+    );
+}
+
+/// Tests that importing a standalone P2SH address succeeds and the address appears
+/// in `get_transparent_receivers` with the correct `TransparentAddressSource`.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_p2sh<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let (redeem_script, _) = build_test_redeem_script();
+
+    // Import should succeed
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        Ok(_)
+    );
+
+    // Verify the address appears in get_transparent_receivers
+    let receivers = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // The P2SH address derived from the redeem script should be present
+    let script_pubkey = sh(&redeem_script);
+    let expected_addr =
+        TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+
+    let metadata = receivers
+        .get(&expected_addr)
+        .expect("address should be present");
+    assert!(matches!(
+        metadata.source(),
+        TransparentAddressSource::StandaloneScript(_)
+    ));
+}
+
+/// Tests that importing the same P2SH address twice to the same account is idempotent.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_p2sh_idempotent<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let (redeem_script, _) = build_test_redeem_script();
+
+    // First import
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        Ok(_)
+    );
+
+    // Snapshot state after first import
+    let receivers_before = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // Second import to same account should also succeed (idempotent)
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_script(account_id, redeem_script.clone()),
+        Ok(_)
+    );
+
+    // Verify wallet state is unchanged
+    let receivers_after = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    assert_eq!(receivers_before.len(), receivers_after.len());
+
+    let script_pubkey = sh(&redeem_script);
+    let expected_addr =
+        TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+    let metadata = receivers_after
+        .get(&expected_addr)
+        .expect("address should be present");
+    assert!(matches!(
+        metadata.source(),
+        TransparentAddressSource::StandaloneScript(_)
+    ));
+}
+
+/// Tests that importing the same P2SH address to a different account fails.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_p2sh_conflict<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use secrecy::Secret;
+
+    use crate::data_api::{AccountBirthday, chain::ChainState};
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account1_id = st.test_account().unwrap().id();
+    let (redeem_script, _) = build_test_redeem_script();
+
+    // Import to first account
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_script(account1_id, redeem_script.clone()),
+        Ok(_)
+    );
+
+    // Create a second account
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let seed2 = Secret::new(vec![42u8; 32]);
+    let (account2_id, _) = st
+        .wallet_mut()
+        .create_account("account2", &seed2, &birthday, None)
+        .unwrap();
+
+    // Import same redeem script to second account should fail
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_script(account2_id, redeem_script),
+        Err(_)
+    );
+}
+
+/// Tests that a UTXO received at a standalone P2SH address is reflected in the wallet balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_p2sh_balance<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    use crate::data_api::wallet::ConfirmationsPolicy;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let (redeem_script, _) = build_test_redeem_script();
+
+    // Import the P2SH address.
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .unwrap();
+
+    // Derive the expected transparent address from the redeem script.
+    let script_pubkey = sh(&redeem_script);
+    let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake UTXO at the P2SH address.
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(outpoint, txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Verify the balance is reflected via get_transparent_balances.
+    let target_height = TargetHeight::from(height + 1);
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    assert_eq!(
+        balances.get(&taddr).map(|(_, b)| b.spendable_value()),
+        Some(value),
+    );
+
+    // Verify the UTXO is returned by get_spendable_transparent_outputs.
+    let utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &taddr,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(utxos.len(), 1);
+    assert_eq!(utxos[0].value(), value);
+}
+
+/// Tests spending from a standalone P2SH (multisig) address by shielding its balance.
+#[cfg(feature = "transparent-key-import")]
+pub fn spend_from_standalone_p2sh<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::data_api::wallet::{self, SpendingKeys};
+    use std::collections::HashMap;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    // Build the redeem script and get the signing key.
+    let (redeem_script, secret_key) = build_test_redeem_script();
+
+    // Import the P2SH address.
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .unwrap();
+
+    // Derive the P2SH address.
+    let script_pubkey = sh(&redeem_script);
+    let taddr = TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+
+    // Initialize chain data with blocks (needed for shielding transaction creation).
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Create a fake UTXO at the P2SH address.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height)).unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Build SpendingKeys with the standalone key for the P2SH address.
+    let mut standalone_keys = HashMap::new();
+    standalone_keys.insert(taddr, vec![secret_key]);
+    let spending_keys = SpendingKeys::new(
+        account.usk().clone(),
+        #[cfg(feature = "transparent-key-import")]
+        standalone_keys,
+    );
+
+    // Shield the P2SH UTXO.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
+    let network = *st.network();
+    let txids = wallet::shield_transparent_funds(
+        st.wallet_mut(),
+        &network,
+        &prover,
+        &prover,
+        &input_selector,
+        &change_strategy,
+        value,
+        &spending_keys,
+        &[taddr],
+        account_id,
+        ConfirmationsPolicy::MIN,
+    )
+    .unwrap();
+
+    assert!(!txids.is_empty());
+
+    // The wallet should have zero transparent balance after shielding.
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
+
+    // The shielded balance should now include the value minus the fee.
+    let fee = st
+        .get_tx_from_history(*txids.first())
+        .unwrap()
+        .unwrap()
+        .fee_paid()
+        .expect("fee should be known for wallet-created transactions");
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .unwrap()
+        .unwrap();
+    let account_balance = summary.account_balances().get(&account_id).unwrap();
+    assert_eq!(
+        account_balance
+            .sapling_balance()
+            .change_pending_confirmation(),
+        (value - fee).unwrap(),
+    );
+}
+
+/// Tests [`WalletWrite::mark_transparent_addresses_exposed`] by observing the effect on the
+/// address's exposure metadata via
+/// [`WalletRead::get_transparent_address_metadata`](crate::data_api::WalletRead::get_transparent_address_metadata).
+pub fn mark_transparent_addresses_exposed<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::{data_api::WalletRead, wallet::Exposure};
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let taddr = *st
+        .wallet()
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap()
+        .transparent()
+        .unwrap();
+
+    let exposure_of = |st: &TestState<_, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+                       addr: &TransparentAddress|
+     -> Exposure {
+        st.wallet()
+            .get_transparent_address_metadata(account_id, addr)
+            .unwrap()
+            .unwrap()
+            .exposure()
+    };
+
+    // Calling with a very high height does not raise an already-recorded exposure,
+    // and records the provided height if no prior exposure was tracked.
+    let initial = exposure_of(&st, &taddr);
+    let very_high = BlockHeight::from(u32::MAX);
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, very_high)])
+        .unwrap();
+    match initial {
+        Exposure::Exposed { at_height, .. } => assert_matches!(
+            exposure_of(&st, &taddr),
+            Exposure::Exposed { at_height: h, .. } if h == at_height
+        ),
+        Exposure::Unknown | Exposure::CannotKnow => assert_matches!(
+            exposure_of(&st, &taddr),
+            Exposure::Exposed { at_height: h, .. } if h == very_high
+        ),
+    }
+
+    // Calling with a lower height lowers the recorded exposure.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, BlockHeight::from(0))])
+        .unwrap();
+    assert_matches!(
+        exposure_of(&st, &taddr),
+        Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(0)
+    );
+
+    // Calling with a higher height does not raise the recorded exposure.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(taddr, BlockHeight::from(100))])
+        .unwrap();
+    assert_matches!(
+        exposure_of(&st, &taddr),
+        Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(0)
+    );
+
+    // An address not tracked by the wallet must return an error.
+    let unknown = TransparentAddress::PublicKeyHash([0u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
+            .is_err()
+    );
+
+    // An empty input is a no-op.
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[])
+        .unwrap();
+}
+
+/// Tests that [`WalletWrite::mark_transparent_addresses_exposed`] correctly handles bulk
+/// input: all addresses in a successful call must be marked, and an unrecognized address
+/// must cause the entire call to be rolled back.
+pub fn mark_transparent_addresses_exposed_bulk<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::{data_api::WalletRead, wallet::Exposure};
+    use zcash_protocol::consensus::BlockHeight;
+
+    let gap_limits = GapLimits::new(5, 2, 2);
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_gap_limits(gap_limits)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let mut receivers = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap()
+        .into_iter()
+        .filter_map(|(addr, meta)| {
+            let exposure = meta.exposure();
+            meta.address_index().map(|i| (i.index(), addr, exposure))
+        })
+        .collect::<Vec<_>>();
+    receivers.sort_by_key(|(i, _, _)| *i);
+
+    // Use known-unexposed receivers for the bulk-success test, so that the post-call
+    // recorded height is exactly the one we pass in regardless of any default exposure
+    // that address generation may set on other receivers.
+    let unexposed = receivers
+        .iter()
+        .copied()
+        .filter(|(_, _, exposure)| matches!(exposure, Exposure::Unknown))
+        .collect::<Vec<_>>();
+    assert!(
+        unexposed.len() >= 2,
+        "account should have at least 2 unexposed derived receivers"
+    );
+
+    // Mark two unexposed addresses at distinct heights in a single bulk call.
+    let (_idx_a, addr_a, _) = unexposed[0];
+    let (_idx_b, addr_b, _) = unexposed[1];
+    let height_a = BlockHeight::from(10);
+    let height_b = BlockHeight::from(20);
+    st.wallet_mut()
+        .mark_transparent_addresses_exposed(&[(addr_a, height_a), (addr_b, height_b)])
+        .unwrap();
+
+    let exposure_of = |st: &TestState<_, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+                       addr: &TransparentAddress|
+     -> Exposure {
+        st.wallet()
+            .get_transparent_address_metadata(account_id, addr)
+            .unwrap()
+            .unwrap()
+            .exposure()
+    };
+    assert_matches!(
+        exposure_of(&st, &addr_a),
+        Exposure::Exposed { at_height, .. } if at_height == height_a
+    );
+    assert_matches!(
+        exposure_of(&st, &addr_b),
+        Exposure::Exposed { at_height, .. } if at_height == height_b
+    );
+
+    // Now attempt a bulk call where the second entry is unrecognized. The whole call must
+    // fail, and the first entry must not have been partially applied. Pick a third
+    // receiver distinct from `addr_a`/`addr_b` — its prior exposure state is irrelevant
+    // since the assertion is preservation, not a specific height.
+    let (idx_c, addr_c, _) = *receivers
+        .iter()
+        .find(|(_, addr, _)| *addr != addr_a && *addr != addr_b)
+        .expect("account should have a third derived receiver");
+    let before = exposure_of(&st, &addr_c);
+    let unknown = TransparentAddress::PublicKeyHash([0x7u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[
+                (addr_c, BlockHeight::from(5)),
+                (unknown, BlockHeight::from(5)),
+            ])
+            .is_err()
+    );
+    assert_eq!(
+        exposure_of(&st, &addr_c),
+        before,
+        "exposure at index {idx_c} must not change when bulk call fails atomically"
+    );
+}
+
+/// Tests that [`WalletWrite::mark_transparent_addresses_exposed`] returns an error when
+/// asked to mark an address that the wallet does not track.
+pub fn mark_transparent_addresses_exposed_unknown_address<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let unknown = TransparentAddress::PublicKeyHash([0u8; 20]);
+    assert!(
+        st.wallet_mut()
+            .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
+            .is_err()
+    );
 }

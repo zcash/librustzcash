@@ -39,7 +39,7 @@ mod verify;
 #[cfg(test)]
 mod test_vectors;
 
-pub use verify::{is_valid_solution, Error};
+pub use verify::{Error, is_valid_solution};
 
 #[cfg(feature = "solver")]
 mod blake2b;

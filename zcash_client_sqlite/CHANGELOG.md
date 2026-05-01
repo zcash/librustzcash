@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-04-27
+
 ### Added
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`
@@ -25,19 +27,75 @@ workspace.
 - `impl zcash_keys::keys::transparent::gap_limits::AddressStore for WalletDb`
   (behind the `transparent-inputs` feature flag)
 - `zcash_client_sqlite::AccountRef` is now public.
+- `impl<'conn, P, CL, R> WalletWrite for WalletDb<SqlTransaction<'conn>, P, CL, R>` to
+  enable calling `WalletWrite` methods inside `WalletDb::transactionally` (amortizing the
+  database transaction overhead).
+- `WalletDb::get_unspent_orchard_notes_at_historical_height` returns all Orchard
+  notes that existed and were unspent at a given height.
+- `WalletDb::generate_orchard_witnesses_at_historical_height` generates Merkle
+  witnesses at a historical height using an ephemeral in-memory
+  `shardtree::store::memory::MemoryShardStore`.
+- Two new `orchard`-gated variants have been added to
+  `zcash_client_sqlite::error::SqliteClientError` to surface the failure modes
+  of `WalletDb::generate_orchard_witnesses_at_historical_height`:
+  - `HistoricalFrontierInvalid(shardtree::error::InsertionError)` —
+    the caller-supplied frontier is inconsistent with the shard data
+    reconstructed from the wallet at the requested height.
+  - `HistoricalWitnessUnavailable { position, height }` — no witness can be
+    produced for the specified position at the specified height (the wallet
+    most likely has not synced through that height).
+  Shard-read failures continue to surface via the existing
+  `SqliteClientError::CommitmentTree` variant.
 
 ### Changed
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
-- `zcash_client_sqlite::error::SqliteClientError` has added variant `GapAddresses`.
+- Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
+  `zcash_protocol 0.8`, `zcash_address 0.11`, `zip321 0.7`, `zcash_transparent 0.7`, 
+  `zcash_primitives 0.27`, `zcash_proofs 0.27`, `zcash_keys 0.13`, `pczt 0.6`,
+  `zcash_client_backend 0.22`
+- The `accounts` table now stores IVK item caches instead of FVK item caches for
+  collision detection. A new `p2sh_ivk_item_cache` column is reserved for future
+  ZIP 316 Revision 2 P2SH support.
+- Account collision detection now uses IVK-based matching, which catches collisions
+  between FVK-imported and IVK-imported accounts. Importing an FVK over an existing
+  IVK-only account is treated as a capability upgrade if the existing IVK items are
+  a subset of those derivable from the new FVK.
+- The `InputSource::get_spendable_transparent_outputs` implementation now
+  accepts an `output_filter: TransparentOutputFilter` parameter. When set to
+  `CoinbaseOnly`, the SQL query restricts results to outputs from coinbase
+  transactions (identified by `tx_index = 0`).
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
+- Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
+  `zcash_client_sqlite::error::StandaloneImportConflict`
+- P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a
+  precomputed input size for accurate ZIP 317 fee estimation.
+- Added a `witness_stabilized` column to the `sapling_received_notes` and
+  `orchard_received_notes` tables. The column is set to 1 at the end of each
+  scan batch (and once as a backfill by the `witness_stabilized_notes`
+  migration) for notes whose containing shard is fully Scanned and whose
+  `subtree_end_height` has received at least `PRUNING_DEPTH` confirmations.
 
 ### Removed
 - `zcash_client_sqlite::GapLimits` use `zcash_keys::keys::transparent::GapLimits` instead.
 - `zcash_client_sqlite::UtxoId` contents are now private.
+- The inadvertently-exposed `zcash_client_sqlite::chain::migrations::blockmeta::init`
+  module has been removed from the public API.
 
 ### Fixed
+- `get_transparent_balances` no longer fails for standalone transparent addresses
+  that have no `TransparentKeyScope`. Previously, it would error when encountering
+  a `KeyScope` that could not be converted to a `TransparentKeyScope`.
 - Notes are now consistently treated as having "uneconomic value" if their value is less
   than **or equal to** the marginal fee. Previously, some call sites only considered
   note uneconomic if their value was less than the marginal fee.
+
+## [0.19.5] - 2026-03-10
+
+### Fixed
+- The following APIs no longer crash in certain regtest mode configurations with
+  fewer NUs active:
+  - `WalletDb::{create_account, import_account_hd, import_account_ufvk}`
+  - `WalletDb::get_wallet_summary`
+  - `WalletDb::truncate_to_height`
 
 ## [0.18.12, 0.19.4] - 2026-02-26
 

@@ -71,7 +71,7 @@ impl InputUpdater<'_> {
         if let Some(TransparentAddress::ScriptHash(hash)) =
             TransparentAddress::from_script_from_chain(&self.0.script_pubkey)
         {
-            if hash[..] == Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
+            if hash[..] == crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
                 self.0.redeem_script = Some(redeem_script);
                 Ok(())
             } else {
@@ -101,8 +101,8 @@ impl InputUpdater<'_> {
 
     /// Stores the given value along with `key = RIPEMD160(SHA256(value))`.
     pub fn set_hash160_preimage(&mut self, value: Vec<u8>) {
-        let hash = Ripemd160::digest(Sha256::digest(&value));
-        self.0.hash160_preimages.insert(hash.into(), value);
+        let hash = crate::util::hash160::hash(&value);
+        self.0.hash160_preimages.insert(hash, value);
     }
 
     /// Stores the given value along with `key = SHA256(SHA256(value))`.
@@ -129,7 +129,7 @@ impl OutputUpdater<'_> {
         if let Some(TransparentAddress::ScriptHash(hash)) =
             TransparentAddress::from_script_pubkey(&self.0.script_pubkey)
         {
-            if hash[..] == Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
+            if hash[..] == crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
                 self.0.redeem_script = Some(redeem_script);
                 Ok(())
             } else {

@@ -1,11 +1,13 @@
-use zcash_protocol::{constants, PoolType};
+use zcash_protocol::{PoolType, constants};
 
-use super::{private::SealedItem, ParseError, Typecode};
+use super::{ParseError, Typecode, private::SealedItem};
 
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
+///
+/// Defined in [ZIP 316](https://zips.z.cash/zip-0316).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
@@ -24,6 +26,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
             Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
             Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
             Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
+            // Preserve unknown typecodes for forward compatibility.
             Typecode::Unknown(_) => Ok(Receiver::Unknown {
                 typecode,
                 data: addr.to_vec(),
@@ -261,7 +264,7 @@ mod tests {
     use zcash_protocol::consensus::NetworkType;
 
     use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
+        kind::unified::{Container, Encoding, private::SealedContainer},
         unified::address::testing::arb_unified_address,
     };
 
@@ -437,5 +440,48 @@ mod tests {
                 },
             ]
         )
+    }
+
+    #[test]
+    fn address_receiver_queries() {
+        use zcash_protocol::PoolType;
+
+        // A UA with all receiver types
+        let ua = Address(vec![
+            Receiver::Orchard([0; 43]),
+            Receiver::Sapling([1; 43]),
+            Receiver::P2pkh([2; 20]),
+        ]);
+
+        // has_receiver_of_type
+        assert!(ua.has_receiver_of_type(PoolType::ORCHARD));
+        assert!(ua.has_receiver_of_type(PoolType::SAPLING));
+        assert!(ua.has_receiver_of_type(PoolType::TRANSPARENT));
+
+        // can_receive_memo: true only when Sapling or Orchard is present
+        assert!(ua.can_receive_memo());
+
+        // contains_receiver: exact data match required
+        assert!(ua.contains_receiver(&Receiver::Orchard([0; 43])));
+        assert!(!ua.contains_receiver(&Receiver::Orchard([1; 43]))); // same type, different data
+
+        // Transparent-only address cannot receive memos
+        let transparent_only = Address(vec![Receiver::P2pkh([0; 20])]);
+        assert!(!transparent_only.can_receive_memo());
+        assert!(!transparent_only.has_receiver_of_type(PoolType::ORCHARD));
+        assert!(!transparent_only.has_receiver_of_type(PoolType::SAPLING));
+        assert!(transparent_only.has_receiver_of_type(PoolType::TRANSPARENT));
+
+        // Unknown receiver does not count for any pool type
+        let with_unknown = Address(vec![
+            Receiver::Orchard([0; 43]),
+            Receiver::Unknown {
+                typecode: 0xAA,
+                data: vec![0; 32],
+            },
+        ]);
+        assert!(!with_unknown.has_receiver_of_type(PoolType::SAPLING));
+        // Unknown receiver is NOT counted as transparent
+        assert!(!with_unknown.has_receiver_of_type(PoolType::TRANSPARENT));
     }
 }

@@ -46,12 +46,15 @@ use crate::wallet::scanning::priority_code;
 ///   `hd_seed_fingerprint` must also be non-null.
 /// - `ufvk`: The unified full viewing key for the account, if known.
 /// - `uivk`: The unified incoming viewing key for the account.
-/// - `orchard_fvk_item_cache`: The serialized representation of the Orchard item of the `ufvk`,
-///   if any.
-/// - `sapling_fvk_item_cache`: The serialized representation of the Sapling item of the `ufvk`,
-///   if any.
-/// - `p2pkh_fvk_item_cache`: The serialized representation of the P2PKH item of the `ufvk`,
-///   if any.
+/// - `orchard_ivk_item_cache`: The serialized representation of the Orchard IVK item derived
+///   from the account's viewing key, if any. Used for collision detection.
+/// - `sapling_ivk_item_cache`: The serialized representation of the Sapling IVK item derived
+///   from the account's viewing key, if any. Used for collision detection.
+/// - `p2pkh_ivk_item_cache`: The serialized representation of the transparent P2PKH IVK item
+///   derived from the account's viewing key, if any. Used for collision detection.
+/// - `p2sh_ivk_item_cache`: The serialized representation of a P2SH IVK item derived from
+///   the account's viewing key, if any. At most one of `p2pkh_ivk_item_cache` and
+///   `p2sh_ivk_item_cache` may be non-NULL.
 /// - `birthday_height`: The minimum block height among blocks that may potentially contain
 ///   shielded funds belonging to the account.
 /// - `birthday_sapling_tree_size`: A cache of the size of the Sapling note commitment tree
@@ -86,9 +89,10 @@ CREATE TABLE "accounts" (
     hd_account_index INTEGER,
     ufvk TEXT,
     uivk TEXT NOT NULL,
-    orchard_fvk_item_cache BLOB,
-    sapling_fvk_item_cache BLOB,
-    p2pkh_fvk_item_cache BLOB,
+    orchard_ivk_item_cache BLOB,
+    sapling_ivk_item_cache BLOB,
+    p2pkh_ivk_item_cache BLOB,
+    p2sh_ivk_item_cache BLOB,
     birthday_height INTEGER NOT NULL,
     birthday_sapling_tree_size INTEGER,
     birthday_orchard_tree_size INTEGER,
@@ -107,6 +111,9 @@ CREATE TABLE "accounts" (
         account_kind = 1
         AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
       )
+    ),
+    CHECK (
+      NOT (p2pkh_ivk_item_cache IS NOT NULL AND p2sh_ivk_item_cache IS NOT NULL)
     )
 )"#;
 pub(super) const INDEX_ACCOUNTS_UUID: &str =
@@ -116,6 +123,14 @@ pub(super) const INDEX_ACCOUNTS_UFVK: &str =
 pub(super) const INDEX_ACCOUNTS_UIVK: &str =
     r#"CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk)"#;
 pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index)"#;
+pub(super) const INDEX_ACCOUNTS_ORCHARD_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_orchard_ivk ON accounts (orchard_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_SAPLING_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_sapling_ivk ON accounts (sapling_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_P2PKH_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_p2pkh_ivk ON accounts (p2pkh_ivk_item_cache)"#;
+pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_p2sh_ivk ON accounts (p2sh_ivk_item_cache)"#;
 
 /// Stores addresses that have been generated from accounts in the wallet.
 ///
@@ -125,7 +140,7 @@ pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON a
 /// - `diversifier_index_be`: the diversifier index at which this address was derived.
 ///   This may be null for imported standalone addresses.
 /// - `key_scope`: the BIP 44 change-level index at which this address was derived, or `-1`
-///   for imported transparent pubkeys.
+///   for imported standalone transparent addresses (P2PKH or P2SH).
 /// - `address`: The Unified, Sapling, or transparent address. For Unified and Sapling addresses,
 ///   only external-key scoped addresses should be stored in this table; for purely transparent
 ///   addresses, this may be an internal-scope (change) address, so that we can provide
@@ -162,11 +177,16 @@ pub(super) const INDEX_HD_ACCOUNT: &str = r#"CREATE UNIQUE INDEX hd_account ON a
 /// - `transparent_receiver_next_check_time`: The Unix epoch time at which a client should next
 ///   check to determine whether any new UTXOs have been received by the cached transparent receiver
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
-//  - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
-//    `cached_transparent_receiver_address` value, for imported transparent addresses that were not
-//    obtained via derivation from an HD seed associated with the account. In cases that
-//    `cached_transparent_receiver_address` is non-null, either this column or
-//    `transparent_child_index` must also be non-null.
+/// - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
+///   `cached_transparent_receiver_address` value, for imported transparent P2PKH addresses that
+///   were not obtained via derivation from an HD seed associated with the account. In cases that
+///   `cached_transparent_receiver_address` is non-null, either this column, or
+///   `imported_transparent_receiver_script` (for imported P2SH addresses), or
+///   `transparent_child_index` must also be non-null. This is only set for imported addresses
+///   (key_scope = -1).
+/// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
+///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
+///   address derived from this script. This is only set for imported addresses (key_scope = -1).
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -183,8 +203,10 @@ CREATE TABLE "addresses" (
     receiver_flags INTEGER NOT NULL,
     transparent_receiver_next_check_time INTEGER,
     imported_transparent_receiver_pubkey BLOB,
+    imported_transparent_receiver_script BLOB,
     UNIQUE (account_id, key_scope, diversifier_index_be),
     UNIQUE (imported_transparent_receiver_pubkey),
+    UNIQUE (imported_transparent_receiver_script),
     CONSTRAINT ck_addr_transparent_index_consistency CHECK (
         (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
         AND (
@@ -192,10 +214,18 @@ CREATE TABLE "addresses" (
                 cached_transparent_receiver_address IS NULL
                 AND transparent_child_index IS NULL
                 AND imported_transparent_receiver_pubkey IS NULL
+                AND imported_transparent_receiver_script IS NULL
             )
             OR (
                 cached_transparent_receiver_address IS NOT NULL
-                AND (transparent_child_index IS NULL) == (imported_transparent_receiver_pubkey IS NOT NULL)
+                AND (
+                    (transparent_child_index IS NULL) == (
+                        key_scope = -1 AND (
+                            (imported_transparent_receiver_pubkey IS NULL) !=
+                              (imported_transparent_receiver_script IS NULL)
+                        )
+                    )
+                )
             )
         )
     ),
@@ -345,6 +375,7 @@ CREATE TABLE "sapling_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     UNIQUE (transaction_id, output_index)
 )"#;
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -358,6 +389,10 @@ CREATE INDEX idx_sapling_received_notes_address ON sapling_received_notes (
 pub(super) const INDEX_SAPLING_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_sapling_received_notes_tx ON sapling_received_notes (
     transaction_id ASC
+)"#;
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
+CREATE INDEX idx_sapling_received_notes_witness_stabilized ON sapling_received_notes (
+    witness_stabilized
 )"#;
 
 /// A junction table between received Sapling notes and the transactions that spend them.
@@ -428,6 +463,7 @@ CREATE TABLE "orchard_received_notes" (
     recipient_key_scope INTEGER,
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -441,6 +477,10 @@ CREATE INDEX idx_orchard_received_notes_address ON orchard_received_notes (
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_TX: &str = r#"
 CREATE INDEX idx_orchard_received_notes_tx ON orchard_received_notes (
     transaction_id ASC
+)"#;
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = r#"
+CREATE INDEX idx_orchard_received_notes_witness_stabilized ON orchard_received_notes (
+    witness_stabilized
 )"#;
 
 /// A junction table between received Orchard notes and the transactions that spend them.
@@ -1191,6 +1231,12 @@ SELECT
 FROM unioned
 GROUP BY transaction_id, output_pool, output_index";
 
+/// Combines the Sapling tree shards and scan ranges.
+///
+/// Note that in regtest mode when the Sapling NU has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard. However, in this
+/// scenario there should never be any Sapling shards, so the view should be empty and
+/// this state should be unobservable.
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(
         "CREATE VIEW v_sapling_shard_scan_ranges AS
@@ -1215,7 +1261,12 @@ pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> Strin
                 shard.subtree_end_height IS NULL
             )
         )",
-        u32::from(params.activation_height(NetworkUpgrade::Sapling).unwrap()),
+        // Sapling might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Sapling)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
     )
 }
 
@@ -1260,6 +1311,12 @@ GROUP BY
     subtree_end_height,
     contains_marked";
 
+/// Combines the Orchard tree shards and scan ranges.
+///
+/// Note that in regtest mode when NU5 has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard. However, in this
+/// scenario there should never be any Orchard shards, so the view should be empty and
+/// this state should be unobservable.
 pub(super) fn view_orchard_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(
         "CREATE VIEW v_orchard_shard_scan_ranges AS
@@ -1284,7 +1341,12 @@ pub(super) fn view_orchard_shard_scan_ranges<P: Parameters>(params: &P) -> Strin
                 shard.subtree_end_height IS NULL
             )
         )",
-        u32::from(params.activation_height(NetworkUpgrade::Nu5).unwrap()),
+        // NU5 might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Nu5)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
     )
 }
 

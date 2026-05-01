@@ -127,7 +127,7 @@ impl MemoBytes {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, &b)| b != 0)
+            .find(|(_, b)| **b != 0)
             .map(|(i, _)| i + 1)
             .unwrap_or_default();
 

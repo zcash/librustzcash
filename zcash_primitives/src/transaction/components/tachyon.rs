@@ -1,11 +1,11 @@
 //! Functions for parsing & serialization of Tachyon transaction components.
 
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use pasta_curves::{EpAffine, Fp};
 
 use ff::PrimeField;
-use group::GroupEncoding;
+use pasta_curves::group::GroupEncoding;
 
 use zcash_encoding::Vector;
 
