@@ -61,6 +61,7 @@ mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
+mod witness_anchor_stable;
 mod witness_stabilized_notes;
 
 use std::{rc::Rc, sync::Mutex};
@@ -143,15 +144,16 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
-    //                                        /               |              \
+    //                                         /              |           \
     //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
     //                                                    /          \         \
     //                                                   /            \      orchard_note_version
     //                                                  /              \         \
     //                                                 /                \      ironwood_received_notes
-    //                                                /                  \              |
-    //                                               /                    \     ironwood_pool_code_views
-    //                                          ivk_item_cache    add_transparent_receiver_address_index
+    //                                                /                  \        /            \
+    //                                               /                    \      /       witness_anchor_stable
+    //                                          ivk_item_cache             \  ironwood_pool_code_views
+    //                                                            add_transparent_receiver_address_index
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -256,6 +258,9 @@ pub(super) fn all_migrations<
         Box::new(ironwood_received_notes::Migration),
         Box::new(ironwood_pool_code_views::Migration),
         Box::new(tree_retained_checkpoints::Migration),
+        Box::new(witness_anchor_stable::Migration {
+            _params: params.clone(),
+        }),
     ]
 }
 
@@ -403,6 +408,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_value_index::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
+    witness_anchor_stable::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

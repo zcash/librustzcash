@@ -369,6 +369,7 @@ where
         ),
     }
 }
+
 /// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
@@ -414,7 +415,7 @@ where
              accounts.ufvk as ufvk, rn.recipient_key_scope,
              t.block AS mined_height,
              scan_state.max_priority,
-             rn.witness_stabilized,
+             rn.witness_anchor_stable,
              IFNULL(t.trust_status, 0) AS trust_status,
              MAX(tt.mined_height) AS max_shielding_input_height,
              MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -466,7 +467,9 @@ where
         |row| -> Result<_, SqliteClientError> {
             let result_note = to_received_note(params, protocol, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
-            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+            let witness_anchor_stable = row
+                .get::<_, Option<u32>>("witness_anchor_stable")?
+                .map(BlockHeight::from);
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let shard_scan_priority = max_priority_raw
@@ -481,7 +484,7 @@ where
 
             Ok((
                 result_note,
-                witness_stabilized,
+                witness_anchor_stable,
                 shard_scan_priority,
                 tx_trust_status,
                 tx_shielding_inputs_trusted,
@@ -493,11 +496,12 @@ where
         .map(|t| match t? {
             (
                 Some(note),
-                witness_stabilized,
+                witness_anchor_stable,
                 max_shard_priority,
                 tx_trusted,
                 tx_shielding_inputs_trusted,
             ) => {
+                let witness_stabilized = witness_anchor_stable.is_some();
                 let shard_witness_available = witness_stabilized
                     || max_shard_priority.is_some_and(|p| p <= ScanPriority::Scanned);
 
@@ -595,7 +599,7 @@ where
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
-                 rn.witness_stabilized,
+                 rn.witness_anchor_stable,
                  IFNULL(t.trust_status, 0) AS trust_status,
                  MAX(tt.mined_height) AS max_shielding_input_height,
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -623,7 +627,7 @@ where
              -- A stabilized note's witness is durable across rewinds, so it bypasses
              -- the scan-state gating
              AND (
-                 rn.witness_stabilized = 1
+                 rn.witness_anchor_stable IS NOT NULL
                  OR (
                      :tip_unscanned = 0 -- the tip shard has no unscanned ranges
                      AND scan_state.max_priority <= :scanned_priority -- the note shard is fully scanned or ignored
@@ -636,14 +640,14 @@ where
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, witness_stabilized, trust_status,
+                mined_height, witness_anchor_stable, trust_status,
                 max_shielding_input_height, min_shielding_input_trust
          FROM eligible WHERE so_far < :target_value
          UNION
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, witness_stabilized, trust_status,
+                mined_height, witness_anchor_stable, trust_status,
                 max_shielding_input_height, min_shielding_input_trust
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         spent_notes_clause(table_prefix)
@@ -678,7 +682,9 @@ where
                 .get::<_, Option<u32>>("max_shielding_input_height")?
                 .map(BlockHeight::from);
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
-            let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+            let witness_anchor_stable = row
+                .get::<_, Option<u32>>("witness_anchor_stable")?
+                .map(BlockHeight::from);
             let note = to_spendable_note(params, protocol, row)?;
 
             Ok(note.map(|n| {
@@ -687,7 +693,7 @@ where
                     tx_trust_status,
                     max_shielding_input_height,
                     tx_shielding_inputs_trusted,
-                    witness_stabilized,
+                    witness_anchor_stable,
                 )
             }))
         },
@@ -703,8 +709,9 @@ where
                         tx_trusted,
                         max_shielding_input_height,
                         tx_shielding_inputs_trusted,
-                        witness_stabilized,
+                        witness_anchor_stable,
                     )| {
+                        let witness_stabilized = witness_anchor_stable.is_some();
                         // A stabilized note was confirmed well beyond any reasonable
                         // confirmations policy at stabilization time, so the confirmations
                         // check is trivially satisfied.
