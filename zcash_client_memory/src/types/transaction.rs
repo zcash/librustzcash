@@ -69,6 +69,7 @@ impl TransactionEntry {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn tx_index(&self) -> Option<u32> {
         self.tx_index
     }

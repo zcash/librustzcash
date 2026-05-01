@@ -3,7 +3,7 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Transaction, TransactionData, TxDigests, TxIn, TxVersion,
+        Authorization, Transaction, TransactionData, TxDigests, TxIn,
         sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
         testing::arb_tx, transparent, txid::TxIdDigester,
     },
