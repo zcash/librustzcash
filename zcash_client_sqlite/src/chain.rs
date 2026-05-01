@@ -531,6 +531,41 @@ mod tests {
     }
 
     #[test]
+    fn note_in_recently_completed_shard_spendable_once_confirmed_sapling() {
+        testing::pool::note_in_recently_completed_shard_spendable_once_confirmed::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn note_in_recently_completed_shard_spendable_once_confirmed_orchard() {
+        testing::pool::note_in_recently_completed_shard_spendable_once_confirmed::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    fn shard_completeness_derives_from_scan_queue_sapling() {
+        testing::pool::shard_completeness_derives_from_scan_queue::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn shard_completeness_derives_from_scan_queue_orchard() {
+        testing::pool::shard_completeness_derives_from_scan_queue::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_settled_height_invalidated_by_reorg_sapling() {
+        testing::pool::stabilized_note_settled_height_invalidated_by_reorg::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_settled_height_invalidated_by_reorg_orchard() {
+        testing::pool::stabilized_note_settled_height_invalidated_by_reorg::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }
