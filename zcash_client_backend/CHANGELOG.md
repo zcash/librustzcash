@@ -24,6 +24,11 @@ workspace.
   - `zcash_client_backend::data_api::testing::shard_stub`
     - `level_index_decomposition{start, end, max_level}`
     - `fake_advance_to{st, advance_height, advance_block_hash, target_position, rng}`
+- `zcash_client_backend::data_api::scanning::ScanPriority::Anchor`, slotted
+  between `ChainTip` and `Verify`. Backends stamp `scan_queue` ranges with
+  this priority after operations that disturb the wallet's anchor; the
+  spendability rule treats any `Anchor`-priority range overlapping the
+  chain-tip pruning window as blocking.
 
 ### Changed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
