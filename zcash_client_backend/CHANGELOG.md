@@ -43,6 +43,10 @@ workspace.
   it omitted the transparent receiver of an address that also had a shielded
   receiver.
 
+### Removed
+- `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
+  newly_discovered_notes_become_stabilized}`.
+
 ### Fixed
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`
   now counts the value of the selected transparent inputs in the `available`
