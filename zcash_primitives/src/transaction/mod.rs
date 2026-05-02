@@ -381,7 +381,7 @@ pub struct TransactionData<A: Authorization> {
     sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
     #[cfg(zcash_unstable = "nu7")]
-    tachyon_bundle: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>>,
+    tachyon_bundle: Option<zcash_tachyon::TachyonBundle>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
@@ -537,7 +537,7 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     #[cfg(zcash_unstable = "nu7")]
-    pub fn tachyon_bundle(&self) -> Option<&zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>> {
+    pub fn tachyon_bundle(&self) -> Option<&zcash_tachyon::TachyonBundle> {
         self.tachyon_bundle.as_ref()
     }
 
@@ -577,8 +577,11 @@ impl<A: Authorization> TransactionData<A> {
                     self.tachyon_bundle.as_ref().map_or_else(
                         || Ok(ZatBalance::zero()),
                         |b| {
-                            ZatBalance::try_from(b.value_balance)
-                                .map_err(|_| BalanceError::Overflow)
+                            let value_balance = match b {
+                                zcash_tachyon::TachyonBundle::Stamped(s) => s.value_balance,
+                                zcash_tachyon::TachyonBundle::Stripped(s) => s.value_balance,
+                            };
+                            ZatBalance::try_from(value_balance).map_err(|_| BalanceError::Overflow)
                         },
                     )?,
                     #[cfg(all(
