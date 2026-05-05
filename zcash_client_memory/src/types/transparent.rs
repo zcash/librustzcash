@@ -159,36 +159,47 @@ impl Deref for TransparentSpendCache {
 
 mod serialization {
     use super::*;
-    use crate::{proto::memwallet as proto, read_optional};
+    use crate::{Error, proto::memwallet as proto, read_optional};
+    use bip32::ChildNumber;
     use transparent::address::Script;
     use zcash_keys::encoding::AddressCodec;
     use zcash_protocol::{consensus::Network::MainNetwork as EncodingParams, value::Zatoshis};
 
     impl From<ReceivedTransparentOutput> for proto::ReceivedTransparentOutput {
         fn from(output: ReceivedTransparentOutput) -> Self {
+            // Convert TransparentKeyScope to u32 via ChildNumber (the only public API)
+            let key_scope_child: ChildNumber = output.key_scope.into();
             Self {
                 transaction_id: output.transaction_id.as_ref().to_vec(),
                 account_id: *output.account_id,
                 address: output.address.encode(&EncodingParams),
                 txout: Some(output.txout.into()),
                 max_observed_unspent_height: output.max_observed_unspent_height.map(|h| h.into()),
+                key_scope: Some(key_scope_child.index()),
             }
         }
     }
 
-    // FIXME: Key scope information needs to be added to both `proto::Address` and
-    // `proto::ReceivedTransparentOutput`, with a data migration that updates stored data with
-    // correct scope information.
-    #[allow(unreachable_code)]
     impl TryFrom<proto::ReceivedTransparentOutput> for ReceivedTransparentOutput {
         type Error = crate::Error;
 
         fn try_from(output: proto::ReceivedTransparentOutput) -> Result<Self, Self::Error> {
+            // Handle key_scope with backwards compatibility
+            let key_scope = match output.key_scope {
+                Some(scope_value) => TransparentKeyScope::custom(scope_value).ok_or_else(|| {
+                    Error::CorruptedData(format!(
+                        "Invalid TransparentKeyScope value: {} (must be < 2^31)",
+                        scope_value
+                    ))
+                })?,
+                None => TransparentKeyScope::EXTERNAL, // Default for old data without key_scope
+            };
+
             Ok(Self {
                 transaction_id: TxId::from_bytes(output.transaction_id.clone().try_into()?),
                 account_id: output.account_id.into(),
                 address: TransparentAddress::decode(&EncodingParams, &output.address)?,
-                key_scope: TransparentKeyScope::custom(u32::MAX).expect("FIXME"),
+                key_scope,
                 txout: read_optional!(output, txout)?.try_into()?,
                 max_observed_unspent_height: output.max_observed_unspent_height.map(|h| h.into()),
             })

@@ -1,12 +1,11 @@
-mod received;
-mod sent;
+pub mod received;
+pub mod sent;
 
-pub(crate) use received::{
-    ReceievedNoteSpends, ReceivedNote, ReceivedNoteTable, to_spendable_notes,
-};
+pub(crate) use received::{ReceievedNoteSpends, to_spendable_notes};
+pub use received::{ReceivedNote, ReceivedNoteTable};
 #[cfg(test)]
 pub(crate) use sent::SentNoteId;
-pub(crate) use sent::{SentNote, SentNoteTable};
+pub use sent::{SentNote, SentNoteTable};
 
 mod serialization {
     use crate::error::Error;
@@ -87,48 +86,73 @@ mod serialization {
         }
     }
 
-    impl From<proto::Note> for Note {
-        fn from(note: proto::Note) -> Self {
+    impl TryFrom<proto::Note> for Note {
+        type Error = Error;
+        fn try_from(note: proto::Note) -> Result<Self, Error> {
             match note.protocol() {
                 proto::ShieldedProtocol::Sapling => {
-                    let recipient =
-                        sapling::PaymentAddress::from_bytes(&note.recipient.try_into().unwrap())
-                            .unwrap();
+                    let recipient_bytes: [u8; 43] = note
+                        .recipient
+                        .try_into()
+                        .map_err(|_| Error::CorruptedData("invalid sapling recipient length".into()))?;
+                    let recipient = sapling::PaymentAddress::from_bytes(&recipient_bytes)
+                        .ok_or_else(|| Error::CorruptedData("invalid sapling payment address".into()))?;
                     let value = sapling::value::NoteValue::from_raw(note.value);
                     let rseed = match note.rseed {
                         Some(proto::RSeed {
                             rseed_type: Some(0),
                             payload,
-                        }) => sapling::Rseed::BeforeZip212(
-                            Fr::from_bytes(&payload.try_into().unwrap()).unwrap(),
-                        ),
+                        }) => {
+                            let bytes: [u8; 32] = payload
+                                .try_into()
+                                .map_err(|_| Error::CorruptedData("invalid rseed payload length".into()))?;
+                            let fr = Option::from(Fr::from_bytes(&bytes))
+                                .ok_or_else(|| Error::CorruptedData("invalid rseed field element".into()))?;
+                            sapling::Rseed::BeforeZip212(fr)
+                        }
                         Some(proto::RSeed {
                             rseed_type: Some(1),
                             payload,
-                        }) => sapling::Rseed::AfterZip212(payload.try_into().unwrap()),
-                        _ => panic!("rseed is required"),
+                        }) => sapling::Rseed::AfterZip212(
+                            payload
+                                .try_into()
+                                .map_err(|_| Error::CorruptedData("invalid rseed payload length".into()))?,
+                        ),
+                        _ => return Err(Error::ProtoMissingField("rseed")),
                     };
-                    Self::Sapling(sapling::Note::from_parts(recipient, value, rseed))
+                    Ok(Self::Sapling(sapling::Note::from_parts(recipient, value, rseed)))
                 }
                 #[cfg(feature = "orchard")]
                 proto::ShieldedProtocol::Orchard => {
-                    let recipient = orchard::Address::from_raw_address_bytes(
-                        &note.recipient.try_into().unwrap(),
-                    )
-                    .unwrap();
+                    let recipient_bytes: [u8; 43] = note
+                        .recipient
+                        .try_into()
+                        .map_err(|_| Error::CorruptedData("invalid orchard recipient length".into()))?;
+                    let recipient = Option::from(orchard::Address::from_raw_address_bytes(&recipient_bytes))
+                        .ok_or_else(|| Error::CorruptedData("invalid orchard address".into()))?;
                     let value = orchard::value::NoteValue::from_raw(note.value);
-                    let rho =
-                        orchard::note::Rho::from_bytes(&note.rho.unwrap().try_into().unwrap())
-                            .unwrap();
-                    let rseed = orchard::note::RandomSeed::from_bytes(
-                        note.rseed.unwrap().payload.try_into().unwrap(),
-                        &rho,
-                    )
-                    .unwrap();
-                    Self::Orchard(orchard::Note::from_parts(recipient, value, rho, rseed).unwrap())
+                    let rho_bytes: [u8; 32] = note
+                        .rho
+                        .ok_or(Error::ProtoMissingField("rho"))?
+                        .try_into()
+                        .map_err(|_| Error::CorruptedData("invalid rho length".into()))?;
+                    let rho = Option::from(orchard::note::Rho::from_bytes(&rho_bytes))
+                        .ok_or_else(|| Error::CorruptedData("invalid orchard rho".into()))?;
+                    let rseed_payload = note
+                        .rseed
+                        .ok_or(Error::ProtoMissingField("rseed"))?
+                        .payload
+                        .try_into()
+                        .map_err(|_| Error::CorruptedData("invalid rseed payload length".into()))?;
+                    let rseed = Option::from(orchard::note::RandomSeed::from_bytes(rseed_payload, &rho))
+                        .ok_or_else(|| Error::CorruptedData("invalid orchard random seed".into()))?;
+                    Ok(Self::Orchard(
+                        Option::from(orchard::Note::from_parts(recipient, value, rho, rseed))
+                            .ok_or_else(|| Error::CorruptedData("invalid orchard note".into()))?,
+                    ))
                 }
                 #[cfg(not(feature = "orchard"))]
-                _ => panic!("invalid protocol"),
+                _ => Err(Error::CorruptedData("unsupported protocol".into())),
             }
         }
     }
@@ -153,7 +177,7 @@ mod serialization {
             ));
 
             let proto_note: proto::Note = note.clone().into();
-            let recovered: Note = proto_note.into();
+            let recovered: Note = proto_note.try_into().unwrap();
 
             assert_eq!(note, recovered);
         }

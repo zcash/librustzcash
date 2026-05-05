@@ -27,7 +27,7 @@ impl Deref for TxLocatorMap {
 
 /// A table of received notes. Corresponds to sapling_received_notes and orchard_received_notes tables.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TransactionEntry {
+pub struct TransactionEntry {
     // created: String,
     /// mined_height is rolled into into a txn status
     tx_status: TransactionStatus,
@@ -55,14 +55,14 @@ impl TransactionEntry {
             _target_height: None,
         }
     }
-    pub(crate) fn expiry_height(&self) -> Option<BlockHeight> {
+    pub fn expiry_height(&self) -> Option<BlockHeight> {
         self.expiry_height
     }
-    pub(crate) fn status(&self) -> TransactionStatus {
+    pub fn status(&self) -> TransactionStatus {
         self.tx_status
     }
 
-    pub(crate) fn mined_height(&self) -> Option<BlockHeight> {
+    pub fn mined_height(&self) -> Option<BlockHeight> {
         match self.tx_status {
             TransactionStatus::Mined(height) => Some(height),
             _ => None,
@@ -95,7 +95,7 @@ impl TransactionEntry {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct TransactionTable(pub(crate) BTreeMap<TxId, TransactionEntry>);
+pub struct TransactionTable(pub(crate) BTreeMap<TxId, TransactionEntry>);
 
 impl TransactionTable {
     pub(crate) fn new() -> Self {
