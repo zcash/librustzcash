@@ -4688,18 +4688,20 @@ pub fn rewind_to_chain_state_deep<T: ShieldedPoolTester, Dsf>(
         )
         .expect("rewind_to_chain_state should succeed for a deep target");
 
-    // The chain tip (derived from scan_queue) should now report the rewind target.
+    // The chain tip (derived from scan_queue) should still report the pre-rewind tip:
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target
+    // with a `Historic` rescan range that extends up to the pre-rewind tip.
     let new_tip = st
         .wallet()
         .chain_height()
         .unwrap()
-        .expect("chain tip should match rewind target");
-    assert_eq!(new_tip, rewind_target);
+        .expect("chain tip should still be set after rewind");
+    assert_eq!(new_tip, pre_rewind_tip);
 
-    // A deep rewind keeps the scan queue rewound to the target, while blocks,
-    // transactions, tx_locator_map entries, and note commitment trees are only rewound
-    // to the oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`. Data at that
-    // boundary is kept (so stabilized notes remain spendable); data above it is removed.
+    // A deep rewind preserves block, transaction, tx_locator_map, and note commitment tree
+    // data only as far back as the oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`.
+    // Data at that boundary is kept (so stabilized notes remain spendable); data above it is
+    // removed.
     let wallet = st.wallet();
     assert_eq!(
         wallet.get_block_hash(prune_boundary).unwrap(),
@@ -4802,12 +4804,15 @@ pub fn rewind_to_chain_state_shallow<T: ShieldedPoolTester, Dsf>(
         )
         .expect("rewind_to_chain_state should succeed for a shallow target");
 
+    // The chain tip (derived from scan_queue) should still report the pre-rewind tip:
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target with
+    // a `Historic` rescan range that extends up to the pre-rewind tip.
     let new_tip = st
         .wallet()
         .chain_height()
         .unwrap()
-        .expect("chain tip should match rewind target");
-    assert_eq!(new_tip, rewind_target);
+        .expect("chain tip should still be set after rewind");
+    assert_eq!(new_tip, tip);
 
     // A shallow rewind truncates blocks, tx_locator_map, and note commitment trees
     // directly to the rewind target: data at the target is preserved (with the same
@@ -5091,93 +5096,27 @@ where
 
     let account = st.test_account().unwrap().clone();
 
-    // Remember the pre-rewind tip; we restore it in Step 7 to provide an anchor
-    // for `propose_transfer`.
-    let pre_rewind_tip = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set before rewind");
-
-    // Step 5: deep-rewind to the target and confirm scan_queue followed it. The rewind
-    // target is below the account birthday, so the account must be included in the
-    // reset set for the birthday to be lowered.
+    // Step 5: deep-rewind to the target. The rewind target is below the account birthday,
+    // so the account must be included in the reset set for the birthday to be lowered.
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target with
+    // a `Historic` rescan range, so the chain tip remains observable as the pre-rewind tip
+    // and notes whose `witness_stabilized = 1` flag survives can still be spent.
     st.wallet_mut()
         .rewind_to_chain_state(
             ChainState::empty(rewind_target, BlockHash([0; 32])),
             HashSet::from([account.id()]),
         )
         .expect("rewind_to_chain_state should succeed");
-    let tip_after_rewind = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set after rewind");
-    assert!(
-        tip_after_rewind <= rewind_target,
-        "scan_queue must be rewound at or below the rewind target"
-    );
 
-    // Step 6: before `update_chain_tip`, balance must reflect all three stabilized
-    // notes, but the spend path must fail because no anchor can be derived.
+    // Step 6: balance reflects all three stabilized notes, and a spend can be proposed
+    // immediately because the chain tip is preserved by the rewind.
     assert_eq!(
         st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         total_note_value,
-        "stabilized balance must be available even before update_chain_tip"
-    );
-    let pre_update_request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        T::sk_default_address(&T::sk(&[0xcc; 32])).to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(10_000),
-    )])
-    .unwrap();
-    let pre_update_change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
-    let pre_update_input_selector = GreedyInputSelector::new();
-    let pre_update_result = st.propose_transfer(
-        account.id(),
-        &pre_update_input_selector,
-        &pre_update_change_strategy,
-        pre_update_request,
-        ConfirmationsPolicy::MIN,
-    );
-    assert_matches!(
-        pre_update_result,
-        Err(crate::data_api::error::Error::ScanRequired)
-            | Err(crate::data_api::error::Error::InsufficientFunds { .. }),
-        "propose_transfer should fail with InsufficientFunds or ScanRequired"
-    );
-    if let Err(crate::data_api::error::Error::InsufficientFunds { available, .. }) =
-        &pre_update_result
-    {
-        assert_eq!(
-            *available,
-            Zatoshis::ZERO,
-            "when note selection runs, no notes should be eligible without the restored tip",
-        );
-    }
-
-    // Step 7: restore the chain tip so `propose_transfer` can derive an anchor,
-    // and confirm balance is still the full three-note sum.
-    st.wallet_mut()
-        .update_chain_tip(pre_rewind_tip)
-        .expect("update_chain_tip should succeed");
-    let tip_after_update = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set after update_chain_tip");
-    assert_eq!(tip_after_update, pre_rewind_tip);
-    let post_rewind_spendable = st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN);
-    assert_eq!(
-        post_rewind_spendable, total_note_value,
         "all stabilized notes should remain spendable after deep rewind"
     );
 
-    // Step 8: build and sign a real spend end-to-end.
+    // Step 7: build and sign a real spend end-to-end.
     let to_extsk = T::sk(&[0xcc; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let send_value = Zatoshis::const_from_u64(10_000);

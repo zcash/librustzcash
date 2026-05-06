@@ -80,8 +80,8 @@ use encoding::{
 use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, Connection, OptionalExtension, named_params, params};
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
-use tracing::{debug, warn};
+use shardtree::{error::ShardTreeError, store::ShardStore};
+use tracing::warn;
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -572,61 +572,36 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         birthday: birthday.height(),
     };
 
-    // If birthday frontiers are available and the birthday height is less than or equal to the
-    // max-scanned height, insert them into the note commitment trees. Otherwise, we don't need to
-    // do anything.
-    if block_max_scanned(conn, params)?.is_some_and(|m| m.block_height() > birthday.height()) {
-        if let Some(frontier) = birthday.sapling_frontier().value() {
-            debug!("Inserting Sapling frontier into ShardTree: {:?}", frontier);
-            let shard_store =
-                SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                    conn,
-                    crate::SAPLING_TABLES_PREFIX,
-                )?;
-            let mut shard_tree: ShardTree<
-                _,
-                { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                SAPLING_SHARD_HEIGHT,
-            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
-            shard_tree.insert_frontier_nodes(
-                frontier.clone(),
-                Retention::Checkpoint {
-                    // This subtraction is safe, because all leaves in the tree appear in blocks, and
-                    // the invariant that birthday.height() always corresponds to the block for which
-                    // `frontier` is the tree state at the start of the block. Together, this means
-                    // there exists a prior block for which frontier is the tree state at the end of
-                    // the block.
-                    id: birthday.height() - 1,
-                    marking: Marking::Reference,
-                },
-            )?;
-        }
-
-        #[cfg(feature = "orchard")]
-        if let Some(frontier) = birthday.orchard_frontier().value() {
-            debug!("Inserting Orchard frontier into ShardTree: {:?}", frontier);
-            let shard_store = SqliteShardStore::<
-                _,
-                ::orchard::tree::MerkleHashOrchard,
-                ORCHARD_SHARD_HEIGHT,
-            >::from_connection(conn, crate::ORCHARD_TABLES_PREFIX)?;
-            let mut shard_tree: ShardTree<
-                _,
-                { ::orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-                ORCHARD_SHARD_HEIGHT,
-            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
-            shard_tree.insert_frontier_nodes(
-                frontier.clone(),
-                Retention::Checkpoint {
-                    // This subtraction is safe, because all leaves in the tree appear in blocks, and
-                    // the invariant that birthday.height() always corresponds to the block for which
-                    // `frontier` is the tree state at the start of the block. Together, this means
-                    // there exists a prior block for which frontier is the tree state at the end of
-                    // the block.
-                    id: birthday.height() - 1,
-                    marking: Marking::Reference,
-                },
-            )?;
+    // Bring the wallet's note commitment tree, scan queue, and birthday metadata into a state
+    // consistent with the new account's birthday by rewinding to the chain state prior to the
+    // birthday height. The new account is the only entry in `reset_account_birthdays`;
+    // existing accounts retain their own birthdays.
+    //
+    // This handles two concerns that the previous manual implementation couldn't address
+    // safely together:
+    //   - Note commitment tree data above the pruning floor is removed so that subsequent
+    //     re-scanning cannot conflict with stale tree state from prior scans.
+    //   - The scan queue above `birthday.height() - 1` is overwritten with a `Historic`
+    //     rescan range so that blocks that must be re-scanned for the new account's notes
+    //     are queued.
+    match rewind_to_chain_state(
+        conn,
+        params,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        birthday.prior_chain_state(),
+        std::iter::once(account_uuid).collect(),
+    ) {
+        Ok(()) => {}
+        Err(RewindError::DataSource(e)) => return Err(e),
+        Err(RewindError::RewindBeyondBirthdays(_)) => {
+            // Cannot occur: `reset_account_birthdays` is non-empty (it contains the new
+            // account), so `rewind_to_chain_state`'s contract specifies that this variant is
+            // not returned.
+            unreachable!(
+                "rewind_to_chain_state cannot return RewindBeyondBirthdays with a non-empty \
+                 reset_account_birthdays set"
+            );
         }
     }
 
@@ -651,23 +626,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             false,
         )?;
     };
-
-    // Rewrite the scan ranges from the birthday height up to the chain tip so that we'll ensure we
-    // re-scan to find any notes that might belong to the newly added account.
-    if let Some(t) = chain_tip_height(conn)? {
-        let rescan_range = birthday.height()..(t + 1);
-
-        replace_queue_entries::<SqliteClientError>(
-            conn,
-            &rescan_range,
-            Some(ScanRange::from_parts(
-                rescan_range.clone(),
-                ScanPriority::Historic,
-            ))
-            .into_iter(),
-            true, // force rescan
-        )?;
-    }
 
     // Always derive the default Unified Address for the account. If the account's viewing
     // key has fewer components than the wallet supports (most likely due to this being an
@@ -3917,24 +3875,32 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
 ///
 /// In contrast to [`truncate_to_chain_state`], which unconditionally removes wallet state above
 /// `chain_state.block_height()` (transaction & note data is retained, but commitment trees,
-/// blocks, etc. are removed to the truncation height), this rewinds the scan queue to the
-/// target height but only rewinds blocks, note commitment trees, transactions, transparent UTXO
-/// observations, and nullifier-map entries as far back as the pruning floor (`chain_tip -
-/// (PRUNING_DEPTH - 1)`). Data at or below that height is preserved. Because `PRUNING_DEPTH` is
-/// a property of chain depth, the floor is derived from the wallet's view of the chain tip
-/// rather than from `MAX(blocks.height)`.
+/// blocks, etc. are removed to the truncation height), this rewinds blocks, note commitment
+/// trees, transactions, transparent UTXO observations, and nullifier-map entries only as far
+/// back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`). Data at or below that height
+/// is preserved. Because `PRUNING_DEPTH` is a property of chain depth, the floor is derived
+/// from the wallet's view of the chain tip rather than from `MAX(blocks.height)`.
 ///
 /// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor (via
 /// [`commitment_tree::min_checkpoint_id_at_or_above`]) so that [`truncate_to_height_internal`]
 /// has a real checkpoint to truncate to under non-contiguous scan orders.
 ///
+/// The scan-queue range above the rewind target is overwritten with a `Historic` rescan range
+/// extending up to the wallet's pre-rewind chain tip (computed from `MAX(block_range_end)` of
+/// the scan queue prior to mutation). This forces re-scanning of any blocks above the rewind
+/// target while preserving the wallet's view of the chain tip; existing scan-queue entries
+/// with priority strictly greater than `Historic` (`ChainTip`, `OpenAdjacent`, `FoundNote`,
+/// `Verify`) are preserved by the spanning-tree merge.
+///
 /// The birthday height is reset for an account in `reset_account_birthdays` only when the new
 /// birthday (`chain_state.block_height() + 1`) is strictly less than the existing birthday
 /// height; the existing birthday is never raised by this method.
 ///
-/// Returns `Err(RewindError::RewindBeyondBirthdays(_))` if any account in the wallet has a
-/// birthday greater than `chain_state.block_height()` and is not present in
-/// `reset_account_birthdays`.
+/// Returns `Err(RewindError::RewindBeyondBirthdays(_))` only when `reset_account_birthdays` is
+/// empty *and* every account in the wallet has a birthday greater than
+/// `chain_state.block_height() + 1`. Returns `Err(RewindError::DataSource(_))` (with a
+/// `CorruptedData` payload) if `reset_account_birthdays` contains any account UUID that is not
+/// present in the wallet.
 pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -3942,9 +3908,9 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     chain_state: &ChainState,
     reset_account_birthdays: HashSet<AccountUuid>,
 ) -> Result<(), RewindError<AccountUuid, SqliteClientError>> {
-    // Find account birthdays. We need to check that we either we have an account with a birthday
-    // less than or equal to the new birthday height, or that there is an intersection between the
-    // account birthdays to be reset and the accounts in the wallet.
+    // Load every account's birthday so we can validate `reset_account_birthdays` against the
+    // wallet's accounts and check whether at least one existing birthday is at or below the
+    // proposed new birthday floor.
     let account_birthdays: HashMap<AccountUuid, BlockHeight> = {
         let mut stmt = conn
             .prepare("SELECT uuid, birthday_height FROM accounts")
@@ -3981,6 +3947,10 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     if birthday_reset_required {
         return Err(RewindError::RewindBeyondBirthdays(account_birthdays));
     }
+
+    // Capture the chain tip from the scan queue before any mutation; we use it as the upper
+    // bound of the rescan range we install above the rewind target.
+    let chain_tip = chain_tip_height(conn).map_err(|e| RewindError::DataSource(e.into()))?;
 
     // Truncate wallet data above the pruning floor only when the target is below the wallet's
     // max scanned height; if the target is at or above the max scanned height, the wallet has
@@ -4039,17 +4009,38 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
         }
     }
 
-    // When the caller asked to rewind below the truncation_height floor, trim the scan queue
-    // the rest of the way down to `target_height` so the sync loop will re-scan the blocks
-    // between `target_height` and the truncation height.
-    trim_scan_queue_to(conn, target_height).map_err(RewindError::DataSource)?;
+    // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
+    // forcing re-scan of any blocks that previously appeared above the target. This both
+    // re-queues the blocks above the truncation floor (which truncate_to_height_internal
+    // already trimmed) and overrides any `Scanned`/`Historic` entries in the
+    // `(target_height, truncation_height]` window that survived a deep rewind, so the sync
+    // loop will re-scan them. With `force_rescans = true` the only entries this preserves are
+    // those whose priority would dominate `Historic` even under a forced rescan
+    // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
+    // and cannot overwrite anything.
+    if let Some(t) = chain_tip {
+        if target_height < t {
+            let rescan_range = (target_height + 1)..(t + 1);
+            replace_queue_entries::<SqliteClientError>(
+                conn,
+                &rescan_range,
+                std::iter::once(ScanRange::from_parts(
+                    rescan_range.clone(),
+                    ScanPriority::Historic,
+                )),
+                true,
+            )
+            .map_err(RewindError::DataSource)?;
+        }
+    }
 
     let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
     #[cfg(feature = "orchard")]
-    let new_orchard_tree_size: u64 = chain_state.final_orchard_tree().tree_size();
+    let new_orchard_tree_size = Some(chain_state.final_orchard_tree().tree_size());
+    #[cfg(not(feature = "orchard"))]
+    let new_orchard_tree_size: Option<u64> = None;
 
     for uuid in &reset_account_birthdays {
-        #[cfg(feature = "orchard")]
         conn.execute(
             "UPDATE accounts
              SET birthday_height = :new_birthday,
@@ -4064,19 +4055,6 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             ],
         )
         .map_err(|e| RewindError::DataSource(e.into()))?;
-        #[cfg(not(feature = "orchard"))]
-        conn.execute(
-            "UPDATE accounts
-             SET birthday_height = :new_birthday,
-                 birthday_sapling_tree_size = :new_sapling_tree_size
-             WHERE uuid = :uuid AND birthday_height > :new_birthday",
-            named_params![
-                ":new_birthday": u32::from(new_birthday),
-                ":new_sapling_tree_size": new_sapling_tree_size,
-                ":uuid": uuid.0,
-            ],
-        )
-        .map_err(|e| RewindError::DataSource(e.into()))?;
     }
 
     Ok(())
@@ -4085,9 +4063,8 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
 /// Trims the `scan_queue` so that no range extends above `max_height`.
 ///
 /// Deletes any range whose start is above `max_height`, and clamps the upper bound of any
-/// remaining range that extends past `max_height`. Used by [`rewind_to_chain_state`] to push the
-/// scan-queue rewind below the data-truncation floor without disturbing the wallet data
-/// preserved within the pruning window.
+/// remaining range that extends past `max_height`. Used by [`truncate_to_height_internal`] to
+/// remove scan-queue entries above the truncation height.
 pub(crate) fn trim_scan_queue_to(
     conn: &rusqlite::Transaction,
     max_height: BlockHeight,
