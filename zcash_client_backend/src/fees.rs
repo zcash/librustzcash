@@ -170,7 +170,7 @@ impl TransactionBalance {
         let total = proposed_change
             .iter()
             .map(|c| c.value())
-            .chain(Some(fee_required).into_iter())
+            .chain(Some(fee_required))
             .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 

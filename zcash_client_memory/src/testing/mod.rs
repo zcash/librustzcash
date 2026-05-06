@@ -204,8 +204,8 @@ where
     ) -> Result<Vec<NoteId>, Error> {
         Ok(self
             .get_sent_notes()
-            .iter()
-            .filter_map(|(id, _)| {
+            .keys()
+            .filter_map(|id| {
                 if let SentNoteId::Shielded(id) = id {
                     if id.txid() == txid && id.protocol() == protocol {
                         Some(*id)
@@ -391,7 +391,7 @@ where
             _ => {}
         }
 
-        checkpoints.sort_by(|(a, _), (b, _)| a.cmp(b));
+        checkpoints.sort_by_key(|(a, _)| *a);
 
         Ok(checkpoints)
     }

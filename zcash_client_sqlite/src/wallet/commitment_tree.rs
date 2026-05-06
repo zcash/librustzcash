@@ -1147,7 +1147,7 @@ pub(crate) fn check_witnesses(
 
     for addr in sapling_incomplete {
         let range = super::get_block_range(conn, ShieldedProtocol::Sapling, addr)?;
-        scan_ranges.extend(range.into_iter());
+        scan_ranges.extend(range);
     }
 
     #[cfg(feature = "orchard")]
@@ -1170,7 +1170,7 @@ pub(crate) fn check_witnesses(
 
         for addr in orchard_incomplete {
             let range = super::get_block_range(conn, ShieldedProtocol::Orchard, addr)?;
-            scan_ranges.extend(range.into_iter());
+            scan_ranges.extend(range);
         }
     }
 

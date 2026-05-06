@@ -292,7 +292,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .collect::<Vec<_>>();
 
         // sort by oldest first (use location in commitment tree since this gives a total order)
-        eligible_notes.sort_by(|a, b| a.commitment_tree_position.cmp(&b.commitment_tree_position));
+        eligible_notes.sort_by_key(|a| a.commitment_tree_position);
 
         // now take notes until we have enough to cover the target value
         let mut value_acc = Zatoshis::ZERO;
