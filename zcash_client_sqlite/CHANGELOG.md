@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-04-27
+
+### Fixed
+- This release fixes a bug in progress estimation that can occur when rewinding
+  to a height prior to any existing wallet birthday as a consequence of adding
+  an account.
+
 ## [0.20.0] - 2026-04-27
 
 ### Added
