@@ -5373,4 +5373,333 @@ mod tests {
             first = initial_height,
         );
     }
+
+    #[test]
+    fn rewound_birthday_slow_path_recovery_stays_below_one() {
+        use std::num::NonZeroU8;
+
+        use incrementalmerkletree::frontier::Frontier;
+        use zcash_client_backend::data_api::{
+            chain::{ChainState, CommitmentTreeRoot},
+            testing::{
+                InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+            },
+        };
+        use zcash_protocol::{
+            ShieldedProtocol,
+            consensus::{NetworkUpgrade, Parameters},
+        };
+
+        // Same imported-subtrees + small scanned tail setup as the fast-path
+        // test, but here we exercise the `else` branch of `subtree_scan_progress`
+        // by passing `fully_scanned_height` that is *not* equal to
+        // `chain_tip_height`. This forces the function down the path that
+        // computes `recover_until_size - birthday_size` and the linear
+        // extrapolation block.
+        let prior_block_hash = BlockHash([0; 32]);
+        let initial_sapling_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_orchard_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_height_offset: u32 = 310;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|rng, network| {
+                let sapling_activation_height = network
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .unwrap();
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_sapling_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                let prior_sapling_roots = prior_sapling_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(
+                            sapling_activation_height + (100 * i),
+                            root,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_orchard_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                #[cfg(feature = "orchard")]
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(
+                            sapling_activation_height + (100 * i),
+                            root,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        sapling_activation_height + initial_height_offset - 1,
+                        prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let sapling_activation_height = st.sapling_activation_height();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let initial_height = sapling_activation_height + initial_height_offset;
+
+        st.generate_block_at(
+            initial_height,
+            prior_block_hash,
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(50000),
+            )],
+            initial_sapling_tree_size,
+            initial_orchard_tree_size,
+            false,
+        );
+        for _ in 1..10 {
+            st.generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10000),
+            );
+        }
+        st.scan_cached_blocks(initial_height, 10);
+
+        let chain_tip_height = initial_height + 9;
+        let recover_until_height = initial_height + 5;
+
+        // `fully_scanned_height = None` forces the `else` branch.
+        let progress = super::subtree_scan_progress(
+            st.wallet().conn(),
+            st.network(),
+            ShieldedProtocol::Sapling,
+            sapling_activation_height,
+            sapling_activation_height,
+            Some(recover_until_height),
+            None,
+            chain_tip_height,
+        )
+        .expect("subtree_scan_progress must not error")
+        .expect("a Progress value should be returned");
+
+        let recovery = progress
+            .recovery()
+            .expect("recovery progress should be reported");
+
+        // Sanity: scanned outputs cannot exceed total outputs in the recovery range.
+        assert!(
+            recovery.numerator() <= recovery.denominator(),
+            "recovery numerator {n} exceeds denominator {d} in the slow-path \
+             rewind scenario",
+            n = recovery.numerator(),
+            d = recovery.denominator(),
+        );
+
+        // The wallet has never scanned `[sapling_activation_height, initial_height)`,
+        // which contains at least `initial_sapling_tree_size` outputs from the
+        // imported subtree roots. Recovery progress must therefore not report
+        // 100% complete.
+        assert!(
+            recovery.numerator() < recovery.denominator(),
+            "slow-path recovery wrongly reports {n}/{d} after a rewind to a \
+             birthday below all scanned blocks; at least {unscanned} outputs \
+             in [{birthday:?}, {first:?}) live only in imported subtree roots \
+             and have never been scanned",
+            n = recovery.numerator(),
+            d = recovery.denominator(),
+            unscanned = u64::from(initial_sapling_tree_size),
+            birthday = sapling_activation_height,
+            first = initial_height,
+        );
+
+        // The denominator must reflect the imported subtree contents in the
+        // recovery range -- otherwise the ratio is meaningless across the
+        // rewind point.
+        assert!(
+            *recovery.denominator() >= u64::from(initial_sapling_tree_size),
+            "slow-path recovery denominator {d} fails to account for the \
+             {imported} outputs of the imported subtree roots that fall \
+             within [{birthday:?}, {recover:?})",
+            d = recovery.denominator(),
+            imported = u64::from(initial_sapling_tree_size),
+            birthday = sapling_activation_height,
+            recover = recover_until_height,
+        );
+    }
+
+    #[test]
+    fn recover_until_above_chain_tip_does_not_overshoot_tip_size() {
+        use std::num::NonZeroU8;
+
+        use incrementalmerkletree::frontier::Frontier;
+        use zcash_client_backend::data_api::{
+            chain::{ChainState, CommitmentTreeRoot},
+            testing::{
+                InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+            },
+        };
+        use zcash_protocol::{
+            ShieldedProtocol,
+            consensus::{NetworkUpgrade, Parameters},
+        };
+
+        // Reproduces the wild scenario in which one of the wallet's accounts has
+        // `recover_until_height` slightly above the current chain tip (e.g. UFVK1
+        // was registered with `recover_until` a few blocks past the then chain
+        // tip, and the chain hasn't yet caught up). Then `recover_until_size`
+        // is computed by linear extrapolation, and because `recovery_range >
+        // total_range` the integer extrapolation overshoots `tip_tree_size`.
+        // The unclamped subtraction `tip_tree_size - recover_until_size` then
+        // underflows in the scan denominator.
+        let prior_block_hash = BlockHash([0; 32]);
+        let initial_sapling_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_orchard_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_height_offset: u32 = 310;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|rng, network| {
+                let sapling_activation_height = network
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .unwrap();
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_sapling_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                let prior_sapling_roots = prior_sapling_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(
+                            sapling_activation_height + (100 * i),
+                            root,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_orchard_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                #[cfg(feature = "orchard")]
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(
+                            sapling_activation_height + (100 * i),
+                            root,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        sapling_activation_height + initial_height_offset - 1,
+                        prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let sapling_activation_height = st.sapling_activation_height();
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let initial_height = sapling_activation_height + initial_height_offset;
+
+        st.generate_block_at(
+            initial_height,
+            prior_block_hash,
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(50000),
+            )],
+            initial_sapling_tree_size,
+            initial_orchard_tree_size,
+            false,
+        );
+        for _ in 1..10 {
+            st.generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10000),
+            );
+        }
+        st.scan_cached_blocks(initial_height, 10);
+
+        let chain_tip_height = initial_height + 9;
+        // Recover-until sits a handful of blocks *above* the chain tip, mimicking
+        // the wild scenario where UFVK1's `recover_until` was set with a buffer
+        // and the chain has not caught up.
+        let recover_until_height = chain_tip_height + 5;
+
+        // We expect this to return a Progress whose scan denominator has not
+        // underflowed. With the current (unfixed) code, the call panics in
+        // debug builds on `tip_tree_size - start_size` because the linear
+        // extrapolation produces `recover_until_size > tip_tree_size`.
+        let progress = super::subtree_scan_progress(
+            st.wallet().conn(),
+            st.network(),
+            ShieldedProtocol::Sapling,
+            sapling_activation_height,
+            sapling_activation_height,
+            Some(recover_until_height),
+            None,
+            chain_tip_height,
+        )
+        .expect("subtree_scan_progress must not error")
+        .expect("a Progress value should be returned");
+
+        let scan = progress.scan();
+
+        // The scan denominator must be a sane count of outputs in the chain-tip
+        // segment, never the result of a u64 underflow.
+        assert!(
+            *scan.denominator() <= u64::from(initial_sapling_tree_size) + 1_000,
+            "scan denominator {d} appears to have underflowed (raw u64); \
+             tip_tree_size and recover_until_size disagree about which is \
+             upper-bound",
+            d = scan.denominator(),
+        );
+        // And of course no ratio should report scanned > total.
+        assert!(
+            scan.numerator() <= scan.denominator(),
+            "scan numerator {n} exceeds denominator {d}",
+            n = scan.numerator(),
+            d = scan.denominator(),
+        );
+    }
 }
