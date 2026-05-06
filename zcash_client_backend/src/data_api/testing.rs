@@ -1,7 +1,7 @@
 //! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     fmt,
     hash::Hash,
@@ -62,7 +62,7 @@ use super::{
     },
 };
 use crate::{
-    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
+    data_api::{MaxSpendMode, TargetValue, error::RewindError, wallet::TargetHeight},
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
@@ -2997,8 +2997,12 @@ impl WalletWrite for MockWalletDb {
         Err(())
     }
 
-    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
-        Err(())
+    fn rewind_to_chain_state(
+        &mut self,
+        _chain_state: ChainState,
+        _reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        Err(RewindError::DataSource(()))
     }
 
     /// Adds a transparent UTXO received by the wallet to the data store.

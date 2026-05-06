@@ -41,7 +41,7 @@ use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
     borrow::{Borrow, BorrowMut},
     cmp::{max, min},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::AsRef,
     fmt,
     num::NonZeroU32,
@@ -62,7 +62,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
-        error::FindAccountForAddressError,
+        error::{FindAccountForAddressError, RewindError},
         ll::{
             self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
             wallet::store_decrypted_tx,
@@ -114,7 +114,7 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::{collections::HashSet, time::SystemTime},
+    std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
             TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter, WalletUtxo,
@@ -1332,8 +1332,29 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.truncate_to_chain_state(chain_state))
     }
 
-    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
-        self.transactionally(|wdb| wdb.rewind_to_height(max_height))
+    fn rewind_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+        reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| RewindError::DataSource(SqliteClientError::from(e)))?;
+        let result = wallet::rewind_to_chain_state(
+            &tx,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            &chain_state,
+            reset_account_birthdays,
+        );
+        if result.is_ok() {
+            tx.commit()
+                .map_err(|e| RewindError::DataSource(SqliteClientError::from(e)))?;
+        }
+        result
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1678,13 +1699,18 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         wallet::truncate_to_chain_state(self, chain_state)
     }
 
-    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
-        wallet::rewind_to_height(
+    fn rewind_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+        reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        wallet::rewind_to_chain_state(
             self.conn.0,
             &self.params,
             #[cfg(feature = "transparent-inputs")]
             &self.gap_limits,
-            max_height,
+            &chain_state,
+            reset_account_birthdays,
         )
     }
 

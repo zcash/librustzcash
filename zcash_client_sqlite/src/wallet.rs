@@ -65,7 +65,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::TryFrom,
     io::{self, Cursor},
     num::NonZeroU32,
@@ -94,7 +94,7 @@ use zcash_client_backend::{
         TransactionStatus, WalletSummary, Zip32Derivation,
         chain::ChainState,
         defaults::address_receiver_matches_ua,
-        error::FindAccountForAddressError,
+        error::{FindAccountForAddressError, RewindError},
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -143,7 +143,6 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::collections::HashSet,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
 };
 
@@ -3912,92 +3911,181 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     Ok(())
 }
 
-/// Rewinds the wallet to at most the given block height, preserving any wallet data which has been
-/// confirmed beyond the pruning depth.
+/// Rewinds the wallet to the specified chain state, preserving wallet data which has been
+/// confirmed beyond the pruning depth, and resetting the birthday height of specified accounts
+/// to the block following the chain state.
 ///
-/// In contrast to [`truncate_to_height`], which unconditionally deletes wallet state above
-/// `max_height` (transaction & note data is retained, but committment trees, blocks, etc are
-/// removed to the truncation height), this rewinds the scan queue to `max_height` but only rewinds
-/// blocks, note commitment trees, transactions, transparent UTXO observations, and nullifier-map
-/// entries as far back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`). Data at or below
-/// that height is preserved. Because `PRUNING_DEPTH` is a property of chain depth, the floor is
-/// derived from the wallet's view of the chain tip rather than from `MAX(blocks.height)`.
-///
+/// In contrast to [`truncate_to_chain_state`], which unconditionally removes wallet state above
+/// `chain_state.block_height()` (transaction & note data is retained, but commitment trees,
+/// blocks, etc. are removed to the truncation height), this rewinds the scan queue to the
+/// target height but only rewinds blocks, note commitment trees, transactions, transparent UTXO
+/// observations, and nullifier-map entries as far back as the pruning floor (`chain_tip -
+/// (PRUNING_DEPTH - 1)`). Data at or below that height is preserved. Because `PRUNING_DEPTH` is
+/// a property of chain depth, the floor is derived from the wallet's view of the chain tip
+/// rather than from `MAX(blocks.height)`.
 ///
 /// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor (via
-/// [`commitment_tree::min_checkpoint_id_at_or_above`]) so that [`truncate_to_height_internal`] has
-/// a real checkpoint to truncate to under non-contiguous scan orders.
+/// [`commitment_tree::min_checkpoint_id_at_or_above`]) so that [`truncate_to_height_internal`]
+/// has a real checkpoint to truncate to under non-contiguous scan orders.
 ///
-/// Returns the actual scan-queue rewind height (`max_height` clamped to the max scanned height when
-/// `max_height` is above it).
-pub(crate) fn rewind_to_height<P: consensus::Parameters>(
+/// The birthday height is reset for an account in `reset_account_birthdays` only when the new
+/// birthday (`chain_state.block_height() + 1`) is strictly less than the existing birthday
+/// height; the existing birthday is never raised by this method.
+///
+/// Returns `Err(RewindError::RewindBeyondBirthdays(_))` if any account in the wallet has a
+/// birthday greater than `chain_state.block_height()` and is not present in
+/// `reset_account_birthdays`.
+pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
-    max_height: BlockHeight,
-) -> Result<BlockHeight, SqliteClientError> {
-    let max_scanned_height = block_max_scanned(conn, params)?
+    chain_state: &ChainState,
+    reset_account_birthdays: HashSet<AccountUuid>,
+) -> Result<(), RewindError<AccountUuid, SqliteClientError>> {
+    // Find account birthdays. We need to check that we either we have an account with a birthday
+    // less than or equal to the new birthday height, or that there is an intersection between the
+    // account birthdays to be reset and the accounts in the wallet.
+    let account_birthdays: HashMap<AccountUuid, BlockHeight> = {
+        let mut stmt = conn
+            .prepare("SELECT uuid, birthday_height FROM accounts")
+            .map_err(|e| RewindError::DataSource(e.into()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let uuid: Uuid = row.get(0)?;
+                let h: u32 = row.get(1)?;
+                Ok((AccountUuid(uuid), BlockHeight::from(h)))
+            })
+            .map_err(|e| RewindError::DataSource(e.into()))?;
+
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(|e| RewindError::DataSource(e.into()))?
+    };
+
+    let reset_valid = reset_account_birthdays
+        .iter()
+        .all(|uuid| account_birthdays.contains_key(uuid));
+
+    if !reset_valid {
+        return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+            "Account UUIDs provided for birthday reset do not exist in the wallet database."
+                .to_string(),
+        )));
+    }
+
+    let target_height = chain_state.block_height();
+    let new_birthday = target_height + 1;
+    let birthday_reset_required =
+        account_birthdays.values().all(|b| b > &new_birthday) && reset_account_birthdays.is_empty();
+
+    if birthday_reset_required {
+        return Err(RewindError::RewindBeyondBirthdays(account_birthdays));
+    }
+
+    // Truncate wallet data above the pruning floor only when the target is below the wallet's
+    // max scanned height; if the target is at or above the max scanned height, the wallet has
+    // not yet scanned past the rewind point and there is nothing above it to remove.
+    if let Some(max_scanned_height) = block_max_scanned(conn, params)
+        .map_err(RewindError::DataSource)?
         .map(|m| m.block_height())
-        .unwrap_or_else(|| {
-            params
-                .activation_height(NetworkUpgrade::Sapling)
-                // Fall back to the genesis block in regtest mode.
-                .map_or(BlockHeight::from_u32(0), |h| h - 1)
-        });
-
-    // Compute the floor height of the pruning window
-    let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
-    let truncation_target = max_height.max(pruning_floor);
-
-    // Determine the minimum sapling and orchard checkpoints within the pruning window
-    let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
-        conn,
-        crate::SAPLING_TABLES_PREFIX,
-        truncation_target,
-    )
-    .map_err(ShardTreeError::Storage)?;
-
-    #[cfg(feature = "orchard")]
     {
-        // Check that Orchard checkpoint matches the Sapling checkpoint.
-        // These should always match, unless the database is corrupted.
-        let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
-            conn,
-            crate::ORCHARD_TABLES_PREFIX,
-            truncation_target,
-        )
-        .map_err(ShardTreeError::Storage)?;
-        if orchard_window_floor != sapling_window_floor {
-            return Err(SqliteClientError::CorruptedData(
-                "Sapling and Orchard should have the same checkpoints".into(),
-            ));
+        if target_height < max_scanned_height {
+            // Compute the floor height of the pruning window.
+            let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+            let truncation_target = target_height.max(pruning_floor);
+
+            // Determine the minimum sapling and orchard checkpoints within the pruning window.
+            let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+                conn,
+                crate::SAPLING_TABLES_PREFIX,
+                truncation_target,
+            )
+            .map_err(ShardTreeError::Storage)
+            .map_err(SqliteClientError::from)
+            .map_err(RewindError::DataSource)?;
+
+            #[cfg(feature = "orchard")]
+            {
+                // Check that Orchard checkpoint matches the Sapling checkpoint. These should
+                // always match unless the database is corrupted.
+                let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+                    conn,
+                    crate::ORCHARD_TABLES_PREFIX,
+                    truncation_target,
+                )
+                .map_err(ShardTreeError::Storage)
+                .map_err(SqliteClientError::from)
+                .map_err(RewindError::DataSource)?;
+                if orchard_window_floor != sapling_window_floor {
+                    return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                        "Sapling and Orchard should have the same checkpoints".into(),
+                    )));
+                }
+            }
+
+            // Combine the per-pool floors by taking the shallower (larger height).
+            let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+
+            // Use `truncate_to_height_internal` to perform full truncation of data within the
+            // pruning window.
+            truncate_to_height_internal(
+                conn,
+                params,
+                #[cfg(feature = "transparent-inputs")]
+                gap_limits,
+                truncation_height,
+            )
+            .map_err(RewindError::DataSource)?;
         }
     }
 
-    // Combine the per-pool floors by taking the shallower (larger height).
-    let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+    // When the caller asked to rewind below the truncation_height floor, trim the scan queue
+    // the rest of the way down to `target_height` so the sync loop will re-scan the blocks
+    // between `target_height` and the truncation height.
+    trim_scan_queue_to(conn, target_height).map_err(RewindError::DataSource)?;
 
-    // Use `truncate_to_height_internal` perform full truncation of data within the pruning window
-    truncate_to_height_internal(
-        conn,
-        params,
-        #[cfg(feature = "transparent-inputs")]
-        gap_limits,
-        truncation_height,
-    )?;
+    let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
+    #[cfg(feature = "orchard")]
+    let new_orchard_tree_size: u64 = chain_state.final_orchard_tree().tree_size();
 
-    // When the caller asked to rewind below the truncation_height floor, trim the scan queue the
-    // rest of the way down to `max_height` so the sync loop will re-scan the blocks between
-    // `max_height` and `data_rewind_height`.
-    trim_scan_queue_to(conn, max_height)?;
+    for uuid in &reset_account_birthdays {
+        #[cfg(feature = "orchard")]
+        conn.execute(
+            "UPDATE accounts
+             SET birthday_height = :new_birthday,
+                 birthday_sapling_tree_size = :new_sapling_tree_size,
+                 birthday_orchard_tree_size = :new_orchard_tree_size
+             WHERE uuid = :uuid AND birthday_height > :new_birthday",
+            named_params![
+                ":new_birthday": u32::from(new_birthday),
+                ":new_sapling_tree_size": new_sapling_tree_size,
+                ":new_orchard_tree_size": new_orchard_tree_size,
+                ":uuid": uuid.0,
+            ],
+        )
+        .map_err(|e| RewindError::DataSource(e.into()))?;
+        #[cfg(not(feature = "orchard"))]
+        conn.execute(
+            "UPDATE accounts
+             SET birthday_height = :new_birthday,
+                 birthday_sapling_tree_size = :new_sapling_tree_size
+             WHERE uuid = :uuid AND birthday_height > :new_birthday",
+            named_params![
+                ":new_birthday": u32::from(new_birthday),
+                ":new_sapling_tree_size": new_sapling_tree_size,
+                ":uuid": uuid.0,
+            ],
+        )
+        .map_err(|e| RewindError::DataSource(e.into()))?;
+    }
 
-    Ok(max_height.min(max_scanned_height))
+    Ok(())
 }
 
 /// Trims the `scan_queue` so that no range extends above `max_height`.
 ///
 /// Deletes any range whose start is above `max_height`, and clamps the upper bound of any
-/// remaining range that extends past `max_height`. Used by [`rewind_to_height`] to push the
+/// remaining range that extends past `max_height`. Used by [`rewind_to_chain_state`] to push the
 /// scan-queue rewind below the data-truncation floor without disturbing the wallet data
 /// preserved within the pruning window.
 pub(crate) fn trim_scan_queue_to(
