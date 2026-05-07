@@ -3941,6 +3941,12 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
 
     let target_height = chain_state.block_height();
     let new_birthday = target_height + 1;
+    // An empty `reset_account_birthdays` is the caller's explicit assertion that the
+    // requested rewind should not require lowering any account's birthday. Honor that:
+    // if the rewind would land below every account's birthday — meaning the caller's
+    // assertion is wrong — surface `RewindBeyondBirthdays` so the caller can decide
+    // which accounts (if any) to acknowledge for lowering. A non-empty set is the
+    // caller's acknowledgement that the listed accounts may be lowered.
     let birthday_reset_required =
         account_birthdays.values().all(|b| b > &new_birthday) && reset_account_birthdays.is_empty();
 
@@ -5728,6 +5734,103 @@ mod tests {
             "scan numerator {n} exceeds denominator {d}",
             n = scan.numerator(),
             d = scan.denominator(),
+        );
+    }
+
+    /// `rewind_to_chain_state` must return `RewindBeyondBirthdays` when the rewind would
+    /// land below every account's birthday and the caller has not provided any accounts in
+    /// `reset_account_birthdays` to acknowledge the lowering.
+    #[test]
+    fn rewind_to_chain_state_below_all_birthdays_with_empty_reset_returns_error() {
+        use std::collections::HashSet;
+        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState, error::RewindError};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let original_birthday = st.test_account().unwrap().birthday().height();
+        // Pick a target whose `new_birthday = target + 1` is strictly below every
+        // account's birthday, so the safeguard fires when the caller hasn't
+        // acknowledged any reset.
+        let target_height = original_birthday - 10;
+
+        let result = st.wallet_mut().rewind_to_chain_state(
+            ChainState::empty(target_height, BlockHash([0; 32])),
+            HashSet::new(),
+        );
+
+        assert_matches!(
+            result,
+            Err(RewindError::RewindBeyondBirthdays(birthdays))
+                if birthdays.get(&account_id) == Some(&original_birthday)
+        );
+    }
+
+    /// When the rewind target is below every account's birthday but the caller acknowledges
+    /// the lowering by including the account in `reset_account_birthdays`, the rewind
+    /// proceeds and the listed account's birthday is lowered to the new floor.
+    #[test]
+    fn rewind_to_chain_state_below_all_birthdays_with_account_in_reset_succeeds() {
+        use std::collections::HashSet;
+        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let original_birthday = st.test_account().unwrap().birthday().height();
+        // Pick a target whose `new_birthday = target + 1` is strictly below every
+        // account's birthday, so the safeguard fires when the caller hasn't
+        // acknowledged any reset.
+        let target_height = original_birthday - 10;
+
+        st.wallet_mut()
+            .rewind_to_chain_state(
+                ChainState::empty(target_height, BlockHash([0; 32])),
+                HashSet::from([account_id]),
+            )
+            .expect("rewind_to_chain_state should succeed when the account is in reset");
+
+        // The account's birthday is now lowered to `target_height + 1`.
+        assert_matches!(
+            account_birthday(st.wallet().conn(), account_id),
+            Ok(b) if b == target_height + 1
+        );
+    }
+
+    /// `rewind_to_chain_state` must reject `reset_account_birthdays` containing an
+    /// `AccountUuid` that does not correspond to an account in the wallet, surfacing the
+    /// error via `RewindError::DataSource(CorruptedData)`.
+    #[test]
+    fn rewind_to_chain_state_with_unknown_uuid_in_reset_returns_data_source_error() {
+        use std::collections::HashSet;
+        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState, error::RewindError};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let original_birthday = st.test_account().unwrap().birthday().height();
+        // Pick a target whose `new_birthday = target + 1` is strictly below every
+        // account's birthday, so the safeguard fires when the caller hasn't
+        // acknowledged any reset.
+        let target_height = original_birthday - 10;
+
+        let bogus_uuid = AccountUuid(Uuid::from_u128(0xDEADBEEF));
+        let result = st.wallet_mut().rewind_to_chain_state(
+            ChainState::empty(target_height, BlockHash([0; 32])),
+            HashSet::from([bogus_uuid]),
+        );
+
+        assert_matches!(
+            result,
+            Err(RewindError::DataSource(SqliteClientError::CorruptedData(_)))
         );
     }
 }
