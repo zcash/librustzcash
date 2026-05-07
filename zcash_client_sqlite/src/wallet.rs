@@ -2153,25 +2153,44 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         ..
     } = table_constants::<SqliteClientError>(shielded_protocol)?;
 
+    // Each query against the `blocks` table that contributes to scan-progress accounting
+    // must exclude heights that fall within a `scan_queue` range whose priority indicates
+    // the range is pending re-scan. Without this filter, blocks whose tree state was
+    // recorded by a previous scan but whose enclosing range was subsequently re-queued
+    // (e.g., by `rewind_to_chain_state`) would be counted as scanned, over-reporting
+    // progress against a tree-size denominator that no longer reflects the wallet's
+    // actual scanned state.
+    let scanned_priority = priority_code(&ScanPriority::Scanned);
+    let unscanned_filter = "AND NOT EXISTS (
+            SELECT 1 FROM scan_queue
+            WHERE block_range_start <= blocks.height
+              AND blocks.height < block_range_end
+              AND priority > :scanned_priority
+        )";
+
     let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
         FROM blocks
-        WHERE :start_height <= height AND height < :end_height",
+        WHERE :start_height <= height AND height < :end_height
+        {unscanned_filter}",
     ))?;
     let mut stmt_scanned_count_from = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
         FROM blocks
-        WHERE :start_height <= height",
+        WHERE :start_height <= height
+        {unscanned_filter}",
     ))?;
     let mut stmt_start_tree_size = conn.prepare_cached(&format!(
         "SELECT MAX({table_prefix}_commitment_tree_size - {output_count_col})
         FROM blocks
-        WHERE height <= :start_height",
+        WHERE height <= :start_height
+        {unscanned_filter}",
     ))?;
     let mut stmt_start_tree_size_at = conn.prepare_cached(&format!(
         "SELECT {table_prefix}_commitment_tree_size - {output_count_col}
         FROM blocks
-        WHERE height = :start_height",
+        WHERE height = :start_height
+        {unscanned_filter}",
     ))?;
 
     // In case we didn't have information about the tree size at the birthday height,
@@ -2179,9 +2198,13 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     // it just alters the magnitude of recovery progress a bit.
     let mut get_tree_size_near = |as_of: BlockHeight| {
         let size_from_blocks = stmt_start_tree_size
-            .query_row(named_params![":start_height": u32::from(as_of)], |row| {
-                row.get::<_, Option<u64>>(0)
-            })
+            .query_row(
+                named_params![
+                    ":start_height": u32::from(as_of),
+                    ":scanned_priority": scanned_priority,
+                ],
+                |row| row.get::<_, Option<u64>>(0),
+            )
             .optional()?
             .flatten();
 
@@ -2240,9 +2263,13 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             &format!(
                 "SELECT {table_prefix}_commitment_tree_size
                     FROM blocks
-                    WHERE height = :height",
+                    WHERE height = :height
+                    {unscanned_filter}",
             ),
-            named_params! {":height": u32::from(chain_tip_height)},
+            named_params! {
+                ":height": u32::from(chain_tip_height),
+                ":scanned_priority": scanned_priority,
+            },
             |row| row.get::<_, Option<u64>>(0),
         )
         .optional()?
@@ -2266,7 +2293,10 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         .map(|recover_until_height| {
             let size_from_blocks = stmt_start_tree_size_at
                 .query_row(
-                    named_params![":start_height": u32::from(recover_until_height)],
+                    named_params![
+                        ":start_height": u32::from(recover_until_height),
+                        ":scanned_priority": scanned_priority,
+                    ],
                     |row| row.get::<_, Option<u64>>(0),
                 )
                 .optional()?
@@ -2315,6 +2345,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 named_params! {
                     ":start_height": u32::from(min_birthday_height),
                     ":end_height": u32::from(end_height),
+                    ":scanned_priority": scanned_priority,
                 },
                 |row| row.get::<_, Option<u64>>(0),
             )
@@ -2337,9 +2368,12 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         // Count the total outputs scanned so far on the chain tip side of the
         // recover-until height.
         let scanned_count = stmt_scanned_count_from.query_row(
-                named_params![":start_height": u32::from(recover_until_height.unwrap_or(min_birthday_height))],
-                |row| row.get::<_, Option<u64>>(0),
-            )?;
+            named_params![
+                ":start_height": u32::from(recover_until_height.unwrap_or(min_birthday_height)),
+                ":scanned_priority": scanned_priority,
+            ],
+            |row| row.get::<_, Option<u64>>(0),
+        )?;
 
         recover_until_size
             .unwrap_or(birthday_size)
