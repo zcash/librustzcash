@@ -10,7 +10,18 @@ workspace.
 
 ## [Unreleased]
 
-## [0.20.1] - 2026-04-27
+## [0.20.2] - 2026-05-07
+
+### Fixed
+- Scan-progress accounting (`subtree_scan_progress`) no longer counts outputs
+  from blocks whose enclosing scan-queue range has been re-queued for
+  scanning. Previously, a wallet that had scanned blocks and then re-queued
+  the corresponding range (for example as a consequence of adding a new
+  account whose birthday lies within already-scanned territory) would
+  over-report scan progress, because the re-queued blocks remained in the
+  `blocks` table and were still counted as scanned.
+
+## [0.20.1] - 2026-05-06
 
 ### Fixed
 - This release fixes a bug in progress estimation that can occur when rewinding
