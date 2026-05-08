@@ -572,6 +572,8 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 
     /// Adds an Orchard recipient to the transaction.
+    /// Defaults to the note version that is standard in the current protocol;
+    /// this default may change across wallet SDK updates as the protocol evolves.
     pub fn add_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
@@ -579,14 +581,34 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
         value: Zatoshis,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
+        self.add_versioned_orchard_output(
+            ovk,
+            recipient,
+            value,
+            memo,
+            orchard::note::NoteVersion::V2,
+        )
+    }
+
+    /// Adds an Orchard recipient to the transaction,
+    /// using the specified note version for rcm derivation.
+    pub fn add_versioned_orchard_output<FE>(
+        &mut self,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: Zatoshis,
+        memo: MemoBytes,
+        note_version: orchard::note::NoteVersion,
+    ) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBuilderNotAvailable)?
-            .add_output(
+            .add_versioned_output(
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value.into()),
                 memo.into_bytes(),
+                note_version,
             )
             .map_err(Error::OrchardRecipient)
     }
