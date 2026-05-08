@@ -12,7 +12,7 @@ use zcash_protocol::value::Zatoshis;
 use zcash_script::{script, solver};
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::builder::TransparentInputInfo;
+use transparent::builder::{SpendInfo, TransparentInputInfo};
 
 /// The size of a transparent input, or the outpoint corresponding to the input
 /// if the size of the script required to spend that input is unknown.
@@ -65,10 +65,18 @@ impl InputView for TransparentInputInfo {
     }
 
     fn serialized_size(&self) -> InputSize {
-        self.serialized_len().map_or(
-            InputSize::Unknown(self.outpoint().clone()),
-            InputSize::Known,
-        )
+        // For P2PKH inputs, return the ZIP 317 standard size (150 bytes) rather than the
+        // exact serialized size (which is one byte smaller). The proposal layer accounts
+        // for fees using the standard size; the builder must agree, otherwise a
+        // shielding transaction with enough P2PKH inputs to cross a
+        // `ceildiv(t_in_total_size, 150)` boundary will fail with `ChangeRequired`.
+        match self.spend_info() {
+            SpendInfo::P2pkh { .. } => InputSize::STANDARD_P2PKH,
+            SpendInfo::P2sh { .. } => self.serialized_len().map_or(
+                InputSize::Unknown(self.outpoint().clone()),
+                InputSize::Known,
+            ),
+        }
     }
 }
 
