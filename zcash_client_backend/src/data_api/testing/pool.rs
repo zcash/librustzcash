@@ -1,5 +1,6 @@
 use std::{
     cmp::Eq,
+    collections::HashSet,
     convert::Infallible,
     hash::Hash,
     num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -66,7 +67,7 @@ use {
         wallet::WalletTransparentOutput,
     },
     nonempty::NonEmpty,
-    std::{collections::HashSet, str::FromStr},
+    std::str::FromStr,
     transparent::{
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
@@ -4603,8 +4604,10 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
     );
 }
 
-pub fn rewind_to_height_deep<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
-where
+pub fn rewind_to_chain_state_deep<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
@@ -4614,7 +4617,7 @@ where
     // 3. Pick a rewind target well below the future prune floor.
     // 4. Generate and scan more than PRUNING_DEPTH extra blocks so that the checkpoint at the
     //    target is pruned AND the target lies below `tip - PRUNING_DEPTH` (the "deep" branch).
-    // 5. Call `rewind_to_height(target)` and verify:
+    // 5. Call `rewind_to_chain_state(target)` and verify:
     //    - the scan queue is rewound all the way to `target`;
     //    - blocks, transactions, tx_locator_map entries, and note commitment trees are
     //      only rewound to `tip - (PRUNING_DEPTH - 1)` (the oldest retained checkpoint).
@@ -4677,25 +4680,28 @@ where
         .unwrap()
         .expect("block at prune boundary should be present before rewind");
 
-    // `rewind_to_height` must succeed at the same target.
-    let rewound_to = st
-        .wallet_mut()
-        .rewind_to_height(rewind_target)
-        .expect("rewind_to_height should succeed for a deep target");
-    assert_eq!(rewound_to, rewind_target);
+    // `rewind_to_chain_state` must succeed at the same target.
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed for a deep target");
 
-    // The chain tip (derived from scan_queue) should now report the rewind target.
+    // The chain tip (derived from scan_queue) should still report the pre-rewind tip:
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target
+    // with a `Historic` rescan range that extends up to the pre-rewind tip.
     let new_tip = st
         .wallet()
         .chain_height()
         .unwrap()
-        .expect("chain tip should match rewind target");
-    assert_eq!(new_tip, rewind_target);
+        .expect("chain tip should still be set after rewind");
+    assert_eq!(new_tip, pre_rewind_tip);
 
-    // A deep rewind keeps the scan queue rewound to the target, while blocks,
-    // transactions, tx_locator_map entries, and note commitment trees are only rewound
-    // to the oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`. Data at that
-    // boundary is kept (so stabilized notes remain spendable); data above it is removed.
+    // A deep rewind preserves block, transaction, tx_locator_map, and note commitment tree
+    // data only as far back as the oldest retained checkpoint at `tip - (PRUNING_DEPTH - 1)`.
+    // Data at that boundary is kept (so stabilized notes remain spendable); data above it is
+    // removed.
     let wallet = st.wallet();
     assert_eq!(
         wallet.get_block_hash(prune_boundary).unwrap(),
@@ -4720,8 +4726,10 @@ where
     );
 }
 
-pub fn rewind_to_height_shallow<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
-where
+pub fn rewind_to_chain_state_shallow<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
@@ -4732,7 +4740,7 @@ where
     // 4. Generate and scan `PRUNING_DEPTH - 1` extra blocks so that the target sits at
     //    the shallow boundary (`target == tip - (PRUNING_DEPTH - 1)`, exactly the oldest
     //    retained checkpoint).
-    // 5. Call `rewind_to_height(target)` and verify all wallet data is rewound to the
+    // 5. Call `rewind_to_chain_state(target)` and verify all wallet data is rewound to the
     //    target: data at the target is preserved, anything above is removed.
 
     use crate::data_api::ll::wallet::PRUNING_DEPTH;
@@ -4789,18 +4797,22 @@ where
         .unwrap()
         .expect("block at the rewind target should be present before rewind");
 
-    let rewound_to = st
-        .wallet_mut()
-        .rewind_to_height(rewind_target)
-        .expect("rewind_to_height should succeed for a shallow target");
-    assert_eq!(rewound_to, rewind_target);
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed for a shallow target");
 
+    // The chain tip (derived from scan_queue) should still report the pre-rewind tip:
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target with
+    // a `Historic` rescan range that extends up to the pre-rewind tip.
     let new_tip = st
         .wallet()
         .chain_height()
         .unwrap()
-        .expect("chain tip should match rewind target");
-    assert_eq!(new_tip, rewind_target);
+        .expect("chain tip should still be set after rewind");
+    assert_eq!(new_tip, tip);
 
     // A shallow rewind truncates blocks, tx_locator_map, and note commitment trees
     // directly to the rewind target: data at the target is preserved (with the same
@@ -4835,7 +4847,7 @@ pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
     // Regression test: after the scan scheduler processes a `ChainTip` range before a
     // lower `Historic` range, `MAX(height) FROM blocks` points into one scanned region
     // while `last_scanned - (PRUNING_DEPTH - 1)` lands inside the unscanned gap between
-    // the two regions. `rewind_to_height` must still succeed: an implementation that
+    // the two regions. `rewind_to_chain_state` must still succeed: an implementation that
     // expected a checkpoint at exactly the PD floor would return `CorruptedData` via
     // `truncate_to_checkpoint`; clamping forward to the lowest checkpoint inside the
     // prune window keeps us aligned with a real checkpoint.
@@ -4893,16 +4905,19 @@ pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
          gap is ({low_end_inclusive}, {high_start}))"
     );
 
-    // `rewind_to_height` must return `Ok(_)` rather than `CorruptedData`: clamping
+    // `rewind_to_chain_state` must return `Ok(_)` rather than `CorruptedData`: clamping
     // forward to the lowest checkpoint inside the window (which sits at `high_start`)
     // keeps us aligned with a real checkpoint.
     st.wallet_mut()
-        .rewind_to_height(low_end_inclusive)
-        .expect("rewind_to_height should succeed across a non-contiguous scan");
+        .rewind_to_chain_state(
+            ChainState::empty(low_end_inclusive, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed across a non-contiguous scan");
 }
 
 /// Multiple wallet notes in a stabilized shard remain spendable after a deep
-/// `rewind_to_height` moves the scan queue below them.
+/// `rewind_to_chain_state` moves the scan queue below them.
 pub fn stabilized_note_spendable_after_deep_rewind<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
@@ -5081,88 +5096,27 @@ where
 
     let account = st.test_account().unwrap().clone();
 
-    // Remember the pre-rewind tip; we restore it in Step 7 to provide an anchor
-    // for `propose_transfer`.
-    let pre_rewind_tip = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set before rewind");
-
-    // Step 5: deep-rewind to the target and confirm scan_queue followed it.
+    // Step 5: deep-rewind to the target. The rewind target is below the account birthday,
+    // so the account must be included in the reset set for the birthday to be lowered.
+    // `rewind_to_chain_state` overwrites the scan-queue range above the rewind target with
+    // a `Historic` rescan range, so the chain tip remains observable as the pre-rewind tip
+    // and notes whose `witness_stabilized = 1` flag survives can still be spent.
     st.wallet_mut()
-        .rewind_to_height(rewind_target)
-        .expect("rewind_to_height should succeed");
-    let tip_after_rewind = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set after rewind");
-    assert!(
-        tip_after_rewind <= rewind_target,
-        "scan_queue must be rewound at or below the rewind target"
-    );
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::from([account.id()]),
+        )
+        .expect("rewind_to_chain_state should succeed");
 
-    // Step 6: before `update_chain_tip`, balance must reflect all three stabilized
-    // notes, but the spend path must fail because no anchor can be derived.
+    // Step 6: balance reflects all three stabilized notes, and a spend can be proposed
+    // immediately because the chain tip is preserved by the rewind.
     assert_eq!(
         st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         total_note_value,
-        "stabilized balance must be available even before update_chain_tip"
-    );
-    let pre_update_request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        T::sk_default_address(&T::sk(&[0xcc; 32])).to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(10_000),
-    )])
-    .unwrap();
-    let pre_update_change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
-    let pre_update_input_selector = GreedyInputSelector::new();
-    let pre_update_result = st.propose_transfer(
-        account.id(),
-        &pre_update_input_selector,
-        &pre_update_change_strategy,
-        pre_update_request,
-        ConfirmationsPolicy::MIN,
-    );
-    assert_matches!(
-        pre_update_result,
-        Err(crate::data_api::error::Error::ScanRequired)
-            | Err(crate::data_api::error::Error::InsufficientFunds { .. }),
-        "propose_transfer should fail with InsufficientFunds or ScanRequired"
-    );
-    if let Err(crate::data_api::error::Error::InsufficientFunds { available, .. }) =
-        &pre_update_result
-    {
-        assert_eq!(
-            *available,
-            Zatoshis::ZERO,
-            "when note selection runs, no notes should be eligible without the restored tip",
-        );
-    }
-
-    // Step 7: restore the chain tip so `propose_transfer` can derive an anchor,
-    // and confirm balance is still the full three-note sum.
-    st.wallet_mut()
-        .update_chain_tip(pre_rewind_tip)
-        .expect("update_chain_tip should succeed");
-    let tip_after_update = st
-        .wallet()
-        .chain_height()
-        .unwrap()
-        .expect("chain tip should be set after update_chain_tip");
-    assert_eq!(tip_after_update, pre_rewind_tip);
-    let post_rewind_spendable = st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN);
-    assert_eq!(
-        post_rewind_spendable, total_note_value,
         "all stabilized notes should remain spendable after deep rewind"
     );
 
-    // Step 8: build and sign a real spend end-to-end.
+    // Step 7: build and sign a real spend end-to-end.
     let to_extsk = T::sk(&[0xcc; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let send_value = Zatoshis::const_from_u64(10_000);
@@ -5205,7 +5159,7 @@ where
 /// the ensuing re-scan discovers the new account's previously-unknown notes
 /// and `scan_complete → mark_stabilized_notes` flags them `witness_stabilized`
 /// on the fly, so they remain spendable across a subsequent deep
-/// `rewind_to_height`.
+/// `rewind_to_chain_state`.
 pub fn newly_discovered_notes_become_stabilized<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     T: ShieldedPoolTester,
@@ -5454,8 +5408,11 @@ where
     // stabilized would drop out of the balance here.
     let rewind_target = account_a.birthday().height() - 100;
     st.wallet_mut()
-        .rewind_to_height(rewind_target)
-        .expect("rewind_to_height should succeed");
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::from([account_a.id(), account_b.id()]),
+        )
+        .expect("rewind_to_chain_state should succeed");
 
     assert_eq!(
         st.get_spendable_balance(account_a.id(), ConfirmationsPolicy::MIN),

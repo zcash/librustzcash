@@ -326,15 +326,15 @@ pub(crate) fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester>() {
     )
 }
 
-pub(crate) fn rewind_to_height_deep<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::rewind_to_height_deep::<T, _>(
+pub(crate) fn rewind_to_chain_state_deep<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_to_chain_state_deep::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
 }
 
-pub(crate) fn rewind_to_height_shallow<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::rewind_to_height_shallow::<T, _>(
+pub(crate) fn rewind_to_chain_state_shallow<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::rewind_to_chain_state_shallow::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )

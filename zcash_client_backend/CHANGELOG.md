@@ -8,6 +8,22 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [0.23.0] - PLANNED
+
+### Added
+- `zcash_client_backend::data_api::error::RewindError`
+
+### Changed
+- `zcash_client_backend::data_api::WalletWrite`:
+  - `rewind_to_height` has been replaced by `rewind_to_chain_state`. Callers
+    that previously passed a `BlockHeight` should now construct a
+    `ChainState` for the rewind target. The new method returns `Result<(),
+    RewindError<Self::AccountId, Self::Error>>`. If the rewind target is
+    below the birthday height of any account in the wallet, the call will
+    fail with `RewindError::RewindBeyondBirthdays`; the caller should re-try
+    with the affected account ids included in the `reset_account_birthdays`
+    argument to acknowledge that those birthdays will be lowered.
+
 ## [0.22.0] - 2026-04-27
 
 ### Added

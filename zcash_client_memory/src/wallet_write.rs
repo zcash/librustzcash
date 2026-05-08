@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     ops::Range,
 };
 
@@ -20,6 +20,7 @@ use zcash_client_backend::{
         AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
         WalletCommitmentTrees as _, Zip32Derivation,
         chain::ChainState,
+        error::RewindError,
         scanning::{ScanPriority, ScanRange},
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
@@ -1065,7 +1066,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         todo!()
     }
 
-    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+    fn rewind_to_chain_state(
+        &mut self,
+        _chain_state: ChainState,
+        _reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
         todo!()
     }
 
