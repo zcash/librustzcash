@@ -60,7 +60,7 @@ pub fn signature_hash<
             v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::V5 | TxVersion::V5_Qr => v5_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),

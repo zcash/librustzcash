@@ -3,9 +3,9 @@ use proptest::prelude::*;
 #[cfg(test)]
 use {
     crate::transaction::{
-        Authorization, Transaction, TransactionData, TxDigests, TxIn, sighash::SignableInput,
-        sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, testing::arb_tx, transparent,
-        txid::TxIdDigester,
+        Authorization, Transaction, TransactionData, TxDigests, TxIn, TxVersion,
+        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
@@ -38,6 +38,22 @@ fn tx_read_write() {
     let mut encoded = Vec::with_capacity(data.len());
     tx.write(&mut encoded).unwrap();
     assert_eq!(&data[..], &encoded[..]);
+}
+
+#[test]
+fn suggested_version_for_v5_branches_is_not_qr() {
+    assert_eq!(
+        TxVersion::suggested_for_branch(BranchId::Nu5),
+        TxVersion::V5
+    );
+    assert_eq!(
+        TxVersion::suggested_for_branch(BranchId::Nu6),
+        TxVersion::V5
+    );
+    assert_eq!(
+        TxVersion::suggested_for_branch(BranchId::Nu6_1),
+        TxVersion::V5
+    );
 }
 
 #[cfg(test)]

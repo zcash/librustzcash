@@ -1597,13 +1597,24 @@ where
 
                 #[cfg(feature = "orchard")]
                 {
-                    builder.add_orchard_output(
+                    #[cfg(feature = "unstable")]
+                    let orchard_change_note_version = if proposed_version == Some(TxVersion::V5_Qr)
+                    {
+                        orchard::note::NoteVersion::V3_Qr
+                    } else {
+                        orchard::note::NoteVersion::V2
+                    };
+                    #[cfg(not(feature = "unstable"))]
+                    let orchard_change_note_version = orchard::note::NoteVersion::V2;
+
+                    builder.add_versioned_orchard_output(
                         internal_ovk.map(|k| k.into()),
                         ufvk.orchard()
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value(),
                         memo.clone(),
+                        orchard_change_note_version,
                     )?;
                     orchard_output_meta.push((
                         BuildRecipient::InternalAccount {
