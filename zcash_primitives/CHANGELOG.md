@@ -8,6 +8,18 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [0.28.0] - PLANNED
+
+### Added
+- `zcash_primitives::transaction`:
+  - `TxVersion::V5_Qr`, a builder-level selector that serializes identically
+    to `TxVersion::V5` but enables quantum recoverable Orchard change outputs
+    when used by wallet construction APIs.
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_versioned_orchard_output`, enabling callers to explicitly
+    select the [`orchard::note::NoteVersion`] used to construct an Orchard
+    output.
+
 ## [0.27.0] - 2026-04-23
 
 ### Added

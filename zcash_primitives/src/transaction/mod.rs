@@ -80,12 +80,18 @@ pub enum TxVersion {
     /// It is specified in [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding)
     /// and [ZIP 225](https://zips.z.cash/zip-0225).
     V5,
-    /// Transaction version 5, with Orchard change outputs constructed as QR notes.
+    /// Transaction version 5, with Orchard change outputs constructed as
+    /// quantum recoverable notes.
     ///
-    /// This is serialized identically to [`TxVersion::V5`]. It exists as a builder-level selector
-    /// for wallets that want to opt into QR Orchard change notes while remaining compatible with the
-    /// current v5 transaction format. For now this only affects change notes; a future upgrade may
-    /// also use this selector for QR sends.
+    /// This is serialized identically to [`TxVersion::V5`]. It exists as a
+    /// builder-level selector for wallets that want to opt into quantum
+    /// recoverable Orchard change notes while remaining compatible with the
+    /// current v5 transaction format. For now this only affects change notes; a
+    /// future librustzcash upgrade may also use this selector for quantum
+    /// recoverable sends.
+    ///
+    /// Wallet APIs that accept this selector are exposed behind their
+    /// `unstable` feature flag.
     #[allow(non_camel_case_types)]
     V5_Qr,
     /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).

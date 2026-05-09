@@ -916,6 +916,13 @@ impl SpendingKeys {
 /// step is not supported, because the ultimate positions of those notes in the global note
 /// commitment tree cannot be known until the transaction that produces those notes is mined,
 /// and therefore the required spend proofs for such notes cannot be constructed.
+///
+/// Under the `unstable` feature, `proposed_version` can be used to request a
+/// particular transaction version. Passing [`TxVersion::V5_Qr`] constructs
+/// Orchard change outputs as quantum recoverable notes. Passing
+/// [`TxVersion::V5`] preserves the usual v5 Orchard note version, which should
+/// be used for transaction construction flows that depend on software that does
+/// not yet support quantum recoverable Orchard notes.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
@@ -1600,12 +1607,12 @@ where
                     #[cfg(feature = "unstable")]
                     let orchard_change_note_version = if proposed_version == Some(TxVersion::V5_Qr)
                     {
-                        orchard::note::NoteVersion::V3_Qr
+                        orchard::note::NoteVersion::V3
                     } else {
-                        orchard::note::NoteVersion::V2
+                        orchard::note::DEFAULT_NOTE_VERSION
                     };
                     #[cfg(not(feature = "unstable"))]
-                    let orchard_change_note_version = orchard::note::NoteVersion::V2;
+                    let orchard_change_note_version = orchard::note::DEFAULT_NOTE_VERSION;
 
                     builder.add_versioned_orchard_output(
                         internal_ovk.map(|k| k.into()),

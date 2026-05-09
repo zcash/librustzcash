@@ -572,8 +572,8 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 
     /// Adds an Orchard recipient to the transaction.
-    /// Defaults to the note version that is standard in the current protocol;
-    /// this default may change across wallet SDK updates as the protocol evolves.
+    ///
+    /// This uses [`orchard::note::DEFAULT_NOTE_VERSION`].
     pub fn add_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
@@ -586,12 +586,12 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
             recipient,
             value,
             memo,
-            orchard::note::NoteVersion::V2,
+            orchard::note::DEFAULT_NOTE_VERSION,
         )
     }
 
-    /// Adds an Orchard recipient to the transaction,
-    /// using the specified note version for rcm derivation.
+    /// Adds an Orchard recipient to the transaction, using the specified note
+    /// plaintext version.
     pub fn add_versioned_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
