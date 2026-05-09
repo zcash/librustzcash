@@ -2512,14 +2512,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
         let tip_window_scanned = scanning::tip_window_fully_scanned(tx, chain_tip)?;
 
-        let anchor_available = anchor_height.map_or(Ok(false), |h| match protocol {
-            ShieldedProtocol::Sapling => super::sapling_tree(tx)
-                .and_then(|t| t.root_at_checkpoint_id(&h).map(|r| r.is_some())),
-            #[cfg(feature = "orchard")]
-            ShieldedProtocol::Orchard => super::orchard_tree(tx)
-                .and_then(|t| t.root_at_checkpoint_id(&h).map(|r| r.is_some())),
-            #[cfg(not(feature = "orchard"))]
-            ShieldedProtocol::Orchard => Ok(true),
+        let anchor_available = anchor_height.map_or(Ok(false), |h| {
+            common::anchor_frontier_available(tx, h, protocol)
         })?;
 
         let mut stmt_select_notes = tx.prepare_cached(&format!(
@@ -2581,20 +2575,6 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .get::<_, Option<u32>>("witness_anchor_stable")?
                 .map(BlockHeight::from);
 
-            // A note is spendable when:
-            //   - its `witness_anchor_stable` is set and lies at or below the chosen
-            //     anchor — the stored value is a *floor*, the lowest anchor for which
-            //     the wallet has the data needed to construct this note's witness;
-            //   - the chain-tip pruning window has no `Anchor`-priority range, so the
-            //     wallet has scanned through any disturbance left by truncate, rewind,
-            //     or account-import;
-            //   - the chosen anchor's tree root is constructable;
-            //   - the note has met its confirmations-policy threshold (which also
-            //     implies `note.mined_height <= anchor_height`, so the note exists in
-            //     the tree at the chosen anchor).
-            let stored_at_or_below_chosen = witness_anchor_stable
-                .zip(anchor_height)
-                .is_some_and(|(stored, chosen)| stored <= chosen);
             let confirmations_met = confirmations_policy.confirmations_until_spendable(
                 target_height,
                 PoolType::Shielded(protocol),
@@ -2604,10 +2584,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 max_shielding_input_height,
                 tx_shielding_inputs_trusted,
             ) == 0;
-            let is_spendable = stored_at_or_below_chosen
-                && tip_window_scanned
-                && anchor_available
-                && confirmations_met;
+            let is_spendable = common::is_note_spendable_at_anchor(
+                witness_anchor_stable,
+                anchor_height,
+                tip_window_scanned,
+                anchor_available,
+                confirmations_met,
+            );
 
             let is_pending_change =
                 is_change && received_height.iter().all(|h| h > &trusted_height);

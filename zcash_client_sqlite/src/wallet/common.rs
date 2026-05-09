@@ -269,6 +269,66 @@ impl NoteRequest {
     }
 }
 
+/// Returns whether the wallet's shardtree has a frontier at the given anchor height for
+/// the specified pool — i.e. whether a tree-state checkpoint exists from which a witness
+/// against this anchor can be reconstructed.
+///
+/// After a deep rewind that drops the chain tip below the lowest surviving tree
+/// checkpoint, no checkpoint exists at the anchor height and the wallet treats the
+/// anchor as unavailable for spendability purposes.
+pub(crate) fn anchor_frontier_available(
+    conn: &Connection,
+    anchor_height: BlockHeight,
+    protocol: ShieldedProtocol,
+) -> Result<bool, SqliteClientError> {
+    let table_prefix = match protocol {
+        ShieldedProtocol::Sapling => SAPLING_TABLES_PREFIX,
+        #[cfg(feature = "orchard")]
+        ShieldedProtocol::Orchard => ORCHARD_TABLES_PREFIX,
+        #[cfg(not(feature = "orchard"))]
+        ShieldedProtocol::Orchard => return Ok(true),
+    };
+    Ok(
+        super::commitment_tree::get_checkpoint(conn, table_prefix, anchor_height)
+            .map_err(|e| {
+                SqliteClientError::CommitmentTree(shardtree::error::ShardTreeError::Storage(e))
+            })?
+            .is_some(),
+    )
+}
+
+/// Encodes the wallet's spendability rule for a single note, given the four orthogonal
+/// predicates that compose it. All four must hold for the note to be spendable.
+///
+/// 1. **Stored floor at or below the chosen anchor.** `witness_anchor_stable` (the note's
+///    *anchor floor* — the lowest anchor height for which the wallet has the data needed
+///    to construct this note's witness) must be set, and must lie at or below the chosen
+///    anchor height.
+/// 2. **Tip-window fully scanned.** The chain-tip pruning window must contain no
+///    `scan_queue` range with [`ScanPriority::Anchor`] priority. This is a wallet-state-wide
+///    precondition that the caller computes once per call.
+/// 3. **Anchor frontier available.** The wallet's shardtree must have a frontier at the
+///    chosen anchor height (i.e., a tree-state checkpoint from which a witness against
+///    that anchor can be reconstructed). Use [`anchor_frontier_available`] to compute
+///    this once per pool per call.
+/// 4. **Confirmations met.** The note must have met its confirmations-policy threshold,
+///    which also implies `note.mined_height <= anchor_height` (so the note exists in the
+///    tree at the chosen anchor).
+///
+/// [`ScanPriority::Anchor`]: zcash_client_backend::data_api::scanning::ScanPriority::Anchor
+pub(crate) fn is_note_spendable_at_anchor(
+    witness_anchor_stable: Option<BlockHeight>,
+    anchor_height: Option<BlockHeight>,
+    tip_window_scanned: bool,
+    anchor_available: bool,
+    confirmations_met: bool,
+) -> bool {
+    let stored_at_or_below_chosen = witness_anchor_stable
+        .zip(anchor_height)
+        .is_some_and(|(stored, chosen)| stored <= chosen);
+    stored_at_or_below_chosen && tip_window_scanned && anchor_available && confirmations_met
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
@@ -425,26 +485,18 @@ where
         Some(h) => super::scanning::tip_window_fully_scanned(conn, h)?,
         None => false,
     };
+    // Compute anchor_available once per call: it's a per-pool, per-anchor-height check.
+    // For `NoteRequest::Unspent` (no anchor in the request) the spendability gate doesn't
+    // run, so the value is irrelevant; default to `false` in that case.
+    let anchor_available = match note_request.anchor_height() {
+        Some(h) => anchor_frontier_available(conn, h, protocol)?,
+        None => false,
+    };
 
     row_results
         .map(|t| match t? {
             (Some(note), witness_anchor_stable, tx_trusted, tx_shielding_inputs_trusted) => {
-                // The stored value is a *floor* — the lowest anchor at which the wallet
-                // can construct this note's witness. Spendability requires that the
-                // chosen anchor sits at or above the floor and that the chain-tip
-                // pruning window has no `Anchor` priority left from a recent
-                // disturbance.
-                let stored_at_or_below_chosen = witness_anchor_stable
-                    .zip(note_request.anchor_height())
-                    .is_some_and(|(stored, chosen)| stored <= chosen);
-                let shard_witness_available = stored_at_or_below_chosen && tip_window_scanned;
-
-                let mined_at_anchor = note
-                    .mined_height()
-                    .zip(note_request.anchor_height())
-                    .is_some_and(|(h, ah)| h <= ah);
-
-                let has_confirmations = confirmations_policy.confirmations_until_spendable(
+                let confirmations_met = confirmations_policy.confirmations_until_spendable(
                     target_height,
                     PoolType::Shielded(protocol),
                     Some(note.spending_key_scope()),
@@ -454,10 +506,15 @@ where
                     tx_shielding_inputs_trusted,
                 ) == 0;
 
-                match (
-                    note_request,
-                    shard_witness_available && mined_at_anchor && has_confirmations,
-                ) {
+                let is_spendable = is_note_spendable_at_anchor(
+                    witness_anchor_stable,
+                    note_request.anchor_height(),
+                    tip_window_scanned,
+                    anchor_available,
+                    confirmations_met,
+                );
+
+                match (note_request, is_spendable) {
                     (NoteRequest::UnspentOrError { .. }, false) => {
                         Err(SqliteClientError::IneligibleNotes)
                     }
@@ -511,6 +568,10 @@ where
         Some(h) => super::scanning::tip_window_fully_scanned(conn, h)?,
         None => false,
     };
+    // Compute anchor_available once per call: a per-pool, per-anchor-height check on the
+    // shardtree's cap state. The SQL pre-filter doesn't gate on this (it has no access to
+    // the shardtree), so we must check it in Rust.
+    let anchor_available = anchor_frontier_available(conn, anchor_height, protocol)?;
 
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached.
@@ -535,6 +596,7 @@ where
                  SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
+                 rn.witness_anchor_stable,
                  IFNULL(t.trust_status, 0) AS trust_status,
                  MAX(tt.mined_height) AS max_shielding_input_height,
                  MIN(IFNULL(tt.trust_status, 0)) AS min_shielding_input_trust
@@ -570,14 +632,14 @@ where
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, trust_status,
+                mined_height, witness_anchor_stable, trust_status,
                 max_shielding_input_height, min_shielding_input_trust
          FROM eligible WHERE so_far < :target_value
          UNION
          SELECT id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, trust_status,
+                mined_height, witness_anchor_stable, trust_status,
                 max_shielding_input_height, min_shielding_input_trust
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         spent_notes_clause(table_prefix)
@@ -609,6 +671,9 @@ where
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
         |row| {
+            let witness_anchor_stable = row
+                .get::<_, Option<u32>>("witness_anchor_stable")?
+                .map(BlockHeight::from);
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
             let max_shielding_input_height = row
                 .get::<_, Option<u32>>("max_shielding_input_height")?
@@ -619,6 +684,7 @@ where
             Ok(note.map(|n| {
                 (
                     n,
+                    witness_anchor_stable,
                     tx_trust_status,
                     max_shielding_input_height,
                     tx_shielding_inputs_trusted,
@@ -634,14 +700,12 @@ where
                 .map(
                     |(
                         note,
+                        witness_anchor_stable,
                         tx_trusted,
                         max_shielding_input_height,
                         tx_shielding_inputs_trusted,
                     )| {
-                        // The SQL filter already enforced the floor predicate
-                        // (`witness_anchor_stable <= :anchor_height`); here we only need
-                        // the confirmations-policy gate, which applies to every note.
-                        let has_confirmations = confirmations_policy.confirmations_until_spendable(
+                        let confirmations_met = confirmations_policy.confirmations_until_spendable(
                             target_height,
                             PoolType::Shielded(protocol),
                             Some(note.spending_key_scope()),
@@ -651,7 +715,18 @@ where
                             tx_shielding_inputs_trusted,
                         ) == 0;
 
-                        has_confirmations.then_some(note)
+                        // The SQL pre-filter already enforced
+                        // `stored_at_or_below_chosen` and `tip_window_scanned`; the helper
+                        // re-evaluates them defensively against the row's actual values
+                        // and adds the `anchor_available` and confirmations gates.
+                        is_note_spendable_at_anchor(
+                            witness_anchor_stable,
+                            Some(anchor_height),
+                            tip_window_scanned,
+                            anchor_available,
+                            confirmations_met,
+                        )
+                        .then_some(note)
                     },
                 )
                 .transpose()
