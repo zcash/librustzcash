@@ -333,6 +333,97 @@ where
     );
 }
 
+/// Regression test for [PRO-291]: shielding a transparent balance composed of many P2PKH
+/// UTXOs must not fail with `ChangeRequired` due to fee disagreement between the proposal
+/// and builder layers.
+///
+/// At 150 P2PKH inputs the proposal-time fee computation (which uses
+/// `STANDARD_P2PKH = 150` bytes per input) starts to diverge from the builder-time
+/// fee computation (which historically used the actual serialized size, 149 bytes per
+/// input) due to the `ceildiv(t_in_total_size, 150)` term in the ZIP 317 fee formula.
+/// The discrepancy grows by one logical action (5000 zats) for every additional 150
+/// inputs.
+///
+/// [PRO-291]: https://linear.app/zodl/issue/PRO-291
+pub fn shielding_many_transparent_utxos<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    // Choose enough UTXOs to cross the first ceildiv(_, 150) boundary.
+    const NUM_UTXOS: usize = 160;
+    // Per-UTXO value comfortably above the marginal fee so none are treated as dust.
+    const PER_UTXO: u64 = 100_000;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Initialize the wallet with chain data that has no shielded notes for us.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Add many distinct P2PKH UTXOs to the wallet, all at the same transparent address.
+    let value = Zatoshis::const_from_u64(PER_UTXO);
+    let txout = TxOut::new(value, taddr.script().into());
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..NUM_UTXOS {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let outpoint = OutPoint::new(hash, 0);
+        let utxo =
+            WalletTransparentOutput::from_parts(outpoint, txout.clone(), Some(height)).unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Shield the transparent balance.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+    let txids = st
+        .shield_transparent_funds(
+            &input_selector,
+            &change_strategy,
+            value,
+            account.usk(),
+            &[*taddr],
+            account.id(),
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("shielding many P2PKH UTXOs should succeed");
+    assert_eq!(txids.len(), 1);
+
+    // After shielding, the transparent balance should be zero.
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
+}
+
 /// This test attempts to verify that transparent funds spendability is
 /// accounted for properly given the different minimum confirmations values
 /// that can be set when querying for balances.

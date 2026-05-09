@@ -2330,6 +2330,14 @@ mod tests {
     }
 
     #[test]
+    fn shielding_many_transparent_utxos() {
+        zcash_client_backend::data_api::testing::transparent::shielding_many_transparent_utxos(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),
