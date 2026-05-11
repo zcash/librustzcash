@@ -66,36 +66,35 @@ pub(crate) fn pruning_floor(chain_tip: BlockHeight) -> BlockHeight {
     BlockHeight::from(u32::from(chain_tip).saturating_sub(PRUNING_DEPTH))
 }
 
-/// Returns true when no `scan_queue` range in the chain-tip pruning window has
-/// [`ScanPriority::Anchor`] priority. This is the wallet-level precondition for treating
-/// any stabilized note as spendable under the new rule: `Anchor` is the priority the
-/// wallet stamps on the pruning window after operations that disturb the anchor
-/// (rewind, truncate, account import), and as long as any such range remains
-/// unprocessed, the cap state needed to witness stabilized notes can't be reliably
-/// reconstructed.
-///
-/// Non-`Anchor` higher priorities (`Verify`, `ChainTip`, `Historic`, etc.) represent
-/// ordinary forward-sync work and don't gate this check — a wallet with a partial-sync
-/// gap below the anchor can still spend stabilized notes whose shard is itself
-/// scan-clean.
-pub(crate) fn tip_window_fully_scanned(
+/// Returns true when every `scan_queue` range overlapping the chain-tip pruning window has
+/// `Scanned` priority (or `Ignored`, for pre-birthday gaps). This is the wallet-level
+/// precondition for treating any stabilized note as spendable: as long as a range above
+/// `Scanned` remains in the window, the cap state needed to witness stabilized notes can't
+/// be reliably reconstructed.
+pub(crate) fn prunable_window_fully_scanned(
     conn: &rusqlite::Connection,
     chain_tip: BlockHeight,
 ) -> Result<bool, SqliteClientError> {
-    let pruning_floor_u32 = u32::from(pruning_floor(chain_tip));
+    // The pruning window is the half-open range `(pruning_floor, chain_tip]`, i.e. heights
+    // `pruning_floor + 1 ..= chain_tip`. A `scan_queue` range `[start, end)` overlaps the
+    // window iff `start <= chain_tip` and `end >= pruning_floor + 2` (equivalently,
+    // `end > pruning_floor + 1`). Without the `+ 1` we'd match a range whose `end` is
+    // exactly `pruning_floor + 1` — that range covers only `pruning_floor`, which is *not*
+    // in the window.
+    let window_lower_inclusive = u32::from(pruning_floor(chain_tip)) + 1;
     let chain_end = u32::from(chain_tip) + 1;
-    let anchor_code = priority_code(&ScanPriority::Anchor);
+    let scanned_code = priority_code(&ScanPriority::Scanned);
     conn.query_row(
         "SELECT NOT EXISTS(
              SELECT 1 FROM scan_queue
              WHERE block_range_start < :chain_end
-               AND block_range_end > :pruning_floor
-               AND priority = :anchor_priority
+               AND block_range_end > :window_lower_inclusive
+               AND priority > :scanned_priority
          )",
         named_params![
             ":chain_end": chain_end,
-            ":pruning_floor": pruning_floor_u32,
-            ":anchor_priority": anchor_code,
+            ":window_lower_inclusive": window_lower_inclusive,
+            ":scanned_priority": scanned_code,
         ],
         |row| row.get(0),
     )
@@ -470,69 +469,44 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Records `witness_anchor_stable` on received notes whose witness is durably constructable given
-/// the ability to construct an anchor and scanning invariants.
+/// Records each note's **anchor-stable height** in `witness_anchor_stable`: the lowest
+/// anchor at which the wallet has the data needed to construct the note's witness. Once
+/// written it is monotonically non-decreasing, except that chain reorgs or explicit rewinds
+/// in the chain-tip shard may decrease it. Invalidation is not done here — only explicit
+/// truncation clears stored values.
 ///
-/// The stored value is the note's **anchor floor**: the lowest anchor height at which the wallet
-/// has the data it needs to construct this note's witness. Once written it is monotonically
-/// non-decreasing: the anchor floor advances over a row's lifetime under two cases: first, when
-/// the active-shard floor is promoted to a completed-shard floor, and secondly, for notes in the
-/// chain-tip shard, when the contiguously scanned region containing the note grows toward an
-/// anchor. In the chain-tip shard only, chain reorgs and explicit rewind operations may cause
-/// the stored value to decrease.
+/// Two arms:
 ///
-/// - **First-time stabilize** (NULL → anchor floor): for any note whose containing shard is
-///   currently scan-clean and whose stored value is NULL, write the anchor floor.
-///   - For a *completed* shard whose `subtree_end_height` is at or below the pruning floor
-///     (i.e. has at least `PRUNING_DEPTH` confirmations): the anchor floor is the shard's
-///     `subtree_end_height` — the height at which the leaf-to-shard-root path was finalized.
-///     Even though `subtree_end_height` is the *highest* height in the shard, it is a *lower*
-///     bound on the chosen anchor: any anchor at or above that height is sufficient to witness
+/// - **First-time stabilize** (NULL → anchor-stable height) for notes in a scan-clean shard:
+///   - *Completed* shard at or below the pruning floor: `subtree_end_height`. Although that
+///     is the highest height in the shard, it is the lower bound on anchors that can witness
 ///     the note.
-///   - For an *active* (chain-tip) shard: the anchor floor is the note's transaction's `block`
-///     (the height of the block in which the note was received, populated only when the
-///     wallet's `blocks` table actually has the block). The witness can be constructed
-///     for any anchor at or above that height from the frontier at `t.block - 1`
-///     (durable), the subtree roots in the cap (durable), and the contiguous range of
-///     scanned blocks between the note and the chosen anchor.
+///   - *Active* (tip) shard: the note's transaction's `block` (its mined height, available
+///     iff the wallet has the block). The witness reconstructs from the durable frontier at
+///     `t.block - 1`, the cap, and the contiguously scanned range up to the anchor.
 ///
-/// - **Promote on shard completion** (active anchor floor → completed anchor floor): for
-///   any note whose stored anchor floor is currently `t.block` (active interpretation) but
-///   whose containing shard has since become completed and reached the pruning depth,
-///   advance the stored anchor floor to `subtree_end_height`. The advance is bounded — it
-///   never moves again after firing — because `t.block ≤ subtree_end_height` always holds.
-///
-/// Invalidation (clearing a stored value) is deliberately *not* performed here.
-/// Stabilization is a property of the note commitment tree's preserved data, and per-scan
-/// hooks cannot discard data; the only operation that can is an explicit truncation, which
-/// is responsible for clearing affected stored values.
+/// - **Promote on shard completion** (active → completed): once the containing shard has
+///   completed and reached the pruning floor, advance from `t.block` to `subtree_end_height`.
+///   Bounded because `t.block ≤ subtree_end_height` always holds.
 pub(crate) fn mark_stabilized_notes(
     conn: &rusqlite::Transaction<'_>,
 ) -> Result<(), SqliteClientError> {
-    // The two arms (first-time stabilize and promote-on-completion) are kept as
-    // separate `UPDATE` statements rather than a single `CASE WHEN`-driven query.
-    // They have semantically distinct gates — `witness_anchor_stable IS NULL` for
-    // the former, `IS NOT NULL AND < subtree_end_height` for the latter — and
-    // each compiles to an index-friendly predicate. A combined query would
-    // duplicate the shard lookup in three places (in the value expression and in
-    // both halves of the no-op-avoidance gate) and bury the "first-time vs
-    // promote" intent inside a `CASE`. The doubled round-trip is cheap relative
-    // to the scan work that surrounds this call.
+    // The two arms run as separate `UPDATE`s rather than a single `CASE WHEN` query: their
+    // gates (`IS NULL` vs `< subtree_end_height`) are semantically distinct and each compiles
+    // to an index-friendly predicate. A combined query would duplicate the shard lookup and
+    // bury the intent inside a `CASE`. The extra round-trip is cheap relative to scan work.
     fn first_time_stabilize(
         conn: &rusqlite::Transaction<'_>,
         pool: &str,
         shard_height: u8,
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
-        // For a note with no stored stability height whose shard is currently scan-clean, write
-        // the stability height. The COALESCE prefers the completed-shard interpretation
-        // (`subtree_end_height`); if the shard is still active or hasn't yet reached pruning
-        // depth, the inner SELECT returns NULL and the floor falls through to the active-shard
-        // interpretation (`t.block`). Reading `t.block` rather than `t.mined_height` is
-        // deliberate: `block` is foreign-keyed to the `blocks` table, so it's only non-NULL when
-        // the wallet has actually processed the block — which is what the active-shard witness
-        // reconstruction needs (it depends on the frontier the wallet records when scanning that
-        // block).
+        // COALESCE prefers the completed-shard interpretation (`subtree_end_height`); if the
+        // shard is still active or above the pruning floor, the inner SELECT returns NULL and
+        // falls through to `t.block` (the active-shard interpretation). `t.block` rather than
+        // `t.mined_height` because `block` is FK-bound to `blocks` and is only non-NULL once
+        // the wallet has actually processed the block — required by active-shard witness
+        // reconstruction, which depends on the frontier recorded at scan time.
         let sql = format!(
             "UPDATE {pool}_received_notes
              SET witness_anchor_stable = COALESCE(
@@ -568,22 +542,16 @@ pub(crate) fn mark_stabilized_notes(
         shard_height: u8,
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
-        // For a note that already has a stored floor, advance it to the shard's
-        // `subtree_end_height` if the shard has now reached the completed-and-
-        // stabilized state and the stored floor sits below that height. The join to
-        // the shards table is itself the completion-check gate (only completed shards
-        // at or below the pruning floor and free of unscanned ranges contribute a row);
-        // the `<` predicate makes this a no-op for rows whose stored floor already
-        // equals `subtree_end_height` (e.g. notes that hit the completed-shard arm of
-        // the first-time stabilize step in the same call).
+        // The join to `shards` is itself the completion-check gate — only completed shards at
+        // or below the pruning floor and free of unscanned ranges contribute a row. The `<`
+        // predicate makes this a no-op for rows already at `subtree_end_height` (e.g. notes
+        // that hit the completed-shard arm in the same call).
         let sql = format!(
             "UPDATE {pool}_received_notes AS rn
              SET witness_anchor_stable = shard.subtree_end_height
              FROM {pool}_tree_shards AS shard
-             WHERE rn.witness_anchor_stable IS NOT NULL
+             WHERE rn.witness_anchor_stable < shard.subtree_end_height
                AND rn.commitment_tree_position IS NOT NULL
-               AND rn.witness_anchor_stable < shard.subtree_end_height
-               AND shard.subtree_end_height IS NOT NULL
                AND shard.subtree_end_height <= :pruning_floor
                AND (rn.commitment_tree_position >> :shard_height) = shard.shard_index
                AND shard.shard_index NOT IN (

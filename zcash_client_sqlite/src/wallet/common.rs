@@ -319,14 +319,14 @@ pub(crate) fn anchor_frontier_available(
 pub(crate) fn is_note_spendable_at_anchor(
     witness_anchor_stable: Option<BlockHeight>,
     anchor_height: Option<BlockHeight>,
-    tip_window_scanned: bool,
+    prunable_window_scanned: bool,
     anchor_available: bool,
     confirmations_met: bool,
 ) -> bool {
     let stored_at_or_below_chosen = witness_anchor_stable
         .zip(anchor_height)
         .is_some_and(|(stored, chosen)| stored <= chosen);
-    stored_at_or_below_chosen && tip_window_scanned && anchor_available && confirmations_met
+    stored_at_or_below_chosen && prunable_window_scanned && anchor_available && confirmations_met
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -481,8 +481,8 @@ where
     )?;
 
     let chain_tip = super::chain_tip_height(conn)?;
-    let tip_window_scanned = match chain_tip {
-        Some(h) => super::scanning::tip_window_fully_scanned(conn, h)?,
+    let prunable_window_scanned = match chain_tip {
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
         None => false,
     };
     // Compute anchor_available once per call: it's a per-pool, per-anchor-height check.
@@ -509,7 +509,7 @@ where
                 let is_spendable = is_note_spendable_at_anchor(
                     witness_anchor_stable,
                     note_request.anchor_height(),
-                    tip_window_scanned,
+                    prunable_window_scanned,
                     anchor_available,
                     confirmations_met,
                 );
@@ -564,8 +564,8 @@ where
     // its cap state. If `chain_tip_height` is unset there's no spendable balance anyway,
     // so treat the predicate as false.
     let chain_tip = super::chain_tip_height(conn)?;
-    let tip_window_scanned = match chain_tip {
-        Some(h) => super::scanning::tip_window_fully_scanned(conn, h)?,
+    let prunable_window_scanned = match chain_tip {
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
         None => false,
     };
     // Compute anchor_available once per call: a per-pool, per-anchor-height check on the
@@ -624,7 +624,7 @@ where
              -- rewind, or account-import.
              AND rn.witness_anchor_stable IS NOT NULL
              AND rn.witness_anchor_stable <= :anchor_height
-             AND :tip_window_scanned = 1
+             AND :prunable_window_scanned = 1
              AND rn.id NOT IN rarray(:exclude)
              AND rn.id NOT IN ({})
              GROUP BY rn.id
@@ -658,7 +658,7 @@ where
     let excluded_ptr = Rc::new(excluded);
 
     // The chain-tip-pruning-window check is wallet-state-wide; if no chain tip is
-    // recorded the SQL returns no rows (the `:tip_window_scanned = 1` predicate
+    // recorded the SQL returns no rows (the `:prunable_window_scanned = 1` predicate
     // compares against 0).
     let notes = stmt_select_notes.query_and_then(
         named_params![
@@ -667,7 +667,7 @@ where
             ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
-            ":tip_window_scanned": i64::from(tip_window_scanned),
+            ":prunable_window_scanned": i64::from(prunable_window_scanned),
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
         |row| {
@@ -716,13 +716,13 @@ where
                         ) == 0;
 
                         // The SQL pre-filter already enforced
-                        // `stored_at_or_below_chosen` and `tip_window_scanned`; the helper
+                        // `stored_at_or_below_chosen` and `prunable_window_scanned`; the helper
                         // re-evaluates them defensively against the row's actual values
                         // and adds the `anchor_available` and confirmations gates.
                         is_note_spendable_at_anchor(
                             witness_anchor_stable,
                             Some(anchor_height),
-                            tip_window_scanned,
+                            prunable_window_scanned,
                             anchor_available,
                             confirmations_met,
                         )

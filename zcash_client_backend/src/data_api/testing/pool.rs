@@ -5199,7 +5199,7 @@ pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
 /// Invariants encoded here (and exercised by all three rewind-class tests):
 ///   - Immediately after the rewind, `get_spendable_balance` reports zero
 ///     and `propose_transfer` fails with `ScanRequired` or
-///     `InsufficientFunds`. The rule's `tip_window_fully_scanned` predicate
+///     `InsufficientFunds`. The rule's `prunable_window_fully_scanned` predicate
 ///     fails because the chain-tip pruning window contains `Anchor`-priority
 ///     ranges.
 ///   - Rescanning the chain-tip pruning window (`PRUNING_DEPTH` blocks ending

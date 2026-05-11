@@ -1,17 +1,20 @@
 //! Replaces the boolean `witness_stabilized` flag on received-note tables with a
-//! `witness_anchor_stable` column whose value is the containing shard's
-//! `subtree_end_height` at the time of stabilization. The new column carries the same
-//! "this note's witness data is durable" information as the old flag, plus the
-//! specific anchor height up to which the leaf-level path has been finalized.
+//! `witness_anchor_stable` column that records the height at which the note's
+//! leaf-level witness path was finalized. The new column carries the same "this
+//! note's witness data is durable" information as the old flag, plus the
+//! specific anchor height that can be used for spendability decisions.
 //!
 //! This migration is semantics-preserving: every row that previously had
 //! `witness_stabilized = 1` ends up with a non-NULL `witness_anchor_stable`, and
-//! every row that had `witness_stabilized = 0` ends up with `NULL`. Subsequent
-//! migrations and code may use the height value for finer-grained spendability
-//! decisions.
+//! every row that had `witness_stabilized = 0` ends up with `NULL`.
 //!
-//! The backfill performs a per-row lookup of `subtree_end_height` against the matching
-//! shard, derived from `commitment_tree_position >> shard_height`.
+//! The backfill uses the containing shard's `subtree_end_height`. The pre-migration
+//! `mark_stabilized_notes` predicate only stabilized notes whose shard was
+//! complete, so every backfilled row has a non-NULL `subtree_end_height`
+//! available. Post-migration, `mark_stabilized_notes` may additionally stabilize
+//! notes in the active (tip) shard, in which case `witness_anchor_stable` is set
+//! to the block in which the note was mined rather than the shard's
+//! `subtree_end_height`.
 
 use std::collections::HashSet;
 
