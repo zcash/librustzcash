@@ -41,7 +41,7 @@ workspace.
 - `zcash_client_backend::wallet::WalletTransparentOutput` has been refactored
   to convey information equivalent to `WalletOutput`:
     - It now has an `AccountId` generic parameter,
-    - `from_parts` now takes additional `transfer_type`, `recipient_account`, 
+    - `from_parts` now takes additional `recipient_account`,
       `recipient_key_scope`, and `funding_account` parameters.
 
 ### Removed

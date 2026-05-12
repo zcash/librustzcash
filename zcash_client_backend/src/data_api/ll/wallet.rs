@@ -837,13 +837,6 @@ where
                         OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                         txout.clone(),
                         mined_height,
-                        // TODO: Confirm this is correct for `TransferType::WalletInternal`.
-                        match key_scope {
-                            Some(
-                                TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL,
-                            ) => TransferType::WalletInternal,
-                            _ => TransferType::Incoming,
-                        },
                         Some(account_uuid),
                         key_scope,
                         funding_account,
@@ -868,7 +861,6 @@ where
                             OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
                             txout.clone(),
                             mined_height,
-                            TransferType::Outgoing,
                             None,
                             None,
                             Some(account_id),
@@ -1061,6 +1053,8 @@ where
     for output in outputs {
         let sent_output = match output.transfer_type() {
             TransferType::Outgoing => {
+                // An `Outgoing` `WalletTransparentOutput` is documented to carry a
+                // non-empty set of funding accounts.
                 let from_account = *output
                     .funding_account()
                     .expect("an Outgoing WalletTransparentOutput has a funding account");

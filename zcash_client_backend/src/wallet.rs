@@ -175,7 +175,6 @@ pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
     txout: TxOut,
     mined_height: Option<BlockHeight>,
-    transfer_type: TransferType,
     recipient_account: Option<AccountId>,
     recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
@@ -194,7 +193,6 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
         outpoint: OutPoint,
         txout: TxOut,
         mined_height: Option<BlockHeight>,
-        transfer_type: TransferType,
         recipient_account: Option<AccountId>,
         recipient_key_scope: Option<TransparentKeyScope>,
         funding_account: Option<AccountId>,
@@ -205,7 +203,6 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
                 outpoint,
                 txout,
                 mined_height,
-                transfer_type,
                 recipient_account,
                 recipient_key_scope,
                 recipient_address,
@@ -223,7 +220,6 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
             outpoint: self.outpoint,
             txout: self.txout,
             mined_height: self.mined_height,
-            transfer_type: self.transfer_type,
             recipient_account: self.recipient_account.map(|_| ()),
             recipient_key_scope: self.recipient_key_scope,
             recipient_address: self.recipient_address,
@@ -270,9 +266,34 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
         self.recipient_key_scope
     }
 
-    /// The identifier for the account to which the output belongs.
-    pub fn transfer_type(&self) -> TransferType {
-        self.transfer_type
+    /// Returns the [`TransferType`] for this output, derived from the recipient,
+    /// recipient-key-scope, and funding-account information stored on the output:
+    ///
+    /// - [`TransferType::Outgoing`] when [`recipient_account`](Self::recipient_account)
+    ///   is `None` (the recipient is external to the wallet).
+    /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
+    ///   the output is a same-account self-transfer. This is detected either
+    ///   structurally, when [`recipient_key_scope`](Self::recipient_key_scope) is
+    ///   `INTERNAL` or `EPHEMERAL` (those key scopes exist only within a single
+    ///   account), or by observation, when the recipient account is also the
+    ///   [`funding_account`](Self::funding_account).
+    /// - [`TransferType::Incoming`] otherwise. This includes cross-account transfers
+    ///   within the wallet, which are recorded at the storage layer via the
+    ///   `funding_account` rather than via this classification.
+    pub fn transfer_type(&self) -> TransferType
+    where
+        AccountId: PartialEq,
+    {
+        match (&self.recipient_account, self.recipient_key_scope) {
+            (None, _) => TransferType::Outgoing,
+            (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL)) => {
+                TransferType::WalletInternal
+            }
+            (Some(r), _) if self.funding_account.as_ref() == Some(r) => {
+                TransferType::WalletInternal
+            }
+            (Some(_), _) => TransferType::Incoming,
+        }
     }
 
     /// The identifier for the account that received this output, if known to belong to the

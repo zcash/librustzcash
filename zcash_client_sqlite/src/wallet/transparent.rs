@@ -970,13 +970,6 @@ fn to_unspent_transparent_output(
         outpoint,
         TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
-        match key_scope {
-            // TODO: Is this right?
-            Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL) => {
-                zcash_client_backend::TransferType::WalletInternal
-            }
-            _ => zcash_client_backend::TransferType::Incoming,
-        },
         Some(account_id),
         key_scope,
         None,

@@ -527,8 +527,6 @@ where
                         BlockHeight::try_from(reply.height)
                             .map_err(|_| Error::MisbehavingServer)?,
                     ),
-                    // TODO: Figure out how to set this correctly given what we query from the wallet.
-                    crate::TransferType::Incoming,
                     Some(account_id),
                     None,
                     None,
