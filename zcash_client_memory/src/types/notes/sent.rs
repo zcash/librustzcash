@@ -56,6 +56,8 @@ impl SentNoteTable {
             Recipient::External { output_pool, .. } => *output_pool,
             #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent { .. } => PoolType::Transparent,
+            #[cfg(feature = "transparent-inputs")]
+            Recipient::InternalTransparent { .. } => PoolType::Transparent,
             Recipient::InternalAccount { note, .. } => PoolType::Shielded(note.protocol()),
         };
         match pool_type {
@@ -105,6 +107,8 @@ impl SentNoteTable {
             Recipient::External { output_pool, .. } => *output_pool,
             #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent { .. } => PoolType::Transparent,
+            #[cfg(feature = "transparent-inputs")]
+            Recipient::InternalTransparent { .. } => PoolType::Transparent,
             Recipient::InternalAccount { note, .. } => PoolType::Shielded(note.protocol()),
         };
         match pool_type {
@@ -299,6 +303,20 @@ mod serialization {
                     outpoint: Some(outpoint.into()),
                     note: None,
                 },
+                #[cfg(feature = "transparent-inputs")]
+                Recipient::InternalTransparent {
+                    receiving_account,
+                    recipient_address,
+                } => proto::Recipient {
+                    recipient_type: proto::RecipientType::InternalTransparent as i32,
+
+                    address: Some(recipient_address.encode(&EncodingParams)),
+                    pool_type: Some(proto::PoolType::Transparent as i32),
+
+                    account_id: Some(*receiving_account),
+                    outpoint: None,
+                    note: None,
+                },
                 Recipient::InternalAccount {
                     receiving_account,
                     external_address,
@@ -356,6 +374,18 @@ mod serialization {
                     external_address: recipient.address.map(|a| a.parse()).transpose()?,
                     note: Box::new(read_optional!(recipient, note)?.into()),
                 },
+                proto::RecipientType::InternalTransparent => {
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    return Err(Error::Other("transparent inputs not enabled".to_string()));
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::InternalTransparent {
+                        receiving_account: read_optional!(recipient, account_id)?.into(),
+                        recipient_address: TransparentAddress::decode(
+                            &EncodingParams,
+                            &read_optional!(recipient, address)?,
+                        )?,
+                    }
+                }
             })
         }
     }

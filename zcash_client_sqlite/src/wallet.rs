@@ -3483,6 +3483,32 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     true,
                 )?;
             }
+            #[cfg(feature = "transparent-inputs")]
+            Recipient::InternalTransparent {
+                receiving_account,
+                recipient_address,
+            } => {
+                transparent::put_transparent_output(
+                    conn,
+                    params,
+                    gap_limits,
+                    &WalletTransparentOutput::from_parts(
+                        OutPoint::new(
+                            sent_tx.tx().txid().into(),
+                            u32::try_from(output.output_index())
+                                .expect("output index fits into a u32"),
+                        ),
+                        TxOut::new(output.value(), recipient_address.script().into()),
+                        None,
+                        Some(*receiving_account),
+                        None,
+                        Some(*sent_tx.funding_account()),
+                    )
+                    .expect("can extract a recipient address from a transparent recipient_address"),
+                    sent_tx.target_height().into(),
+                    true,
+                )?;
+            }
         }
     }
 
@@ -4617,6 +4643,19 @@ fn recipient_params<P: consensus::Parameters>(
             Ok((
                 from_account_id,
                 Some(ephemeral_address.encode(_params)),
+                Some(to_account),
+                PoolType::TRANSPARENT,
+            ))
+        }
+        #[cfg(feature = "transparent-inputs")]
+        Recipient::InternalTransparent {
+            receiving_account,
+            recipient_address,
+        } => {
+            let to_account = get_account_ref(conn, *receiving_account)?;
+            Ok((
+                from_account_id,
+                Some(recipient_address.encode(_params)),
                 Some(to_account),
                 PoolType::TRANSPARENT,
             ))

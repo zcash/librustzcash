@@ -16,6 +16,10 @@ workspace.
   - `recipient_account`
   - `recipient_key_scope`
   - `funding_account`
+- `zcash_client_backend::wallet::Recipient::InternalTransparent` (behind
+  the `transparent-inputs` feature flag): a new variant for recording the
+  send side of a transparent output whose recipient address belongs to a
+  wallet account (i.e., the wallet both funded and received the output).
 
 ### Changed
 - `zcash_client_backend::data_api`:

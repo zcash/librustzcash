@@ -156,6 +156,14 @@ where
                         #[cfg(feature = "transparent-inputs")]
                         None,
                     ),
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::InternalTransparent {
+                        recipient_address, ..
+                    } => OutputOfSentTx::from_parts(
+                        note.value,
+                        Some(Address::from(recipient_address)),
+                        None,
+                    ),
                 })
             })
             .collect::<Result<_, Error>>()

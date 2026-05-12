@@ -724,7 +724,6 @@ where
         wallet_db,
         params,
         tx_ref,
-        funding_account,
         &wallet_transparent_outputs,
         #[cfg(feature = "transparent-inputs")]
         |wallet_db, output| wallet_db.put_transparent_output(output, observed_height, false),
@@ -1029,7 +1028,6 @@ fn put_transparent_outputs<DbT, P>(
     wallet_db: &mut DbT,
     params: &P,
     tx_ref: <DbT as LowLevelWalletRead>::TxRef,
-    funding_account: Option<DbT::AccountId>,
     outputs: &[WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>],
     #[cfg(feature = "transparent-inputs")] put_received_output: impl Fn(
         &mut DbT,
@@ -1051,79 +1049,63 @@ where
     P: consensus::Parameters,
 {
     for output in outputs {
-        let sent_output = match output.transfer_type() {
-            TransferType::Outgoing => {
-                // An `Outgoing` `WalletTransparentOutput` is documented to carry a
-                // non-empty set of funding accounts.
-                let from_account = *output
-                    .funding_account()
-                    .expect("an Outgoing WalletTransparentOutput has a funding account");
-                let receiver = Receiver::Transparent(*output.recipient_address());
+        // Receive side: record the output as received whenever its recipient
+        // address belongs to a wallet account.
+        #[cfg(feature = "transparent-inputs")]
+        if output.recipient_account().is_some() {
+            let (account_id, _) = put_received_output(wallet_db, output)?;
 
-                #[cfg(feature = "transparent-inputs")]
-                let recipient_address =
-                    external_address(wallet_db, params, from_account, receiver)?;
-
-                #[cfg(not(feature = "transparent-inputs"))]
-                let recipient_address = receiver.to_zcash_address(params.network_type());
-
-                let recipient = Recipient::External {
-                    recipient_address,
-                    output_pool: PoolType::TRANSPARENT,
-                };
-
-                Some((from_account, recipient))
+            if let Some(t_key_scope) = output.recipient_key_scope() {
+                on_received(account_id, t_key_scope);
             }
-            TransferType::Incoming | TransferType::WalletInternal => {
+
+            // When we receive transparent funds (particularly as ephemeral outputs
+            // in transaction pairs sending to a ZIP 320 address) it becomes
+            // possible that the spend of these outputs is not then later detected
+            // if the transaction that spends them is purely transparent. This is
+            // especially a problem in wallet recovery.
+            wallet_db.queue_transparent_spend_detection(
+                *output.recipient_address(),
+                tx_ref,
+                output.outpoint().n(),
+            )?;
+        }
+
+        // Send side: record the output as sent for the wallet account that
+        // funded the transaction, if any. If the recipient is also a wallet
+        // account, the send is recorded as an internal transfer.
+        if let Some(&from_account) = output.funding_account() {
+            let recipient = match output.recipient_account() {
                 #[cfg(feature = "transparent-inputs")]
-                {
-                    let (account_id, _) = put_received_output(wallet_db, output)?;
-
-                    if let Some(t_key_scope) = output.recipient_key_scope() {
-                        on_received(account_id, t_key_scope);
-                    }
-
-                    // When we receive transparent funds (particularly as ephemeral outputs
-                    // in transaction pairs sending to a ZIP 320 address) it becomes
-                    // possible that the spend of these outputs is not then later detected
-                    // if the transaction that spends them is purely transparent. This is
-                    // especially a problem in wallet recovery.
-                    wallet_db.queue_transparent_spend_detection(
-                        *output.recipient_address(),
-                        tx_ref,
-                        output.outpoint().n(),
-                    )?;
-                }
-
-                // If a transaction we observe contains spends from our wallet, we will
-                // store its transparent outputs in the same way they would be stored by
-                // create_spend_to_address.
-                if let Some(account_uuid) = funding_account {
+                Some(&receiving_account) => Recipient::InternalTransparent {
+                    receiving_account,
+                    recipient_address: *output.recipient_address(),
+                },
+                #[cfg(not(feature = "transparent-inputs"))]
+                Some(_) => Recipient::External {
+                    recipient_address: Receiver::Transparent(*output.recipient_address())
+                        .to_zcash_address(params.network_type()),
+                    output_pool: PoolType::TRANSPARENT,
+                },
+                None => {
                     let receiver = Receiver::Transparent(*output.recipient_address());
 
                     #[cfg(feature = "transparent-inputs")]
                     let recipient_address =
-                        external_address(wallet_db, params, account_uuid, receiver)?;
+                        external_address(wallet_db, params, from_account, receiver)?;
 
                     #[cfg(not(feature = "transparent-inputs"))]
                     let recipient_address = receiver.to_zcash_address(params.network_type());
 
-                    // TODO: Even if the recipient address is external, record the send as internal.
-                    let recipient = Recipient::External {
+                    Recipient::External {
                         recipient_address,
                         output_pool: PoolType::TRANSPARENT,
-                    };
-
-                    Some((account_uuid, recipient))
-                } else {
-                    None
+                    }
                 }
-            }
-        };
+            };
 
-        if let Some((from_account_uuid, recipient)) = sent_output {
             wallet_db.put_sent_output(
-                from_account_uuid,
+                from_account,
                 tx_ref,
                 output.index(),
                 &recipient,

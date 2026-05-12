@@ -84,6 +84,14 @@ pub enum Recipient<AccountId> {
         ephemeral_address: TransparentAddress,
         outpoint: OutPoint,
     },
+    /// A transparent output sent to a non-ephemeral transparent address belonging to
+    /// a wallet account. Used to record the send side of a transparent output that
+    /// the wallet both funded and received.
+    #[cfg(feature = "transparent-inputs")]
+    InternalTransparent {
+        receiving_account: AccountId,
+        recipient_address: TransparentAddress,
+    },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
