@@ -2444,7 +2444,7 @@ pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
     target_height: TargetHeight,
-    account: AccountId,
+    funding_account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: Zatoshis,
     #[cfg(feature = "transparent-inputs")]
@@ -2458,7 +2458,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// - `tx`: the raw transaction data
     /// - `created`: the system time at which the transaction was created
     /// - `target_height`: the target height that was used in the construction of the transaction
-    /// - `account`: the account that spent funds in creation of the transaction
+    /// - `funding_account`: the account that spent funds in creation of the transaction
     /// - `outputs`: the outputs created by the transaction, including those sent to external
     ///   recipients which may not otherwise be recoverable
     /// - `fee_amount`: the fee value paid by the transaction
@@ -2467,7 +2467,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         tx: &'a Transaction,
         created: time::OffsetDateTime,
         target_height: TargetHeight,
-        account: AccountId,
+        funding_account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: Zatoshis,
         #[cfg(feature = "transparent-inputs")] utxos_spent: &'a [OutPoint],
@@ -2476,7 +2476,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
             tx,
             created,
             target_height,
-            account,
+            funding_account,
             outputs,
             fee_amount,
             #[cfg(feature = "transparent-inputs")]
@@ -2493,8 +2493,8 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         self.created
     }
     /// Returns the id for the account that created the outputs.
-    pub fn account_id(&self) -> &AccountId {
-        &self.account
+    pub fn funding_account(&self) -> &AccountId {
+        &self.funding_account
     }
     /// Returns the outputs of the transaction.
     pub fn outputs(&self) -> &[SentTransactionOutput<AccountId>] {

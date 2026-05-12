@@ -132,8 +132,9 @@ where
         txout.clone(),
         Some(height_1),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
@@ -166,8 +167,9 @@ where
         txout,
         Some(height_2),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
@@ -259,8 +261,9 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account.id(),
+        Some(account.id()),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     st.wallet_mut()
@@ -415,8 +418,9 @@ where
             txout.clone(),
             Some(height),
             crate::TransferType::Incoming,
-            account.id(),
+            Some(account.id()),
             Some(TransparentKeyScope::EXTERNAL),
+            None,
         )
         .unwrap();
         st.wallet_mut()
@@ -506,8 +510,9 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account.id(),
+        Some(account.id()),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     st.wallet_mut()
@@ -880,7 +885,8 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
+        None,
         None,
     )
     .unwrap();
@@ -964,7 +970,8 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
+        None,
         None,
     )
     .unwrap();
@@ -1226,7 +1233,8 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
+        None,
         None,
     )
     .unwrap();
@@ -1307,7 +1315,8 @@ where
         txout,
         Some(height),
         crate::TransferType::Incoming,
-        account_id,
+        Some(account_id),
+        None,
         None,
     )
     .unwrap();

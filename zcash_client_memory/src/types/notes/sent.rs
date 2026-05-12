@@ -69,7 +69,7 @@ impl SentNoteTable {
                 self.0.insert(
                     note_id,
                     SentNote {
-                        from_account_id: *tx.account_id(),
+                        from_account_id: *tx.funding_account(),
                         to: output.recipient().clone(),
                         value: output.value(),
                         memo: Memo::Empty, // transparent notes don't have memos
@@ -85,7 +85,7 @@ impl SentNoteTable {
                 self.0.insert(
                     note_id.into(),
                     SentNote {
-                        from_account_id: *tx.account_id(),
+                        from_account_id: *tx.funding_account(),
                         to: output.recipient().clone(),
                         value: output.value(),
                         memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),

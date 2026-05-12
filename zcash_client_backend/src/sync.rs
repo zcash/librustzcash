@@ -529,7 +529,8 @@ where
                     ),
                     // TODO: Figure out how to set this correctly given what we query from the wallet.
                     crate::TransferType::Incoming,
-                    account_id,
+                    Some(account_id),
+                    None,
                     None,
                 )
                 .ok_or(Error::MisbehavingServer)

@@ -3350,7 +3350,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     }
 
     for output in sent_tx.outputs() {
-        insert_sent_output(conn, params, tx_ref, *sent_tx.account_id(), output)?;
+        insert_sent_output(conn, params, tx_ref, *sent_tx.funding_account(), output)?;
 
         match output.recipient() {
             Recipient::External {
@@ -3386,8 +3386,9 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                                     TxOut::new(output.value(), taddr.script().into()),
                                     None,
                                     TransferType::Outgoing,
-                                    *sent_tx.account_id(),
-                                    Some(TransparentKeyScope::EXTERNAL)
+                                    None,
+                                    Some(TransparentKeyScope::EXTERNAL),
+                                    Some(*sent_tx.funding_account()),
                                 )
                                 .expect(
                                     "can extract a recipient address from an internal address script",
@@ -3448,9 +3449,23 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 outpoint,
                 ..
             } => {
-                // First check to verify that creation of this output does not result in reuse of
+                // Check to verify that creation of this output does not result in reuse of
                 // an ephemeral address.
                 transparent::check_ephemeral_address_reuse(conn, params, ephemeral_address)?;
+
+                // Look up the wallet account that owns the ephemeral address.
+                let (recipient_account, _) =
+                    transparent::find_account_uuid_for_transparent_address(
+                        conn,
+                        params,
+                        ephemeral_address,
+                    )?
+                    .ok_or_else(|| {
+                        SqliteClientError::CorruptedData(format!(
+                            "ephemeral address {} does not belong to any wallet account",
+                            ephemeral_address.encode(params),
+                        ))
+                    })?;
 
                 transparent::put_transparent_output(
                     conn,
@@ -3462,8 +3477,9 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         None,
                         // TODO: Is this correct?
                         TransferType::Outgoing,
-                        *sent_tx.account_id(),
+                        Some(recipient_account),
                         Some(TransparentKeyScope::EPHEMERAL),
+                        Some(*sent_tx.funding_account()),
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
                     sent_tx.target_height().into(),

@@ -3351,8 +3351,9 @@ where
         TxOut::new(Zatoshis::const_from_u64(100000), taddr.script().into()),
         Some(h),
         crate::TransferType::Incoming,
-        account.id(),
+        Some(account.id()),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
 
@@ -6015,8 +6016,9 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             t_bundle.vout[0].clone(),
             Some(h),
             crate::TransferType::Incoming,
-            dest_account_id,
+            Some(dest_account_id),
             Some(TransparentKeyScope::EXTERNAL),
+            None,
         )
         .unwrap();
         st.wallet_mut()
@@ -6311,8 +6313,9 @@ where
         TxOut::new(non_coinbase_value, t_addr.script().into()),
         Some(h),
         crate::TransferType::Incoming,
-        account,
+        Some(account),
         Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     st.wallet_mut()

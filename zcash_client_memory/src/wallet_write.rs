@@ -842,8 +842,9 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                             txout.clone(),
                             d_tx.mined_height(),
                             TransferType::Incoming,
-                            account_id,
+                            Some(account_id),
                             // TODO: Get from somewhere
+                            None,
                             None,
                         )
                         .unwrap();
@@ -1181,8 +1182,9 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                             // TODO: What should this be?
                             TransferType::WalletInternal,
                             // TODO: Should this be the sending or receiving account?
-                            *receiving_account,
+                            Some(*receiving_account),
                             Some(TransparentKeyScope::EPHEMERAL),
+                            None,
                         )
                         .unwrap();
                         self.put_transparent_output(&txo, receiving_account, true)?;

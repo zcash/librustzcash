@@ -176,9 +176,10 @@ pub struct WalletTransparentOutput<AccountId> {
     txout: TxOut,
     mined_height: Option<BlockHeight>,
     transfer_type: TransferType,
-    account_id: AccountId,
+    recipient_account: Option<AccountId>,
     recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
+    funding_account: Option<AccountId>,
     /// The known serialized input size for this output, if available.
     /// This is set for P2SH outputs where the redeem script is known.
     known_input_size: Option<usize>,
@@ -194,8 +195,9 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
         txout: TxOut,
         mined_height: Option<BlockHeight>,
         transfer_type: TransferType,
-        account_id: AccountId,
+        recipient_account: Option<AccountId>,
         recipient_key_scope: Option<TransparentKeyScope>,
+        funding_account: Option<AccountId>,
     ) -> Option<Self> {
         txout
             .recipient_address()
@@ -204,9 +206,10 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
                 txout,
                 mined_height,
                 transfer_type,
-                account_id,
+                recipient_account,
                 recipient_key_scope,
                 recipient_address,
+                funding_account,
                 known_input_size: None,
             })
     }
@@ -221,9 +224,10 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
             txout: self.txout,
             mined_height: self.mined_height,
             transfer_type: self.transfer_type,
-            account_id: (),
+            recipient_account: self.recipient_account.map(|_| ()),
             recipient_key_scope: self.recipient_key_scope,
             recipient_address: self.recipient_address,
+            funding_account: None,
             known_input_size: self.known_input_size,
         }
     }
@@ -271,14 +275,28 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
         self.transfer_type
     }
 
-    /// The identifier for the account to which the output belongs.
-    pub fn account_id(&self) -> &AccountId {
-        &self.account_id
+    /// The identifier for the account that received this output, if known to belong to the
+    /// wallet. Returns `None` for outputs sent to addresses outside the wallet.
+    pub fn recipient_account(&self) -> Option<&AccountId> {
+        self.recipient_account.as_ref()
     }
 
     /// Returns the wallet address that received the UTXO.
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
+    }
+
+    /// The identifier for the wallet account that provided funds in the transaction
+    /// that created the output, if known.
+    ///
+    /// Note: the Zcash protocol permits construction of transactions where multiple distinct
+    /// accounts provide funds; however, `zcash_client_backend` does not currently support the
+    /// construction of transactions of this form. In cases where multiple funding accounts are
+    /// detected, the account that provided the most significant source of funds should be selected
+    /// if possible; in the future, this should be either expanded to support a set of funding
+    /// accounts (which will require potentially invasive storage backend changes).
+    pub fn funding_account(&self) -> Option<&AccountId> {
+        self.funding_account.as_ref()
     }
 
     /// Returns the value of the UTXO

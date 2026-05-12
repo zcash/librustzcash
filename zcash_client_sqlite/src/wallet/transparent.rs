@@ -977,8 +977,9 @@ fn to_unspent_transparent_output(
             }
             _ => zcash_client_backend::TransferType::Incoming,
         },
-        account_id,
+        Some(account_id),
         key_scope,
+        None,
     )
     .ok_or_else(|| {
         SqliteClientError::CorruptedData(

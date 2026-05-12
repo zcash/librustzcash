@@ -12,9 +12,10 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
-- `zcash_client_backend::wallet`:
-  - `WalletTransparentOutput::account_id`
-  - `WalletTransparentOutput::recipient_key_scope`
+- `zcash_client_backend::wallet::WalletTransparentOutput`:
+  - `recipient_account`
+  - `recipient_key_scope`
+  - `funding_account`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -22,6 +23,9 @@ workspace.
     - The result types of `InputSource::get_unspent_transparent_output` and
       `InputSource::get_unspent_transparent_outputs` have each changed; these
       have reverted to returning `WalletTransparentOutput`.
+- `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
+  and accessor have been renamed to `funding_account`, to disambiguate from
+  the recipient-account terminology now used by `WalletTransparentOutput`.
 - `zcash_client_backend::data_api::WalletWrite`:
   - `rewind_to_height` has been replaced by `rewind_to_chain_state`. Callers
     that previously passed a `BlockHeight` should now construct a
@@ -34,12 +38,11 @@ workspace.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
-- `zcash_client_backend::wallet`:
-  - `WalletTransparentOutput` has been refactored to convey information
-    equivalent to `WalletOutput`:
+- `zcash_client_backend::wallet::WalletTransparentOutput` has been refactored
+  to convey information equivalent to `WalletOutput`:
     - It now has an `AccountId` generic parameter,
-    - `WalletTransparentOutput::from_parts` now takes `TransferType`,
-      `AccountId`, and `Option<TransparentKeyScope>` parameters.
+    - `from_parts` now takes additional `transfer_type`, `recipient_account`, 
+      `recipient_key_scope`, and `funding_account` parameters.
 
 ### Removed
 - `zcash_client_backend::data_api`:

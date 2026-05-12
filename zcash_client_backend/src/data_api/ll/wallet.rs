@@ -799,7 +799,7 @@ fn detect_wallet_transparent_outputs<P, AccountId, E>(
 ) -> Result<Vec<WalletTransparentOutput<AccountId>>, E>
 where
     P: consensus::Parameters,
-    AccountId: Copy + core::fmt::Debug,
+    AccountId: Copy + core::fmt::Debug + std::hash::Hash + std::cmp::Eq,
 {
     let mut result = vec![];
     for (output_index, txout) in tx
@@ -844,8 +844,9 @@ where
                             ) => TransferType::WalletInternal,
                             _ => TransferType::Incoming,
                         },
-                        account_uuid,
+                        Some(account_uuid),
                         key_scope,
+                        funding_account,
                     )
                     .expect("txout.recipient_address extraction previously checked"),
                 );
@@ -868,8 +869,9 @@ where
                             txout.clone(),
                             mined_height,
                             TransferType::Outgoing,
-                            account_id,
                             None,
+                            None,
+                            Some(account_id),
                         )
                         .expect("txout.recipient_address extraction previously checked"),
                     );
@@ -1059,11 +1061,14 @@ where
     for output in outputs {
         let sent_output = match output.transfer_type() {
             TransferType::Outgoing => {
+                let from_account = *output
+                    .funding_account()
+                    .expect("an Outgoing WalletTransparentOutput has a funding account");
                 let receiver = Receiver::Transparent(*output.recipient_address());
 
                 #[cfg(feature = "transparent-inputs")]
                 let recipient_address =
-                    external_address(wallet_db, params, *output.account_id(), receiver)?;
+                    external_address(wallet_db, params, from_account, receiver)?;
 
                 #[cfg(not(feature = "transparent-inputs"))]
                 let recipient_address = receiver.to_zcash_address(params.network_type());
@@ -1073,7 +1078,7 @@ where
                     output_pool: PoolType::TRANSPARENT,
                 };
 
-                Some((*output.account_id(), recipient))
+                Some((from_account, recipient))
             }
             TransferType::Incoming | TransferType::WalletInternal => {
                 #[cfg(feature = "transparent-inputs")]

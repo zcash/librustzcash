@@ -135,8 +135,9 @@ impl ReceivedTransparentOutput {
                 }
                 _ => zcash_client_backend::TransferType::Incoming,
             },
-            self.account_id,
+            Some(self.account_id),
             Some(self.key_scope),
+            None,
         )
     }
 }
