@@ -16,16 +16,16 @@ use zcash_protocol::consensus;
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::account_delete_cascade;
-use crate::PRUNING_DEPTH;
-use crate::wallet::block_max_scanned;
+use crate::wallet::chain_tip_height;
 use crate::wallet::init::WalletMigrationError;
+use crate::wallet::scanning::pruning_floor;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x64925567_65ae_495e_b6cf_d5f56e99e422);
 
 const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
-    pub(super) params: P,
+    pub(super) _params: P,
 }
 
 impl<P> schemerz::Migration<Uuid> for Migration<P> {
@@ -63,12 +63,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // Backfill: Identify any notes which have stable witness data, and mark them as such.
         // The SQL is inlined here so this migration remains stable even if
         // `crate::wallet::scanning::mark_stabilized_notes` later evolves to write a
-        // different column.
-        if let Some(max_scanned_height) =
-            block_max_scanned(transaction, &self.params)?.map(|m| m.block_height())
-        {
-            let pruning_floor: u32 =
-                u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+        // different column. The boundary calculation matches `mark_stabilized_notes` exactly
+        // (`chain_tip_height` and `scanning::pruning_floor`); using either a lower bound
+        // (e.g. `block_max_scanned`) or a higher floor (e.g. `tip - (PRUNING_DEPTH - 1)`)
+        // would stabilize shards whose checkpoint is inside the pruning window, leaving the
+        // wallet pointing at potentially-pruned cap state.
+        if let Some(chain_tip) = chain_tip_height(transaction)? {
+            let pruning_floor: u32 = u32::from(pruning_floor(chain_tip));
             for (pool, shard_height) in [
                 ("sapling", SAPLING_SHARD_HEIGHT),
                 #[cfg(feature = "orchard")]
@@ -154,17 +155,19 @@ mod tests {
             .init_or_migrate_to(&mut db_data, DEPENDENCIES)
             .unwrap();
 
-        // Pick `last_scanned` so that the pruning floor `last_scanned - (PRUNING_DEPTH - 1)`
-        // equals `stable_block_height`. Place all heights well above the Sapling and NU5
-        // activation heights on TestNetwork (280,000 and 1,842,420 respectively) so that
-        // each shard's block extent — `(prev.subtree_end_height, subtree_end_height]` with
-        // `prev.subtree_end_height` defaulting to the pool's activation — actually
+        // Pick `last_scanned` so that the pruning floor `chain_tip - PRUNING_DEPTH` equals
+        // `stable_block_height`. `chain_tip_height` reads `MAX(block_range_end) - 1` from
+        // `scan_queue`, so inserting a range with `block_range_end = last_scanned + 1`
+        // gives `chain_tip = last_scanned`. Place all heights well above the Sapling and
+        // NU5 activation heights on TestNetwork (280,000 and 1,842,420 respectively) so
+        // that each shard's block extent — `(prev.subtree_end_height, subtree_end_height]`
+        // with `prev.subtree_end_height` defaulting to the pool's activation — actually
         // overlaps the scan_queue range inserted below. Otherwise the view's INNER JOIN
         // would return no rows for the shards and the test wouldn't exercise the
         // unscanned-ranges check.
         let base: u32 = 2_000_000;
         let stable_block_height: u32 = base + 301;
-        let last_scanned: u32 = stable_block_height + (PRUNING_DEPTH - 1);
+        let last_scanned: u32 = stable_block_height + PRUNING_DEPTH;
         let birthday_height: u32 = base;
 
         // Seed a minimal account. The UFVK/UIVK must be real encoded values because
@@ -217,7 +220,8 @@ mod tests {
             )
             .unwrap();
 
-        // A `blocks` row is needed for `block_max_scanned` to return `Some`.
+        // A `blocks` row is convenient to keep around for other queries, though no longer
+        // strictly required by the backfill (which keys off `chain_tip_height`).
         db_data
             .conn
             .execute(
@@ -501,7 +505,10 @@ mod tests {
         let shard_end_height: u32 = base + 250;
         let max_scanned: u32 = shard_end_height + PRUNING_DEPTH + 50;
         let chain_tip_exclusive: u32 = max_scanned + 1;
-        let pruning_floor: u32 = max_scanned - (PRUNING_DEPTH - 1);
+        // `chain_tip_height` reads `MAX(block_range_end) - 1` from `scan_queue`, so the
+        // runtime sees `chain_tip = max_scanned` and computes `chain_tip - PRUNING_DEPTH`
+        // as the pruning floor.
+        let pruning_floor: u32 = max_scanned - PRUNING_DEPTH;
         assert!(
             shard_end_height <= pruning_floor,
             "test invariant: shard end must lie at or below the pruning floor so the \
@@ -572,8 +579,9 @@ mod tests {
             )
             .unwrap();
 
-        // A `blocks` row at `max_scanned` so `block_max_scanned` reflects the high range's
-        // tip and the helper can compute the pruning floor.
+        // A `blocks` row at `max_scanned`. `mark_stabilized_notes` derives the pruning
+        // floor from `chain_tip_height` (computed from `scan_queue`), so this row is just
+        // for general consistency.
         db_data
             .conn
             .execute(

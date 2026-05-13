@@ -230,7 +230,7 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(witness_stabilized_notes::Migration {
-            params: params.clone(),
+            _params: params.clone(),
         }),
         Box::new(witness_anchor_stable::Migration {
             _params: params.clone(),
