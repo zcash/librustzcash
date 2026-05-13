@@ -47,7 +47,7 @@ pub const NOTE_COMMITMENT_TREE_DEPTH: u8 = 32;
 /// minimal set of aligned subtree addresses that exactly cover the range,
 /// capping each subtree at level `max_level`.
 ///
-/// Each returned [`Address`] identifies a complete subtree at some
+/// Each returned [`Address`] identifies a subtree at some
 /// `0 <= level <= max_level` whose leaf range is contained in `[start, end)`.
 /// Returned addresses are disjoint and together cover `[start, end)` exactly.
 ///
