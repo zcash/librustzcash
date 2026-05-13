@@ -23,6 +23,16 @@ workspace.
 - `zcash_client_backend::TransferType::AccountInternal`: indicates an output
   whose recipient and funder are the same wallet account (e.g. change). This
   has the semantics previously carried by `TransferType::WalletInternal`.
+- `zcash_client_backend::data_api::wallet::propose_shielding_coinbase` and
+  `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector::propose_shielding_coinbase`,
+  which propose a transaction that shields one or more coinbase transparent
+  outputs to an arbitrary shielded recipient.
+- `zcash_client_backend::proposal::ProposalError::ShieldingRequiresShieldedRecipient`,
+  returned by `propose_shielding_coinbase` when the supplied `to_address` is
+  a transparent or TEX address.
+- `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
+  alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
+  instead of a `ChangeStrategy`.
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -55,6 +65,9 @@ workspace.
     - It now has an `AccountId` generic parameter,
     - `from_parts` now takes additional `recipient_account`,
       `recipient_key_scope`, and `funding_account` parameters.
+- `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector`
+  now requires implementors to provide `propose_shielding_coinbase` in
+  addition to `propose_shielding`.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput` 

@@ -70,6 +70,10 @@ pub enum ProposalError {
     /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
+    /// A shielding proposal was constructed with a destination address that has no shielded
+    /// receiver. Shielding requires the destination to be able to receive shielded value.
+    #[cfg(feature = "transparent-inputs")]
+    ShieldingRequiresShieldedRecipient,
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
     #[cfg(feature = "unstable")]
@@ -150,6 +154,11 @@ impl Display for ProposalError {
             ProposalError::EphemeralAddressLinkability => write!(
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::ShieldingRequiresShieldedRecipient => write!(
+                f,
+                "A shielding proposal's destination must have a shielded receiver."
             ),
             #[cfg(feature = "unstable")]
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
