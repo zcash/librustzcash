@@ -814,14 +814,19 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        VERIFY_LOOKAHEAD,
+        PRUNING_DEPTH, VERIFY_LOOKAHEAD, WalletDb,
         error::SqliteClientError,
         testing::{
             BlockCache,
-            db::{TestDb, TestDbFactory},
+            db::{TestDb, TestDbFactory, test_clock, test_rng},
         },
-        wallet::scanning::{
-            insert_queue_entries, pruning_floor, replace_queue_entries, suggest_scan_ranges,
+        wallet::{
+            init::WalletMigrator,
+            priority_code,
+            scanning::{
+                insert_queue_entries, mark_stabilized_notes, pruning_floor, replace_queue_entries,
+                suggest_scan_ranges,
+            },
         },
     };
 
@@ -2142,5 +2147,255 @@ pub(crate) mod tests {
         );
 
         assert_matches!(proposal, Ok(_));
+    }
+
+    /// Regression test: a note whose containing shard's `subtree_end_height` is known
+    /// (e.g. populated by `put_shard_roots`) and lies at or below the pruning floor must
+    /// NOT be treated as stabilized if any block inside the shard's extent is covered by
+    /// a non-Scanned `scan_queue` range. An earlier criterion that only required
+    /// `subtree_end_height <= last_scanned - (PRUNING_DEPTH - 1)` could spuriously
+    /// stabilize such a note even though the wallet was missing the intra-shard
+    /// commitments inside the unscanned gap, stranding the note at spend time. The fix is
+    /// the per-shard view-based check in `mark_stabilized_notes`.
+    #[test]
+    fn gap_in_scanned_coverage_prevents_stabilization() {
+        use rusqlite::named_params;
+        use secrecy::Secret;
+        use tempfile::NamedTempFile;
+        use zcash_keys::keys::UnifiedSpendingKey;
+        use zcash_protocol::consensus::Network;
+
+        let network = Network::TestNetwork;
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+
+        let seed_bytes = vec![0xab; 32];
+
+        // Bring the schema up to the current state so `mark_stabilized_notes` has its
+        // target column (`witness_anchor_stable`) to write into.
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes.clone()))
+            .ignore_seed_relevance()
+            .init_or_migrate(&mut db_data)
+            .unwrap();
+
+        // Scenario: the `scan_queue` partition covers `[birthday, chain_tip_exclusive)`
+        // with a non-Scanned (here: Historic) gap `[low_end, high_start)` in the middle.
+        // Shard 0's block extent is `(birthday, shard_end_height]`, which overlaps that
+        // gap. The shard's end lies below the pruning floor, so the only remaining
+        // barrier to stabilization is the view-based unscanned-range check.
+        //
+        //   birthday          low_end  gap    high_start           shard_end         max_scanned
+        //   |--- Scanned --------|---Historic---|--------- Scanned -------|-- Scanned -----|
+        //                                                 ^
+        //                                   shard 0's extent covers (birthday, shard_end],
+        //                                   which straddles the non-Scanned gap.
+        // All heights sit above the NU5 testnet activation height (1,842,420) so that each
+        // pool's shard scan-range view actually joins the shard to the scan_queue rows
+        // below — otherwise the shard's view-frame extent would be empty and the gap
+        // couldn't overlap.
+        let base: u32 = 2_000_000;
+        let birthday_height: u32 = base + 1;
+        let low_end: u32 = base + 150; // exclusive upper bound of the low Scanned range
+        let high_start: u32 = base + 200;
+        let shard_end_height: u32 = base + 250;
+        let max_scanned: u32 = shard_end_height + PRUNING_DEPTH + 50;
+        let chain_tip_exclusive: u32 = max_scanned + 1;
+        // `chain_tip_height` reads `MAX(block_range_end) - 1` from `scan_queue`, so the
+        // runtime sees `chain_tip = max_scanned` and computes `chain_tip - PRUNING_DEPTH`
+        // as the pruning floor.
+        let pruning_floor: u32 = max_scanned - PRUNING_DEPTH;
+        assert!(
+            shard_end_height <= pruning_floor,
+            "test invariant: shard end must lie at or below the pruning floor so the \
+             only remaining barrier to stabilization is the unscanned-range check",
+        );
+        assert!(
+            low_end < high_start && high_start < shard_end_height,
+            "test invariant: non-Scanned gap must lie inside shard 0's extent",
+        );
+
+        // Seed a minimal account so `wallet_birthday(conn)` returns `Some(birthday_height)`.
+        let usk =
+            UnifiedSpendingKey::from_seed(&network, &seed_bytes, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let ufvk_str = ufvk.encode(&network);
+        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (id, uuid, account_kind,
+                 hd_seed_fingerprint, hd_account_index,
+                 ufvk, uivk, has_spend_key, birthday_height)
+                 VALUES (1, X'0000000000000000000000000000AAAA', 0,
+                 X'00000000000000000000000000000000000000000000000000000000000000AB',
+                 0, :ufvk, :uivk, 1, :birthday_height)",
+                named_params![
+                    ":ufvk": ufvk_str,
+                    ":uivk": uivk_str,
+                    ":birthday_height": birthday_height,
+                ],
+            )
+            .unwrap();
+
+        // Seed a single transaction; the note rows need an `id_tx` to reference.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO transactions (id_tx, txid, min_observed_height)
+                 VALUES (1, X'00', 1)",
+                [],
+            )
+            .unwrap();
+
+        // `scan_queue` is a partition of `[birthday, chain_tip_exclusive)`:
+        //   [birthday, low_end)       priority Scanned
+        //   [low_end, high_start)     priority Historic  <-- the non-Scanned gap
+        //   [high_start, chain_tip)   priority Scanned
+        let scanned = priority_code(&ScanPriority::Scanned);
+        let historic = priority_code(&ScanPriority::Historic);
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
+                 VALUES
+                    (:start1, :end1, :scanned),
+                    (:start2, :end2, :historic),
+                    (:start3, :end3, :scanned)",
+                named_params![
+                    ":start1": birthday_height,
+                    ":end1": low_end,
+                    ":start2": low_end,
+                    ":end2": high_start,
+                    ":start3": high_start,
+                    ":end3": chain_tip_exclusive,
+                    ":scanned": scanned,
+                    ":historic": historic,
+                ],
+            )
+            .unwrap();
+
+        // A `blocks` row at `max_scanned`. `mark_stabilized_notes` derives the pruning
+        // floor from `chain_tip_height` (computed from `scan_queue`), so this row is just
+        // for general consistency.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO blocks (
+                     height, hash, time,
+                     sapling_tree, sapling_commitment_tree_size
+                 ) VALUES
+                     (:max_scanned, X'0000000000000000000000000000000000000000000000000000000000000000', 0, X'', 0)",
+                named_params![":max_scanned": max_scanned],
+            )
+            .unwrap();
+
+        // Shard 0 with `subtree_end_height = shard_end_height`. Its block extent is
+        // `(birthday, shard_end_height]`, which overlaps the non-Scanned gap. Its end
+        // lies below the pruning floor, so the criterion's only remaining barrier is the
+        // view-based unscanned-range check.
+        for pool in ["sapling", "orchard"] {
+            db_data
+                .conn
+                .execute(
+                    &format!(
+                        "INSERT INTO {pool}_tree_shards (shard_index, subtree_end_height)
+                         VALUES (0, :end)"
+                    ),
+                    named_params![":end": shard_end_height],
+                )
+                .unwrap();
+        }
+
+        // One note per pool in shard 0. `commitment_tree_position = 1` places each note
+        // inside shard index 0 for both SAPLING_SHARD_HEIGHT and ORCHARD_SHARD_HEIGHT.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO sapling_received_notes (
+                     transaction_id, output_index, account_id,
+                     diversifier, value, rcm, is_change,
+                     commitment_tree_position
+                 ) VALUES (1, 0, 1, X'00', 0, X'00', 0, 1)",
+                [],
+            )
+            .unwrap();
+        #[cfg(feature = "orchard")]
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO orchard_received_notes (
+                     transaction_id, action_index, account_id,
+                     diversifier, value, rho, rseed, is_change,
+                     commitment_tree_position
+                 ) VALUES (1, 0, 1, X'00', 0, X'00', X'00', 0, 1)",
+                [],
+            )
+            .unwrap();
+
+        let read_stabilized = |conn: &rusqlite::Connection, table: &str, pk_col: &str| -> i64 {
+            conn.query_row(
+                &format!(
+                    "SELECT witness_anchor_stable IS NOT NULL FROM {table} WHERE {pk_col} = 0"
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        // First call: the non-Scanned gap lies inside shard 0's extent, so the note must
+        // NOT stabilize.
+        let tx = db_data.conn.transaction().unwrap();
+        mark_stabilized_notes(&tx).unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(
+            read_stabilized(&db_data.conn, "sapling_received_notes", "output_index"),
+            0,
+            "sapling note must not be stabilized while a non-Scanned scan_queue \
+             range overlaps its containing shard's extent",
+        );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            read_stabilized(&db_data.conn, "orchard_received_notes", "action_index"),
+            0,
+            "orchard note must not be stabilized while a non-Scanned scan_queue \
+             range overlaps its containing shard's extent",
+        );
+
+        // Replace the three ranges with a single contiguous Scanned range
+        // `[birthday, chain_tip_exclusive)`. The view should now return no rows for
+        // shard 0, so the note stabilizes.
+        db_data.conn.execute("DELETE FROM scan_queue", []).unwrap();
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
+                 VALUES (:start, :end, :priority)",
+                named_params![
+                    ":start": birthday_height,
+                    ":end": chain_tip_exclusive,
+                    ":priority": scanned,
+                ],
+            )
+            .unwrap();
+
+        let tx = db_data.conn.transaction().unwrap();
+        mark_stabilized_notes(&tx).unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(
+            read_stabilized(&db_data.conn, "sapling_received_notes", "output_index"),
+            1,
+            "sapling note must be stabilized once the gap is filled",
+        );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            read_stabilized(&db_data.conn, "orchard_received_notes", "action_index"),
+            1,
+            "orchard note must be stabilized once the gap is filled",
+        );
     }
 }
