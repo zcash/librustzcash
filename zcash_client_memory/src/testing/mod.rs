@@ -186,7 +186,11 @@ where
             .get(outpoint)
             .map(|txo| (txo, self.tx_table.get(&txo.transaction_id)))
             .and_then(|(txo, tx)| {
-                txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                txo.to_wallet_transparent_output(
+                    outpoint,
+                    tx.and_then(|tx| tx.mined_height()),
+                    self.find_funding_account(&txo.transaction_id),
+                )
             }))
     }
 
