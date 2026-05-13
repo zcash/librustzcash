@@ -3415,7 +3415,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             output
                                 .memo()
                                 .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            TransferType::WalletInternal,
+                            TransferType::AccountInternal,
                         ),
                         tx_ref,
                         Some(sent_tx.target_height().into()),
@@ -3434,7 +3434,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             output
                                 .memo()
                                 .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            TransferType::WalletInternal,
+                            TransferType::AccountInternal,
                         ),
                         tx_ref,
                         Some(sent_tx.target_height().into()),

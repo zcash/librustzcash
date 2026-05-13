@@ -20,6 +20,9 @@ workspace.
   the `transparent-inputs` feature flag): a new variant for recording the
   send side of a transparent output whose recipient address belongs to a
   wallet account (i.e., the wallet both funded and received the output).
+- `zcash_client_backend::TransferType::AccountInternal`: indicates an output
+  whose recipient and funder are the same wallet account (e.g. change). This
+  has the semantics previously carried by `TransferType::WalletInternal`.
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -42,6 +45,11 @@ workspace.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+- `zcash_client_backend::TransferType::WalletInternal` semantics have
+  narrowed: it now specifically indicates a cross-account internal transfer
+  (recipient and funder are distinct wallet accounts). Code that previously
+  used `WalletInternal` for same-account self-transfers should switch to the
+  new `AccountInternal` variant.
 - `zcash_client_backend::wallet::WalletTransparentOutput` has been refactored
   to convey information equivalent to `WalletOutput`:
     - It now has an `AccountId` generic parameter,
@@ -49,8 +57,8 @@ workspace.
       `recipient_key_scope`, and `funding_account` parameters.
 
 ### Removed
-- `zcash_client_backend::data_api`:
-  - `WalletUtxo` (use `WalletTransparentOutput` instead).
+- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput` 
+  instead).
 
 ## [0.22.0] - 2026-04-27
 

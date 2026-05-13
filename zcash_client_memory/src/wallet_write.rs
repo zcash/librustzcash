@@ -684,7 +684,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         &sent_tx_output,
                     );
                 }
-                TransferType::WalletInternal => {
+                TransferType::AccountInternal => {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
@@ -712,6 +712,9 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                 TransferType::Incoming => {
                     todo!("store decrypted tx sapling incoming")
                 }
+                TransferType::WalletInternal => unreachable!(
+                    "TransferType::WalletInternal is only produced for transparent outputs"
+                ),
             }
         }
 
@@ -755,7 +758,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         &sent_tx_output,
                     );
                 }
-                TransferType::WalletInternal => {
+                TransferType::AccountInternal => {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
@@ -783,6 +786,9 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                 TransferType::Incoming => {
                     todo!("store decrypted tx orchard incoming")
                 }
+                TransferType::WalletInternal => unreachable!(
+                    "TransferType::WalletInternal is only produced for transparent outputs"
+                ),
             }
         }
 

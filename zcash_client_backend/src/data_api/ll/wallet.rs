@@ -964,7 +964,7 @@ where
 
                 Some((output.account_id(), recipient, note.value()))
             }
-            TransferType::WalletInternal => {
+            TransferType::AccountInternal => {
                 let spent_in = detect_note_spent_in(wallet_db, output)?;
                 put_received_note(wallet_db, output, tx_ref, spent_in)?;
 
@@ -1007,6 +1007,9 @@ where
                     None
                 }
             }
+            TransferType::WalletInternal => unreachable!(
+                "TransferType::WalletInternal is only produced for transparent outputs"
+            ),
         };
 
         if let Some((from_account_uuid, recipient, value)) = sent_output {

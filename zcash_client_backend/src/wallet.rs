@@ -279,15 +279,17 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     ///
     /// - [`TransferType::Outgoing`] when [`recipient_account`](Self::recipient_account)
     ///   is `None` (the recipient is external to the wallet).
-    /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
+    /// - [`TransferType::AccountInternal`] when the recipient is a wallet account and
     ///   the output is a same-account self-transfer. This is detected either
     ///   structurally, when [`recipient_key_scope`](Self::recipient_key_scope) is
     ///   `INTERNAL` or `EPHEMERAL` (those key scopes exist only within a single
     ///   account), or by observation, when the recipient account is also the
     ///   [`funding_account`](Self::funding_account).
-    /// - [`TransferType::Incoming`] otherwise. This includes cross-account transfers
-    ///   within the wallet, which are recorded at the storage layer via the
-    ///   `funding_account` rather than via this classification.
+    /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
+    ///   the [`funding_account`](Self::funding_account) is a different wallet account
+    ///   (a cross-account transfer within the wallet).
+    /// - [`TransferType::Incoming`] when the recipient is a wallet account and no
+    ///   wallet funding account is known.
     pub fn transfer_type(&self) -> TransferType
     where
         AccountId: PartialEq,
@@ -295,12 +297,14 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
         match (&self.recipient_account, self.recipient_key_scope) {
             (None, _) => TransferType::Outgoing,
             (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL)) => {
-                TransferType::WalletInternal
+                TransferType::AccountInternal
             }
             (Some(r), _) if self.funding_account.as_ref() == Some(r) => {
-                TransferType::WalletInternal
+                TransferType::AccountInternal
             }
-            (Some(_), _) => TransferType::Incoming,
+            (Some(_), _) if self.funding_account.is_some() => TransferType::WalletInternal,
+            (Some(_), None) => TransferType::Incoming,
+            (Some(_), Some(_)) => TransferType::Incoming,
         }
     }
 

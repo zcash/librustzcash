@@ -558,7 +558,7 @@ mod tests {
                 // migration.
                 for output in d_tx.sapling_outputs() {
                     match output.transfer_type() {
-                        TransferType::Outgoing | TransferType::WalletInternal => {
+                        TransferType::Outgoing | TransferType::AccountInternal => {
                             // Don't need to bother with sent outputs for this test.
                             if output.transfer_type() != TransferType::Outgoing {
                                 put_received_note_before_migration(
@@ -578,6 +578,9 @@ mod tests {
                             put_received_note_before_migration(wdb.conn.0, output, tx_ref.0, None)
                                 .unwrap();
                         }
+                        TransferType::WalletInternal => unreachable!(
+                            "TransferType::WalletInternal is only produced for transparent outputs"
+                        ),
                     }
                 }
 
