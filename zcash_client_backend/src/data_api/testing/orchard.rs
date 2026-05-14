@@ -5,8 +5,13 @@ use ::orchard::{
     note_encryption::OrchardDomain,
     tree::MerkleHashOrchard,
 };
-use incrementalmerkletree::{Hashable, Level};
+use incrementalmerkletree::{
+    Address as TreeAddress, Hashable, Level, Position, Retention,
+    frontier::{Frontier, NonEmptyFrontier},
+};
+use rand::RngCore;
 use shardtree::error::ShardTreeError;
+use zcash_primitives::block::BlockHash;
 
 use zcash_keys::{
     address::{Address, UnifiedAddress},
@@ -25,7 +30,7 @@ use crate::{
     data_api::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
-        chain::{CommitmentTreeRoot, ScanSummary},
+        chain::{self, CommitmentTreeRoot, ScanSummary},
         testing::{TestState, pool::ShieldedPoolTester},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -36,7 +41,7 @@ use crate::{
 pub struct OrchardPoolTester;
 impl ShieldedPoolTester for OrchardPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
-    // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
+    const SHARD_HEIGHT: u8 = crate::data_api::ORCHARD_SHARD_HEIGHT;
 
     type Sk = SpendingKey;
     type Fvk = FullViewingKey;
@@ -106,12 +111,68 @@ impl ShieldedPoolTester for OrchardPoolTester {
         st: &mut TestState<Cache, DbT, P>,
         shard_index: u64,
     ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
-        use incrementalmerkletree::{Address, Position};
+        use incrementalmerkletree::Position;
         let shard_height = crate::data_api::ORCHARD_SHARD_HEIGHT;
-        let addr = Address::from_parts(Level::from(shard_height), shard_index);
+        let addr = TreeAddress::from_parts(Level::from(shard_height), shard_index);
         let end_position = Position::from((shard_index + 1) << shard_height);
         st.wallet_mut()
             .with_orchard_tree_mut(|tree| tree.root(addr, end_position))
+    }
+
+    fn insert_subtree_stub<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        addr: TreeAddress,
+        hash: Self::MerkleTreeHash,
+    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
+        st.wallet_mut()
+            .with_orchard_tree_mut(|tree| tree.insert(addr, hash))
+    }
+
+    fn random_subtree_hash(mut rng: impl RngCore) -> Self::MerkleTreeHash {
+        MerkleHashOrchard::random(&mut rng)
+    }
+
+    fn read_tree_root<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        addr: TreeAddress,
+        truncate_at: Position,
+    ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
+        st.wallet_mut()
+            .with_orchard_tree_mut(|tree| tree.root(addr, truncate_at))
+    }
+
+    fn insert_frontier_into_tree<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
+        frontier: NonEmptyFrontier<Self::MerkleTreeHash>,
+        leaf_retention: Retention<BlockHeight>,
+    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
+        let frontier_ref = &frontier;
+        st.wallet_mut().with_orchard_tree_mut(|tree| {
+            tree.insert_frontier_nodes(frontier_ref.clone(), leaf_retention)
+        })
+    }
+
+    fn pool_frontier_in_chain_state(
+        chain_state: &chain::ChainState,
+    ) -> Frontier<Self::MerkleTreeHash, { super::shard_stub::NOTE_COMMITMENT_TREE_DEPTH }> {
+        chain_state.final_orchard_tree().clone()
+    }
+
+    fn build_chain_state_with_pool_frontier(
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        pool_frontier: Frontier<
+            Self::MerkleTreeHash,
+            { super::shard_stub::NOTE_COMMITMENT_TREE_DEPTH },
+        >,
+        other_pools_chain_state: &chain::ChainState,
+    ) -> chain::ChainState {
+        chain::ChainState::new(
+            block_height,
+            block_hash,
+            other_pools_chain_state.final_sapling_tree().clone(),
+            pool_frontier,
+        )
     }
 
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64 {
