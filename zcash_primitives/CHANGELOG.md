@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-05-14
+
 ### Fixed
 - `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`:
   the implementation for `TransparentInputInfo` now reports the ZIP 317 standard

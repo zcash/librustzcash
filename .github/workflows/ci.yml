@@ -262,6 +262,10 @@ jobs:
   build-latest:
     name: Latest build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Override the workspace `rust-toolchain.toml` (which pins the MSRV) so
+      # this job actually exercises the latest stable toolchain.
+      RUSTUP_TOOLCHAIN: stable
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
@@ -274,6 +278,12 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: latest
+      # macOS-latest pre-installs a system `rustc` that is not a rustup proxy
+      # and does not understand `+toolchain` syntax. Ensure rustup's proxies in
+      # $CARGO_HOME/bin take precedence so `rustc +stable ...` works.
+      - name: Ensure rustup proxies take precedence
+        shell: bash
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set "${TOOLCHAIN}"
