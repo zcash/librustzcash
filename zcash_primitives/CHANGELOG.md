@@ -8,6 +8,19 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+## [0.27.1] - 2026-05-14
+
+### Fixed
+- `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`:
+  the implementation for `TransparentInputInfo` now reports the ZIP 317 standard
+  size (`STANDARD_P2PKH` = 150 bytes) for P2PKH inputs, matching what
+  proposal-time fee computation already uses. Previously it reported the exact
+  serialized size (149 bytes), causing builds of transactions with `>= 150`
+  P2PKH inputs to fail with `Error::ChangeRequired` due to fee disagreement
+  across `ceildiv(t_in_total_size, 150)` boundaries.
+
 ## [0.27.0] - 2026-04-23
 
 ### Added
