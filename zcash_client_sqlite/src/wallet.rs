@@ -3350,7 +3350,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     }
 
     for output in sent_tx.outputs() {
-        insert_sent_output(conn, params, tx_ref, *sent_tx.account_id(), output)?;
+        insert_sent_output(conn, params, tx_ref, *sent_tx.funding_account(), output)?;
 
         match output.recipient() {
             Recipient::External {
@@ -3385,6 +3385,9 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                                     ),
                                     TxOut::new(output.value(), taddr.script().into()),
                                     None,
+                                    None,
+                                    Some(TransparentKeyScope::EXTERNAL),
+                                    Some(*sent_tx.funding_account()),
                                 )
                                 .expect(
                                     "can extract a recipient address from an internal address script",
@@ -3412,7 +3415,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             output
                                 .memo()
                                 .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            TransferType::WalletInternal,
+                            TransferType::AccountInternal,
                         ),
                         tx_ref,
                         Some(sent_tx.target_height().into()),
@@ -3431,7 +3434,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             output
                                 .memo()
                                 .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            TransferType::WalletInternal,
+                            TransferType::AccountInternal,
                         ),
                         tx_ref,
                         Some(sent_tx.target_height().into()),
@@ -3445,9 +3448,23 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 outpoint,
                 ..
             } => {
-                // First check to verify that creation of this output does not result in reuse of
+                // Check to verify that creation of this output does not result in reuse of
                 // an ephemeral address.
                 transparent::check_ephemeral_address_reuse(conn, params, ephemeral_address)?;
+
+                // Look up the wallet account that owns the ephemeral address.
+                let (recipient_account, _) =
+                    transparent::find_account_uuid_for_transparent_address(
+                        conn,
+                        params,
+                        ephemeral_address,
+                    )?
+                    .ok_or_else(|| {
+                        SqliteClientError::CorruptedData(format!(
+                            "ephemeral address {} does not belong to any wallet account",
+                            ephemeral_address.encode(params),
+                        ))
+                    })?;
 
                 transparent::put_transparent_output(
                     conn,
@@ -3457,8 +3474,37 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         outpoint.clone(),
                         TxOut::new(output.value(), ephemeral_address.script().into()),
                         None,
+                        Some(recipient_account),
+                        Some(TransparentKeyScope::EPHEMERAL),
+                        Some(*sent_tx.funding_account()),
                     )
                     .expect("can extract a recipient address from an ephemeral address script"),
+                    sent_tx.target_height().into(),
+                    true,
+                )?;
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Recipient::InternalTransparent {
+                receiving_account,
+                recipient_address,
+            } => {
+                transparent::put_transparent_output(
+                    conn,
+                    params,
+                    gap_limits,
+                    &WalletTransparentOutput::from_parts(
+                        OutPoint::new(
+                            sent_tx.tx().txid().into(),
+                            u32::try_from(output.output_index())
+                                .expect("output index fits into a u32"),
+                        ),
+                        TxOut::new(output.value(), recipient_address.script().into()),
+                        None,
+                        Some(*receiving_account),
+                        None,
+                        Some(*sent_tx.funding_account()),
+                    )
+                    .expect("can extract a recipient address from a transparent recipient_address"),
                     sent_tx.target_height().into(),
                     true,
                 )?;
@@ -4597,6 +4643,19 @@ fn recipient_params<P: consensus::Parameters>(
             Ok((
                 from_account_id,
                 Some(ephemeral_address.encode(_params)),
+                Some(to_account),
+                PoolType::TRANSPARENT,
+            ))
+        }
+        #[cfg(feature = "transparent-inputs")]
+        Recipient::InternalTransparent {
+            receiving_account,
+            recipient_address,
+        } => {
+            let to_account = get_account_ref(conn, *receiving_account)?;
+            Ok((
+                from_account_id,
+                Some(recipient_address.encode(_params)),
                 Some(to_account),
                 PoolType::TRANSPARENT,
             ))

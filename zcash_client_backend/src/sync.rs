@@ -527,6 +527,9 @@ where
                         BlockHeight::try_from(reply.height)
                             .map_err(|_| Error::MisbehavingServer)?,
                     ),
+                    Some(account_id),
+                    None,
+                    None,
                 )
                 .ok_or(Error::MisbehavingServer)
             })

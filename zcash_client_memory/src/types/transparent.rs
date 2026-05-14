@@ -124,8 +124,16 @@ impl ReceivedTransparentOutput {
         &self,
         outpoint: &OutPoint,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
-        WalletTransparentOutput::from_parts(outpoint.clone(), self.txout.clone(), mined_height)
+        funding_account: Option<AccountId>,
+    ) -> Option<WalletTransparentOutput<AccountId>> {
+        WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            self.txout.clone(),
+            mined_height,
+            Some(self.account_id),
+            Some(self.key_scope),
+            funding_account,
+        )
     }
 }
 

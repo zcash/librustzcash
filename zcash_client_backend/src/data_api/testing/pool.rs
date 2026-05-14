@@ -3350,6 +3350,9 @@ where
         spent_outpoint.clone(),
         TxOut::new(Zatoshis::const_from_u64(100000), taddr.script().into()),
         Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
 
@@ -6007,8 +6010,15 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
         assert_eq!(t_bundle.vout.len(), 1);
 
         let outpoint = OutPoint::new(*txid.as_ref(), 0);
-        let utxo = WalletTransparentOutput::from_parts(outpoint, t_bundle.vout[0].clone(), Some(h))
-            .unwrap();
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint,
+            t_bundle.vout[0].clone(),
+            Some(h),
+            Some(dest_account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
         st.wallet_mut()
             .put_received_transparent_utxo(&utxo)
             .unwrap();
@@ -6300,6 +6310,9 @@ where
         OutPoint::fake(),
         TxOut::new(non_coinbase_value, t_addr.script().into()),
         Some(h),
+        Some(account),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
     )
     .unwrap();
     st.wallet_mut()
