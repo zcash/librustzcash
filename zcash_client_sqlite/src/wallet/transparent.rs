@@ -948,21 +948,17 @@ pub(crate) fn utxo_query_height(
     }
 }
 
-/// Returns the wallet account that most likely funded the transaction with the given
-/// internal id, if any. If multiple wallet accounts contributed inputs to the
-/// transaction, the account that contributed the most value is selected; ties are
-/// broken in favor of the account whose oldest contributed input has the lowest
-/// mined height (with unmined inputs sorting last).
-///
-/// `zcash_client_backend` does not currently support representing multiple funding
-/// accounts on a single output; this heuristic provides a deterministic
-/// single-account choice when more than one wallet account contributed funds.
-fn find_funding_account(
+/// Returns the wallet accounts that contributed inputs to the transaction with the
+/// given internal id, paired with the total value each account contributed. Results
+/// are ordered by total contributed value descending; ties are broken in favor of
+/// the account whose oldest contributed input has the lowest mined height (with
+/// unmined inputs sorting last), then by `accounts.id`.
+fn list_funding_accounts(
     conn: &rusqlite::Connection,
     creating_tx_id: i64,
-) -> Result<Option<AccountUuid>, SqliteClientError> {
+) -> Result<Vec<(AccountUuid, Zatoshis)>, SqliteClientError> {
     let mut stmt = conn.prepare_cached(
-        "SELECT a.uuid
+        "SELECT a.uuid, contribs.total_value
          FROM accounts a
          JOIN (
              SELECT account_id,
@@ -992,16 +988,23 @@ fn find_funding_account(
              )
              GROUP BY account_id
          ) contribs ON contribs.account_id = a.id
-         ORDER BY contribs.total_value DESC, contribs.oldest_mined ASC, a.id ASC
-         LIMIT 1",
+         ORDER BY contribs.total_value DESC, contribs.oldest_mined ASC, a.id ASC",
     )?;
 
     stmt.query_and_then(
         named_params![":creating_tx_id": creating_tx_id],
-        |row| -> Result<AccountUuid, SqliteClientError> { Ok(AccountUuid(row.get(0)?)) },
+        |row| -> Result<(AccountUuid, Zatoshis), SqliteClientError> {
+            let account = AccountUuid(row.get(0)?);
+            let raw_value: i64 = row.get(1)?;
+            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
+                SqliteClientError::CorruptedData(format!(
+                    "Invalid funding contribution value: {raw_value}"
+                ))
+            })?;
+            Ok((account, value))
+        },
     )?
-    .next()
-    .transpose()
+    .collect()
 }
 
 fn to_unspent_transparent_output(
@@ -1023,7 +1026,13 @@ fn to_unspent_transparent_output(
     let key_scope = KeyScope::decode(row.get("key_scope")?)?.as_transparent();
     let creating_tx_id: i64 = row.get("creating_tx_id")?;
 
-    let funding_account = find_funding_account(conn, creating_tx_id)?;
+    // `WalletTransparentOutput` records at most a single funding account; when
+    // multiple wallet accounts contributed inputs to the creating transaction we
+    // pick the largest contributor.
+    let funding_account = list_funding_accounts(conn, creating_tx_id)?
+        .into_iter()
+        .next()
+        .map(|(account, _)| account);
 
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(

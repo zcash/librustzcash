@@ -1062,11 +1062,19 @@ where
                 on_received(account_id, t_key_scope);
             }
 
-            // When we receive transparent funds (particularly as ephemeral outputs
-            // in transaction pairs sending to a ZIP 320 address) it becomes
-            // possible that the spend of these outputs is not then later detected
-            // if the transaction that spends them is purely transparent. This is
-            // especially a problem in wallet recovery.
+            // Queue this outpoint for explicit transparent-spend detection.
+            //
+            // Unlike shielded notes -- whose spends are detected naturally
+            // during scanning via nullifier matching -- transparent spends are
+            // only found when the wallet already knows which outpoints to
+            // watch. For receives at ordinary transparent addresses this is
+            // handled by indexer-driven address watches, but for receives at
+            // ephemeral addresses (e.g. the middle hop of a ZIP 320 / TEX
+            // flow) there is no ongoing watch. A purely-transparent spend of
+            // such an output would otherwise go undetected. This is
+            // especially a problem in wallet recovery, where transactions can
+            // be processed out of order: queuing here ensures the spend is
+            // detected even when the receive side is processed first.
             wallet_db.queue_transparent_spend_detection(
                 *output.recipient_address(),
                 tx_ref,

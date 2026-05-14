@@ -781,7 +781,7 @@ impl proposal::Proposal {
                                                             out.index,
                                                         )
                                                     })?
-                                                    .without_account_id(),
+                                                    .redact_account_data(),
                                             );
                                         }
                                     }

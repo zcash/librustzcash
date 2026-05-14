@@ -74,10 +74,15 @@ impl NoteId {
 ///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
+    /// An output sent to a recipient external to the wallet.
     External {
         recipient_address: ZcashAddress,
         output_pool: PoolType,
     },
+    /// A transparent output sent to an ephemeral address of a wallet account
+    /// (e.g. the middle hop of a ZIP 320 / TEX flow). The `outpoint` is
+    /// recorded so the wallet can later detect when this output is spent
+    /// without relying on a continuous address watch.
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent {
         receiving_account: AccountId,
@@ -87,11 +92,22 @@ pub enum Recipient<AccountId> {
     /// A transparent output sent to a non-ephemeral transparent address belonging to
     /// a wallet account. Used to record the send side of a transparent output that
     /// the wallet both funded and received.
+    ///
+    /// Distinct from [`Self::InternalAccount`] because for transparent outputs
+    /// the recipient address is observable on chain and must be recorded;
+    /// additionally, the receiving account may not be known at the point the
+    /// send is recorded. For shielded outputs the recipient address is not
+    /// externally meaningful, so wallet-internal sends are recorded against
+    /// the receiving account alone.
     #[cfg(feature = "transparent-inputs")]
     InternalTransparent {
         receiving_account: AccountId,
         recipient_address: TransparentAddress,
     },
+    /// A shielded output recorded against a wallet account. Used for
+    /// same-account outputs such as change (`external_address` is `None`) and
+    /// for outputs received via an external IVK but funded by another wallet
+    /// account, in which case `external_address` is the address that was paid.
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
@@ -219,11 +235,24 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
             })
     }
 
-    /// Strips the `AccountId` from this output struct.
+    /// Returns a copy of this output with account-identifying data redacted,
+    /// for inclusion in a [`Proposal`].
     ///
-    /// Used by the ZIP 321 Proposal type.
+    /// Specifically:
+    /// - The `AccountId` type parameter is replaced with `()`, erasing the value
+    ///   of `recipient_account` while preserving whether the output is
+    ///   wallet-owned (the `Some` / `None` distinction is retained).
+    /// - `funding_account` is cleared to `None`, since a proposal does not
+    ///   carry information about which account funded prior outputs.
+    ///
+    /// Used when constructing or reconstructing a [`Proposal`], whose
+    /// transparent inputs are deliberately account-agnostic so that proposals
+    /// can be wire-encoded and shared without revealing wallet account
+    /// structure.
+    ///
+    /// [`Proposal`]: crate::proposal::Proposal
     #[cfg(feature = "transparent-inputs")]
-    pub(crate) fn without_account_id(self) -> WalletTransparentOutput<()> {
+    pub(crate) fn redact_account_data(self) -> WalletTransparentOutput<()> {
         WalletTransparentOutput {
             outpoint: self.outpoint,
             txout: self.txout,
@@ -284,7 +313,8 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     ///   structurally, when [`recipient_key_scope`](Self::recipient_key_scope) is
     ///   `INTERNAL` or `EPHEMERAL` (those key scopes exist only within a single
     ///   account), or by observation, when the recipient account is also the
-    ///   [`funding_account`](Self::funding_account).
+    ///   [`funding_account`](Self::funding_account). The latter case also covers
+    ///   standalone addresses, which have no key scope.
     /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
     ///   the [`funding_account`](Self::funding_account) is a different wallet account
     ///   (a cross-account transfer within the wallet).
@@ -294,17 +324,18 @@ impl<AccountId> WalletTransparentOutput<AccountId> {
     where
         AccountId: PartialEq,
     {
-        match (&self.recipient_account, self.recipient_key_scope) {
-            (None, _) => TransferType::Outgoing,
-            (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL)) => {
+        match (
+            self.recipient_account.as_ref(),
+            self.recipient_key_scope,
+            self.funding_account.as_ref(),
+        ) {
+            (None, _, _) => TransferType::Outgoing,
+            (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL), _) => {
                 TransferType::AccountInternal
             }
-            (Some(r), _) if self.funding_account.as_ref() == Some(r) => {
-                TransferType::AccountInternal
-            }
-            (Some(_), _) if self.funding_account.is_some() => TransferType::WalletInternal,
-            (Some(_), None) => TransferType::Incoming,
-            (Some(_), Some(_)) => TransferType::Incoming,
+            (Some(r), _, Some(r0)) if r == r0 => TransferType::AccountInternal,
+            (Some(_), _, Some(_)) => TransferType::WalletInternal,
+            (Some(_), _, _) => TransferType::Incoming,
         }
     }
 
