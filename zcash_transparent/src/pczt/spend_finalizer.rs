@@ -35,8 +35,8 @@ impl super::Bundle {
                                 input.script_sig = Some(script::Component(vec![
                                     pv::push_value(sig_bytes)
                                         .ok_or(SpendFinalizerError::InvalidSignature)?,
-                                    // `pubkey` is a fixed 33-byte compressed key, so its push always fits.
-                                    pv::push_value(pubkey).expect("33-byte pubkey fits"),
+                                    pv::push_value(pubkey)
+                                        .ok_or(SpendFinalizerError::InvalidSignature)?,
                                 ]));
                                 Ok(())
                             }
@@ -146,4 +146,73 @@ pub enum SpendFinalizerError {
     UnsupportedScriptPubkey,
     /// The `redeem_script` kind is unsupported.
     UnsupportedRedeemScript,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+    use alloc::vec;
+
+    use zcash_script::{
+        pattern::pay_to_pubkey_hash,
+        script::{self, Evaluable},
+    };
+
+    use super::SpendFinalizerError;
+    use crate::{
+        pczt::{Bundle, Input, parse::MAX_SCRIPT_PUSH_VALUE_LEN},
+        sighash::SIGHASH_ALL,
+    };
+
+    /// The P2PKH branch of `Bundle::finalize_spends` returns
+    /// `Err(SpendFinalizerError::InvalidSignature)` for a `partial_signatures`
+    /// entry too large to fit in a single script push, rather than panicking.
+    ///
+    /// `Input::parse` rejects such entries, so the test constructs a valid input
+    /// and then replaces its `partial_signatures` directly.
+    #[test]
+    fn p2pkh_finalize_spends_rejects_oversize_signature() {
+        // Any 33-byte value works as the key: the P2PKH branch only checks that
+        // hash160(pubkey) matches the script_pubkey hash, and both sides of that
+        // comparison are derived from this value.
+        let pubkey = [0x02u8; 33];
+        let script_pubkey_bytes = script::Component(pay_to_pubkey_hash(&pubkey)).to_bytes();
+
+        let mut input = Input::parse(
+            [0u8; 32],           // prevout_txid
+            0,                   // prevout_index
+            None,                // sequence
+            None,                // required_time_lock_time
+            None,                // required_height_lock_time
+            None,                // script_sig
+            1_000,               // value
+            script_pubkey_bytes, // script_pubkey
+            None,                // redeem_script
+            BTreeMap::new(),     // partial_signatures
+            SIGHASH_ALL,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .expect("input parse should succeed");
+
+        // One byte over the largest value a single script push can carry.
+        input
+            .partial_signatures
+            .insert(pubkey, vec![0x42u8; MAX_SCRIPT_PUSH_VALUE_LEN + 1]);
+
+        let mut bundle = Bundle {
+            inputs: vec![input],
+            outputs: vec![],
+        };
+
+        let result = bundle.finalize_spends();
+        assert!(
+            matches!(result, Err(SpendFinalizerError::InvalidSignature)),
+            "expected Err(InvalidSignature), got {result:?}",
+        );
+    }
 }
