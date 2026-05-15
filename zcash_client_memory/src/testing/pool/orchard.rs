@@ -9,6 +9,11 @@ fn send_single_step_proposed_transfer() {
 }
 
 #[test]
+fn scan_full_block_detects_outputs() {
+    testing::pool::scan_full_block_detects_outputs::<OrchardPoolTester>()
+}
+
+#[test]
 #[ignore] //FIXME
 #[cfg(feature = "transparent-inputs")]
 fn send_multi_step_proposed_transfer() {
