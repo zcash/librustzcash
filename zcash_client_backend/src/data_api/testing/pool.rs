@@ -6404,3 +6404,298 @@ where
         "All proposal should contain both transparent inputs"
     );
 }
+
+/// Verifies that `propose_shielding_coinbase` with a shielded destination produces
+/// a proposal containing a single ZIP-321 payment to the supplied address for the
+/// full available value (input total minus fee), with no change.
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    // Coinbase outputs require 100 confirmations.
+    st.add_empty_blocks(100);
+
+    // The destination is a shielded address controlled by a separate spending key
+    // (i.e. potentially in a different wallet).
+    let to_extsk = T::sk(&[0xab; 32]);
+    let to_address = T::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let proposal = st
+        .propose_shielding_coinbase(
+            &GreedyInputSelector::new(),
+            &StandardFeeRule::Zip317,
+            Zatoshis::ZERO,
+            &[t_addr],
+            to_address.clone(),
+            None,
+            None,
+        )
+        .expect("propose_shielding_coinbase with a shielded destination should succeed");
+
+    let step = proposal.steps().first();
+    assert_eq!(
+        step.transparent_inputs().len(),
+        1,
+        "Expected exactly one coinbase transparent input"
+    );
+    let payments = step.transaction_request().payments();
+    assert_eq!(
+        payments.len(),
+        1,
+        "Expected exactly one payment in proposal"
+    );
+    let (idx, payment) = payments.iter().next().unwrap();
+    assert_eq!(*idx, 0);
+    assert_eq!(payment.recipient_address(), &to_address);
+    assert_eq!(
+        step.balance().proposed_change().len(),
+        0,
+        "Coinbase shielding must produce no change"
+    );
+
+    let fee = step.balance().fee_required();
+    let payment_amount = payment.amount().expect("payment must have an amount");
+    assert_eq!(
+        (payment_amount + fee).unwrap(),
+        coinbase_value,
+        "payment_amount + fee must equal coinbase input value"
+    );
+}
+
+/// Verifies that `propose_shielding_coinbase` rejects a transparent destination
+/// with [`ProposalError::ShieldingRequiresShieldedRecipient`].
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_shielding_coinbase_transparent_recipient_rejected<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    st.add_empty_blocks(100);
+
+    let bad_to_address = Address::Transparent(TransparentAddress::PublicKeyHash([7; 20]))
+        .to_zcash_address(st.network());
+
+    let result = st.propose_shielding_coinbase(
+        &GreedyInputSelector::new(),
+        &StandardFeeRule::Zip317,
+        Zatoshis::ZERO,
+        &[t_addr],
+        bad_to_address,
+        None,
+        None,
+    );
+
+    assert_matches!(
+        result,
+        Err(Error::Proposal(
+            ProposalError::ShieldingRequiresShieldedRecipient
+        ))
+    );
+}
+
+/// Verifies that `propose_shielding_coinbase` propagates the supplied `memo`
+/// into the resulting payment's memo field.
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_shielding_coinbase_with_memo_succeeds<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    st.add_empty_blocks(100);
+
+    let to_extsk = T::sk(&[0xcd; 32]);
+    let to_address = T::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let memo_text = "shielding to external wallet";
+    let memo_bytes = MemoBytes::from(memo_text.parse::<Memo>().unwrap());
+
+    let proposal = st
+        .propose_shielding_coinbase(
+            &GreedyInputSelector::new(),
+            &StandardFeeRule::Zip317,
+            Zatoshis::ZERO,
+            &[t_addr],
+            to_address,
+            Some(memo_bytes.clone()),
+            None,
+        )
+        .expect("propose_shielding_coinbase with memo should succeed");
+
+    let payments = proposal.steps().first().transaction_request().payments();
+    let (_, payment) = payments.iter().next().unwrap();
+    assert_eq!(payment.memo(), Some(&memo_bytes));
+}
+
+/// Verifies that `propose_shielding_coinbase` with `limit = Some(n)` selects at
+/// most `n` UTXOs, preferring the highest-value coinbase outputs.
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_shielding_coinbase_with_limit_truncates_inputs<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+
+    // Mine three coinbase transactions to the same recipient at successive heights,
+    // with distinct values so we can verify the highest-value-first selection.
+    let values = [
+        Zatoshis::const_from_u64(30000),
+        Zatoshis::const_from_u64(70000),
+        Zatoshis::const_from_u64(50000),
+    ];
+    let mut first_h = None;
+    for v in values {
+        let coinbase_height = if let Some(h) = first_h {
+            h + values.len() as u32 // arbitrary; only first_h matters for maturity
+        } else {
+            st.sapling_activation_height()
+        };
+        let build = build_transparent_coinbase_tx(
+            st.network(),
+            TargetHeight::from(coinbase_height),
+            v,
+            t_addr,
+            None,
+        );
+        let tx = build.transaction();
+        let (h, _) = st.generate_next_block_from_tx(0, tx);
+        st.scan_cached_blocks(h, 1);
+        let params = *st.network();
+        decrypt_and_store_transaction(&params, st.wallet_mut(), tx, Some(h)).unwrap();
+        if first_h.is_none() {
+            first_h = Some(h);
+        }
+    }
+    // Mature all three.
+    st.add_empty_blocks(100);
+
+    let to_extsk = T::sk(&[0x55; 32]);
+    let to_address = T::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let proposal = st
+        .propose_shielding_coinbase(
+            &GreedyInputSelector::new(),
+            &StandardFeeRule::Zip317,
+            Zatoshis::ZERO,
+            &[t_addr],
+            to_address,
+            None,
+            Some(2),
+        )
+        .expect("propose_shielding_coinbase with limit=Some(2) should succeed");
+
+    let inputs = proposal.steps().first().transparent_inputs();
+    assert_eq!(
+        inputs.len(),
+        2,
+        "limit=Some(2) should select exactly 2 inputs"
+    );
+
+    // The two highest-value coinbase UTXOs are 70000 and 50000.
+    let mut selected_values: Vec<u64> = inputs.iter().map(|i| i.value().into_u64()).collect();
+    selected_values.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(selected_values, vec![70000, 50000]);
+}
+
+/// Verifies that `propose_shielding_coinbase` with `limit = Some(0)` selects no
+/// inputs, returning [`InputSelectorError::InsufficientFunds`].
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let (t_addr, _) = st.get_account().usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    st.add_empty_blocks(100);
+
+    let to_extsk = T::sk(&[0x66; 32]);
+    let to_address = T::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let shielding_threshold = Zatoshis::const_from_u64(10000);
+    let result = st.propose_shielding_coinbase(
+        &GreedyInputSelector::new(),
+        &StandardFeeRule::Zip317,
+        shielding_threshold,
+        &[t_addr],
+        to_address,
+        None,
+        Some(0),
+    );
+
+    // With no inputs selected, `payment_amount = input_total - fee` underflows
+    // (input_total = 0, fee > 0), producing `Error::InsufficientFunds` with
+    // `available: 0, required: fee`.
+    assert_matches!(result, Err(Error::InsufficientFunds { .. }));
+}

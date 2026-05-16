@@ -469,3 +469,45 @@ pub(crate) fn coinbase_only_filtering<T: ShieldedPoolTester>() {
         BlockCache::new(),
     );
 }
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_succeeds::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_shielding_coinbase_transparent_recipient_rejected<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_transparent_recipient_rejected::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_shielding_coinbase_with_memo_succeeds<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_with_memo_succeeds::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new());
+}
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_shielding_coinbase_with_limit_truncates_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_with_limit_truncates_inputs::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_with_zero_limit_insufficient_funds::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
