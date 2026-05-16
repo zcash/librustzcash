@@ -25,24 +25,6 @@ pub(crate) struct DecryptedOutput<IvkTag, D: Domain, M> {
     pub(crate) memo: M,
 }
 
-impl<IvkTag, D, M> Clone for DecryptedOutput<IvkTag, D, M>
-where
-    IvkTag: Clone,
-    D: Domain,
-    D::Recipient: Clone,
-    D::Note: Clone,
-    M: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            ivk_tag: self.ivk_tag.clone(),
-            recipient: self.recipient.clone(),
-            note: self.note.clone(),
-            memo: self.memo.clone(),
-        }
-    }
-}
-
 impl<IvkTag, D: Domain, M> fmt::Debug for DecryptedOutput<IvkTag, D, M>
 where
     IvkTag: fmt::Debug,

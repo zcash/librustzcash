@@ -19,7 +19,7 @@ macro_rules! spawn {
         tokio::task::Builder::new()
             .name($name)
             .spawn($f)
-            .expect("panic to match tokio::task::spawn")
+            .expect("spawning a task fails only when the Tokio runtime is shutting down")
     };
 }
 
@@ -44,6 +44,6 @@ macro_rules! spawn_blocking {
         tokio::task::Builder::new()
             .name($name)
             .spawn_blocking($f)
-            .expect("panic to match tokio::task::spawn_blocking")
+            .expect("spawning a blocking task fails only when the Tokio runtime is shutting down")
     };
 }

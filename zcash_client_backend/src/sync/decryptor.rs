@@ -1,5 +1,6 @@
 //! Full block batch decryption engine.
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -119,6 +120,39 @@ impl Builder {
     }
 }
 
+/// The reason a non-blocking [`Handle::try_queue_block`] or [`Handle::try_queue_tx`]
+/// request was rejected.
+///
+/// The rejected payload (the `Block` or `Transaction`) is returned in both cases, so that
+/// the caller may retry.
+#[derive(Debug)]
+pub enum TryQueueError<T> {
+    /// The batch decryptor has shut down.
+    Shutdown(Box<T>),
+    /// The batch decryptor queue is full.
+    Full(Box<T>),
+}
+
+impl<T> TryQueueError<T> {
+    /// Returns the rejected payload, discarding the reason for rejection.
+    pub fn into_inner(self) -> T {
+        match self {
+            TryQueueError::Shutdown(payload) | TryQueueError::Full(payload) => *payload,
+        }
+    }
+}
+
+impl<T> fmt::Display for TryQueueError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TryQueueError::Shutdown(_) => f.write_str("the batch decryptor has shut down"),
+            TryQueueError::Full(_) => f.write_str("the batch decryptor queue is full"),
+        }
+    }
+}
+
+impl<T: fmt::Debug> std::error::Error for TryQueueError<T> {}
+
 /// A handle to a batch decryption [`Engine`].
 #[derive(Clone)]
 pub struct Handle<AccountId, IvkTag> {
@@ -144,24 +178,27 @@ impl<AccountId, IvkTag> Handle<AccountId, IvkTag> {
         }
     }
 
-    /// Requests decryption of a block.
+    /// Requests decryption of a block, without waiting for queue space.
     ///
-    /// - Returns `None` if the batch decryptor has shut down.
-    /// - Returns `Some(Err(block))` if the batch decryptor queue is full.
+    /// On failure the rejected `block` is returned, so that the caller may retry: see
+    /// [`TryQueueError`].
     pub fn try_queue_block(
         &self,
         block: Block,
-    ) -> Option<Result<oneshot::Receiver<BlockDecryptResult<AccountId, IvkTag>>, Block>> {
+    ) -> Result<oneshot::Receiver<BlockDecryptResult<AccountId, IvkTag>>, TryQueueError<Block>>
+    {
         let (on_complete, rx) = oneshot::channel();
         match self
             .handle
             .try_send(DecryptRequest::Block { block, on_complete })
         {
-            Ok(()) => Some(Ok(rx)),
+            Ok(()) => Ok(rx),
             Err(mpsc::error::TrySendError::Full(DecryptRequest::Block { block, .. })) => {
-                Some(Err(block))
+                Err(TryQueueError::Full(Box::new(block)))
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => None,
+            Err(mpsc::error::TrySendError::Closed(DecryptRequest::Block { block, .. })) => {
+                Err(TryQueueError::Shutdown(Box::new(block)))
+            }
             _ => unreachable!(),
         }
     }
@@ -189,24 +226,28 @@ impl<AccountId, IvkTag> Handle<AccountId, IvkTag> {
         }
     }
 
-    /// Requests decryption of a transaction.
+    /// Requests decryption of a transaction, without waiting for queue space.
     ///
-    /// - Returns `None` if the batch decryptor has shut down.
-    /// - Returns `Some(Err(tx))` if the batch decryptor queue is full.
+    /// On failure the rejected `tx` is returned, so that the caller may retry: see
+    /// [`TryQueueError`].
     pub fn try_queue_tx(
         &self,
         tx: Transaction,
         mempool_height: BlockHeight,
-    ) -> Option<Result<oneshot::Receiver<BatchResult<IvkTag>>, Transaction>> {
+    ) -> Result<oneshot::Receiver<BatchResult<IvkTag>>, TryQueueError<Transaction>> {
         let (on_complete, rx) = oneshot::channel();
         match self.handle.try_send(DecryptRequest::Tx {
             tx,
             mempool_height,
             on_complete,
         }) {
-            Ok(()) => Some(Ok(rx)),
-            Err(mpsc::error::TrySendError::Full(DecryptRequest::Tx { tx, .. })) => Some(Err(tx)),
-            Err(mpsc::error::TrySendError::Closed(_)) => None,
+            Ok(()) => Ok(rx),
+            Err(mpsc::error::TrySendError::Full(DecryptRequest::Tx { tx, .. })) => {
+                Err(TryQueueError::Full(Box::new(tx)))
+            }
+            Err(mpsc::error::TrySendError::Closed(DecryptRequest::Tx { tx, .. })) => {
+                Err(TryQueueError::Shutdown(Box::new(tx)))
+            }
             _ => unreachable!(),
         }
     }
@@ -296,6 +337,11 @@ where
             &scanning_keys,
         );
 
+        // Whether a request has been processed since the last flush. The idle-flush
+        // timer is only armed while this is set, so that a quiescent engine does not
+        // wake up to perform no-op flushes.
+        let mut idle_flush_pending = false;
+
         loop {
             tokio::select! {
                 request = self.queue.recv() => match request {
@@ -325,6 +371,7 @@ where
                             // An error means the calling task is shutting down.
                             let _ = on_complete.send((scanning_keys, header, vtx));
                         });
+                        idle_flush_pending = true;
                     }
 
                     // Mempool decryption.
@@ -338,6 +385,7 @@ where
                             // An error means the calling task is shutting down.
                             let _ = on_complete.send(batch.wait());
                         });
+                        idle_flush_pending = true;
                     }
 
                     // Key reload. Flush any pending batches under the current keys
@@ -355,15 +403,19 @@ where
 
                         // An error means the calling task is shutting down.
                         let _ = on_complete.send(());
+                        idle_flush_pending = false;
                     }
 
                     // Calling tasks are shutting down, so we are done.
                     None => return Ok(()),
                 },
 
-                // Timed out waiting for another decryption request; ensure all prior
-                // requests are running.
-                _ = time::sleep(self.batch_start_delay) => runners.flush(),
+                // No new requests have arrived within `batch_start_delay` of the last
+                // one; flush so any sub-threshold batch is run rather than left waiting.
+                _ = time::sleep(self.batch_start_delay), if idle_flush_pending => {
+                    runners.flush();
+                    idle_flush_pending = false;
+                }
             }
         }
     }

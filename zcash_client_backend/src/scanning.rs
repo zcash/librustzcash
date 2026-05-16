@@ -511,6 +511,13 @@ pub enum ScanError {
         protocol: ShieldedProtocol,
         at_height: BlockHeight,
     },
+
+    /// The size of the note commitment tree for the given protocol would exceed the
+    /// `u32` range as a result of applying the outputs in the block being scanned.
+    TreeSizeOverflow {
+        protocol: ShieldedProtocol,
+        at_height: BlockHeight,
+    },
 }
 
 impl ScanError {
@@ -524,6 +531,7 @@ impl ScanError {
             TreeSizeMismatch { .. } => true,
             TreeSizeUnknown { .. } => false,
             TreeSizeInvalid { .. } => false,
+            TreeSizeOverflow { .. } => false,
         }
     }
 
@@ -537,6 +545,7 @@ impl ScanError {
             TreeSizeMismatch { at_height, .. } => *at_height,
             TreeSizeUnknown { at_height, .. } => *at_height,
             TreeSizeInvalid { at_height, .. } => *at_height,
+            TreeSizeOverflow { at_height, .. } => *at_height,
         }
     }
 }
@@ -596,9 +605,20 @@ impl fmt::Display for ScanError {
                     "Received invalid (potentially default) {protocol:?} note commitment tree size metadata at height {at_height}"
                 )
             }
+            TreeSizeOverflow {
+                protocol,
+                at_height,
+            } => {
+                write!(
+                    f,
+                    "The {protocol:?} note commitment tree size at height {at_height} would exceed the `u32` range."
+                )
+            }
         }
     }
 }
+
+impl std::error::Error for ScanError {}
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKeys`].
 ///

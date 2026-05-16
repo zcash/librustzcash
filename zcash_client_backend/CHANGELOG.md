@@ -38,6 +38,8 @@ workspace.
   - `full` module, providing full-block scanning.
   - `Nullifiers::unspent` and `Nullifiers::update_with` are now public, for use
     when driving block scanning via the `full` module.
+  - `ScanError::TreeSizeOverflow`
+  - `impl std::error::Error for ScanError`
 - `zcash_client_backend::sync`:
   - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
     Tokio-based batch decryption engine for full blocks and transactions.

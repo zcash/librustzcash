@@ -207,6 +207,9 @@ impl<IvkTag> PendingBatch<IvkTag> {
 }
 
 /// The result of batch-decrypting a single transaction.
+///
+/// This is an opaque value, produced by [`decrypt_block`] (or the `sync::decryptor`
+/// engine) and consumed by [`scan_block`]; it is not intended to be inspected directly.
 pub struct BatchResult<IvkTag> {
     tx: Transaction,
     sapling: HashMap<usize, DecryptedOutput<IvkTag, SaplingDomain, <SaplingDomain as Domain>::Memo>>,
@@ -260,6 +263,7 @@ where
 
 /// Errors that can occur while scanning a full block via [`scan_block`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ScanBlockError<E> {
     /// A structural or continuity error in the block being scanned.
     Scan(ScanError),
@@ -271,6 +275,27 @@ pub enum ScanBlockError<E> {
 impl<E> From<ScanError> for ScanBlockError<E> {
     fn from(e: ScanError) -> Self {
         ScanBlockError::Scan(e)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for ScanBlockError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScanBlockError::Scan(e) => write!(f, "Error scanning block: {e}"),
+            ScanBlockError::AddressLookup(e) => write!(
+                f,
+                "Error looking up the wallet account for a transparent address: {e}"
+            ),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for ScanBlockError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ScanBlockError::Scan(e) => Some(e),
+            ScanBlockError::AddressLookup(e) => Some(e),
+        }
     }
 }
 
@@ -298,7 +323,7 @@ pub fn scan_block<P, AccountId, IvkTag, E>(
     params: &P,
     height: BlockHeight,
     header: &BlockHeader,
-    vtx: &[BatchResult<IvkTag>],
+    vtx: Vec<BatchResult<IvkTag>>,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
@@ -350,7 +375,7 @@ where
     let cur_hash = header.hash();
     let zip212_enforcement = zip212_enforcement(params, height);
 
-    let mut pos_tracker = PositionTracker::for_block(params, height, vtx, prior_block_metadata)?;
+    let mut pos_tracker = PositionTracker::for_block(params, height, &vtx, prior_block_metadata)?;
 
     let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
 
@@ -362,13 +387,18 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
-    for (tx_index, tx) in vtx.iter().enumerate() {
-        let txid = tx.tx.txid();
+    for (tx_index, batch) in vtx.into_iter().enumerate() {
+        let BatchResult {
+            tx,
+            sapling: sapling_decrypted,
+            #[cfg(feature = "orchard")]
+                orchard: orchard_decrypted,
+        } = batch;
+        let txid = tx.txid();
         let tx_index =
             TxIndex::try_from(tx_index).expect("Cannot fit more than 2^16 transactions in a block");
 
         let (sapling_spends, sapling_unlinked_nullifiers) = tx
-            .tx
             .sapling_bundle()
             .map(|bundle| {
                 find_spent(
@@ -385,7 +415,6 @@ where
         #[cfg(feature = "orchard")]
         let orchard_spends = {
             let (orchard_spends, orchard_unlinked_nullifiers) = tx
-                .tx
                 .orchard_bundle()
                 .map(|bundle| {
                     find_spent(
@@ -414,17 +443,18 @@ where
         if spent_from_accounts.len() > 1 {
             warn!(
                 "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
-                tx.tx.txid(),
+                txid,
                 funding_account
                     .expect("funding_account is Some when spent_from_accounts is nonempty")
             )
         }
 
-        // Transparent spend detection for full blocks is not yet implemented; only
+        // TODO: Transparent spend detection for full blocks is not yet implemented; only
         // received transparent outputs are scanned here.
+        // https://github.com/zcash/librustzcash/issues/2395
         let transparent_outputs = detect_wallet_transparent_outputs(
             params,
-            &tx.tx,
+            &tx,
             Some(height),
             funding_account,
             #[cfg(feature = "transparent-inputs")]
@@ -434,12 +464,11 @@ where
         let has_transparent = !transparent_outputs.is_empty();
 
         let (sapling_outputs, mut sapling_nc) = tx
-            .tx
             .sapling_bundle()
             .map(|bundle| {
                 find_received(
                     height,
-                    pos_tracker.tx_contains_last_sapling_outputs_in_block(&tx.tx),
+                    pos_tracker.tx_contains_last_sapling_outputs_in_block(&tx),
                     txid,
                     |output_idx| pos_tracker.sapling_note_position(output_idx),
                     &scanning_keys.sapling,
@@ -449,7 +478,7 @@ where
                         .iter()
                         .map(|output| (SaplingDomain::new(zip212_enforcement), output.clone()))
                         .collect::<Vec<_>>(),
-                    Some(|_| tx.sapling.clone()),
+                    Some(move |_| sapling_decrypted),
                     batch::try_note_decryption,
                     |output| sapling::Node::from_cmu(output.cmu()),
                 )
@@ -460,12 +489,11 @@ where
 
         #[cfg(feature = "orchard")]
         let (orchard_outputs, mut orchard_nc) = tx
-            .tx
             .orchard_bundle()
             .map(|bundle| {
                 find_received(
                     height,
-                    pos_tracker.tx_contains_last_orchard_actions_in_block(&tx.tx),
+                    pos_tracker.tx_contains_last_orchard_actions_in_block(&tx),
                     txid,
                     |output_idx| pos_tracker.orchard_note_position(output_idx),
                     &scanning_keys.orchard,
@@ -475,7 +503,7 @@ where
                         .iter()
                         .map(|action| (OrchardDomain::for_action(action), action.clone()))
                         .collect::<Vec<_>>(),
-                    Some(|_| tx.orchard.clone()),
+                    Some(move |_| orchard_decrypted),
                     batch::try_note_decryption,
                     |action| MerkleHashOrchard::from_cmx(action.cmx()),
                 )
@@ -503,7 +531,7 @@ where
             ));
         }
 
-        pos_tracker.increment_over_tx(&tx.tx);
+        pos_tracker.increment_over_tx(&tx);
     }
 
     pos_tracker.check_end_of_block_consistency()?;
@@ -527,6 +555,51 @@ where
     ))
 }
 
+/// Returns the size of the given shielded protocol's note commitment tree both before and
+/// after the application of a block at `at_height`.
+///
+/// - `activation_height` is the height at which `protocol` activated, if set.
+/// - `prior_tree_size` is the tree size as of the end of the previous block, if known.
+/// - `output_counts` yields the number of `protocol` outputs in each transaction of the
+///   block, in order.
+///
+/// Returns [`ScanError::TreeSizeUnknown`] if the starting size cannot be determined (the
+/// block is at or above the protocol's activation height but no prior size is known), or
+/// [`ScanError::TreeSizeOverflow`] if applying the block's outputs would take the tree
+/// size beyond the `u32` range.
+fn tree_sizes_around(
+    at_height: BlockHeight,
+    activation_height: Option<BlockHeight>,
+    prior_tree_size: Option<u32>,
+    mut output_counts: impl Iterator<Item = usize>,
+    protocol: ShieldedProtocol,
+) -> Result<(u32, u32), ScanError> {
+    let start_tree_size = match prior_tree_size {
+        Some(size) => size,
+        // If we're below the protocol's activation height, or it is not set, the tree
+        // size is zero; otherwise the starting size is unknown.
+        None => match activation_height {
+            Some(activation_height) if at_height >= activation_height => {
+                return Err(ScanError::TreeSizeUnknown { protocol, at_height });
+            }
+            _ => 0,
+        },
+    };
+
+    // We pre-compute the end tree size here so we can determine when we reach the last
+    // transaction in the block that adds notes to the tree. This enables us to correctly
+    // set the tree checkpoint in `find_received`. Note commitment tree sizes are
+    // `u32`-bounded by the protocol, so overflow here indicates corrupt or adversarial
+    // input rather than a valid chain state.
+    let overflow = || ScanError::TreeSizeOverflow { protocol, at_height };
+    let end_tree_size = output_counts.try_fold(start_tree_size, |acc, tx_outputs| {
+        let tx_outputs = u32::try_from(tx_outputs).map_err(|_| overflow())?;
+        acc.checked_add(tx_outputs).ok_or_else(overflow)
+    })?;
+
+    Ok((start_tree_size, end_tree_size))
+}
+
 impl PositionTracker {
     fn for_block<P, IvkTag>(
         params: &P,
@@ -537,81 +610,23 @@ impl PositionTracker {
     where
         P: consensus::Parameters,
     {
-        /// Returns the size of the given shielded protocol's note commitment tree before and
-        /// after the application of the given block.
-        #[allow(clippy::too_many_arguments)]
-        fn tree_sizes_around<P, IvkTag>(
-            params: &P,
-            at_height: BlockHeight,
-            vtx: &[BatchResult<IvkTag>],
-            prior_block_metadata: Option<&BlockMetadata>,
-            protocol: ShieldedProtocol,
-            activation_nu: NetworkUpgrade,
-            prior_tree_size: impl Fn(&BlockMetadata) -> Option<u32>,
-            tx_output_count: impl Fn(&Transaction) -> usize,
-        ) -> Result<(u32, u32), ScanError>
-        where
-            P: consensus::Parameters,
-        {
-            let start_tree_size = prior_block_metadata.and_then(prior_tree_size).map_or_else(
-                || {
-                    // If we're below the protocol's activation height, or it is
-                    // not set, the tree size is zero.
-                    params.activation_height(activation_nu).map_or_else(
-                        || Ok(0),
-                        |activation_height| {
-                            if at_height < activation_height {
-                                Ok(0)
-                            } else {
-                                Err(ScanError::TreeSizeUnknown {
-                                    protocol,
-                                    at_height,
-                                })
-                            }
-                        },
-                    )
-                },
-                Ok,
-            )?;
-
-            // We pre-compute the end tree size here so we can determine when we reach the
-            // last transaction in the block that adds notes to the tree. This enables us
-            // to correctly set the tree checkpoint in `find_received`.
-            let end_tree_size = start_tree_size
-                + vtx
-                    .iter()
-                    .map(|tx| &tx.tx)
-                    .map(tx_output_count)
-                    .map(|tx_outputs| u32::try_from(tx_outputs).unwrap())
-                    .sum::<u32>();
-
-            Ok((start_tree_size, end_tree_size))
-        }
-
         let (sapling_prior_tree_size, sapling_final_tree_size) = tree_sizes_around(
-            params,
             at_height,
-            vtx,
-            prior_block_metadata,
+            params.activation_height(NetworkUpgrade::Sapling),
+            prior_block_metadata.and_then(|m| m.sapling_tree_size()),
+            vtx.iter()
+                .map(|b| b.tx.sapling_bundle().map_or(0, |bd| bd.shielded_outputs().len())),
             ShieldedProtocol::Sapling,
-            NetworkUpgrade::Sapling,
-            |m| m.sapling_tree_size(),
-            |tx| {
-                tx.sapling_bundle()
-                    .map_or(0, |b| b.shielded_outputs().len())
-            },
         )?;
 
         #[cfg(feature = "orchard")]
         let (orchard_prior_tree_size, orchard_final_tree_size) = tree_sizes_around(
-            params,
             at_height,
-            vtx,
-            prior_block_metadata,
+            params.activation_height(NetworkUpgrade::Nu5),
+            prior_block_metadata.and_then(|m| m.orchard_tree_size()),
+            vtx.iter()
+                .map(|b| b.tx.orchard_bundle().map_or(0, |bd| bd.actions().len())),
             ShieldedProtocol::Orchard,
-            NetworkUpgrade::Nu5,
-            |m| m.orchard_tree_size(),
-            |tx| tx.orchard_bundle().map_or(0, |b| b.actions().len()),
         )?;
 
         Ok(Self {
@@ -664,5 +679,106 @@ impl PositionTracker {
         assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tree_sizes_around;
+    use crate::scanning::ScanError;
+    use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
+
+    #[test]
+    fn uses_known_prior_size() {
+        // A known prior tree size is the starting point, and each transaction's outputs
+        // are added to reach the final size.
+        let result = tree_sizes_around(
+            BlockHeight::from(100u32),
+            Some(BlockHeight::from(1u32)),
+            Some(10),
+            [2usize, 3].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert_eq!(result.unwrap(), (10, 15));
+    }
+
+    #[test]
+    fn zero_below_activation_without_prior() {
+        // No prior size, and the block is below the activation height: the tree starts
+        // empty.
+        let result = tree_sizes_around(
+            BlockHeight::from(5u32),
+            Some(BlockHeight::from(10u32)),
+            None,
+            [1usize, 1].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert_eq!(result.unwrap(), (0, 2));
+    }
+
+    #[test]
+    fn zero_when_activation_unset() {
+        // No prior size and no activation height (e.g. a protocol not activated on this
+        // network): the tree starts empty.
+        let result = tree_sizes_around(
+            BlockHeight::from(100u32),
+            None,
+            None,
+            [4usize].into_iter(),
+            ShieldedProtocol::Orchard,
+        );
+        assert_eq!(result.unwrap(), (0, 4));
+    }
+
+    #[test]
+    fn prior_size_takes_precedence_below_activation() {
+        // A known prior size is used even when the block is below the activation height.
+        let result = tree_sizes_around(
+            BlockHeight::from(5u32),
+            Some(BlockHeight::from(10u32)),
+            Some(7),
+            [1usize].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert_eq!(result.unwrap(), (7, 8));
+    }
+
+    #[test]
+    fn unknown_at_or_above_activation_without_prior() {
+        // At the activation height with no prior size, the starting size cannot be
+        // determined.
+        let result = tree_sizes_around(
+            BlockHeight::from(10u32),
+            Some(BlockHeight::from(10u32)),
+            None,
+            [1usize].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert!(matches!(
+            result,
+            Err(ScanError::TreeSizeUnknown {
+                protocol: ShieldedProtocol::Sapling,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn overflow_is_reported() {
+        // Applying the block's outputs would push the tree size beyond the `u32` range.
+        let result = tree_sizes_around(
+            BlockHeight::from(100u32),
+            Some(BlockHeight::from(1u32)),
+            Some(u32::MAX - 1),
+            [2usize].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert!(matches!(
+            result,
+            Err(ScanError::TreeSizeOverflow {
+                protocol: ShieldedProtocol::Sapling,
+                ..
+            })
+        ));
     }
 }
