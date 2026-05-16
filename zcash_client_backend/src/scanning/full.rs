@@ -204,6 +204,29 @@ impl<IvkTag> PendingBatch<IvkTag> {
                 .unwrap_or_default(),
         }
     }
+
+    /// Waits, without blocking the current thread, until the results of the batch are
+    /// ready.
+    ///
+    /// This is the asynchronous counterpart of [`Self::wait`].
+    #[cfg(feature = "sync-decryptor")]
+    pub(crate) async fn wait_async(self) -> BatchResult<IvkTag> {
+        let sapling = match self.sapling_batch {
+            Some(b) => b.into_results_async().await,
+            None => HashMap::new(),
+        };
+        #[cfg(feature = "orchard")]
+        let orchard = match self.orchard_batch {
+            Some(b) => b.into_results_async().await,
+            None => HashMap::new(),
+        };
+        BatchResult {
+            tx: self.tx,
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
 }
 
 /// The result of batch-decrypting a single transaction.

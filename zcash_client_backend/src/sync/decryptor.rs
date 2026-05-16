@@ -321,6 +321,10 @@ where
     /// engine started are picked up. Each block decryption result reports the
     /// [`ScanningKeys`] that were applied to it (see [`Handle::queue_block`]), so that a
     /// caller can detect which keys a given block was scanned with.
+    ///
+    /// For each queued block or transaction the engine spawns a lightweight asynchronous
+    /// task that awaits the batch-runner results; decryption itself runs in parallel on
+    /// the global threadpool. No blocking-pool threads are used.
     pub async fn run<P, E>(
         mut self,
         params: P,
@@ -354,20 +358,17 @@ where
                             .map(|tx| runners.process_transaction(&params, mined_height, tx))
                             .collect::<Vec<_>>();
 
-                        // Take a copy of the scanning keys applied to this block.
+                        // Record the scanning keys applied to this block.
                         let scanning_keys = scanning_keys.clone();
 
-                        // Each request spawns its own blocking task to wait on the batch
-                        // runners. This is simple and keeps the engine loop responsive,
-                        // at the cost of one blocking-pool thread per in-flight request;
-                        // if that pressure becomes a problem, a fixed waiter pool could
-                        // be introduced.
-                        crate::spawn_blocking!("Block decryption waiter", || {
-                            let vtx = batches
-                                .into_iter()
-                                .map(|batch| batch.wait())
-                                .collect::<Vec<_>>();
-
+                        // Await the batch results on a lightweight task, so the engine
+                        // loop stays free to accept further requests. The decryption
+                        // work itself is already running on the global threadpool.
+                        crate::spawn!("Block decryption", async move {
+                            let mut vtx = Vec::with_capacity(batches.len());
+                            for batch in batches {
+                                vtx.push(batch.wait_async().await);
+                            }
                             // An error means the calling task is shutting down.
                             let _ = on_complete.send((scanning_keys, header, vtx));
                         });
@@ -381,9 +382,9 @@ where
                         on_complete,
                     }) => {
                         let batch = runners.process_transaction(&params, mempool_height, tx);
-                        crate::spawn_blocking!("Mempool decryption waiter", || {
+                        crate::spawn!("Mempool decryption", async move {
                             // An error means the calling task is shutting down.
-                            let _ = on_complete.send(batch.wait());
+                            let _ = on_complete.send(batch.wait_async().await);
                         });
                         idle_flush_pending = true;
                     }

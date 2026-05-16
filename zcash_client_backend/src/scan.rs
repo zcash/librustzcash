@@ -1,4 +1,4 @@
-use crossbeam_channel as channel;
+use flume as channel;
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -138,26 +138,10 @@ pub(crate) struct BatchReceiver<IvkTag, D: Domain, M>(channel::Receiver<OutputIt
 
 impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
     fn dynamic_usage(&self) -> usize {
-        // We count the memory usage of items in the channel on the receiver side.
-        let num_items = self.0.len();
-
-        // We know we use unbounded channels, so the items in the channel are stored as a
-        // linked list. `crossbeam_channel` allocates memory for the linked list in blocks
-        // of 31 items.
-        const ITEMS_PER_BLOCK: usize = 31;
-        let num_blocks = num_items.div_ceil(ITEMS_PER_BLOCK);
-
-        // The structure of a block is:
-        // - A pointer to the next block.
-        // - For each slot in the block:
-        //   - Space for an item.
-        //   - The state of the slot, stored as an AtomicUsize.
-        const PTR_SIZE: usize = std::mem::size_of::<usize>();
-        let item_size = std::mem::size_of::<OutputItem<IvkTag, D, M>>();
-        const ATOMIC_USIZE_SIZE: usize = std::mem::size_of::<AtomicUsize>();
-        let block_size = PTR_SIZE + ITEMS_PER_BLOCK * (item_size + ATOMIC_USIZE_SIZE);
-
-        num_blocks * block_size
+        // We count the memory usage of items still buffered in the channel on the
+        // receiver side. This is an approximation: `flume` stores queued items in an
+        // internal buffer, so we count one item's worth of storage per queued item.
+        self.0.len() * std::mem::size_of::<OutputItem<IvkTag, D, M>>()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
@@ -184,6 +168,24 @@ impl<IvkTag, D: Domain, M> BatchReceiver<IvkTag, D, M> {
                  }| { (output_index, value) },
             )
             .collect()
+    }
+
+    /// Waits, without blocking the current thread, until the results of the batch are
+    /// ready.
+    ///
+    /// This is the asynchronous counterpart of [`Self::into_results`]; the channel
+    /// completion semantics are identical.
+    #[cfg(feature = "sync-decryptor")]
+    pub(crate) async fn into_results_async(self) -> HashMap<usize, DecryptedOutput<IvkTag, D, M>> {
+        let mut results = HashMap::new();
+        while let Ok(OutputIndex {
+            output_index,
+            value,
+        }) = self.0.recv_async().await
+        {
+            results.insert(output_index, value);
+        }
+        results
     }
 }
 

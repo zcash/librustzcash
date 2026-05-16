@@ -120,7 +120,7 @@ byteorder = { workspace = true, optional = true }
 percent-encoding.workspace = true
 
 # - Scanning
-crossbeam-channel.workspace = true
+flume.workspace = true
 rayon.workspace = true
 
 # - Tor
