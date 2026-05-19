@@ -19,7 +19,10 @@ use crate::{
 /// Orchard note plaintext version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NotePlaintextVersion {
-    /// The original Orchard note plaintext version.
+    /// The [ZIP 212] Orchard note plaintext format, identified by lead byte
+    /// `0x02`.
+    ///
+    /// [ZIP 212]: https://zips.z.cash/zip-0212
     V2,
     /// The quantum-recoverable Orchard note plaintext version defined in
     /// [ZIP 2005].
