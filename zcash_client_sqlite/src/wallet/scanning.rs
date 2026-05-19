@@ -1,5 +1,5 @@
 use incrementalmerkletree::{Address, Position};
-use rusqlite::{self, OptionalExtension, named_params, types::Value};
+use rusqlite::{self, named_params, types::Value, OptionalExtension};
 use std::cmp::{max, min};
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -7,19 +7,19 @@ use std::rc::Rc;
 use tracing::{debug, trace};
 
 use zcash_client_backend::data_api::{
+    scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
     SAPLING_SHARD_HEIGHT,
-    scanning::{ScanPriority, ScanRange, spanning_tree::SpanningTree},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    ShieldedProtocol,
 };
 
 use crate::TableConstants;
 use crate::{
-    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
     error::SqliteClientError,
     wallet::{block_height_extrema, init::WalletMigrationError},
+    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
 };
 
 use super::common::table_constants;
@@ -563,18 +563,18 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 pub(crate) mod tests {
     use std::num::NonZeroU8;
 
-    use incrementalmerkletree::{Hashable, Position, frontier::Frontier};
+    use incrementalmerkletree::{frontier::Frontier, Hashable, Position};
 
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
-        AccountBirthday, Ratio, WalletRead, WalletWrite,
         chain::{ChainState, CommitmentTreeRoot},
-        scanning::{ScanPriority, spanning_tree::testing::scan_range},
+        scanning::{spanning_tree::testing::scan_range, ScanPriority},
         testing::{
-            AddressType, FakeCompactOutput, InitialChainState, TestBuilder, TestState,
-            pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+            pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
+            InitialChainState, TestBuilder, TestState,
         },
         wallet::ConfirmationsPolicy,
+        AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
@@ -584,13 +584,13 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        VERIFY_LOOKAHEAD,
         error::SqliteClientError,
         testing::{
-            BlockCache,
             db::{TestDb, TestDbFactory},
+            BlockCache,
         },
         wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        VERIFY_LOOKAHEAD,
     };
 
     #[cfg(feature = "orchard")]
@@ -600,10 +600,10 @@ pub(crate) mod tests {
         std::convert::Infallible,
         zcash_client_backend::{
             data_api::{
-                WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
-                wallet::input_selection::GreedyInputSelector,
+                testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
+                WalletCommitmentTrees,
             },
-            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            fees::{standard, DustOutputPolicy, StandardFeeRule},
             wallet::OvkPolicy,
         },
         zcash_protocol::memo::Memo,
@@ -1719,7 +1719,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_complete() {
-        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
@@ -1813,7 +1813,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_incomplete() {
-        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(false);
         let account = st.test_account().cloned().unwrap();

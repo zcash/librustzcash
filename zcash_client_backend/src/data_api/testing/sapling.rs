@@ -7,26 +7,26 @@ use sapling::{
 };
 use shardtree::error::ShardTreeError;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
-use zcash_primitives::transaction::{Transaction, components::sapling::zip212_enforcement};
+use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
 use crate::{
     data_api::{
-        DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
-        WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
         wallet::{ConfirmationsPolicy, TargetHeight},
+        DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
+        WalletTest,
     },
     wallet::{Note, ReceivedNote},
 };
 
-use super::{TestState, pool::ShieldedPoolTester};
+use super::{pool::ShieldedPoolTester, TestState};
 
 /// Type for running pool-agnostic tests on the Sapling pool.
 pub struct SaplingPoolTester;

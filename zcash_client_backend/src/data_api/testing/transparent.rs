@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use assert_matches::assert_matches;
 
-use ::transparent::{
+use sapling::zip32::ExtendedSpendingKey;
+use transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
 };
-use sapling::zip32::ExtendedSpendingKey;
 use zcash_keys::{
     address::Address,
-    keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    keys::{transparent::gap_limits::GapLimits, UnifiedAddressRequest},
 };
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
@@ -23,16 +23,17 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, TargetHeight,
         },
+        Account as _, Balance, InputSource as _, TransparentUtxoFilter, WalletRead as _,
+        WalletTest as _, WalletWrite,
     },
-    fees::{DustOutputPolicy, StandardFeeRule, standard},
+    fees::{standard, DustOutputPolicy, StandardFeeRule},
     wallet::WalletTransparentOutput,
 };
 
@@ -73,7 +74,11 @@ fn check_balance<DSF>(
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+            .get_spendable_transparent_outputs(
+                TransparentUtxoFilter::from_addresses(core::slice::from_ref(taddr)),
+                target_height,
+                confirmations_policy,
+            )
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
@@ -129,7 +134,7 @@ where
     // Confirm that we see the output unspent as of `height_1`.
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
-            taddr,
+            TransparentUtxoFilter::from_addresses(core::slice::from_ref(taddr)),
             target_height,
             ConfirmationsPolicy::MIN
         ).as_deref(),
@@ -153,7 +158,11 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, target_height, ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(
+                TransparentUtxoFilter::from_addresses(core::slice::from_ref(taddr)),
+                target_height,
+                ConfirmationsPolicy::MIN,
+            )
             .as_deref(),
         Ok(&[])
     );
@@ -168,7 +177,11 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(
+                TransparentUtxoFilter::from_addresses(core::slice::from_ref(taddr)),
+                TargetHeight::from(height_2 + 1),
+                ConfirmationsPolicy::MIN,
+            )
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -650,7 +663,7 @@ where
     use secp256k1::{Secp256k1, SecretKey};
     use secrecy::Secret;
 
-    use crate::data_api::{AccountBirthday, chain::ChainState};
+    use crate::data_api::{chain::ChainState, AccountBirthday};
     use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
     let mut st = TestBuilder::new()
@@ -752,7 +765,11 @@ where
     // Verify the UTXO is returned by get_spendable_transparent_outputs.
     let utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&taddr, target_height, ConfirmationsPolicy::MIN)
+        .get_spendable_transparent_outputs(
+            TransparentUtxoFilter::from_addresses(&[taddr]),
+            target_height,
+            ConfirmationsPolicy::MIN,
+        )
         .unwrap();
     assert_eq!(utxos.len(), 1);
     assert_eq!(utxos[0].value(), value);
@@ -980,7 +997,7 @@ where
 {
     use secrecy::Secret;
 
-    use crate::data_api::{AccountBirthday, chain::ChainState};
+    use crate::data_api::{chain::ChainState, AccountBirthday};
     use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
     let mut st = TestBuilder::new()
@@ -1077,7 +1094,11 @@ where
     // Verify the UTXO is returned by get_spendable_transparent_outputs.
     let utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&taddr, target_height, ConfirmationsPolicy::MIN)
+        .get_spendable_transparent_outputs(
+            TransparentUtxoFilter::from_addresses(&[taddr]),
+            target_height,
+            ConfirmationsPolicy::MIN,
+        )
         .unwrap();
     assert_eq!(utxos.len(), 1);
     assert_eq!(utxos[0].value(), value);

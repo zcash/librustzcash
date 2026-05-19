@@ -4,20 +4,20 @@ use std::{
     num::{NonZeroU64, NonZeroUsize},
 };
 
-use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
-    FeeRule,
     transparent::{self, InputSize},
     zip317::{self as prim_zip317},
+    FeeRule,
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
+    PoolType, ShieldedProtocol,
 };
+use ::transparent::bundle::OutPoint;
 
-use crate::data_api::{InputSource, wallet::TargetHeight};
+use crate::data_api::{wallet::TargetHeight, InputSource};
 
 pub mod common;
 #[cfg(feature = "non-standard-fees")]
@@ -64,7 +64,7 @@ impl FeeRule for StandardFeeRule {
 
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
-/// enabled, an ephemeral output to the transparent pool.
+/// enabled, an ephemeral or non-ephemeral output to the transparent pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue(ChangeValueInner);
 
@@ -77,6 +77,10 @@ enum ChangeValueInner {
     },
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
+    /// A non-ephemeral transparent change output, sent to a wallet-internal
+    /// transparent address (BIP 44 internal/change scope).
+    #[cfg(feature = "transparent-inputs")]
+    Transparent { value: Zatoshis },
 }
 
 impl ChangeValue {
@@ -84,6 +88,15 @@ impl ChangeValue {
     #[cfg(feature = "transparent-inputs")]
     pub fn ephemeral_transparent(value: Zatoshis) -> Self {
         Self(ChangeValueInner::EphemeralTransparent { value })
+    }
+
+    /// Constructs a new non-ephemeral transparent change output value.
+    ///
+    /// This is used for fully-transparent (t→t) transactions where change
+    /// should be returned to a wallet-internal transparent address.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(value: Zatoshis) -> Self {
+        Self(ChangeValueInner::Transparent { value })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -112,6 +125,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { protocol, .. } => PoolType::Shielded(*protocol),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => PoolType::Transparent,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => PoolType::Transparent,
         }
     }
 
@@ -121,6 +136,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { value, .. } => *value,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { value } => *value,
         }
     }
 
@@ -130,6 +147,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { memo, .. } => memo.as_ref(),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => None,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => None,
         }
     }
 
@@ -144,7 +163,15 @@ impl ChangeValue {
             ChangeValueInner::Shielded { .. } => false,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => true,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => false,
         }
+    }
+
+    /// Whether this is a non-ephemeral transparent change output.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn is_transparent_change(&self) -> bool {
+        matches!(&self.0, ChangeValueInner::Transparent { .. })
     }
 }
 
@@ -579,7 +606,7 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use ::transparent::bundle::{OutPoint, TxOut};
+    use transparent::bundle::{OutPoint, TxOut};
     use zcash_primitives::transaction::fees::transparent;
     use zcash_protocol::value::Zatoshis;
 

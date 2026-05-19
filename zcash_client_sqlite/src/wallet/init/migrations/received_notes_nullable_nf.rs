@@ -231,9 +231,9 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::v_transactions_net},
+        wallet::init::{migrations::v_transactions_net, WalletMigrator},
+        WalletDb,
     };
 
     #[test]

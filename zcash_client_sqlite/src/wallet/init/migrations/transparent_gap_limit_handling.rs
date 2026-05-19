@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use rusqlite::{Transaction, named_params};
+use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 
 use zcash_address::ZcashAddress;
@@ -16,21 +16,21 @@ use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
 use crate::{
-    AccountRef,
     util::Clock,
-    wallet::{self, KeyScope, encoding::ReceiverFlags, init::WalletMigrationError},
+    wallet::{self, encoding::ReceiverFlags, init::WalletMigrationError, KeyScope},
+    AccountRef,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        GapLimits,
         wallet::{
             encoding::{decode_diversifier_index_be, encode_diversifier_index_be, epoch_seconds},
             transparent::{find_gap_start, generate_address_range_internal, next_check_time},
         },
+        GapLimits,
     },
-    ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+    transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
     zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,

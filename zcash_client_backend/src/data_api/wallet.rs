@@ -46,39 +46,37 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use crate::{
     data_api::{
-        Account, MaxSpendMode, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
-        WalletRead, WalletWrite, error::Error, wallet::input_selection::propose_send_max,
+        error::Error, wallet::input_selection::propose_send_max, Account, MaxSpendMode,
+        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{
-        ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
+        standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
-};
 use sapling::{
-    note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
+    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
+use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::transaction::{
-    Transaction, TxId,
     builder::{BuildConfig, BuildResult, Builder},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
+    Transaction, TxId,
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 use zip32::Scope;
 use zip321::Payment;
@@ -86,14 +84,15 @@ use zip321::Payment;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
+        data_api::TransparentUtxoFilter,
         fees::ChangeValue,
         proposal::StepOutput,
         wallet::{TransparentAddressMetadata, TransparentAddressSource},
     },
-    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
+    transparent::bundle::TxOut,
 };
 
 #[cfg(feature = "transparent-key-import")]
@@ -102,7 +101,6 @@ use zcash_script::script::{self as zs_script, Evaluable};
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
-    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -111,6 +109,7 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::consensus::NetworkConstants,
 };
@@ -652,6 +651,8 @@ where
         change_strategy,
         #[cfg(feature = "unstable")]
         proposed_version,
+        #[cfg(feature = "transparent-inputs")]
+        None,
     )?;
     Ok(proposal)
 }
@@ -707,20 +708,21 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 where
     ParamsT: consensus::Parameters + Clone,
     DbT: InputSource,
-    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
+    DbT: WalletRead<
+        Error = <DbT as InputSource>::Error,
+        AccountId = <DbT as InputSource>::AccountId,
+    >,
     DbT::NoteRef: Copy + Eq + Ord,
 {
-    let request = zip321::TransactionRequest::new(vec![
-        Payment::new(
-            to.to_zcash_address(params),
-            Some(amount),
-            memo,
-            None,
-            None,
-            vec![],
-        )
-        .map_err(Error::Payment)?,
-    ])
+    let request = zip321::TransactionRequest::new(vec![Payment::new(
+        to.to_zcash_address(params),
+        Some(amount),
+        memo,
+        None,
+        None,
+        vec![],
+    )
+    .map_err(Error::Payment)?])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
@@ -799,6 +801,11 @@ where
 
 /// Constructs a proposal to shield all of the funds belonging to the provided set of
 /// addresses.
+///
+/// The `utxo_filter` parameter controls which transparent outputs are eligible for
+/// inclusion in the proposal. See [`TransparentUtxoFilter`] for details.
+///
+/// [`TransparentUtxoFilter`]: crate::data_api::TransparentUtxoFilter
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -811,6 +818,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
+    utxo_filter: TransparentUtxoFilter<'_>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -836,8 +844,107 @@ where
             to_account,
             (chain_tip_height + 1).into(),
             confirmations_policy,
+            utxo_filter,
         )
         .map_err(Error::from)
+}
+
+/// Proposes a fully-transparent transfer, selecting transparent UTXOs as inputs
+/// and producing transparent change when needed.
+///
+/// This method enables spending transparent funds and producing transparent
+/// outputs including transparent change. It is intended for zcashd wallet
+/// replacement scenarios and rejects shielded recipients.
+///
+/// All recipients in the [`TransactionRequest`] must be transparent addresses;
+/// the method returns an error if any shielded recipient is present.
+///
+/// # Parameters
+///
+/// * `wallet_db`: A read/write reference to the wallet database.
+/// * `params`: Consensus parameters.
+/// * `spend_from_account`: The account that controls the funds to be spent.
+/// * `fee_rule`: The fee rule for the transaction.
+/// * `request`: The transaction request describing transparent payments.
+/// * `confirmations_policy`: Minimum confirmations for input selection.
+/// * `source_addresses`: The transparent addresses to spend from.
+///
+/// [`TransactionRequest`]: zip321::TransactionRequest
+#[cfg(feature = "zcashd-compat")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_transparent_transfer<DbT, ParamsT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    fee_rule: StandardFeeRule,
+    request: zip321::TransactionRequest,
+    confirmations_policy: ConfirmationsPolicy,
+    source_addresses: &[TransparentAddress],
+) -> Result<
+    Proposal<StandardFeeRule, <DbT as InputSource>::NoteRef>,
+    ProposeTransferErrT<
+        DbT,
+        CommitmentTreeErrT,
+        GreedyInputSelector<DbT>,
+        SingleOutputChangeStrategy<DbT>,
+    >,
+>
+where
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    ParamsT: consensus::Parameters + Clone,
+{
+    // Validate that all recipients are transparent.
+    for (_idx, payment) in request.payments() {
+        // We only need to check that the address is transparent; if conversion
+        // fails or yields a shielded address, we reject it.
+        let is_transparent = payment
+            .recipient_address()
+            .clone()
+            .convert_if_network(params.network_type())
+            .ok()
+            .map_or(false, |addr: Address| {
+                matches!(addr, Address::Transparent(_))
+            });
+
+        if !is_transparent {
+            return Err(Error::from(InputSelectorError::Proposal(
+                ProposalError::ShieldedRecipientInTransparentTransfer,
+            )));
+        }
+    }
+
+    let input_selector = GreedyInputSelector::<DbT>::new();
+    let change_strategy = SingleOutputChangeStrategy::<DbT>::new(
+        fee_rule,
+        None,                      // no change memo for transparent change
+        ShieldedProtocol::Sapling, // fallback, unused for transparent
+        DustOutputPolicy::default(),
+    )
+    .with_transparent_change();
+
+    let maybe_initial_heights = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted)
+        .map_err(InputSelectorError::DataSource)?;
+    let (target_height, anchor_height) =
+        maybe_initial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
+
+    let proposal = input_selector.propose_transaction(
+        params,
+        wallet_db,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        spend_from_account,
+        request,
+        &change_strategy,
+        #[cfg(feature = "unstable")]
+        None,
+        Some(TransparentUtxoFilter::from_addresses(source_addresses)),
+    )?;
+
+    Ok(proposal)
 }
 
 struct StepResult<AccountId> {
@@ -1599,6 +1706,8 @@ where
             PoolType::Transparent => {
                 #[cfg(not(feature = "transparent-inputs"))]
                 return Err(Error::UnsupportedChangeType(output_pool));
+
+                // Non-ephemeral transparent change is handled below.
             }
         }
     }
@@ -1639,6 +1748,42 @@ where
                 change_value.value(),
                 StepOutputIndex::Change(*change_index),
             ))
+        }
+
+        // Handle non-ephemeral transparent change outputs. These go to
+        // wallet-internal (BIP 44 change scope) transparent addresses.
+        let transparent_change_outputs: Vec<(usize, &ChangeValue)> = proposal_step
+            .balance()
+            .proposed_change()
+            .iter()
+            .enumerate()
+            .filter(|(_, change_value)| change_value.is_transparent_change())
+            .collect();
+
+        if !transparent_change_outputs.is_empty() {
+            let change_addresses_and_metadata = wallet_db
+                .reserve_next_n_internal_addresses(account_id, transparent_change_outputs.len())
+                .map_err(Error::DataSource)?;
+            assert_eq!(
+                change_addresses_and_metadata.len(),
+                transparent_change_outputs.len()
+            );
+
+            for ((change_index, change_value), (change_address, _)) in transparent_change_outputs
+                .iter()
+                .zip(change_addresses_and_metadata)
+            {
+                builder.add_transparent_output(&change_address, change_value.value())?;
+                transparent_output_meta.push((
+                    BuildRecipient::InternalAccount {
+                        receiving_account: account_id,
+                        external_address: None,
+                    },
+                    change_address,
+                    change_value.value(),
+                    StepOutputIndex::Change(*change_index),
+                ))
+            }
         }
     }
 
@@ -2196,7 +2341,7 @@ where
     DbT::AccountId: serde::de::DeserializeOwned,
 {
     use std::collections::BTreeMap;
-    use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput};
+    use zcash_note_encryption::{Domain, ShieldedOutput, ENC_CIPHERTEXT_SIZE};
 
     let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
 
@@ -2639,6 +2784,7 @@ where
         from_addrs,
         to_account,
         confirmations_policy,
+        TransparentUtxoFilter::ALL,
     )?;
 
     create_proposed_transactions(

@@ -7,11 +7,11 @@ use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::{
-    WalletMigrationError,
     migrations::{
         add_transaction_trust_marker, support_zcashd_wallet_import, tx_retrieval_queue_expiry,
         v_received_output_spends_account, v_tx_outputs_return_addrs,
     },
+    WalletMigrationError,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x07770bfd_c549_4069_9e05_822458f81cc4);

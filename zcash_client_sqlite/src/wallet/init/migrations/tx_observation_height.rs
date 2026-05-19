@@ -7,7 +7,7 @@ use uuid::Uuid;
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::wallet::{
-    init::{WalletMigrationError, migrations::fix_transparent_received_outputs},
+    init::{migrations::fix_transparent_received_outputs, WalletMigrationError},
     mempool_height,
 };
 

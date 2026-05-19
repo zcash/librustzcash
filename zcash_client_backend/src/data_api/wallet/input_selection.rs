@@ -7,28 +7,28 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
-use ::transparent::bundle::TxOut;
+use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
-    FeeRule,
     transparent::InputSize,
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
+    FeeRule,
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
-        wallet::TargetHeight,
+        wallet::TargetHeight, InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention,
+        TargetValue,
     },
-    fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
+    fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -38,12 +38,13 @@ use super::ConfirmationsPolicy;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
+        data_api::TransparentUtxoFilter,
         fees::ChangeValue,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
+    transparent::{address::TransparentAddress, bundle::OutPoint},
     zip321::Payment,
 };
 
@@ -189,6 +190,10 @@ pub trait InputSelector {
     ///
     /// If insufficient funds are available to satisfy the required outputs for the shielding
     /// request, this operation must fail and return [`InputSelectorError::InsufficientFunds`].
+    ///
+    /// When the `transparent-inputs` feature is enabled, an optional
+    /// [`TransparentUtxoFilter`] may be provided to preferentially select transparent
+    /// inputs before shielded notes.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_transaction<ParamsT, ChangeT>(
@@ -202,6 +207,9 @@ pub trait InputSelector {
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+        #[cfg(feature = "transparent-inputs")] transparent_inputs: Option<
+            TransparentUtxoFilter<'_>,
+        >,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -234,9 +242,9 @@ pub trait ShieldingSelector {
     /// transaction.
     ///
     /// Implementations should return the maximum possible number of economically useful inputs
-    /// required to supply at least the requested value, choosing only inputs received at the
-    /// specified source addresses. If insufficient funds are available to satisfy the required
-    /// outputs for the shielding request, this operation must fail and return
+    /// required to supply at least the requested value, choosing only inputs matching the
+    /// provided [`TransparentUtxoFilter`]. If insufficient funds are available to satisfy the
+    /// required outputs for the shielding request, this operation must fail and return
     /// [`InputSelectorError::InsufficientFunds`].
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
@@ -250,6 +258,7 @@ pub trait ShieldingSelector {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        utxo_filter: TransparentUtxoFilter<'_>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -394,6 +403,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+        #[cfg(feature = "transparent-inputs")] transparent_inputs: Option<
+            TransparentUtxoFilter<'_>,
+        >,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -512,6 +524,23 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
             }
         }
+
+        // When a transparent input filter is provided, preferentially select transparent
+        // UTXOs before considering shielded notes.
+        #[cfg(feature = "transparent-inputs")]
+        let selected_transparent_inputs: Vec<WalletTransparentOutput> =
+            if let Some(ref filter) = transparent_inputs {
+                wallet_db
+                    .get_spendable_transparent_outputs(*filter, target_height, confirmations_policy)
+                    .map_err(InputSelectorError::DataSource)?
+                    .into_iter()
+                    .map(|utxo| utxo.into_wallet_output())
+                    .collect()
+            } else {
+                vec![]
+            };
+        #[cfg(not(feature = "transparent-inputs"))]
+        let selected_transparent_inputs: Vec<WalletTransparentOutput> = vec![];
 
         let mut shielded_inputs = ReceivedNotes::empty();
         let mut prior_available = Zatoshis::ZERO;
@@ -633,7 +662,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
-                &[] as &[WalletTransparentOutput],
+                &selected_transparent_inputs,
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
@@ -666,6 +695,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         change_strategy.fee_rule(),
                         tr0_balance,
                         target_height,
+                        selected_transparent_inputs,
                         shielded_inputs,
                         transaction_request,
                         payment_pools,
@@ -942,6 +972,7 @@ where
         fee_rule,
         tr0_balance,
         target_height,
+        vec![], // send_max does not use transparent inputs
         shielded_inputs,
         transaction_request,
         payment_pools,
@@ -971,6 +1002,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     fee_rule: &FeeRuleT,
     tr0_balance: TransactionBalance,
     target_height: TargetHeight,
+    transparent_inputs: Vec<WalletTransparentOutput>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
@@ -1019,7 +1051,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             &[],
             tr0,
             payment_pools,
-            vec![],
+            transparent_inputs,
             shielded_inputs,
             vec![],
             tr0_balance,
@@ -1049,7 +1081,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     Proposal::single_step(
         transaction_request,
         payment_pools,
-        vec![],
+        transparent_inputs,
         shielded_inputs,
         tr0_balance,
         fee_rule.clone(),
@@ -1074,6 +1106,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
+        utxo_filter: TransparentUtxoFilter<'_>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -1091,8 +1124,17 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             |(mut inputs, mut ephemeral_addrs, mut input_addrs), taddr| {
                 use transparent::keys::TransparentKeyScope;
 
+                let addr_filter = if utxo_filter.coinbase_only() {
+                    TransparentUtxoFilter::coinbase_from_addresses(core::slice::from_ref(taddr))
+                } else {
+                    TransparentUtxoFilter::from_addresses(core::slice::from_ref(taddr))
+                };
                 let utxos = wallet_db
-                    .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
+                    .get_spendable_transparent_outputs(
+                        addr_filter,
+                        target_height,
+                        confirmations_policy,
+                    )
                     .map_err(InputSelectorError::DataSource)?;
 
                 // `InputSource::get_spendable_transparent_outputs` is required to return

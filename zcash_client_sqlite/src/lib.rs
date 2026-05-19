@@ -37,7 +37,7 @@ use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
 use rand::RngCore;
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use std::{
     borrow::{Borrow, BorrowMut},
     cmp::{max, min},
@@ -54,23 +54,24 @@ use util::Clock;
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    TransferType,
     data_api::{
-        self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
-        SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         ll::{
-            self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
-            wallet::store_decrypted_tx,
+            self, wallet::store_decrypted_tx, LowLevelWalletRead, LowLevelWalletWrite,
+            ReceivedSaplingOutput,
         },
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
+        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+        ReceivedNotes, ReceivedTransactionOutput, ScannedBlock, SeedRelevance, SentTransaction,
+        TargetValue, TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput, WalletTx},
+    TransferType,
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -81,43 +82,42 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
+    ShieldedProtocol,
 };
-use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
     wallet::{chain_tip_height, commitment_tree::SqliteShardStore},
 };
 use wallet::{
-    SubtreeProgressEstimator,
     commitment_tree::{self, put_shard_roots},
-    common::{TableConstants, unspent_notes_meta},
+    common::{unspent_notes_meta, TableConstants},
     scanning::replace_queue_entries,
-    upsert_address,
+    upsert_address, SubtreeProgressEstimator,
 };
 
 #[cfg(feature = "orchard")]
 use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
     zcash_client_backend::data_api::ll::ReceivedOrchardOutput,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
-    ::transparent::{
+    std::{collections::HashSet, time::SystemTime},
+    transparent::{
         address::TransparentAddress,
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::{collections::HashSet, time::SystemTime},
     zcash_client_backend::{
         data_api::{
-            TransactionsInvolvingAddress, TransparentBalances, WalletUtxo,
-            ll::wallet::generate_transparent_gap_addresses,
+            ll::wallet::generate_transparent_gap_addresses, TransactionsInvolvingAddress,
+            TransparentBalances, TransparentUtxoFilter, WalletUtxo,
         },
         wallet::TransparentAddressMetadata,
     },
@@ -130,7 +130,7 @@ use {
 #[cfg(any(test, feature = "test-dependencies"))]
 use {
     rusqlite::named_params,
-    zcash_client_backend::data_api::{OutputOfSentTx, WalletTest, testing::TransactionSummary},
+    zcash_client_backend::data_api::{testing::TransactionSummary, OutputOfSentTx, WalletTest},
 };
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
@@ -141,7 +141,7 @@ use zcash_protocol::PoolType;
 
 #[cfg(feature = "unstable")]
 use {
-    crate::chain::{BlockMeta, fsblockdb_with_blocks},
+    crate::chain::{fsblockdb_with_blocks, BlockMeta},
     std::path::PathBuf,
     std::{fs, io},
 };
@@ -593,14 +593,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
-        address: &TransparentAddress,
+        filter: TransparentUtxoFilter<'_>,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
-            address,
+            filter,
             target_height,
             confirmations_policy,
         )
@@ -2659,18 +2659,18 @@ mod tests {
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use uuid::Uuid;
     use zcash_client_backend::data_api::{
-        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
-        WalletWrite,
         chain::ChainState,
         testing::{TestBuilder, TestState},
+        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
+        WalletWrite,
     };
     use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
 
     use crate::{
-        AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
-        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
+        error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
+        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET, AccountUuid,
     };
 
     #[cfg(feature = "unstable")]
@@ -3040,7 +3040,7 @@ mod tests {
         use std::collections::BTreeSet;
 
         use crate::{
-            GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests,
+            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
         };
         use zcash_client_backend::data_api::TransactionDataRequest;
 
@@ -3061,15 +3061,13 @@ mod tests {
             .unwrap();
 
         // The receiver for the default UA should be in the set.
-        assert!(
-            receivers.contains_key(
-                ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
-                    .expect("A valid default address exists for the UFVK")
-                    .0
-                    .transparent()
-                    .unwrap()
-            )
-        );
+        assert!(receivers.contains_key(
+            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
+                .expect("A valid default address exists for the UFVK")
+                .0
+                .transparent()
+                .unwrap()
+        ));
 
         // The default t-addr should be in the set.
         assert!(receivers.contains_key(&taddr));

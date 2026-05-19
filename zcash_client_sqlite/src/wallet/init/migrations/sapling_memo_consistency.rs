@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -12,8 +12,8 @@ use zcash_client_backend::decrypt_transaction;
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    TxId,
     consensus::{self, BlockHeight},
+    TxId,
 };
 use zip32::AccountId;
 

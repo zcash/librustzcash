@@ -57,7 +57,7 @@ mod wallet_summaries;
 use std::{rc::Rc, sync::Mutex};
 
 use rand_core::RngCore;
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
@@ -423,9 +423,9 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
+        WalletDb,
     };
 
     /// Tests that we can migrate from a completely empty wallet database to the target

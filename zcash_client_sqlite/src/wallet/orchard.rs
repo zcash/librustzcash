@@ -5,28 +5,28 @@ use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{Connection, Row, named_params, types::Value};
+use rusqlite::{named_params, types::Value, Connection, Row};
 
 use zcash_client_backend::{
     data_api::{
-        Account as _, NullifierQuery, TargetValue,
         ll::ReceivedOrchardOutput,
         wallet::{ConfirmationsPolicy, TargetHeight},
+        Account as _, NullifierQuery, TargetValue,
     },
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight},
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
-use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
+use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
 use super::{
-    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
+    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
 };
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(

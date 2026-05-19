@@ -9,13 +9,13 @@ use zcash_primitives::{block::BlockHash, transaction::fees::zip317};
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis};
 
 use crate::data_api::{
-    Account, AccountBalance, WalletRead,
     chain::ScanSummary,
     testing::{
         AddressType, DataStoreFactory, FakeCompactOutput, TestAccount, TestBuilder, TestCache,
         TestFvk, TestState,
     },
     wallet::ConfirmationsPolicy,
+    Account, AccountBalance, WalletRead,
 };
 
 use super::ShieldedPoolTester;

@@ -7,7 +7,7 @@ use std::{
 
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::{PoolType, ShieldedProtocol, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
@@ -70,6 +70,9 @@ pub enum ProposalError {
     /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
+    /// A transparent-only transfer proposal included a shielded recipient.
+    #[cfg(feature = "transparent-inputs")]
+    ShieldedRecipientInTransparentTransfer,
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
     #[cfg(feature = "unstable")]
@@ -150,6 +153,11 @@ impl Display for ProposalError {
             ProposalError::EphemeralAddressLinkability => write!(
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::ShieldedRecipientInTransparentTransfer => write!(
+                f,
+                "A transparent-only transfer proposal included a shielded recipient."
             ),
             #[cfg(feature = "unstable")]
             ProposalError::IncompatibleTxVersion(branch_id) => write!(

@@ -85,9 +85,9 @@ mod tests {
 
     use super::{DEPENDENCIES, MIGRATION_ID};
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
+        WalletDb,
     };
 
     #[test]

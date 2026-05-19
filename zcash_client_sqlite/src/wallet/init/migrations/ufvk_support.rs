@@ -10,21 +10,21 @@ use zcash_keys::{
     address::Address,
     keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
 };
-use zcash_protocol::{PoolType, consensus};
+use zcash_protocol::{consensus, PoolType};
 use zip32::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::IncomingViewingKey;
+use transparent::keys::IncomingViewingKey;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_keys::encoding::AddressCodec;
 
 use crate::{
-    UA_TRANSPARENT,
     wallet::{
-        init::{WalletMigrationError, migrations::initial_setup},
+        init::{migrations::initial_setup, WalletMigrationError},
         pool_code,
     },
+    UA_TRANSPARENT,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);

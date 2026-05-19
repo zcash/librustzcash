@@ -1,21 +1,21 @@
-use core::cmp::{Ordering, max, min};
+use core::cmp::{max, min, Ordering};
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::transaction::fees::{
-    FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
+    transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
 };
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
 
-use crate::data_api::{AccountMeta, wallet::TargetHeight};
+use crate::data_api::{wallet::TargetHeight, AccountMeta};
 
 use super::{
-    ChangeError, ChangeValue, DustAction, DustOutputPolicy, EphemeralBalance, SplitPolicy,
-    TransactionBalance, sapling as sapling_fees,
+    sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
+    EphemeralBalance, SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -173,6 +173,10 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     fallback_change_pool: ShieldedProtocol,
     marginal_fee: Zatoshis,
     grace_actions: usize,
+    /// When `true`, fully-transparent transactions may produce transparent
+    /// change outputs instead of shielding change to a shielded pool.
+    #[cfg(feature = "transparent-inputs")]
+    allow_transparent_change: bool,
 }
 
 impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
@@ -186,6 +190,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
         fallback_change_pool: ShieldedProtocol,
         marginal_fee: Zatoshis,
         grace_actions: usize,
+        #[cfg(feature = "transparent-inputs")] allow_transparent_change: bool,
     ) -> Self {
         Self {
             params,
@@ -196,6 +201,8 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
             fallback_change_pool,
             marginal_fee,
             grace_actions,
+            #[cfg(feature = "transparent-inputs")]
+            allow_transparent_change,
         }
     }
 }
@@ -256,6 +263,12 @@ where
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let fully_transparent = net_flows.is_transparent() && change_memo.is_none();
+
+    // Determine whether this transaction should produce transparent change.
+    #[cfg(feature = "transparent-inputs")]
+    let wants_transparent_change = fully_transparent && cfg.allow_transparent_change;
+    #[cfg(not(feature = "transparent-inputs"))]
+    let wants_transparent_change = false;
 
     // If we have a non-zero marginal fee, we need to check for uneconomic inputs.
     // This is basically assuming that fee rules with non-zero marginal fee are
@@ -393,10 +406,60 @@ where
                 required: total_out_with_min_fee,
             });
         }
-        Ordering::Equal if fully_transparent => {
+        Ordering::Equal if fully_transparent && !wants_transparent_change => {
             // Case 2 for a tx with all transparent flows and no change memo
-            // (e.g. the second transaction of a ZIP 320 pair).
+            // (e.g. the second transaction of a ZIP 320 pair), and transparent
+            // change is not requested.
             (vec![], min_fee)
+        }
+        _ if wants_transparent_change => {
+            // For fully-transparent transactions that want transparent change,
+            // compute the fee with an additional transparent change output.
+            let transparent_change_output_sizes = transparent_outputs
+                .iter()
+                .map(|i| i.serialized_size())
+                .chain(
+                    ephemeral_balance
+                        .and_then(|b| b.ephemeral_output_amount())
+                        .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
+                )
+                .chain(core::iter::once(P2PKH_STANDARD_OUTPUT_SIZE)); // the change output
+
+            let total_fee = cfg
+                .fee_rule
+                .fee_required(
+                    cfg.params,
+                    BlockHeight::from(target_height),
+                    transparent_input_sizes,
+                    transparent_change_output_sizes,
+                    sapling_input_count,
+                    sapling_output_count(0)?,
+                    orchard_action_count(0)?,
+                )
+                .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
+
+            let total_out = (subtotal_out + total_fee).ok_or_else(overflow)?;
+            let total_change =
+                (total_in - total_out).ok_or_else(|| ChangeError::InsufficientFunds {
+                    available: total_in,
+                    required: total_out,
+                })?;
+
+            if total_change.is_zero() {
+                // No change needed; exact amount.
+                (vec![], total_fee)
+            } else {
+                #[cfg(feature = "transparent-inputs")]
+                {
+                    (vec![ChangeValue::transparent(total_change)], total_fee)
+                }
+                #[cfg(not(feature = "transparent-inputs"))]
+                {
+                    unreachable!(
+                        "wants_transparent_change is always false without transparent-inputs"
+                    )
+                }
+            }
         }
         _ => {
             let max_fee = max(

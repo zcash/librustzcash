@@ -1,19 +1,19 @@
 use std::num::NonZeroU32;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::WalletUtxo;
+use zcash_client_backend::data_api::{TransparentUtxoFilter, WalletUtxo};
 use zcash_client_backend::{
     data_api::{
-        AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
         wallet::{ConfirmationsPolicy, TargetHeight},
+        AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
     },
     wallet::NoteId,
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    ShieldedProtocol::{self, Sapling},
     consensus::{self, BranchId},
     value::Zatoshis,
+    ShieldedProtocol::{self, Sapling},
 };
 
 #[cfg(feature = "orchard")]
@@ -21,12 +21,12 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::data_api::TransactionStatus,
     zcash_protocol::consensus::BlockHeight,
 };
 
-use crate::{AccountId, MemoryWalletDb, error::Error, to_spendable_notes};
+use crate::{error::Error, to_spendable_notes, AccountId, MemoryWalletDb};
 
 impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     type Error = crate::error::Error;
@@ -151,17 +151,41 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
-        address: &TransparentAddress,
+        filter: TransparentUtxoFilter<'_>,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
+        // Short-circuit if the filter matches nothing.
+        if let Some(addrs) = filter.addresses() {
+            if addrs.is_empty() {
+                return Ok(vec![]);
+            }
+        }
+
         // TODO: take into consideration coinbase maturity
         // See <https://github.com/zcash/librustzcash/issues/821>
         let txos = self
             .transparent_received_outputs
             .iter()
-            .filter(|(_, txo)| txo.address == *address)
+            .filter(|(_, txo)| {
+                // Apply address filter
+                match filter.addresses() {
+                    Some(addrs) => addrs.contains(&txo.address),
+                    None => true,
+                }
+            })
             .map(|(outpoint, txo)| (outpoint, txo, self.tx_table.get(&txo.transaction_id)))
+            .filter(|(_, _, tx)| {
+                // Apply coinbase filter: when coinbase_only is set, only include
+                // outputs from coinbase transactions (tx_index == 0). Outputs for
+                // which the transaction index is unknown are conservatively treated
+                // as non-coinbase.
+                if filter.coinbase_only() {
+                    tx.map_or(false, |t| t.tx_index().unwrap_or(1) == 0)
+                } else {
+                    true
+                }
+            })
             .filter(|(outpoint, _, _)| {
                 self.utxo_is_spendable(outpoint, target_height, confirmations_policy)
                     .unwrap_or(false)

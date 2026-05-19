@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use crate::wallet::init::{WalletMigrationError, migrations::account_delete_cascade};
+use crate::wallet::init::{migrations::account_delete_cascade, WalletMigrationError};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x97ac36a9_196f_4dd9_993d_722bde95bebc);
 
@@ -114,12 +114,12 @@ impl RusqliteMigration for Migration {
 #[cfg(test)]
 mod tests {
     use zcash_client_backend::data_api::testing::{pool::dsl::TestDsl, sapling::SaplingPoolTester};
-    use zcash_protocol::{PoolType, value::Zatoshis};
+    use zcash_protocol::{value::Zatoshis, PoolType};
 
     use crate::{
         error::SqliteClientError,
-        testing::{BlockCache, db::TestDbFactory},
-        wallet::{KeyScope, encoding::parse_pool_code, init::migrations::tests::test_migrate},
+        testing::{db::TestDbFactory, BlockCache},
+        wallet::{encoding::parse_pool_code, init::migrations::tests::test_migrate, KeyScope},
     };
 
     #[test]

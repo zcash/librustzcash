@@ -1471,6 +1471,109 @@ impl NoteFilter {
     }
 }
 
+/// Controls which transparent UTXOs are eligible for selection.
+///
+/// This type combines address-based filtering with coinbase-based filtering,
+/// allowing callers to restrict UTXO selection by source address and/or
+/// transaction type.
+///
+/// # Examples
+///
+/// Select all transparent UTXOs:
+/// ```
+/// # use zcash_client_backend::data_api::TransparentUtxoFilter;
+/// let filter = TransparentUtxoFilter::ALL;
+/// ```
+///
+/// Select only coinbase UTXOs:
+/// ```
+/// # use zcash_client_backend::data_api::TransparentUtxoFilter;
+/// let filter = TransparentUtxoFilter::COINBASE_ONLY;
+/// ```
+///
+/// Select UTXOs from specific addresses:
+/// ```ignore
+/// let filter = TransparentUtxoFilter::from_addresses(&[addr1, addr2]);
+/// ```
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransparentUtxoFilter<'a> {
+    /// Restrict to these addresses. `None` means all wallet addresses.
+    addresses: Option<&'a [TransparentAddress]>,
+    /// If `true`, only select coinbase UTXOs.
+    ///
+    /// Coinbase transactions are identified by having `tx_index == 0` within
+    /// their containing block. Outputs for which the transaction index is
+    /// unknown are conservatively treated as non-coinbase and will be excluded
+    /// when this filter is active.
+    coinbase_only: bool,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl Default for TransparentUtxoFilter<'_> {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentUtxoFilter<'_> {
+    /// Select all spendable transparent UTXOs from any wallet address.
+    pub const ALL: Self = Self {
+        addresses: None,
+        coinbase_only: false,
+    };
+
+    /// Select only coinbase transparent UTXOs from any wallet address.
+    pub const COINBASE_ONLY: Self = Self {
+        addresses: None,
+        coinbase_only: true,
+    };
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<'a> TransparentUtxoFilter<'a> {
+    /// Constructs a filter that matches no UTXOs.
+    ///
+    /// This is useful as a default when transparent input selection should be
+    /// skipped entirely.
+    pub fn none() -> Self {
+        Self {
+            addresses: Some(&[]),
+            coinbase_only: false,
+        }
+    }
+
+    /// Constructs a filter that selects UTXOs only from the specified addresses.
+    pub fn from_addresses(addresses: &'a [TransparentAddress]) -> Self {
+        Self {
+            addresses: Some(addresses),
+            coinbase_only: false,
+        }
+    }
+
+    /// Constructs a filter that selects only coinbase UTXOs from the specified addresses.
+    pub fn coinbase_from_addresses(addresses: &'a [TransparentAddress]) -> Self {
+        Self {
+            addresses: Some(addresses),
+            coinbase_only: true,
+        }
+    }
+
+    /// Returns the address restriction, if any.
+    ///
+    /// `None` means all wallet addresses are eligible. `Some(&[])` means no
+    /// addresses are eligible (i.e. the filter matches nothing).
+    pub fn addresses(&self) -> Option<&[TransparentAddress]> {
+        self.addresses
+    }
+
+    /// Returns whether only coinbase UTXOs should be selected.
+    pub fn coinbase_only(&self) -> bool {
+        self.coinbase_only
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a account.
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
@@ -1560,19 +1663,24 @@ pub trait InputSource {
         )
     }
 
-    /// Returns the list of unspent transparent outputs received by this wallet at `address`
+    /// Returns the list of unspent transparent outputs matching the provided filter
     /// such that, at height `target_height`:
     /// * the transaction that produced the output had or will have at least the required number of
     ///   confirmations according to the provided [`ConfirmationsPolicy`]; and
     /// * the output can potentially be spent in a transaction mined in a block at the given
     ///   `target_height` (also taking into consideration the coinbase maturity rule).
     ///
+    /// The `filter` parameter controls which transparent outputs are eligible. When
+    /// [`TransparentUtxoFilter::addresses`] is `None`, outputs from all wallet addresses
+    /// should be returned. When [`TransparentUtxoFilter::coinbase_only`] is `true`, only
+    /// outputs from coinbase transactions should be returned.
+    ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
-        _address: &TransparentAddress,
+        _filter: TransparentUtxoFilter<'_>,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletUtxo>, Self::Error> {
@@ -3190,6 +3298,29 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         unimplemented!(
             "WalletWrite::reserve_next_n_ephemeral_addresses must be overridden for wallets to use the `transparent-inputs` feature"
+        )
+    }
+
+    /// Reserves the next `n` available addresses for internal (change) transparent
+    /// outputs, within the current address gap limit for the
+    /// [`TransparentKeyScope::INTERNAL`] scope.
+    ///
+    /// This is analogous to [`WalletWrite::reserve_next_n_ephemeral_addresses`] but for
+    /// BIP 44 internal (change) addresses. These addresses are used to receive transparent
+    /// change in fully-transparent transactions.
+    ///
+    /// Returns a vector of reserved `(TransparentAddress, TransparentAddressMetadata)` pairs,
+    /// or an error if there is insufficient space within the gap limit.
+    ///
+    /// [`TransparentKeyScope::INTERNAL`]: ::transparent::keys::TransparentKeyScope::INTERNAL
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        _account_id: Self::AccountId,
+        _n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::reserve_next_n_internal_addresses must be overridden for wallets to use transparent change"
         )
     }
 

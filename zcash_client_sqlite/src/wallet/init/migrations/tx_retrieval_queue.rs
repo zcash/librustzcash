@@ -20,9 +20,9 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        AccountRef, TxRef,
         error::SqliteClientError,
-        wallet::{TxQueryType, transparent::uivk_legacy_transparent_address},
+        wallet::{transparent::uivk_legacy_transparent_address, TxQueryType},
+        AccountRef, TxRef,
     },
     rusqlite::OptionalExtension as _,
     std::convert::Infallible,
@@ -31,8 +31,8 @@ use {
     zcash_keys::encoding::AddressCodec,
     zcash_primitives::transaction::Transaction,
     zcash_protocol::{
-        TxId,
         consensus::{BlockHeight, BranchId},
+        TxId,
     },
 };
 
@@ -327,7 +327,7 @@ mod tests {
     use secrecy::Secret;
     use tempfile::NamedTempFile;
 
-    use ::transparent::{
+    use transparent::{
         address::{Script, TransparentAddress},
         bundle::{OutPoint, TxIn, TxOut},
     };
@@ -338,9 +338,9 @@ mod tests {
     };
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
+        wallet::init::{migrations::tests::test_migrate, WalletMigrator},
+        WalletDb,
     };
 
     use super::{DEPENDENCIES, MIGRATION_ID};

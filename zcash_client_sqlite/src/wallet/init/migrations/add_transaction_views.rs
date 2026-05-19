@@ -1,7 +1,7 @@
 //! Migration that adds transaction summary views & add fee information to transactions.
 use std::collections::HashSet;
 
-use rusqlite::{self, OptionalExtension, params, types::ToSql};
+use rusqlite::{self, params, types::ToSql, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -273,15 +273,15 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::addresses_table},
+        wallet::init::{migrations::addresses_table, WalletMigrator},
+        WalletDb,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        ::transparent::{
+        transparent::{
             bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
             keys::IncomingViewingKey,
         },
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
+        use transparent::{address::Script, keys::NonHardenedChildIndex};
         use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_keys::keys::ReceiverRequirement::*;
         use zcash_protocol::value::Zatoshis;

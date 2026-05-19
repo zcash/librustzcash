@@ -1,6 +1,6 @@
 use std::{collections::HashSet, rc::Rc};
 
-use rusqlite::{OptionalExtension, Transaction, named_params};
+use rusqlite::{named_params, OptionalExtension, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;

@@ -11,16 +11,15 @@ use tempfile::NamedTempFile;
 
 use rusqlite::{self};
 use secrecy::SecretVec;
-use shardtree::{ShardTree, error::ShardTreeError};
+use shardtree::{error::ShardTreeError, ShardTree};
 
 use zcash_client_backend::{
     data_api::{
-        TargetValue,
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
         wallet::{ConfirmationsPolicy, TargetHeight},
-        *,
+        TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };
@@ -33,20 +32,20 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, ShieldedProtocol,
 };
 use zip32::DiversifierIndex;
 
 use crate::{
-    AccountUuid, WalletDb, error::SqliteClientError, util::testing::FixedClock,
-    wallet::init::WalletMigrator,
+    error::SqliteClientError, util::testing::FixedClock, wallet::init::WalletMigrator, AccountUuid,
+    WalletDb,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::TransparentAddressMetadata,
-    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 

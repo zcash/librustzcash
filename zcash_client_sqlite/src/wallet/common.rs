@@ -1,31 +1,31 @@
 //! Functions common to Sapling and Orchard support in the wallet.
 
 use incrementalmerkletree::Position;
-use rusqlite::{Connection, Row, named_params, types::Value};
+use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
     data_api::{
-        MaxSpendMode, NoteFilter, NullifierQuery, PoolMeta, SAPLING_SHARD_HEIGHT, TargetValue,
         scanning::ScanPriority,
         wallet::{ConfirmationsPolicy, TargetHeight},
+        MaxSpendMode, NoteFilter, NullifierQuery, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
     },
     wallet::ReceivedNote,
 };
-use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
+use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317, TxId};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 
 use crate::{
-    AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
     error::SqliteClientError,
     wallet::{
         get_anchor_height, pool_code,
         scanning::{parse_priority_code, priority_code},
     },
+    AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]
@@ -942,12 +942,12 @@ pub(crate) fn unspent_notes_meta(
 #[cfg(test)]
 mod tests {
     use zcash_client_backend::data_api::testing::{
-        AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+        pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, TestBuilder,
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedProtocol, value::Zatoshis};
+    use zcash_protocol::{value::Zatoshis, ShieldedProtocol};
 
-    use crate::testing::{BlockCache, db::TestDbFactory};
+    use crate::testing::{db::TestDbFactory, BlockCache};
 
     #[test]
     fn select_unspent_note_meta() {

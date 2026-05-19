@@ -1,7 +1,7 @@
 //! SQLite-backed implementation of [`ShardStore`](shardtree::store::ShardStore)
 //! for note commitment trees.
 
-use rusqlite::{self, OptionalExtension, named_params};
+use rusqlite::{self, named_params, OptionalExtension};
 use std::{
     collections::BTreeSet,
     error, fmt,
@@ -14,9 +14,9 @@ use std::{
 
 use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
-    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
     error::{QueryError, ShardTreeError},
     store::{Checkpoint, ShardStore, TreeState},
+    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
 
 use zcash_client_backend::{
@@ -24,14 +24,14 @@ use zcash_client_backend::{
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
-use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
+use zcash_protocol::{consensus::BlockHeight, ShieldedProtocol};
 
 use crate::{error::SqliteClientError, sapling_tree};
 
 #[cfg(feature = "orchard")]
 use crate::orchard_tree;
 
-use super::common::{TableConstants, table_constants};
+use super::common::{table_constants, TableConstants};
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -1168,12 +1168,12 @@ mod tests {
 
     use super::SqliteShardStore;
     use crate::{
-        WalletDb,
         testing::{
             db::{test_clock, test_rng},
             pool::ShieldedPoolPersistence,
         },
         wallet::init::WalletMigrator,
+        WalletDb,
     };
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(

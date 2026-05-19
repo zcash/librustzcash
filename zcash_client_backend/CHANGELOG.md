@@ -12,8 +12,22 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `TransparentUtxoFilter` struct (behind the `transparent-inputs` feature flag)
+    for composable address + coinbase filtering of transparent UTXOs.
   - `TransparentKeyOrigin` enum (behind the `transparent-inputs` feature flag).
   - `TransparentBalances` type alias (behind the `transparent-inputs` feature flag).
+  - `WalletWrite::reserve_next_n_internal_addresses` (behind the `transparent-inputs`
+    feature flag) for reserving BIP 44 internal-scope (change) transparent addresses.
+  - `wallet::propose_transparent_transfer` (behind the `zcashd-compat` feature flag)
+    for proposing fully-transparent (t→t) transfers with transparent change.
+- `zcash_client_backend::fees`:
+  - `ChangeValue::transparent` constructor for non-ephemeral transparent change outputs.
+  - `ChangeValue::is_transparent_change` accessor.
+- `zcash_client_backend::fees::zip317`:
+  - `SingleOutputChangeStrategy::with_transparent_change` builder method.
+  - `MultiOutputChangeStrategy::with_transparent_change` builder method.
+- `zcash_client_backend::proposal`:
+  - `ProposalError::ShieldedRecipientInTransparentTransfer` variant.
   - `ll` module
   - `wallet::ConfirmationsPolicy::confirmations_until_spendable`
   - `DecryptableTransaction`
@@ -42,6 +56,17 @@ workspace.
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`, `zip321 0.7`.
 - `zcash_client_backend::data_api`:
+  - `InputSource::get_spendable_transparent_outputs` now takes
+    `TransparentUtxoFilter<'_>` instead of a `&TransparentAddress` parameter,
+    supporting address-based and coinbase filtering in a single type.
+  - `InputSelector::propose_transaction` now accepts an optional
+    `TransparentUtxoFilter<'_>` parameter (behind the `transparent-inputs`
+    feature flag) for preferential transparent input selection.
+  - `ShieldingSelector::propose_shielding` now accepts an additional
+    `TransparentUtxoFilter<'_>` parameter for UTXO filtering.
+  - `wallet::propose_shielding` now accepts an additional
+    `TransparentUtxoFilter<'_>` parameter.
+  - The `zcashd-compat` feature now implies `transparent-inputs`.
   - Changes to the `WalletRead` trait:
     - `WalletRead::get_transparent_balances` now returns `TransparentBalances`
       (using `TransparentKeyOrigin`) to distinguish standalone transparent

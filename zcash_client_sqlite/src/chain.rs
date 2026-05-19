@@ -7,7 +7,7 @@ use zcash_protocol::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{BlockDb, error::SqliteClientError};
+use crate::{error::SqliteClientError, BlockDb};
 
 #[cfg(feature = "unstable")]
 use {

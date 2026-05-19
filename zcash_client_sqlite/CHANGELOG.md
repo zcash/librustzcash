@@ -33,6 +33,9 @@ workspace.
 
 ### Changed
 - Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- `InputSource::get_spendable_transparent_outputs` now takes
+  `TransparentUtxoFilter<'_>` instead of `&TransparentAddress`, supporting
+  multi-address and coinbase-only filtering in a single query.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`
 - P2SH UTXOs returned by `get_spendable_transparent_outputs` now include a

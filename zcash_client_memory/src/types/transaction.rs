@@ -1,17 +1,17 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap},
     ops::Deref,
 };
 
 use zcash_client_backend::{
-    data_api::{TransactionStatus, wallet::TargetHeight},
+    data_api::{wallet::TargetHeight, TransactionStatus},
     wallet::WalletTx,
 };
 use zcash_primitives::transaction::{Transaction, TxId};
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
-use crate::AccountId;
 use crate::error::Error;
+use crate::AccountId;
 
 /// Maps a block height and transaction index to a transaction ID.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +72,10 @@ impl TransactionEntry {
     #[cfg(test)]
     pub(crate) fn fee(&self) -> Option<Zatoshis> {
         self.fee
+    }
+
+    pub(crate) fn tx_index(&self) -> Option<u32> {
+        self.tx_index
     }
 
     pub(crate) fn raw(&self) -> Option<&[u8]> {

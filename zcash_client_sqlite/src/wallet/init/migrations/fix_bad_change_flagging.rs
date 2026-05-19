@@ -7,11 +7,11 @@ use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::{
-    SAPLING_TABLES_PREFIX,
     wallet::{
+        init::{migrations::fix_broken_commitment_trees, WalletMigrationError},
         KeyScope,
-        init::{WalletMigrationError, migrations::fix_broken_commitment_trees},
     },
+    SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]

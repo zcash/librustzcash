@@ -15,11 +15,11 @@ use nonempty::NonEmpty;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
-use shardtree::{ShardTree, error::ShardTreeError, store::memory::MemoryShardStore};
+use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use subtle::ConditionallySelectable;
 
-use ::sapling::{
-    note_encryption::{SaplingDomain, sapling_note_encryption},
+use sapling::{
+    note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
 };
@@ -31,15 +31,15 @@ use zcash_keys::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
+    transaction::{components::sapling::zip212_enforcement, fees::FeeRule, Transaction, TxId},
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
+    ShieldedProtocol,
 };
 #[cfg(feature = "transparent-key-import")]
 use zcash_script::script;
@@ -47,25 +47,26 @@ use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-    ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance,
-    SentTransaction, TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
-    WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
-    chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
+    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     error::Error,
     scanning::ScanRange,
     wallet::{
-        ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
+        create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
+        ConfirmationsPolicy, SpendingKeys,
     },
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ReceivedNotes, ReceivedTransactionOutput, ScannedBlock, SeedRelevance, SentTransaction,
+    TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary,
+    WalletTest, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
 use crate::{
-    data_api::{MaxSpendMode, TargetValue, wallet::TargetHeight},
+    data_api::{wallet::TargetHeight, MaxSpendMode, TargetValue},
     fees::{
-        ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
+        ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
     proposal::Proposal,
     proto::compact_formats::{
@@ -77,18 +78,18 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{
-        TransactionsInvolvingAddress, TransparentBalances,
-        wallet::input_selection::ShieldingSelector,
+        wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress,
+        TransparentBalances,
     },
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
+    transparent::address::TransparentAddress,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 
 #[cfg(feature = "orchard")]
 use {
     super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
-    ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
+    group::ff::PrimeField, orchard::tree::MerkleHashOrchard, pasta_curves::pallas,
 };
 
 pub mod pool;
@@ -1101,6 +1102,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub fn propose_shielding<InputsT, ChangeT>(
         &mut self,
         input_selector: &InputsT,
@@ -1109,6 +1111,7 @@ where
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
         confirmations_policy: ConfirmationsPolicy,
+        utxo_filter: super::TransparentUtxoFilter<'_>,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1129,6 +1132,7 @@ where
             from_addrs,
             to_account,
             confirmations_policy,
+            utxo_filter,
         )
     }
 

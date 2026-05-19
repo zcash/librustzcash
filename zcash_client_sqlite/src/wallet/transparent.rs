@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime, SystemTimeError};
 use nonempty::NonEmpty;
 use rand::RngCore;
 use rand_distr::Distribution;
-use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
-use rusqlite::{Connection, Row, named_params};
+use rusqlite::OptionalExtension;
+use rusqlite::{named_params, Connection, Row};
 use tracing::{debug, warn};
 
 use transparent::{
@@ -22,9 +22,9 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, WalletUtxo,
         wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
+        TransactionStatusFilter, TransparentBalances, TransparentUtxoFilter, WalletUtxo,
     },
     wallet::{
         Exposure, GapMetadata, TransparentAddressMetadata, TransparentAddressSource,
@@ -35,16 +35,16 @@ use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
     keys::{
+        transparent::gap_limits::{generate_address_list, GapLimits},
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey,
-        transparent::gap_limits::{GapLimits, generate_address_list},
     },
 };
 use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
-    TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
     value::{ZatBalance, Zatoshis},
+    TxId,
 };
 use zcash_script::script;
 use zip32::Scope;
@@ -53,18 +53,18 @@ use zip32::Scope;
 use bip32::{PublicKey, PublicKeyBytes};
 
 use super::{
-    KeyScope, account_birthday_internal, chain_tip_height,
+    account_birthday_internal, chain_tip_height,
     encoding::{
-        ReceiverFlags, decode_diversifier_index_be, decode_epoch_seconds,
-        encode_diversifier_index_be, epoch_seconds,
+        decode_diversifier_index_be, decode_epoch_seconds, encode_diversifier_index_be,
+        epoch_seconds, ReceiverFlags,
     },
-    get_account_ids, get_account_internal,
+    get_account_ids, get_account_internal, KeyScope,
 };
 use crate::{
-    AccountRef, AccountUuid, AddressRef, TxRef, UtxoId,
     error::SqliteClientError,
     util::Clock,
     wallet::{common::tx_unexpired_condition, get_account, mempool_height},
+    AccountRef, AccountUuid, AddressRef, TxRef, UtxoId,
 };
 
 pub(crate) mod ephemeral;
@@ -1164,10 +1164,34 @@ pub(crate) fn get_wallet_transparent_output(
 pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    address: &TransparentAddress,
+    filter: TransparentUtxoFilter<'_>,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
 ) -> Result<Vec<WalletUtxo>, SqliteClientError> {
+    // Build the address filter clause: when specific addresses are provided,
+    // restrict to those; when None, allow all wallet addresses.
+    let (address_clause, address_params) = match filter.addresses() {
+        Some(addrs) if addrs.is_empty() => return Ok(vec![]),
+        Some(addrs) => {
+            let encoded: Vec<String> = addrs.iter().map(|a| a.encode(params)).collect();
+            let placeholders = encoded
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!(":addr_{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (format!("u.address IN ({placeholders})"), encoded)
+        }
+        None => ("1 = 1".to_string(), vec![]),
+    };
+
+    // When coinbase_only is set, restrict to coinbase outputs (tx_index == 0).
+    let coinbase_clause = if filter.coinbase_only() {
+        "IFNULL(t.tx_index, 1) == 0"
+    } else {
+        "1 = 1"
+    };
+
     let mut stmt_utxos = conn.prepare(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
@@ -1177,19 +1201,18 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
-         WHERE u.address = :address
+         WHERE ({address_clause})
          AND u.value_zat > :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs",
+         AND ({}) -- exclude immature coinbase outputs
+         AND ({coinbase_clause}) -- coinbase filter",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         excluding_immature_coinbase_outputs("t"),
     ))?;
-
-    let addr_str = address.encode(params);
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
@@ -1199,12 +1222,28 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
-    let mut rows = stmt_utxos.query(named_params![
-        ":address": addr_str,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-        ":min_value": u64::from(zip317::MARGINAL_FEE),
-    ])?;
+    let mut query_params: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = vec![
+        (":target_height", Box::new(u32::from(target_height))),
+        (":min_confirmations", Box::new(min_confirmations)),
+        (":min_value", Box::new(u64::from(zip317::MARGINAL_FEE))),
+    ];
+
+    // We need to hold the param name strings alive for the borrow in query_params.
+    let addr_param_names: Vec<String> = address_params
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!(":addr_{i}"))
+        .collect();
+    for (i, addr) in address_params.iter().enumerate() {
+        query_params.push((&addr_param_names[i], Box::new(addr.clone())));
+    }
+
+    let params_slice: Vec<(&str, &dyn rusqlite::types::ToSql)> = query_params
+        .iter()
+        .map(|(k, v)| (*k, v.as_ref() as &dyn rusqlite::types::ToSql))
+        .collect();
+
+    let mut rows = stmt_utxos.query(params_slice.as_slice())?;
 
     let mut utxos = Vec::<WalletUtxo>::new();
     while let Some(row) = rows.next()? {
@@ -2245,19 +2284,19 @@ mod tests {
     use secrecy::Secret;
     use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
     use zcash_client_backend::{
-        data_api::{Account as _, WalletWrite, testing::TestBuilder},
+        data_api::{testing::TestBuilder, Account as _, WalletWrite},
         wallet::{Exposure, TransparentAddressMetadata},
     };
     use zcash_primitives::block::BlockHash;
 
     use crate::{
-        GapLimits, WalletDb,
         error::SqliteClientError,
-        testing::{BlockCache, db::TestDbFactory},
+        testing::{db::TestDbFactory, BlockCache},
         wallet::{
             get_account_ref,
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
         },
+        GapLimits, WalletDb,
     };
 
     #[test]

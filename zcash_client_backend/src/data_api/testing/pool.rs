@@ -2,11 +2,11 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
-use incrementalmerkletree::{Level, Position, frontier::Frontier};
+use incrementalmerkletree::{frontier::Frontier, Level, Position};
 use rand::{Rng, RngCore};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -16,40 +16,42 @@ use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::{
     block::BlockHash,
     transaction::{
-        Transaction,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
+        Transaction,
     },
 };
 use zcash_protocol::{
-    ShieldedProtocol,
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 use zip321::{Payment, TransactionRequest};
 
 use crate::{
     data_api::{
-        self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
-        MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite,
+        self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
         testing::{
-            AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
-            single_output_change_strategy,
+            single_output_change_strategy, AddressType, CacheInsertionResult, FakeCompactOutput,
+            InitialChainState, TestBuilder,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, TargetHeight, TransferErrT,
         },
+        Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, MaxSpendMode,
+        NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletTest, WalletWrite,
     },
     decrypt_transaction,
     fees::{
-        self, DustOutputPolicy, SplitPolicy, StandardFeeRule,
+        self,
         standard::{self, SingleOutputChangeStrategy},
+        DustOutputPolicy, SplitPolicy, StandardFeeRule,
     },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
@@ -60,7 +62,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::TransactionDataRequest,
+        data_api::{TransactionDataRequest, TransparentUtxoFilter},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::WalletTransparentOutput,
@@ -72,7 +74,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_primitives::transaction::fees::zip317,
-    zcash_protocol::{TxId, value::ZatBalance},
+    zcash_protocol::{value::ZatBalance, TxId},
 };
 
 #[cfg(feature = "orchard")]
@@ -3384,11 +3386,9 @@ where
     // Verify that a transaction enhancement request for the transaction containing the spent
     // outpoint does not yet exist.
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 
     // Use `decrypt_and_store_transaction` for the side effect of creating enhancement requests for
     // the transparent inputs of the transaction.
@@ -3402,11 +3402,9 @@ where
 
     // Verify that a transaction enhancement request for the received transaction was created
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 
     // Now advance the chain by 40 blocks; even though a record for the transaction that created
     // `spent_outpoint` exists in the wallet database, the transaction can't be enhanced because
@@ -3433,11 +3431,9 @@ where
 
     // Verify that the transaction enhancement request for the invalid txid has been deleted.
     let requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(
-        !requests
-            .iter()
-            .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid()))
-    );
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 }
 
 // FIXME: This requires fixes to the test framework.
@@ -5197,6 +5193,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             &[to],
             dest_account_id,
             ConfirmationsPolicy::MIN,
+            TransparentUtxoFilter::ALL,
         )
         .unwrap();
     let result1 = st
@@ -5374,7 +5371,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
         let spendable_utxos = st
             .wallet()
             .get_spendable_transparent_outputs(
-                &t_addr,
+                TransparentUtxoFilter::from_addresses(&[t_addr]),
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
             )
@@ -5395,7 +5392,11 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     let target_height = TargetHeight::from(latest_height + 1);
     let spendable_utxos = st
         .wallet()
-        .get_spendable_transparent_outputs(&t_addr, target_height, ConfirmationsPolicy::default())
+        .get_spendable_transparent_outputs(
+            TransparentUtxoFilter::from_addresses(&[t_addr]),
+            target_height,
+            ConfirmationsPolicy::default(),
+        )
         .unwrap();
     assert!(
         !spendable_utxos.is_empty(),
@@ -5415,6 +5416,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
+            TransparentUtxoFilter::ALL,
         )
         .unwrap();
 }

@@ -2,7 +2,7 @@
 //! reorg handling.
 use std::collections::HashSet;
 
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::data_api::WalletCommitmentTrees;
@@ -11,8 +11,8 @@ use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 use crate::{
     error::SqliteClientError,
     wallet::{
+        init::{migrations::support_legacy_sqlite, WalletMigrationError},
         SqlTransaction, WalletDb,
-        init::{WalletMigrationError, migrations::support_legacy_sqlite},
     },
 };
 
@@ -261,12 +261,12 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::init::{
-            WalletMigrator,
             migrations::{support_legacy_sqlite, tests::test_migrate, tx_observation_height},
+            WalletMigrator,
         },
+        WalletDb,
     };
 
     use super::MIGRATION_ID;

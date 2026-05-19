@@ -19,7 +19,7 @@ use zcash_protocol::{consensus, value::BalanceError};
 use self::migrations::verify_network_compatibility;
 
 use super::commitment_tree;
-use crate::{WalletDb, error::SqliteClientError, util::Clock};
+use crate::{error::SqliteClientError, util::Clock, WalletDb};
 
 pub mod migrations;
 
@@ -693,7 +693,7 @@ pub(crate) mod testing {
     use uuid::Uuid;
     use zcash_protocol::consensus;
 
-    use crate::{WalletDb, util::Clock};
+    use crate::{util::Clock, WalletDb};
 
     use super::WalletMigrationError;
 
@@ -712,19 +712,19 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use rand::RngCore;
-    use rusqlite::{self, Connection, ToSql, named_params};
+    use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
 
     use tempfile::NamedTempFile;
 
-    use ::sapling::zip32::ExtendedFullViewingKey;
+    use sapling::zip32::ExtendedFullViewingKey;
     use zcash_client_backend::data_api::testing::TestBuilder;
     use zcash_keys::{
         address::Address,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{
-            ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
-            UnifiedSpendingKey, sapling,
+            sapling, ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey,
         },
     };
     use zcash_primitives::transaction::{TransactionData, TxVersion};
@@ -733,16 +733,16 @@ mod tests {
 
     use super::testing::init_wallet_db;
     use crate::{
-        UA_TRANSPARENT, WalletDb,
-        testing::db::{TestDbFactory, test_clock, test_rng},
+        testing::db::{test_clock, test_rng, TestDbFactory},
         util::Clock,
         wallet::db,
+        WalletDb, UA_TRANSPARENT,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         super::WalletMigrationError,
-        crate::wallet::{self, PoolType, pool_code},
+        crate::wallet::{self, pool_code, PoolType},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
         zip32::DiversifierIndex,

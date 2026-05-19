@@ -212,9 +212,9 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::add_transaction_views},
+        wallet::init::{migrations::add_transaction_views, WalletMigrator},
+        WalletDb,
     };
 
     #[test]

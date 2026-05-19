@@ -4,28 +4,28 @@ use std::{collections::HashSet, rc::Rc};
 
 use group::ff::PrimeField;
 use incrementalmerkletree::Position;
-use rusqlite::{Connection, Row, named_params, types::Value};
+use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
     data_api::{
-        Account, NullifierQuery, TargetValue,
         ll::ReceivedSaplingOutput,
         wallet::{ConfirmationsPolicy, TargetHeight},
+        Account, NullifierQuery, TargetValue,
     },
     wallet::ReceivedNote,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
     consensus::{self, BlockHeight},
+    ShieldedProtocol, TxId,
 };
 use zip32::Scope;
 
-use crate::{AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef, error::SqliteClientError};
+use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
 use super::{
-    KeyScope, common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address,
+    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
 };
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(

@@ -9,23 +9,23 @@ use shardtree::error::ShardTreeError;
 #[cfg(feature = "transparent-key-import")]
 use uuid::Uuid;
 use zcash_address::ParseError;
-use zcash_client_backend::data_api::NoteFilter;
 use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
+use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::BalanceError};
+use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
 use zip32::DiversifierIndex;
 
 use crate::{
-    AccountUuid,
     wallet::{commitment_tree, common::ErrUnsupportedPool},
+    AccountUuid,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::transparent::SchedulingError,
-    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     zcash_keys::{
         encoding::TransparentCodecError, keys::transparent::gap_limits::GapAddressesError,
     },

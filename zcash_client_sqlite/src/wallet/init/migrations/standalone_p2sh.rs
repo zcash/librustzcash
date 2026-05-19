@@ -139,9 +139,9 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
+        wallet::init::{migrations::tests::test_migrate, WalletMigrator},
+        WalletDb,
     };
 
     use super::{DEPENDENCIES, MIGRATION_ID};

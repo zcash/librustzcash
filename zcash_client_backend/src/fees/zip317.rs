@@ -6,23 +6,23 @@
 
 use core::marker::PhantomData;
 
-use zcash_primitives::transaction::fees::{FeeRule, transparent, zip317 as prim_zip317};
+use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
 use zcash_protocol::{
-    ShieldedProtocol, consensus,
+    consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
 
 use crate::{
-    data_api::{AccountMeta, InputSource, NoteFilter, wallet::TargetHeight},
+    data_api::{wallet::TargetHeight, AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
 };
 
 use super::{
-    ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance, MetaSource, SplitPolicy,
-    TransactionBalance,
-    common::{SinglePoolBalanceConfig, single_pool_output_balance},
-    sapling as sapling_fees,
+    common::{single_pool_output_balance, SinglePoolBalanceConfig},
+    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
+    MetaSource, SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -68,6 +68,8 @@ pub struct SingleOutputChangeStrategy<R, I> {
     fallback_change_pool: ShieldedProtocol,
     dust_output_policy: DustOutputPolicy,
     meta_source: PhantomData<I>,
+    #[cfg(feature = "transparent-inputs")]
+    allow_transparent_change: bool,
 }
 
 impl<R, I> SingleOutputChangeStrategy<R, I> {
@@ -88,7 +90,20 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
             fallback_change_pool,
             dust_output_policy,
             meta_source: PhantomData,
+            #[cfg(feature = "transparent-inputs")]
+            allow_transparent_change: false,
         }
+    }
+
+    /// Enables transparent change for fully-transparent transactions.
+    ///
+    /// When enabled, transactions that have only transparent inputs and outputs
+    /// will produce transparent change outputs instead of shielding change to
+    /// a shielded pool.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_transparent_change(mut self) -> Self {
+        self.allow_transparent_change = true;
+        self
     }
 }
 
@@ -138,6 +153,8 @@ where
             self.fallback_change_pool,
             self.fee_rule.marginal_fee(),
             self.fee_rule.grace_actions(),
+            #[cfg(feature = "transparent-inputs")]
+            self.allow_transparent_change,
         );
 
         single_pool_output_balance(
@@ -164,6 +181,8 @@ pub struct MultiOutputChangeStrategy<R, I> {
     dust_output_policy: DustOutputPolicy,
     split_policy: SplitPolicy,
     meta_source: PhantomData<I>,
+    #[cfg(feature = "transparent-inputs")]
+    allow_transparent_change: bool,
 }
 
 impl<R, I> MultiOutputChangeStrategy<R, I> {
@@ -192,7 +211,20 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
             dust_output_policy,
             split_policy,
             meta_source: PhantomData,
+            #[cfg(feature = "transparent-inputs")]
+            allow_transparent_change: false,
         }
+    }
+
+    /// Enables transparent change for fully-transparent transactions.
+    ///
+    /// When enabled, transactions that have only transparent inputs and outputs
+    /// will produce transparent change outputs instead of shielding change to
+    /// a shielded pool.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_transparent_change(mut self) -> Self {
+        self.allow_transparent_change = true;
+        self
     }
 }
 
@@ -247,6 +279,8 @@ where
             self.fallback_change_pool,
             self.fee_rule.marginal_fee(),
             self.fee_rule.grace_actions(),
+            #[cfg(feature = "transparent-inputs")]
+            self.allow_transparent_change,
         );
 
         single_pool_output_balance(
@@ -268,23 +302,23 @@ where
 mod tests {
     use core::{convert::Infallible, num::NonZeroUsize};
 
-    use ::transparent::{address::Script, bundle::TxOut};
+    use transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
     use zcash_protocol::{
-        ShieldedProtocol,
         consensus::{Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
+        ShieldedProtocol,
     };
 
     use super::SingleOutputChangeStrategy;
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta, testing::MockWalletDb, wallet::input_selection::SaplingPayment,
+            testing::MockWalletDb, wallet::input_selection::SaplingPayment, AccountMeta, PoolMeta,
         },
         fees::{
-            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
         },
     };
 
@@ -660,7 +694,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_no_change() {
         use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+        use transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -706,7 +740,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_change() {
         use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+        use transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -752,7 +786,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_dust_change() {
         use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+        use transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
