@@ -9,6 +9,13 @@ represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
 ## [Unreleased]
+### Added
+- `pczt::orchard::NotePlaintextVersion`, representing Orchard note plaintext
+  versions in serialized PCZT data.
+- `pczt::orchard::Spend::note_version` and
+  `pczt::orchard::Output::note_version` getters. These fields are used to
+  reconstruct Orchard note commitments with the intended note plaintext
+  version.
 
 ## [0.6.0] - 2026-04-27
 

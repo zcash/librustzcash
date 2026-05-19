@@ -1609,10 +1609,10 @@ where
                     {
                         orchard::note::NoteVersion::V3
                     } else {
-                        orchard::note::DEFAULT_NOTE_VERSION
+                        orchard::note::NoteVersion::DEFAULT
                     };
                     #[cfg(not(feature = "unstable"))]
-                    let orchard_change_note_version = orchard::note::DEFAULT_NOTE_VERSION;
+                    let orchard_change_note_version = orchard::note::NoteVersion::DEFAULT;
 
                     builder.add_versioned_orchard_output(
                         internal_ovk.map(|k| k.into()),

@@ -573,7 +573,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
 
     /// Adds an Orchard recipient to the transaction.
     ///
-    /// This uses [`orchard::note::DEFAULT_NOTE_VERSION`].
+    /// This uses [`orchard::note::NoteVersion::DEFAULT`].
     pub fn add_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
@@ -586,7 +586,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
             recipient,
             value,
             memo,
-            orchard::note::DEFAULT_NOTE_VERSION,
+            orchard::note::NoteVersion::DEFAULT,
         )
     }
 
@@ -603,7 +603,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBuilderNotAvailable)?
-            .add_versioned_output(
+            .add_output_with_version(
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value.into()),

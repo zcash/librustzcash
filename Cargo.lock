@@ -2967,7 +2967,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.13.1"
-source = "git+https://github.com/valargroup/qr_orchard?rev=0f4175428957348117b5b666038e4d4baee7cfc9#0f4175428957348117b5b666038e4d4baee7cfc9"
+source = "git+https://github.com/valargroup/qr_orchard?rev=9f046f22a46dd644aeed070968e51add57478973#9f046f22a46dd644aeed070968e51add57478973"
 dependencies = [
  "aes",
  "bitvec",
