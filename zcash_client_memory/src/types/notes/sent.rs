@@ -372,7 +372,7 @@ mod serialization {
                 proto::RecipientType::InternalAccount => Recipient::InternalAccount {
                     receiving_account: read_optional!(recipient, account_id)?.into(),
                     external_address: recipient.address.map(|a| a.parse()).transpose()?,
-                    note: Box::new(read_optional!(recipient, note)?.into()),
+                    note: Box::new(read_optional!(recipient, note)?.try_into()?),
                 },
                 proto::RecipientType::InternalTransparent => {
                     #[cfg(not(feature = "transparent-inputs"))]
