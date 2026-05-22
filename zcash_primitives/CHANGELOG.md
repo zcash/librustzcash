@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_primitives::transaction::Transaction::read` now rejects v4
+  transactions whose Sapling section contains zero spends and zero outputs
+  but a non-zero `valueBalanceSapling`, matching Zebra and post-v6.12.2
+  zcashd (consensus rule §7.1.2). Previously the value was silently
+  discarded, accepting an encoding that no consensus node will admit.
+
 ## [0.27.1] - 2026-05-14
 
 ### Fixed
