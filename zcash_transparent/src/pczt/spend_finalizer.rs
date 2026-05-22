@@ -33,8 +33,10 @@ impl super::Bundle {
                             } else {
                                 // P2PKH scriptSig
                                 input.script_sig = Some(script::Component(vec![
-                                    pv::push_value(sig_bytes).expect("short enough"),
-                                    pv::push_value(pubkey).expect("short enough"),
+                                    pv::push_value(sig_bytes)
+                                        .ok_or(SpendFinalizerError::InvalidSignature)?,
+                                    // `pubkey` is a fixed 33-byte compressed key, so its push always fits.
+                                    pv::push_value(pubkey).expect("33-byte pubkey fits"),
                                 ]));
                                 Ok(())
                             }
