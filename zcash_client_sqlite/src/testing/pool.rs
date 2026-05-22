@@ -511,3 +511,11 @@ pub(crate) fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<
         BlockCache::new(),
     );
 }
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::propose_and_build_shielding_coinbase_succeeds::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}

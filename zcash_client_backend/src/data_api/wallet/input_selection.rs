@@ -1245,11 +1245,29 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         // Compute the fee directly from the fee rule. This method produces no
         // change in any pool, so there is no change-strategy or wallet-metadata
         // computation to perform. The proposal will carry exactly one shielded
-        // output (in `destination_pool`) and zero transparent outputs.
+        // payment output (in `destination_pool`) and zero transparent outputs.
+        //
+        // Both Sapling and Orchard transactional bundles pad up to a minimum
+        // of 2 outputs/actions when any output is added (see `MIN_ACTIONS` /
+        // `MIN_SHIELDED_OUTPUTS` in the respective crates). The proposal fee
+        // must reflect the *padded* counts that the builder will actually
+        // produce, otherwise the subsequent `create_proposed_transactions`
+        // call fails with `InsufficientFunds(need additional <marginal_fee>)`.
+        // We query each bundle type for the count it will materialize.
         let (sapling_output_count, orchard_action_count) = match destination_pool {
-            PoolType::SAPLING => (1usize, 0usize),
+            PoolType::SAPLING => {
+                let count = ::sapling::builder::BundleType::DEFAULT
+                    .num_outputs(0, 1)
+                    .expect("sapling DEFAULT bundle type permits any (spends, outputs) count");
+                (count, 0usize)
+            }
             #[cfg(feature = "orchard")]
-            PoolType::ORCHARD => (0usize, 1usize),
+            PoolType::ORCHARD => {
+                let count = orchard::builder::BundleType::DEFAULT
+                    .num_actions(0, 1)
+                    .expect("orchard DEFAULT bundle type permits any (spends, outputs) count");
+                (0usize, count)
+            }
             // Unreachable: `resolve_shielded_destination` rejects transparent
             // destinations earlier with `ShieldingRequiresShieldedRecipient`.
             _ => {

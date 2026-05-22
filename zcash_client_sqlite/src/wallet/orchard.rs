@@ -742,6 +742,12 @@ pub(crate) mod tests {
         >();
     }
 
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_and_build_shielding_coinbase_succeeds() {
+        testing::pool::propose_and_build_shielding_coinbase_succeeds::<OrchardPoolTester>();
+    }
+
     #[test]
     #[cfg(feature = "orchard")]
     fn get_unspent_orchard_notes_at_historical_height_boundary_heights() {

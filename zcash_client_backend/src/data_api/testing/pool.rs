@@ -6699,3 +6699,78 @@ pub fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<T: Shielded
     // `available: 0, required: fee`.
     assert_matches!(result, Err(Error::InsufficientFunds { .. }));
 }
+
+/// Regression test for the propose-fee/build-fee mismatch fixed in #2375.
+///
+/// Both `sapling::builder::BundleType::DEFAULT` and
+/// `orchard::builder::BundleType::DEFAULT` pad up to a minimum of 2
+/// outputs/actions (`MIN_SHIELDED_OUTPUTS` / `MIN_ACTIONS`). Before the fix,
+/// `propose_shielding_coinbase` hardcoded `(1, 0)` / `(0, 1)` when asking the
+/// fee rule what fee to charge, so the proposal underestimated the fee by
+/// exactly one ZIP-317 marginal unit (5000 zat). The proposal succeeded, but
+/// `create_proposed_transactions` then failed at build time with
+/// `Insufficient funds for transaction construction; need an additional
+/// ZatBalance(5000) zatoshis`.
+///
+/// This test verifies the propose-and-build round trip succeeds for both
+/// Sapling and Orchard destinations (parameterized by `T`).
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+pub fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let account = st.get_account();
+    let (t_addr, _) = account.usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(50000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    // Coinbase outputs require 100 confirmations.
+    st.add_empty_blocks(100);
+
+    // The destination is a shielded address controlled by a separate spending key.
+    let to_extsk = T::sk(&[0xcd; 32]);
+    let to_address = T::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let proposal = st
+        .propose_shielding_coinbase(
+            &GreedyInputSelector::new(),
+            &StandardFeeRule::Zip317,
+            Zatoshis::ZERO,
+            &[t_addr],
+            to_address,
+            None,
+            None,
+        )
+        .expect("propose_shielding_coinbase should succeed");
+
+    // The actual regression: prior to #2375 this would fail at build time
+    // with `Insufficient funds for transaction construction; need an
+    // additional ZatBalance(5000) zatoshis` because the proposal-stage fee
+    // was computed assuming N output/action slots but the builder
+    // materializes N+1 (after `MIN_*` padding).
+    let build_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(
+        &build_result,
+        Ok(txids) if txids.len() == 1,
+        "create_proposed_transactions must succeed for proposal {:?}",
+        proposal,
+    );
+}
