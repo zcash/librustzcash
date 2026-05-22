@@ -10,6 +10,11 @@ use crate::sighash::SighashType;
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 
+/// Maximum size of a script push-value (`LargeValue::MAX_SIZE`, 520 bytes).
+/// `partial_signatures` entries are pushed as single script elements during
+/// spend finalization, so they cannot exceed this.
+const MAX_SCRIPT_PUSH_VALUE_LEN: usize = 520;
+
 impl Bundle {
     /// Parses a PCZT bundle from its component parts.
     pub fn parse(inputs: Vec<Input>, outputs: Vec<Output>) -> Result<Self, ParseError> {
@@ -66,6 +71,16 @@ impl Input {
 
         let sighash_type =
             SighashType::parse(sighash_type).ok_or(ParseError::InvalidSighashType)?;
+
+        // Each `partial_signatures` value is pushed as a single script element
+        // during spend finalization and cannot exceed the script push-value
+        // limit. Reject oversized entries at the parse boundary so no downstream
+        // role can be driven to panic on them.
+        for sig in partial_signatures.values() {
+            if sig.len() > MAX_SCRIPT_PUSH_VALUE_LEN {
+                return Err(ParseError::InvalidPartialSignature);
+            }
+        }
 
         Ok(Self {
             prevout_txid,
@@ -155,8 +170,55 @@ pub enum ParseError {
     InvalidScriptPubkey,
     /// An invalid `script_sig` was provided.
     InvalidScriptSig,
+    /// A `partial_signatures` entry exceeded the maximum script element size.
+    InvalidPartialSignature,
     /// An invalid `sighash_type` was provided.
     InvalidSighashType,
     /// An invalid `value` was provided.
     InvalidValue,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+    use alloc::vec;
+
+    use zcash_script::script::Evaluable;
+
+    use crate::address::TransparentAddress;
+    use crate::sighash::SIGHASH_ALL;
+
+    use super::{Input, ParseError};
+
+    #[test]
+    fn input_parse_rejects_oversized_partial_signature() {
+        let script_pubkey = TransparentAddress::PublicKeyHash([0; 20])
+            .script()
+            .to_bytes();
+        let mut partial_signatures = BTreeMap::new();
+        partial_signatures.insert([2; 33], vec![0; 521]);
+
+        assert!(matches!(
+            Input::parse(
+                [0; 32],
+                0,
+                None,
+                None,
+                None,
+                None,
+                1000,
+                script_pubkey,
+                None,
+                partial_signatures,
+                SIGHASH_ALL,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
+            Err(ParseError::InvalidPartialSignature)
+        ));
+    }
 }
