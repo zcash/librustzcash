@@ -25,6 +25,7 @@ mod full_account_ids;
 mod initial_setup;
 mod ivk_item_cache;
 mod nullifier_map;
+mod orchard_note_versions;
 mod orchard_received_notes;
 mod orchard_shardtree;
 mod received_notes_nullable_nf;
@@ -231,6 +232,7 @@ pub(super) fn all_migrations<
         Box::new(witness_stabilized_notes::Migration {
             params: params.clone(),
         }),
+        Box::new(orchard_note_versions::Migration),
     ]
 }
 
@@ -374,7 +376,7 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     v_tx_outputs_key_scopes::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
-    witness_stabilized_notes::MIGRATION_ID,
+    orchard_note_versions::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

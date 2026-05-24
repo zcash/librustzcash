@@ -433,6 +433,7 @@ CREATE INDEX idx_sapling_received_note_spends_transaction_id ON sapling_received
 /// - `value`: the value of the note
 /// - `rho`: the rho value used to derive the nullifier of the note
 /// - `rseed`: the rseed value used to generate the note
+/// - `note_version`: the Orchard note plaintext version used to derive the note commitment
 /// - `nf`: the nullifier that will be exposed when the note is spent
 /// - `is_change`: a flag indicating whether the note was received in a transaction where
 ///   the receiving account also spent notes.
@@ -456,6 +457,7 @@ CREATE TABLE "orchard_received_notes" (
     value INTEGER NOT NULL,
     rho BLOB NOT NULL,
     rseed BLOB NOT NULL,
+    note_version INTEGER NOT NULL DEFAULT 2,
     nf BLOB UNIQUE,
     is_change INTEGER NOT NULL,
     memo BLOB,

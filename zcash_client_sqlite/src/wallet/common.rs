@@ -52,7 +52,7 @@ const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
     table_prefix: ORCHARD_TABLES_PREFIX,
     output_index_col: "action_index",
     output_count_col: "orchard_action_count",
-    note_reconstruction_cols: "rho, rseed",
+    note_reconstruction_cols: "rn.rho AS rho, rn.rseed AS rseed, rn.note_version AS note_version",
     shard_height: ORCHARD_SHARD_HEIGHT,
 };
 
