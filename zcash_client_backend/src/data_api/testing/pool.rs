@@ -5997,7 +5997,7 @@ where
         None,
         OrchardPoolTester::SHIELDED_PROTOCOL,
     );
-    let network = st.network().clone();
+    let network = *st.network();
     let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
