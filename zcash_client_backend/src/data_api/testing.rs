@@ -1171,6 +1171,9 @@ where
         spend_from_account: <DbT as InputSource>::AccountId,
         ovk_policy: OvkPolicy,
         proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+        #[cfg(feature = "unstable")] proposed_version: Option<
+            zcash_primitives::transaction::TxVersion,
+        >,
     ) -> Result<
         pczt::Pczt,
         super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
@@ -1189,6 +1192,8 @@ where
             spend_from_account,
             ovk_policy,
             proposal,
+            #[cfg(feature = "unstable")]
+            proposed_version,
         )
     }
 

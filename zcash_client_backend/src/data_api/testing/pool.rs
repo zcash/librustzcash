@@ -5902,6 +5902,8 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         account.id(),
         OvkPolicy::Sender,
         &proposal0,
+        #[cfg(feature = "unstable")]
+        None,
     );
     assert_matches!(&create_proposed_result, Ok(_));
     let pczt_created = create_proposed_result.unwrap();
@@ -5937,6 +5939,109 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
 
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
+}
+
+#[cfg(all(feature = "pczt", feature = "orchard", feature = "unstable"))]
+pub fn pczt_qr_orchard_change_note_version<Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: serde::Serialize,
+{
+    use pczt::orchard::NotePlaintextVersion;
+    use zcash_primitives::transaction::TxVersion;
+    use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
+
+    use super::orchard::OrchardPoolTester;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|_, network| {
+            let birthday_height = std::cmp::max(
+                network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                network.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD,
+            );
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    Frontier::empty(),
+                    Frontier::empty(),
+                ),
+                prior_sapling_roots: vec![],
+                prior_orchard_roots: vec![],
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let funding_fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let recipient = OrchardPoolTester::fvk_default_address(&recipient_fvk);
+
+    let note_value = Zatoshis::const_from_u64(350000);
+    st.generate_next_block(&funding_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 1);
+
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        recipient.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(200000),
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = single_output_change_strategy(
+        StandardFeeRule::Zip317,
+        None,
+        OrchardPoolTester::SHIELDED_PROTOCOL,
+    );
+    let network = st.network().clone();
+    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        Some(TxVersion::V5_Qr),
+    )
+    .unwrap();
+
+    let pczt = st
+        .create_pczt_from_proposal::<Infallible, _, Infallible>(
+            account.id(),
+            OvkPolicy::Sender,
+            &proposal,
+            Some(TxVersion::V5_Qr),
+        )
+        .unwrap();
+
+    let output_versions = pczt
+        .orchard()
+        .actions()
+        .iter()
+        .filter(|action| action.output().value().is_some())
+        .map(|action| *action.output().note_version())
+        .collect::<Vec<_>>();
+
+    assert_eq!(output_versions.len(), 2);
+    assert_eq!(
+        output_versions
+            .iter()
+            .filter(|v| **v == NotePlaintextVersion::V2)
+            .count(),
+        1
+    );
+    assert_eq!(
+        output_versions
+            .iter()
+            .filter(|v| **v == NotePlaintextVersion::V3)
+            .count(),
+        1
+    );
 }
 
 /// Ensure that wallet recovery recomputes fees.
