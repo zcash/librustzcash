@@ -126,6 +126,17 @@ const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
 #[cfg(feature = "pczt")]
 const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
+#[cfg(all(feature = "pczt", feature = "orchard"))]
+fn orchard_note_from_pczt_parts(
+    recipient: orchard::Address,
+    value: orchard::value::NoteValue,
+    rho: orchard::note::Rho,
+    rseed: orchard::note::RandomSeed,
+    note_version: orchard::note::NoteVersion,
+) -> Option<orchard::Note> {
+    orchard::Note::from_parts_with_version(recipient, value, rho, rseed, note_version).into()
+}
+
 #[cfg(feature = "pczt")]
 fn serialize_target_height<S>(
     target_height: &TargetHeight,
@@ -2269,7 +2280,13 @@ where
                     orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
                 })?;
 
-                orchard::Note::from_parts(recipient, value, rho, rseed).into_option()
+                orchard_note_from_pczt_parts(
+                    recipient,
+                    value,
+                    rho,
+                    rseed,
+                    (*act.output().note_version()).into(),
+                )
             };
 
             let external_address = act
@@ -2690,4 +2707,41 @@ where
         #[cfg(feature = "unstable")]
         None,
     )
+}
+
+#[cfg(all(test, feature = "pczt", feature = "orchard"))]
+mod tests {
+    use orchard::{
+        keys::{FullViewingKey, Scope, SpendingKey},
+        note::{ExtractedNoteCommitment, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
+
+    use super::orchard_note_from_pczt_parts;
+
+    fn test_rseed(rho: &Rho) -> RandomSeed {
+        (0u8..=u8::MAX)
+            .find_map(|b| RandomSeed::from_bytes([b; 32], rho).into())
+            .expect("at least one test rseed is valid")
+    }
+
+    #[test]
+    fn pczt_orchard_note_reconstruction_preserves_note_version() {
+        let sk = SpendingKey::from_bytes([7; 32]).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
+        let value = NoteValue::from_raw(50_000);
+        let rho = Rho::from_bytes(&[1; 32]).unwrap();
+        let rseed = test_rseed(&rho);
+
+        let note =
+            orchard_note_from_pczt_parts(recipient, value, rho, rseed, NoteVersion::V3).unwrap();
+        let default_note = orchard::Note::from_parts(recipient, value, rho, rseed).unwrap();
+
+        assert_eq!(note.version(), NoteVersion::V3);
+        assert_eq!(default_note.version(), NoteVersion::V2);
+        assert_ne!(
+            ExtractedNoteCommitment::from(note.commitment()),
+            ExtractedNoteCommitment::from(default_note.commitment())
+        );
+    }
 }
