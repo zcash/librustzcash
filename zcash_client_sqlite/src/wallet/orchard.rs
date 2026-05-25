@@ -502,12 +502,19 @@ pub(crate) fn mark_orchard_note_spent(
 pub(crate) mod tests {
 
     use orchard::note::NoteVersion;
-    use zcash_client_backend::data_api::testing::{
-        orchard::OrchardPoolTester, sapling::SaplingPoolTester,
+    use zcash_client_backend::data_api::{
+        Account as _,
+        testing::{
+            AddressType, TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+            sapling::SaplingPoolTester,
+        },
+        wallet::TargetHeight,
     };
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::value::Zatoshis;
 
     use super::{decode_note_version, encode_note_version};
-    use crate::testing::{self};
+    use crate::testing::{self, BlockCache, db::TestDbFactory};
 
     #[test]
     fn orchard_note_version_storage_codes_roundtrip() {
@@ -516,6 +523,38 @@ pub(crate) mod tests {
         assert_eq!(decode_note_version(2).unwrap(), NoteVersion::V2);
         assert_eq!(decode_note_version(3).unwrap(), NoteVersion::V3);
         assert!(decode_note_version(4).is_err());
+    }
+
+    #[test]
+    fn persisted_orchard_note_version_controls_reconstruction() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let dfvk = OrchardPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(50000);
+        let (height, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(height, 1);
+
+        let target_height = TargetHeight::from(height + 1);
+        let notes =
+            OrchardPoolTester::select_unspent_notes(&st, account.id(), target_height, &[]).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].note().version(), NoteVersion::V2);
+
+        st.wallet()
+            .conn()
+            .execute("UPDATE orchard_received_notes SET note_version = 3", [])
+            .unwrap();
+
+        let notes =
+            OrchardPoolTester::select_unspent_notes(&st, account.id(), target_height, &[]).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].note().version(), NoteVersion::V3);
+        assert_eq!(notes[0].note_value().unwrap(), value);
     }
 
     #[test]
