@@ -434,6 +434,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn expiry_delta_rejects_expiry_above_maximum() {
+        testing::pool::expiry_delta_rejects_expiry_above_maximum::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn spend_max_spendable_single_step_proposed_transfer() {
         testing::pool::spend_max_spendable_single_step_proposed_transfer::<SaplingPoolTester>()
     }

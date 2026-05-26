@@ -57,6 +57,7 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
+        create_proposed_transactions_with_expiry_delta,
         input_selection::{GreedyInputSelector, InputSelector},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
@@ -1196,6 +1197,37 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
+            #[cfg(feature = "unstable")]
+            None,
+        )
+    }
+
+    /// Invokes [`create_proposed_transactions_with_expiry_delta`] with the given arguments.
+    #[allow(clippy::type_complexity)]
+    pub fn create_proposed_transactions_with_expiry_delta<InputsErrT, FeeRuleT, ChangeErrT, N>(
+        &mut self,
+        usk: &UnifiedSpendingKey,
+        ovk_policy: OvkPolicy,
+        proposal: &Proposal<FeeRuleT, N>,
+        expiry_height_delta: NonZeroU32,
+    ) -> Result<
+        NonEmpty<TxId>,
+        super::wallet::CreateWithExpiryDeltaErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
+    >
+    where
+        FeeRuleT: FeeRule,
+    {
+        let prover = LocalTxProver::bundled();
+        let network = self.network().clone();
+        create_proposed_transactions_with_expiry_delta(
+            self.wallet_mut(),
+            &network,
+            &prover,
+            &prover,
+            &SpendingKeys::from_unified_spending_key(usk.clone()),
+            ovk_policy,
+            proposal,
+            expiry_height_delta,
             #[cfg(feature = "unstable")]
             None,
         )
