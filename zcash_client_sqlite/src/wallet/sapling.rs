@@ -688,4 +688,10 @@ pub(crate) mod tests {
             SaplingPoolTester,
         >();
     }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_and_build_shielding_coinbase_succeeds() {
+        testing::pool::propose_and_build_shielding_coinbase_succeeds::<SaplingPoolTester>();
+    }
 }
