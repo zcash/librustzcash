@@ -24,8 +24,8 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, InputSource as _, TransparentOutputFilter, WalletRead as _,
-        WalletTest as _, WalletWrite,
+        Account as _, Balance, InputSource as _, TransactionDataRequest, TransparentOutputFilter,
+        WalletRead as _, WalletTest as _, WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
@@ -354,6 +354,126 @@ where
         taddr,
         ConfirmationsPolicy::MIN,
         &zero_or_one_conf_value,
+    );
+}
+
+/// Regression test for [#2382]: `truncate_to_height` must clear queue entries that reference
+/// transactions which lived only in the now-discarded portion of the chain. Otherwise
+/// `transaction_data_requests` keeps returning enhancement requests for txids the wallet
+/// should be unaware of after a reorg.
+///
+/// [#2382]: https://github.com/zcash/librustzcash/issues/2382
+pub fn truncate_clears_stale_queue_entries<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Seed the chain with some unrelated blocks so the wallet has a chain tip to truncate
+    // back to.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Insert a transparent UTXO owned by the wallet at the chain tip, then build and mine a
+    // shielding transaction spending it. The shielding transaction has a transparent input
+    // referring to the (fake) prevout txid, which gives us something to inspect in the
+    // retrieval queue.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let txout = TxOut::new(value, taddr.script().into());
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        txout,
+        Some(height),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+    let txid = st
+        .shield_transparent_funds(
+            &input_selector,
+            &change_strategy,
+            value,
+            account.usk(),
+            &[*taddr],
+            account.id(),
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap()[0];
+
+    let (mined_height, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(mined_height, 1);
+
+    // Explicitly decrypt the shielding transaction so that
+    // `queue_transparent_input_retrieval` runs and enqueues an enhancement request for the
+    // prevout txid — this is the codepath that produces the stale entries when the wallet
+    // is later truncated.
+    let shielding_tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("Shielding tx exists in wallet.");
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &shielding_tx, Some(mined_height))
+        .unwrap();
+
+    // Sanity-check: the enhancement request for the prevout txid is present before
+    // truncation.
+    let prevout_txid = *OutPoint::fake().txid();
+    let requests_before_truncate = st.wallet().transaction_data_requests().unwrap();
+    assert!(
+        requests_before_truncate
+            .iter()
+            .any(|req| matches!(req, TransactionDataRequest::Enhancement(t) if *t == prevout_txid)),
+        "Expected an Enhancement request for the prevout txid before truncation, got: {:?}",
+        requests_before_truncate,
+    );
+
+    // Truncate so that the shielding transaction is no longer mined. The enhancement
+    // request was queued solely as a consequence of having seen the shielding transaction
+    // on-chain, so it should be removed.
+    st.wallet_mut()
+        .truncate_to_height(mined_height - 1)
+        .unwrap();
+    assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
+
+    let requests_after_truncate = st.wallet().transaction_data_requests().unwrap();
+    assert!(
+        !requests_after_truncate
+            .iter()
+            .any(|req| matches!(req, TransactionDataRequest::Enhancement(t) if *t == prevout_txid)),
+        "Expected no Enhancement request for the prevout txid after truncation, got: {:?}",
+        requests_after_truncate,
     );
 }
 

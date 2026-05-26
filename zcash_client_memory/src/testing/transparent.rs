@@ -16,3 +16,12 @@ fn transparent_balance_across_shielding() {
         MemBlockCache::new(),
     );
 }
+
+#[test]
+#[ignore] //FIXME
+fn truncate_clears_stale_queue_entries() {
+    zcash_client_backend::data_api::testing::transparent::truncate_clears_stale_queue_entries(
+        TestMemDbFactory::new(),
+        MemBlockCache::new(),
+    );
+}

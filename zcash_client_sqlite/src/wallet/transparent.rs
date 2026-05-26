@@ -2404,6 +2404,14 @@ mod tests {
     }
 
     #[test]
+    fn truncate_clears_stale_queue_entries() {
+        zcash_client_backend::data_api::testing::transparent::truncate_clears_stale_queue_entries(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn shielding_many_transparent_utxos() {
         zcash_client_backend::data_api::testing::transparent::shielding_many_transparent_utxos(
             TestDbFactory::default(),
