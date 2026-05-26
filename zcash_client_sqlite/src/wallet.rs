@@ -3737,6 +3737,27 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         named_params![":height": u32::from(truncation_height)],
     )?;
 
+    // Remove entries from the transaction retrieval and transparent spend search queues that
+    // were queued solely as a consequence of having seen a transaction on-chain at a height
+    // that is about to be discarded. Without this, `transaction_data_requests` will keep
+    // returning requests for txids that lived only in the now-discarded portion of the chain.
+    // This must be done before un-mining the transactions below, since the criterion is based
+    // on the soon-to-be-cleared `mined_height` column.
+    conn.execute(
+        "DELETE FROM tx_retrieval_queue
+         WHERE dependent_transaction_id IN (
+            SELECT id_tx FROM transactions WHERE mined_height > :height
+         )",
+        named_params![":height": u32::from(truncation_height)],
+    )?;
+    conn.execute(
+        "DELETE FROM transparent_spend_search_queue
+         WHERE transaction_id IN (
+            SELECT id_tx FROM transactions WHERE mined_height > :height
+         )",
+        named_params![":height": u32::from(truncation_height)],
+    )?;
+
     // Un-mine transactions. This must be done outside of the last_scanned_height check because
     // transaction entries may be created as a consequence of receiving transparent TXOs.
     conn.execute(
