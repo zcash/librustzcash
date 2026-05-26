@@ -10,6 +10,30 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::wallet::spendability_pir` module providing PIR (Private
+  Information Retrieval) spendability support. This includes:
+  - Nullifier-based spend detection: queries for unspent Orchard notes with
+    nullifiers suitable for PIR checking against an external server.
+  - Witness storage: storing and retrieving PIR-obtained Merkle authentication
+    paths, enabling notes to be spent before the wallet finishes scanning.
+  - Witness validation: verifying PIR-provided authentication paths against the
+    note's commitment before persisting.
+- `WalletCommitmentTrees::get_pir_orchard_merkle_path` implementation for
+  `WalletDb`, backed by the `pir_witness_data` table.
+- `spendability_pir_tables` database migration (unconditional, not feature-gated)
+  creating the `pir_witness_data` table to keep the migration DAG identical
+  across all builds.
+
+### Changed
+- When `spendability-pir` is enabled, `get_wallet_summary` treats Orchard notes
+  with PIR witnesses as spendable even when their shard is not fully scanned.
+- Note selection now accepts Orchard notes with PIR-obtained authentication
+  paths, bypassing the shard-scanned gate that would otherwise block spending.
+- `truncate_to_height` now unconditionally clears the `pir_witness_data` table
+  to invalidate authentication paths bound to anchor heights that may no longer
+  be valid after a reorg.
+
 ## [0.20.2] - 2026-05-07
 
 ### Fixed

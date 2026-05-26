@@ -985,6 +985,8 @@ where
             &proposal,
             #[cfg(feature = "unstable")]
             None,
+            #[cfg(feature = "spendability-pir")]
+            false,
         )
     }
 
@@ -1198,6 +1200,38 @@ where
             proposal,
             #[cfg(feature = "unstable")]
             None,
+            #[cfg(feature = "spendability-pir")]
+            false,
+        )
+    }
+
+    /// Like [`Self::create_proposed_transactions`] but uses PIR-stored witnesses
+    /// instead of ShardTree witnesses for Orchard spends.
+    #[cfg(feature = "spendability-pir")]
+    #[allow(clippy::type_complexity)]
+    pub fn create_proposed_transactions_pir<InputsErrT, FeeRuleT, ChangeErrT, N>(
+        &mut self,
+        usk: &UnifiedSpendingKey,
+        ovk_policy: OvkPolicy,
+        proposal: &Proposal<FeeRuleT, N>,
+    ) -> Result<NonEmpty<TxId>, super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+    where
+        FeeRuleT: FeeRule,
+    {
+        let prover = LocalTxProver::bundled();
+        let network = self.network().clone();
+        create_proposed_transactions(
+            self.wallet_mut(),
+            &network,
+            &prover,
+            &prover,
+            &SpendingKeys::from_unified_spending_key(usk.clone()),
+            ovk_policy,
+            proposal,
+            #[cfg(feature = "unstable")]
+            None,
+            #[cfg(feature = "spendability-pir")]
+            true,
         )
     }
 
