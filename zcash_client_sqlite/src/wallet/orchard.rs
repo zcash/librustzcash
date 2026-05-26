@@ -750,6 +750,12 @@ pub(crate) mod tests {
         testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
     }
 
+    #[cfg(all(feature = "pczt-tests", feature = "unstable"))]
+    #[test]
+    fn pczt_qr_orchard_change_note_version() {
+        testing::pool::pczt_qr_orchard_change_note_version()
+    }
+
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn wallet_recovery_compute_fees() {

@@ -412,6 +412,14 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>()
     )
 }
 
+#[cfg(all(feature = "pczt-tests", feature = "orchard", feature = "unstable"))]
+pub(crate) fn pczt_qr_orchard_change_note_version() {
+    zcash_client_backend::data_api::testing::pool::pczt_qr_orchard_change_note_version::<_>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
     use rusqlite::named_params;
