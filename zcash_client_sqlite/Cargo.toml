@@ -169,6 +169,11 @@ expensive-tests = []
 ## protocol-specific flags. Test-only.
 pczt-tests = ["serde", "zcash_client_backend/pczt"]
 
+## Enables PIR (Private Information Retrieval) for immediate Orchard note spendability:
+## spent-note tracking via nullifier PIR queries and Merkle witness fetching for
+## spending notes before the wallet finishes scanning.
+spendability-pir = ["orchard", "zcash_client_backend/spendability-pir"]
+
 [lib]
 bench = false
 

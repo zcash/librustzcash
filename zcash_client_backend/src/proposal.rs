@@ -41,6 +41,8 @@ pub enum ProposalError {
     ShieldingInvalid,
     /// No anchor information could be obtained for the specified block height.
     AnchorNotFound(BlockHeight),
+    /// Selected Orchard notes were backed by incompatible PIR witness anchors.
+    PIRWitnessAnchorMismatch,
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
@@ -103,6 +105,10 @@ impl Display for ProposalError {
             ProposalError::AnchorNotFound(h) => {
                 write!(f, "Unable to compute anchor for block height {h:?}")
             }
+            ProposalError::PIRWitnessAnchorMismatch => write!(
+                f,
+                "Selected Orchard inputs were backed by incompatible PIR witness anchors."
+            ),
             ProposalError::ReferenceError(r) => {
                 write!(f, "No prior step output found for reference {r:?}")
             }
