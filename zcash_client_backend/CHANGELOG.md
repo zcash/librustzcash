@@ -11,6 +11,14 @@ workspace.
 ## [0.23.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::scanning::ScanError` variants:
+  - `BlockEncodingInvalid`: a block-level compact-format field (block hash,
+    parent hash, or height) could not be decoded from its protobuf
+    representation.
+  - `TxEncodingInvalid`: a transaction-level compact-format field
+    (transaction id, block-relative index, or nullifier) could not be decoded.
+- `zcash_client_backend::proto::CompactFormatError::OutOfRange` for numeric
+  fields whose values exceed their target type's range.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`
@@ -35,6 +43,18 @@ workspace.
   instead of a `ChangeStrategy`.
 
 ### Changed
+- `zcash_client_backend::proto::compact_formats` accessors no longer panic on
+  malformed inputs; they now return `Result<_, CompactFormatError>` so that
+  `scan_block` can surface decoding failures via `ScanError` rather than
+  aborting the process. Affected methods:
+  - `CompactBlock::hash`, `CompactBlock::prev_hash`, `CompactBlock::height`
+  - `CompactTx::txid`
+  Internally, `CompactSaplingOutput::cmu` also no longer panics on a non-32
+  byte input; its (already `Result`-typed) signature is unchanged.
+- `zcash_client_backend::scanning::ScanError::at_height` now returns
+  `Option<BlockHeight>`. It returns `None` only when the height field of the
+  block itself failed to decode (the new `BlockEncodingInvalid` variant);
+  every other variant returns `Some(_)`.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and

@@ -405,12 +405,14 @@ where
             // Pick a height to rewind to, which must be at least one block before the
             // height at which the error occurred, but may be an earlier height determined
             // based on heuristics such as the platform, available bandwidth, size of
-            // recent CompactBlocks, etc.
-            let rewind_height = err.at_height().saturating_sub(10);
+            // recent CompactBlocks, etc. Continuity errors always carry a height.
+            let err_height = err
+                .at_height()
+                .expect("continuity errors always carry a height");
+            let rewind_height = err_height.saturating_sub(10);
             info!(
                 "Chain reorg detected at {}, rewinding to {}",
-                err.at_height(),
-                rewind_height,
+                err_height, rewind_height,
             );
 
             // Rewind to the chosen height.

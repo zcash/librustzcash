@@ -74,11 +74,14 @@ where
 
         let data: Vec<u8> = row.get(1).map_err(to_chain_error)?;
         let block = CompactBlock::decode(&data[..]).map_err(to_chain_error)?;
-        if block.height() != height {
+        let block_height = block.height().map_err(|_| {
+            to_chain_error(SqliteClientError::CorruptedData(format!(
+                "Cached block at expected height {height} had an out-of-range height field",
+            )))
+        })?;
+        if block_height != height {
             return Err(to_chain_error(SqliteClientError::CorruptedData(format!(
-                "Block height {} did not match row's height field value {}",
-                block.height(),
-                height
+                "Block height {block_height} did not match row's height field value {height}",
             ))));
         }
 
@@ -306,11 +309,16 @@ where
 
         let block = CompactBlock::decode(&block_data[..]).map_err(to_chain_error)?;
 
-        if block.height() != cbr.height {
+        let block_height = block.height().map_err(|_| {
+            to_chain_error(FsBlockDbError::CorruptedData(format!(
+                "Cached block at expected height {} had an out-of-range height field",
+                cbr.height,
+            )))
+        })?;
+        if block_height != cbr.height {
             return Err(to_chain_error(FsBlockDbError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
-                block.height(),
-                cbr.height
+                block_height, cbr.height,
             ))));
         }
 

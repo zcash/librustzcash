@@ -84,8 +84,11 @@ impl TestCache for MemBlockCache {
     }
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
-        let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
-        self.0.write().unwrap().insert(cb.height(), cb.clone());
+        let txids = cb.vtx.iter().map(|tx| tx.txid().unwrap()).collect();
+        self.0
+            .write()
+            .unwrap()
+            .insert(cb.height().unwrap(), cb.clone());
         MemBlockCacheInsertionResult { txids }
     }
 
