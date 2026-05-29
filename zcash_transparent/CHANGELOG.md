@@ -8,6 +8,14 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Fixed
+- `zcash_transparent::zip48::FullViewingKey::standard` now rejects a `threshold`
+  of zero with `FullViewingKeyError::InvalidThreshold`. Previously a zero
+  threshold was accepted, producing a 0-of-N (anyone-can-spend) P2SH multisig
+  redeem script.
+
 ## [0.7.0] - 2026-04-23
 
 ### Added

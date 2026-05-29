@@ -239,7 +239,7 @@ impl FullViewingKey {
         let key_info = NonEmpty::from_vec(key_info).ok_or(FullViewingKeyError::NoPubKeys)?;
         if key_info.len() > 15 {
             Err(FullViewingKeyError::TooManyPubKeys)
-        } else if usize::from(threshold) > key_info.len() {
+        } else if threshold == 0 || usize::from(threshold) > key_info.len() {
             Err(FullViewingKeyError::InvalidThreshold)
         } else {
             // Verify `key_info` in a scope so we can borrow from it.
@@ -363,7 +363,7 @@ pub enum FullViewingKeyError {
     NoPubKeys,
     /// The script for a standard [`FullViewingKey`] can contain at most 15 pubkeys.
     TooManyPubKeys,
-    /// The provided threshold was larger than the number of pubkeys.
+    /// The provided threshold was zero, or larger than the number of pubkeys.
     InvalidThreshold,
     /// The pubkeys were not all derived following ZIP 48.
     IncompatiblePubKeys,
@@ -381,7 +381,7 @@ mod tests {
     use crate::{
         keys::NonHardenedChildIndex,
         test_vectors::zip_0048::TEST_VECTORS,
-        zip48::{AccountPrivKey, AccountPubKey, FullViewingKey},
+        zip48::{AccountPrivKey, AccountPubKey, FullViewingKey, FullViewingKeyError},
     };
 
     #[test]
@@ -424,6 +424,27 @@ mod tests {
                 addr,
             );
         }
+    }
+
+    #[test]
+    fn standard_rejects_zero_threshold() {
+        let params = MainNetwork;
+        let seeds = [[1; 32], [2; 32], [3; 32]];
+
+        let key_info = seeds
+            .iter()
+            .map(|seed| {
+                AccountPrivKey::from_seed(&params, seed, AccountId::ZERO)
+                    .unwrap()
+                    .to_account_pubkey()
+            })
+            .collect();
+
+        // A zero threshold would yield a 0-of-N (anyone-can-spend) P2SH script.
+        assert!(matches!(
+            FullViewingKey::standard(0, key_info),
+            Err(FullViewingKeyError::InvalidThreshold),
+        ));
     }
 
     #[test]
