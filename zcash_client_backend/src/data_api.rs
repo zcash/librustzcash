@@ -2273,23 +2273,23 @@ pub struct ScannedBlockCommitments {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<A> {
+pub struct ScannedBlock<AccountId> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    transactions: Vec<WalletTx<A>>,
+    transactions: Vec<WalletTx<AccountId>>,
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
 }
 
-impl<A> ScannedBlock<A> {
+impl<AccountId> ScannedBlock<AccountId> {
     /// Constructs a new `ScannedBlock`
     pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        transactions: Vec<WalletTx<A>>,
+        transactions: Vec<WalletTx<AccountId>>,
         sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
         #[cfg(feature = "orchard")] orchard: ScannedBundles<
             orchard::tree::MerkleHashOrchard,
@@ -2323,7 +2323,7 @@ impl<A> ScannedBlock<A> {
     }
 
     /// Returns the list of transactions from this block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<A>] {
+    pub fn transactions(&self) -> &[WalletTx<AccountId>] {
         &self.transactions
     }
 
