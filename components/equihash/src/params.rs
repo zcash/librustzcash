@@ -12,8 +12,15 @@ impl Params {
         // - k >= 3 so the encoded solutions have an exact byte length.
         // - k < n, so the collision bit length is at least 1.
         // - n is a multiple of k + 1, so we have an integer collision bit length.
+        // - the collision bit length is in the range expected by the minimal
+        //   solution encoding helpers.
         if (n % 8 == 0) && (k >= 3) && (k < n) && (n % (k + 1) == 0) {
-            Some(Params { n, k })
+            let collision_bit_length = n / (k + 1);
+            if (7..=24).contains(&collision_bit_length) {
+                Some(Params { n, k })
+            } else {
+                None
+            }
         } else {
             None
         }

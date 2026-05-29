@@ -288,6 +288,19 @@ mod tests {
     }
 
     #[test]
+    fn invalid_parameter_collision_bit_lengths_return_error() {
+        for (n, k) in [(8, 3), (104, 3), (256, 7)] {
+            let c_bit_len = n / (k + 1);
+            let soln_len = ((1 << k) * (c_bit_len + 1)) / 8;
+            let soln = vec![0; soln_len as usize];
+            let result = std::panic::catch_unwind(|| is_valid_solution(n, k, &[], &[], &soln));
+
+            assert!(result.is_ok(), "is_valid_solution({n}, {k}, ...) panicked");
+            assert!(result.unwrap().is_err());
+        }
+    }
+
+    #[test]
     fn all_bits_matter() {
         // Initialize the state according to one of the valid test vectors.
         let n = 96;
