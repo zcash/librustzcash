@@ -228,3 +228,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+orchard = { package = "orchard", git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "6e134964d5686839ba45bea36cb0de1620ff2127" }
