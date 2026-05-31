@@ -1,4 +1,8 @@
-use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey};
+use orchard::{
+    Bundle,
+    bundle::Authorized,
+    circuit::{FixedPostNu6_2, VerifyingKey},
+};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
 
@@ -19,7 +23,7 @@ pub(super) fn verify_bundle(
             Err(OrchardError::InvalidProof)
         }
     } else {
-        let vk = VerifyingKey::build();
+        let vk = VerifyingKey::build::<FixedPostNu6_2>();
         if validator.validate(&vk, rng) {
             Ok(())
         } else {
