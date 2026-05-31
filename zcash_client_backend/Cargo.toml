@@ -232,6 +232,9 @@ sync-decryptor = [
     "tokio?/rt",
     "tokio?/sync",
     "tokio?/time",
+    # Required by the named-task `spawn!` macro on `--cfg tokio_unstable`, where
+    # `tokio::task::Builder` is gated behind tokio's `tracing` feature.
+    "tokio?/tracing",
 ]
 
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet

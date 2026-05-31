@@ -804,4 +804,31 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn empty_block_leaves_size_unchanged() {
+        // A pool with no outputs in any transaction of the block leaves the size
+        // unchanged (start == end).
+        let result = tree_sizes_around(
+            BlockHeight::from(100u32),
+            Some(BlockHeight::from(1u32)),
+            Some(10),
+            std::iter::empty::<usize>(),
+            ShieldedProtocol::Sapling,
+        );
+        assert_eq!(result.unwrap(), (10, 10));
+    }
+
+    #[test]
+    fn exact_u32_max_boundary_is_not_overflow() {
+        // Reaching exactly `u32::MAX` is a valid (non-overflowing) final size.
+        let result = tree_sizes_around(
+            BlockHeight::from(100u32),
+            Some(BlockHeight::from(1u32)),
+            Some(u32::MAX - 5),
+            [5usize].into_iter(),
+            ShieldedProtocol::Sapling,
+        );
+        assert_eq!(result.unwrap(), (u32::MAX - 5, u32::MAX));
+    }
 }

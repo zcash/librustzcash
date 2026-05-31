@@ -262,6 +262,11 @@ impl<AccountId, IvkTag> Handle<AccountId, IvkTag> {
     ///
     /// Returns a receiver that completes once the reload has been applied, or `None` if
     /// the batch decryptor has shut down.
+    ///
+    /// Note that the returned receiver resolving to an error (because its sender was
+    /// dropped) does not distinguish "the engine shut down" from "the reload closure
+    /// passed to [`Engine::run`] returned an error, terminating the engine"; in both cases
+    /// no further requests will be served.
     pub async fn reload_keys(&self) -> Option<oneshot::Receiver<()>> {
         let (on_complete, rx) = oneshot::channel();
         match self
@@ -341,10 +346,16 @@ where
             &scanning_keys,
         );
 
-        // Whether a request has been processed since the last flush. The idle-flush
+        // Whether a batch has been accumulated since the last flush. The idle-flush
         // timer is only armed while this is set, so that a quiescent engine does not
         // wake up to perform no-op flushes.
+        //
+        // The deadline is anchored to the first request after a flush and is not reset by
+        // later requests, so a steady stream of sub-threshold requests cannot postpone the
+        // flush of an aging batch indefinitely.
         let mut idle_flush_pending = false;
+        let idle_flush = time::sleep(self.batch_start_delay);
+        tokio::pin!(idle_flush);
 
         loop {
             tokio::select! {
@@ -372,7 +383,15 @@ where
                             // An error means the calling task is shutting down.
                             let _ = on_complete.send((scanning_keys, header, vtx));
                         });
-                        idle_flush_pending = true;
+                        // Arm the idle-flush deadline on the first request after a flush;
+                        // subsequent requests do not reset it, so an aging batch is
+                        // flushed even under a steady stream of sub-threshold requests.
+                        if !idle_flush_pending {
+                            idle_flush
+                                .as_mut()
+                                .reset(time::Instant::now() + self.batch_start_delay);
+                            idle_flush_pending = true;
+                        }
                     }
 
                     // Mempool decryption.
@@ -386,7 +405,15 @@ where
                             // An error means the calling task is shutting down.
                             let _ = on_complete.send(batch.wait_async().await);
                         });
-                        idle_flush_pending = true;
+                        // Arm the idle-flush deadline on the first request after a flush;
+                        // subsequent requests do not reset it, so an aging batch is
+                        // flushed even under a steady stream of sub-threshold requests.
+                        if !idle_flush_pending {
+                            idle_flush
+                                .as_mut()
+                                .reset(time::Instant::now() + self.batch_start_delay);
+                            idle_flush_pending = true;
+                        }
                     }
 
                     // Key reload. Flush any pending batches under the current keys
@@ -411,9 +438,9 @@ where
                     None => return Ok(()),
                 },
 
-                // No new requests have arrived within `batch_start_delay` of the last
-                // one; flush so any sub-threshold batch is run rather than left waiting.
-                _ = time::sleep(self.batch_start_delay), if idle_flush_pending => {
+                // The oldest accumulated batch has been waiting `batch_start_delay`;
+                // flush so any sub-threshold batch is run rather than left waiting.
+                _ = &mut idle_flush, if idle_flush_pending => {
                     runners.flush();
                     idle_flush_pending = false;
                 }

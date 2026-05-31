@@ -139,8 +139,10 @@ pub(crate) struct BatchReceiver<IvkTag, D: Domain, M>(channel::Receiver<OutputIt
 impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
     fn dynamic_usage(&self) -> usize {
         // We count the memory usage of items still buffered in the channel on the
-        // receiver side. This is an approximation: `flume` stores queued items in an
-        // internal buffer, so we count one item's worth of storage per queued item.
+        // receiver side. This is a loose lower bound rather than an exact figure:
+        // `flume` stores queued items in an internal buffer that may be over-allocated
+        // relative to its length and carries per-item bookkeeping, so the true heap use
+        // can exceed this. It is only used as a soft memory-pressure heuristic.
         self.0.len() * std::mem::size_of::<OutputItem<IvkTag, D, M>>()
     }
 
@@ -618,22 +620,7 @@ where
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of
             // this runner's kind.
-            .map(|BatchReceiver(rx)| {
-                // This iterator will end once the channel becomes empty and disconnected.
-                // We created one sender per output, and each sender is dropped after the
-                // batch it is in completes (and in the case of successful decryptions,
-                // after the decrypted note has been sent to the channel). Completion of
-                // the iterator therefore corresponds to complete knowledge of the outputs
-                // of this transaction that could be decrypted.
-                rx.into_iter()
-                    .map(
-                        |OutputIndex {
-                             output_index,
-                             value,
-                         }| { (output_index, value) },
-                    )
-                    .collect()
-            })
+            .map(BatchReceiver::into_results)
             .unwrap_or_default()
     }
 }

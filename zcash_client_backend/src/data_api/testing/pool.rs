@@ -360,6 +360,7 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
+    use incrementalmerkletree::Retention;
     use nonempty::NonEmpty;
     use zcash_primitives::block::{Block, BlockHeaderData};
 
@@ -493,6 +494,37 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
         })
         .sum();
     assert_eq!(received_outputs, 1);
+
+    // The note commitment tree should have grown by exactly the two shielded outputs in
+    // the block's single transaction (the payment and the change), starting from the
+    // empty prior tree. The outputs all belong to the pool under test; the other pool (if
+    // compiled in) sees no outputs.
+    let total_commitments = scanned.sapling().commitments().len();
+    #[cfg(feature = "orchard")]
+    let total_commitments = total_commitments + scanned.orchard().commitments().len();
+    assert_eq!(total_commitments, 2);
+
+    let total_final_tree_size = scanned.sapling().final_tree_size();
+    #[cfg(feature = "orchard")]
+    let total_final_tree_size = total_final_tree_size + scanned.orchard().final_tree_size();
+    assert_eq!(total_final_tree_size, 2);
+
+    // The final note added in the block must be marked as a checkpoint at this block
+    // height; this is what lets the wallet anchor witnesses to the block. Getting the
+    // "last outputs in the block" boundary wrong is the most error-prone part of position
+    // tracking, so we assert it explicitly.
+    let last_retention = scanned.sapling().commitments().last().map(|(_, r)| *r);
+    #[cfg(feature = "orchard")]
+    let last_retention = scanned
+        .orchard()
+        .commitments()
+        .last()
+        .map(|(_, r)| *r)
+        .or(last_retention);
+    assert!(
+        matches!(last_retention, Some(Retention::Checkpoint { id, .. }) if id == h),
+        "final note commitment should be a checkpoint at height {h:?}, got {last_retention:?}",
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

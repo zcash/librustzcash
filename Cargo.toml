@@ -129,7 +129,6 @@ tracing = { version = "0.1", default-features = false }
 corez = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Parallel processing
-crossbeam-channel = "0.5"
 flume = "0.11"
 maybe-rayon = { version = "0.1.0", default-features = false }
 rayon = "1.5"
