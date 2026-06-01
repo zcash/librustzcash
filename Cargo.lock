@@ -2018,8 +2018,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=32a87582dfb0ad9364ef3ffe71751ceab2a502ea#32a87582dfb0ad9364ef3ffe71751ceab2a502ea"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -2044,8 +2043,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=32a87582dfb0ad9364ef3ffe71751ceab2a502ea#32a87582dfb0ad9364ef3ffe71751ceab2a502ea"
 dependencies = [
  "bitvec",
  "ff",
@@ -2056,8 +2054,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05713f117155643ce10975e0bee44a274bcda2f4bb5ef29a999ad67c1fa8d4d3"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=32a87582dfb0ad9364ef3ffe71751ceab2a502ea#32a87582dfb0ad9364ef3ffe71751ceab2a502ea"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2966,9 +2963,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a36733033adae631acacf46f542f027d508d9025d14797d9b35059494c99eb3"
+version = "0.13.1"
+source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=2a5a80a00c518e5f78c7e3bc4f5917e1dbe9165a#2a5a80a00c518e5f78c7e3bc4f5917e1dbe9165a"
 dependencies = [
  "aes",
  "bitvec",
@@ -7533,8 +7529,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "orchard"
-version = "0.13.1"
-source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=6e134964d5686839ba45bea36cb0de1620ff2127#6e134964d5686839ba45bea36cb0de1620ff2127"

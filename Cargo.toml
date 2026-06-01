@@ -230,4 +230,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-orchard = { package = "orchard", git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "6e134964d5686839ba45bea36cb0de1620ff2127" }
+halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
+poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
+orchard = { package = "orchard", git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "2a5a80a00c518e5f78c7e3bc4f5917e1dbe9165a" }
