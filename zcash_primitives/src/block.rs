@@ -92,6 +92,8 @@ impl Deref for BlockHeader {
 }
 
 /// The information contained in a Zcash block header.
+///
+/// Redefined in zebra as [`Header`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block/header.rs).
 #[derive(Debug)]
 pub struct BlockHeaderData {
     pub version: i32,
