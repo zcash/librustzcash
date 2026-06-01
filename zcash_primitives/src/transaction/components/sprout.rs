@@ -12,6 +12,9 @@ const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
+/// The Sprout JoinSplit bundle of a Zcash transaction.
+///
+/// Redefined in zebra as [`transaction::JoinSplitData`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/joinsplit.rs).
 #[derive(Debug, Clone)]
 pub struct Bundle {
     pub joinsplits: Vec<JsDescription>,
@@ -47,6 +50,9 @@ impl core::fmt::Debug for SproutProof {
     }
 }
 
+/// A Sprout JoinSplit description.
+///
+/// Redefined in zebra as [`sprout::JoinSplit`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/sprout/joinsplit.rs).
 #[derive(Clone)]
 pub struct JsDescription {
     pub(crate) vpub_old: ZatBalance,

@@ -26,6 +26,8 @@ pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 ///
 /// This codec requires integers to be in the range `0x0..=0x02000000`, for compatibility
 /// with Zcash consensus rules.
+///
+/// Redefined in zebra as [`serialization::CompactSize64`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/serialization/compact_size.rs).
 pub struct CompactSize;
 
 impl CompactSize {

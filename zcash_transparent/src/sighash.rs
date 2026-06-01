@@ -17,6 +17,10 @@ pub const SIGHASH_ANYONECANPAY: u8 = 0x80;
 /// A [ZIP 244] sighash type.
 ///
 /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
+///
+/// Redefined in zebra as the `HashType` bitflags in
+/// [zebra-chain/src/transaction/sighash.rs](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/sighash.rs);
+/// a candidate to share this type rather than duplicate it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SighashType(u8);
 

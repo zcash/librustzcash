@@ -15,6 +15,8 @@ use crate::constants::{mainnet, regtest, testnet};
 ///
 /// Safe conversion from various integer types, as well as addition and subtraction, are provided.
 /// Subtraction of block heights, and of deltas to block heights, are always saturating.
+///
+/// Redefined in zebra as [`block::Height`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block/height.rs).
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
@@ -186,6 +188,8 @@ impl TryFrom<usize> for TxIndex {
 memuse::impl_no_dynamic_usage!(TxIndex);
 
 /// The enumeration of known Zcash network types.
+///
+/// Redefined in zebra as [`parameters::Network`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network.rs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NetworkType {
     /// Zcash Mainnet.
@@ -565,6 +569,8 @@ impl Parameters for Network {
 /// consensus rules enforced by the network are altered.
 ///
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
+///
+/// Redefined in zebra as [`parameters::NetworkUpgrade`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network_upgrade.rs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetworkUpgrade {
     /// The [Overwinter] network upgrade.
@@ -698,6 +704,8 @@ pub const COINBASE_MATURITY_BLOCKS: u32 = 100;
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
 ///
 /// [`signature_hash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/transaction/sighash/fn.signature_hash.html
+///
+/// Redefined in zebra as [`parameters::ConsensusBranchId`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network_upgrade.rs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BranchId {
     /// The consensus rules at the launch of Zcash.

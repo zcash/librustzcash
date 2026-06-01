@@ -14,6 +14,8 @@ use memuse::DynamicUsage;
 ///   that have been mined.
 /// - For v5 transactions onwards, this identifier is derived only from "effecting" data,
 ///   and is non-malleable in all contexts.
+///
+/// Redefined in zebra as [`transaction::Hash`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/hash.rs).
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId([u8; 32]);
 
