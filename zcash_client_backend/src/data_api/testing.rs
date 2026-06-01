@@ -1472,6 +1472,7 @@ impl TestBuilder<(), ()> {
         nu5: Some(BlockHeight::from_u32(100_000)),
         nu6: None,
         nu6_1: None,
+        nu6_2: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
         #[cfg(zcash_unstable = "zfuture")]
