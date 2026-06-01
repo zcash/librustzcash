@@ -65,3 +65,22 @@ impl fmt::Display for PoolType {
         }
     }
 }
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::{Just, Strategy, prop_oneof};
+
+    use super::ShieldedProtocol;
+
+    /// A [`proptest`] strategy that yields a [`ShieldedProtocol`] variant uniformly at
+    /// random.
+    ///
+    /// This is useful for properties that should hold for every shielded protocol, so that
+    /// the protocol does not have to be hard-coded in each test.
+    pub fn arb_protocol() -> impl Strategy<Value = ShieldedProtocol> {
+        prop_oneof![
+            Just(ShieldedProtocol::Sapling),
+            Just(ShieldedProtocol::Orchard),
+        ]
+    }
+}
