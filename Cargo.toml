@@ -230,7 +230,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
-halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
-poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "32a87582dfb0ad9364ef3ffe71751ceab2a502ea" }
-orchard = { package = "orchard", git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "2a5a80a00c518e5f78c7e3bc4f5917e1dbe9165a" }
+halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+orchard = { git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "6e76352618b6b4a7448645f0f8afae18855d5fa1" }
