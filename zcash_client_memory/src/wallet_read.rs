@@ -80,7 +80,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                         None
                     }
                 }
-                AccountSource::Imported { purpose: _, .. } => None,
+                AccountSource::Imported { .. } => None,
             }))
     }
 
