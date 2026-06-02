@@ -1,8 +1,4 @@
-use orchard::{
-    Bundle,
-    bundle::Authorized,
-    circuit::{FixedPostNu6_2, VerifyingKey},
-};
+use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
 
@@ -23,7 +19,8 @@ pub(super) fn verify_bundle(
             Err(OrchardError::InvalidProof)
         }
     } else {
-        let vk = VerifyingKey::build::<FixedPostNu6_2>();
+        // PCZT extraction produces new transactions, which use the NU6.2 (fixed) circuit.
+        let vk = VerifyingKey::build();
         if validator.validate(&vk, rng) {
             Ok(())
         } else {

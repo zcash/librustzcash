@@ -2964,7 +2964,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.13.1"
-source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=6e76352618b6b4a7448645f0f8afae18855d5fa1#6e76352618b6b4a7448645f0f8afae18855d5fa1"
+source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=51956fb794e409e874c0d43f17f54391d05b1799#51956fb794e409e874c0d43f17f54391d05b1799"
 dependencies = [
  "aes",
  "bitvec",
