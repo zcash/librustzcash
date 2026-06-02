@@ -355,7 +355,7 @@ impl Bundle {
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.
-        for (lhs, rhs) in self.spends.iter_mut().zip(spends.into_iter()) {
+        for (lhs, rhs) in self.spends.iter_mut().zip(spends) {
             // Destructure `rhs` to ensure we handle everything.
             let Spend {
                 cv,
@@ -398,7 +398,7 @@ impl Bundle {
             }
         }
 
-        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
+        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Output {
                 cv,

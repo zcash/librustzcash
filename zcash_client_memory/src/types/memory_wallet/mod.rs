@@ -516,8 +516,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     ) -> Result<Option<zip32::AccountId>, Error> {
         Ok(self
             .accounts
-            .iter()
-            .filter_map(|(_, a)| match a.source() {
+            .values()
+            .filter_map(|a| match a.source() {
                 AccountSource::Derived { derivation, .. } => {
                     if derivation.seed_fingerprint() == seed_fingerprint {
                         Some(derivation.account_index())
@@ -879,8 +879,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             // from the blocks table.
             let start_size = self
                 .accounts
-                .iter()
-                .filter_map(|(_, account)| {
+                .values()
+                .filter_map(|account| {
                     if account.birthday().height() == *birthday_height {
                         Some(account.birthday().sapling_frontier().tree_size())
                     } else {
@@ -957,8 +957,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             // from the blocks table.
             let start_size = self
                 .accounts
-                .iter()
-                .filter_map(|(_, account)| {
+                .values()
+                .filter_map(|account| {
                     if account.birthday().height() == *birthday_height {
                         Some(account.birthday().sapling_frontier().tree_size())
                     } else {

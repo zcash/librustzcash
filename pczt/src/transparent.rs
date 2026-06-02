@@ -228,7 +228,7 @@ impl Bundle {
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.
-        for (lhs, rhs) in self.inputs.iter_mut().zip(inputs.into_iter()) {
+        for (lhs, rhs) in self.inputs.iter_mut().zip(inputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Input {
                 prevout_txid,
@@ -279,7 +279,7 @@ impl Bundle {
             }
         }
 
-        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
+        for (lhs, rhs) in self.outputs.iter_mut().zip(outputs) {
             // Destructure `rhs` to ensure we handle everything.
             let Output {
                 value,

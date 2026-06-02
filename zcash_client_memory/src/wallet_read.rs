@@ -399,7 +399,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .iter()
                 .filter(|(_, _, p)| p == &ScanPriority::Scanned)
                 .collect();
-            scanned_ranges.sort_by(|(start_a, _, _), (start_b, _, _)| start_a.cmp(start_b));
+            scanned_ranges.sort_by_key(|(start_a, _, _)| *start_a);
             if let Some(fully_scanned_height) = scanned_ranges.first().and_then(
                 |(block_range_start, block_range_end, _priority)| {
                     // If the start of the earliest scanned range is greater than
@@ -487,8 +487,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         tracing::debug!("get_unified_full_viewing_keys");
         Ok(self
             .accounts
-            .iter()
-            .filter_map(|(_id, account)| account.ufvk().map(|ufvk| (account.id(), ufvk.clone())))
+            .values()
+            .filter_map(|account| account.ufvk().map(|ufvk| (account.id(), ufvk.clone())))
             .collect())
     }
 
