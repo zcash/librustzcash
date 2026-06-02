@@ -8,6 +8,11 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`.
+
 ## [0.7.0] - 2026-04-23
 
 ### Added

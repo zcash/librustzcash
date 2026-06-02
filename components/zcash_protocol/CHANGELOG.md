@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-02
+
+### Changed
+- This release sets the NU6.2 network activation height to 
+  3364600 on mainnet and 4052000 on testnet.
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_2` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_2` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_2`.
+
 ## [0.8.0] - 2026-04-23
 
 ### Added

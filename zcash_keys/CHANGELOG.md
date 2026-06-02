@@ -9,6 +9,9 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `zcash_protocol 0.9.0`.
+
 ## [0.13.0] - 2026-04-27
 
 ### Added
