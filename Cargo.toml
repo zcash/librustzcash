@@ -40,7 +40,7 @@ equihash = { version = "0.3", path = "components/equihash", default-features = f
 zcash_address = { version = "0.12", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.22", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.4", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.13", path = "zcash_keys", default-features = false  }
+zcash_keys = { version = "0.14", path = "zcash_keys", default-features = false  }
 zcash_protocol = { version = "0.9", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.8", path = "components/zip321" }
 
@@ -68,7 +68,7 @@ redjubjub = { version = "0.8", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
-orchard = { version = "0.13", default-features = false }
+orchard = { version = "0.14", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -230,7 +230,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
-halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
-poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
-orchard = { git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "51956fb794e409e874c0d43f17f54391d05b1799" }
+halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
+poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
+orchard = { git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd" }

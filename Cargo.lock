@@ -2017,8 +2017,8 @@ dependencies = [
 
 [[package]]
 name = "halo2_gadgets"
-version = "0.4.0"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=a101adb907869062593242a1946a7d6157d11899#a101adb907869062593242a1946a7d6157d11899"
+version = "0.5.0"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -2043,7 +2043,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=a101adb907869062593242a1946a7d6157d11899#a101adb907869062593242a1946a7d6157d11899"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
 dependencies = [
  "bitvec",
  "ff",
@@ -2054,7 +2054,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.2"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=a101adb907869062593242a1946a7d6157d11899#a101adb907869062593242a1946a7d6157d11899"
+source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2963,8 +2963,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.13.1"
-source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=51956fb794e409e874c0d43f17f54391d05b1799#51956fb794e409e874c0d43f17f54391d05b1799"
+version = "0.14.0"
+source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd#994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd"
 dependencies = [
  "aes",
  "bitvec",
@@ -7250,7 +7250,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "assert_matches",
  "bech32",
