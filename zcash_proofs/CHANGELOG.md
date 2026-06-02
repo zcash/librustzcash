@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-06-02
+
 ### Changed
 - Migrated to `zcash_primitives 0.28.0`.
 
