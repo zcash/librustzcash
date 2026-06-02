@@ -17,7 +17,7 @@ workspace.
   - `zcash_primitives::transaction::TxVersion::valid_in_branch`
 
 ### Changed
-- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`
+- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
   an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
   argument.
