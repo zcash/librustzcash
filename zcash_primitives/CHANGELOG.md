@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-06-02
+
 ### Added
 - Support for the NU6.2 consensus branch. The following now handle
   `zcash_protocol::consensus::BranchId::Nu6_2` (mapped to `TxVersion::V5`):
