@@ -6655,6 +6655,8 @@ pub fn propose_shielding_coinbase_with_limit_truncates_inputs<T: ShieldedPoolTes
 
 /// Verifies that `propose_shielding_coinbase` with `limit = Some(0)` selects no
 /// inputs, returning [`InputSelectorError::InsufficientFunds`].
+///
+/// [`InputSelectorError::InsufficientFunds`]: crate::data_api::wallet::input_selection::InputSelectorError::InsufficientFunds
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
 pub fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
