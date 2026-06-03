@@ -35,16 +35,12 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.halo2_gadgets]
-audit-as-crates-io = true
 
 [policy.halo2_poseidon]
-audit-as-crates-io = true
 
 [policy.halo2_proofs]
-audit-as-crates-io = true
 
 [policy.orchard]
-audit-as-crates-io = true
 
 [policy.pczt]
 audit-as-crates-io = true
