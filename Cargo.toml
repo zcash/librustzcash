@@ -228,9 +228,3 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
-
-[patch.crates-io]
-halo2_gadgets = { package = "halo2_gadgets", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
-halo2_proofs = { package = "halo2_proofs", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
-poseidon = { package = "halo2_poseidon", git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "d751768afe0d2105b349dd93f73fde7f2eade088" }
-orchard = { git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd" }

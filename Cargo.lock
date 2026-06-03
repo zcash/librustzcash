@@ -2018,7 +2018,8 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.5.0"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb2a697cad929f706b7987fe804ad57d43622cd37463ba7e4d662a926fdcfea3"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -2043,7 +2044,8 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
 dependencies = [
  "bitvec",
  "ff",
@@ -2054,7 +2056,8 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.2"
-source = "git+https://github.com/zodl-inc/halo2-security-fixes.git?rev=d751768afe0d2105b349dd93f73fde7f2eade088#d751768afe0d2105b349dd93f73fde7f2eade088"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05713f117155643ce10975e0bee44a274bcda2f4bb5ef29a999ad67c1fa8d4d3"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2964,7 +2967,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.14.0"
-source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd#994dad2f7bb8c85e7c8ea336dcc2a814a94bc9fd"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a54f8d29bfb1e76a9d4e868a1a08cce2e57dd2bdc66232982822ad3114b91ab3"
 dependencies = [
  "aes",
  "bitvec",
