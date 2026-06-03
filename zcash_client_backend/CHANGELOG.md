@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.23.0] - PLANNED
+## [0.23.0] - 2026-06-02
 
 ### Changed
 - Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`,
