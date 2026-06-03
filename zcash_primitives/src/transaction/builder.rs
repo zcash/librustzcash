@@ -64,6 +64,15 @@ use super::components::sapling::zip212_enforcement;
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
 pub const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
+/// The maximum transaction expiry height for non-coinbase transactions.
+///
+/// `nExpiryHeight` is in the range `1..=499_999_999`, or `0` to disable expiry.
+/// Coinbase transactions are an exception: from NU5 activation onward, their expiry
+/// height must equal the block height and this upper bound does not apply.
+///
+/// <https://zips.z.cash/zip-0203#changes-for-nu5>
+pub const MAX_TX_EXPIRY_HEIGHT: BlockHeight = BlockHeight::from_u32(499_999_999);
+
 /// Errors that can occur during fee calculation.
 #[derive(Debug)]
 pub enum FeeError<FE> {
@@ -168,6 +177,59 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
 
 #[cfg(feature = "std")]
 impl<FE: fmt::Debug + fmt::Display> std::error::Error for Error<FE> {}
+
+/// Errors that can occur when setting a custom transaction expiry height.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpiryHeightError {
+    /// The expiry height was set to `0`, which disables transaction expiry.
+    NoExpiry,
+    /// Coinbase transaction expiry height must be equal to the target height.
+    Coinbase {
+        /// The requested expiry height.
+        expiry_height: BlockHeight,
+        /// The block height for which the coinbase transaction is being built.
+        target_height: BlockHeight,
+    },
+    /// The expiry height exceeds the maximum allowed for non-coinbase transactions.
+    ExceedsMaximum {
+        /// The requested expiry height.
+        expiry_height: BlockHeight,
+        /// The maximum allowed expiry height for non-coinbase transactions.
+        max_expiry_height: BlockHeight,
+    },
+}
+
+impl fmt::Display for ExpiryHeightError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ExpiryHeightError::NoExpiry => {
+                write!(f, "Transaction expiry height must not be 0")
+            }
+            ExpiryHeightError::Coinbase {
+                expiry_height,
+                target_height,
+            } => write!(
+                f,
+                "Coinbase transaction expiry height {} must equal target height {}",
+                u32::from(*expiry_height),
+                u32::from(*target_height)
+            ),
+            ExpiryHeightError::ExceedsMaximum {
+                expiry_height,
+                max_expiry_height,
+            } => write!(
+                f,
+                "Transaction expiry height {} exceeds maximum {}",
+                u32::from(*expiry_height),
+                u32::from(*max_expiry_height)
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ExpiryHeightError {}
 
 impl<FE> From<BalanceError> for Error<FE> {
     fn from(e: BalanceError) -> Self {
@@ -369,6 +431,49 @@ impl<P, U> Builder<'_, P, U> {
         self.target_height
     }
 
+    /// Returns the expiry height of the transaction under construction.
+    pub fn expiry_height(&self) -> BlockHeight {
+        self.expiry_height
+    }
+
+    /// Sets the expiry height of the transaction under construction.
+    ///
+    /// Returns [`ExpiryHeightError::NoExpiry`] if `expiry_height` is `0`, because that
+    /// disables transaction expiry. Returns [`ExpiryHeightError::Coinbase`] if this
+    /// builder is configured for a coinbase transaction and `expiry_height` is not
+    /// equal to [`Builder::target_height`]. Returns [`ExpiryHeightError::ExceedsMaximum`]
+    /// if a non-coinbase transaction expiry height exceeds [`MAX_TX_EXPIRY_HEIGHT`].
+    ///
+    /// For non-coinbase transactions this method validates consensus bounds, but it
+    /// does not reject expiry heights below the builder's target height. Callers
+    /// that want "expires after N blocks" semantics should compute the expiry
+    /// height relative to their selected target height.
+    pub fn set_expiry_height(
+        &mut self,
+        expiry_height: BlockHeight,
+    ) -> Result<(), ExpiryHeightError> {
+        if expiry_height == BlockHeight::from_u32(0) {
+            return Err(ExpiryHeightError::NoExpiry);
+        }
+
+        if self.build_config.is_coinbase() && expiry_height != self.target_height {
+            return Err(ExpiryHeightError::Coinbase {
+                expiry_height,
+                target_height: self.target_height,
+            });
+        }
+
+        if !self.build_config.is_coinbase() && expiry_height > MAX_TX_EXPIRY_HEIGHT {
+            return Err(ExpiryHeightError::ExceedsMaximum {
+                expiry_height,
+                max_expiry_height: MAX_TX_EXPIRY_HEIGHT,
+            });
+        }
+
+        self.expiry_height = expiry_height;
+        Ok(())
+    }
+
     /// Returns the set of transparent inputs currently committed to be consumed
     /// by the transaction.
     #[cfg(feature = "transparent-inputs")]
@@ -457,8 +562,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ///
     /// # Default values
     ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
+    /// For non-coinbase transactions, the expiry height will be set to the given
+    /// height plus [`DEFAULT_TX_EXPIRY_DELTA`]. For coinbase transactions, the
+    /// expiry height will be set to the given height.
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
             build_config
@@ -1374,7 +1480,7 @@ mod testing {
 mod tests {
     #[cfg(feature = "circuits")]
     use {
-        super::{Builder, Error},
+        super::{Builder, DEFAULT_TX_EXPIRY_DELTA, Error, ExpiryHeightError, MAX_TX_EXPIRY_HEIGHT},
         crate::transaction::builder::BuildConfig,
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
@@ -1384,7 +1490,7 @@ mod tests {
         incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
         rand_core::OsRng,
         zcash_protocol::{
-            consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+            consensus::{BlockHeight, NetworkUpgrade, Parameters, TEST_NETWORK},
             memo::MemoBytes,
             value::{BalanceError, ZatBalance, Zatoshis},
         },
@@ -1396,11 +1502,91 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
+        crate::transaction::{OutPoint, TxOut, TxVersion},
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn expiry_height_can_be_overridden() {
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let custom_expiry_height = tx_height + 7;
+        let build_config = BuildConfig::Standard {
+            sapling_anchor: Some(sapling::Anchor::empty_tree()),
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+        };
+        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+
+        assert_eq!(builder.expiry_height(), tx_height + DEFAULT_TX_EXPIRY_DELTA);
+        assert_eq!(builder.set_expiry_height(custom_expiry_height), Ok(()));
+        assert_eq!(builder.expiry_height(), custom_expiry_height);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn expiry_height_rejects_no_expiry() {
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let build_config = BuildConfig::Standard {
+            sapling_anchor: Some(sapling::Anchor::empty_tree()),
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+        };
+        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+
+        assert_eq!(
+            builder.set_expiry_height(BlockHeight::from_u32(0)),
+            Err(ExpiryHeightError::NoExpiry)
+        );
+        assert_eq!(builder.expiry_height(), tx_height + DEFAULT_TX_EXPIRY_DELTA);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn expiry_height_rejects_values_above_maximum() {
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let build_config = BuildConfig::Standard {
+            sapling_anchor: Some(sapling::Anchor::empty_tree()),
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+        };
+        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+        let expiry_height = MAX_TX_EXPIRY_HEIGHT + 1;
+
+        assert_eq!(
+            builder.set_expiry_height(expiry_height),
+            Err(ExpiryHeightError::ExceedsMaximum {
+                expiry_height,
+                max_expiry_height: MAX_TX_EXPIRY_HEIGHT,
+            })
+        );
+        assert_eq!(builder.set_expiry_height(MAX_TX_EXPIRY_HEIGHT), Ok(()));
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn coinbase_expiry_height_must_equal_target_height() {
+        let tx_height = TEST_NETWORK
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        let build_config = BuildConfig::Coinbase { miner_data: None };
+        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+
+        assert_eq!(builder.expiry_height(), tx_height);
+        assert_eq!(
+            builder.set_expiry_height(tx_height + 1),
+            Err(ExpiryHeightError::Coinbase {
+                expiry_height: tx_height + 1,
+                target_height: tx_height,
+            })
+        );
+        assert_eq!(builder.set_expiry_height(tx_height), Ok(()));
+    }
 
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.

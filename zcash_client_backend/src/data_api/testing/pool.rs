@@ -18,6 +18,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         Transaction,
+        builder::MAX_TX_EXPIRY_HEIGHT,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
     },
 };
@@ -347,6 +348,53 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     assert_matches!(
         decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None),
         Ok(_)
+    );
+}
+
+/// Tests that the expiry-delta transaction creation helper rejects deltas that
+/// would exceed the ZIP 203 non-time-based expiry height range.
+pub fn expiry_delta_rejects_expiry_above_maximum<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    let to = T::random_address(st.rng_mut());
+    let account = st.get_account();
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account.id(),
+            StandardFeeRule::Zip317,
+            ConfirmationsPolicy::MIN,
+            &to,
+            Zatoshis::const_from_u64(10_000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+
+    let expiry_height_delta = NonZeroU32::new(
+        u32::from(MAX_TX_EXPIRY_HEIGHT) - u32::from(proposal.min_target_height()) + 1,
+    )
+    .expect("computed delta is nonzero");
+
+    assert_matches!(
+        st.create_proposed_transactions_with_expiry_delta::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+            expiry_height_delta,
+        ),
+        Err(crate::data_api::wallet::CreateWithExpiryDeltaError::ExpiryHeightTooHigh {
+            min_target_height,
+            expiry_height_delta: actual_delta,
+            max_expiry_height,
+        }) if min_target_height == proposal.min_target_height()
+            && actual_delta == expiry_height_delta
+            && max_expiry_height == MAX_TX_EXPIRY_HEIGHT
     );
 }
 

@@ -37,6 +37,13 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn expiry_delta_rejects_expiry_above_maximum<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::expiry_delta_rejects_expiry_above_maximum::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_max_spendable_single_step_proposed_transfer::<
         T,

@@ -33,6 +33,16 @@ workspace.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
+- `zcash_client_backend::data_api::wallet::propose_zip317_transfer_to_address`,
+  which proposes a transfer using an explicit
+  `zcash_primitives::transaction::fees::zip317::FeeRule`, behind the
+  `non-standard-fees` feature flag.
+- `zcash_client_backend::data_api::wallet::propose_zip317_transfer_to_address_with_marginal_fee`,
+  which proposes a transfer using a ZIP 317 fee rule with an explicit marginal fee,
+  behind the `non-standard-fees` feature flag.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions_with_expiry_delta`,
+  for executing proposals with an explicit transaction expiry height delta.
+- `zcash_client_backend::data_api::wallet::{CreateWithExpiryDeltaError, CreateWithExpiryDeltaErrT}`
 
 ### Changed
 - `zcash_client_backend::data_api`:

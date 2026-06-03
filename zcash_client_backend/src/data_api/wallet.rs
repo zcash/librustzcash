@@ -37,6 +37,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 use nonempty::NonEmpty;
 use rand_core::OsRng;
 use std::{
+    fmt,
     num::NonZeroU32,
     ops::{Add, Sub},
 };
@@ -46,6 +47,8 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 #[cfg(feature = "transparent-inputs")]
 use super::TransparentOutputFilter;
+#[cfg(feature = "non-standard-fees")]
+use crate::fees::zip317;
 use crate::{
     data_api::{
         Account, MaxSpendMode, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
@@ -68,9 +71,11 @@ use zcash_keys::{
     address::Address,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
+#[cfg(feature = "non-standard-fees")]
+use zcash_primitives::transaction::fees::zip317 as prim_zip317;
 use zcash_primitives::transaction::{
     Transaction, TxId,
-    builder::{BuildConfig, BuildResult, Builder},
+    builder::{BuildConfig, BuildResult, Builder, MAX_TX_EXPIRY_HEIGHT},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
@@ -272,6 +277,56 @@ pub type CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N> = Error<
     ChangeErrT,
     N,
 >;
+
+/// Errors that may be generated when executing proposals with an explicit expiry height delta.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum CreateWithExpiryDeltaError<E> {
+    /// The requested expiry height delta produces an expiry height that exceeds the maximum
+    /// allowed for non-coinbase transactions.
+    ExpiryHeightTooHigh {
+        /// The minimum target height from the proposal.
+        min_target_height: TargetHeight,
+        /// The requested expiry height delta.
+        expiry_height_delta: NonZeroU32,
+        /// The maximum allowed expiry height for non-coinbase transactions.
+        max_expiry_height: BlockHeight,
+    },
+    /// An error occurred while executing the proposal.
+    Create(E),
+}
+
+impl<E: fmt::Display> fmt::Display for CreateWithExpiryDeltaError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CreateWithExpiryDeltaError::ExpiryHeightTooHigh {
+                min_target_height,
+                expiry_height_delta,
+                max_expiry_height,
+            } => write!(
+                f,
+                "Expiry height delta {} from proposal minimum target height {} exceeds maximum {}",
+                expiry_height_delta,
+                u32::from(*min_target_height),
+                u32::from(*max_expiry_height)
+            ),
+            CreateWithExpiryDeltaError::Create(e) => e.fmt(f),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for CreateWithExpiryDeltaError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CreateWithExpiryDeltaError::ExpiryHeightTooHigh { .. } => None,
+            CreateWithExpiryDeltaError::Create(e) => Some(e),
+        }
+    }
+}
+
+/// Errors that may be generated when executing proposals with an explicit expiry height delta.
+pub type CreateWithExpiryDeltaErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N> =
+    CreateWithExpiryDeltaError<CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>;
 
 /// Errors that may be generated in the execution of proposals that may send shielded inputs.
 pub type TransferErrT<DbT, InputsT, ChangeT> = Error<
@@ -760,6 +815,152 @@ where
     )
 }
 
+/// Proposes making a payment to the specified address from the given account,
+/// using an explicit ZIP 317 fee rule.
+///
+/// Returns the proposal, which may then be executed using [`create_proposed_transactions`]
+/// or [`create_proposed_transactions_with_expiry_delta`]. The resulting proposal
+/// carries its fee rule in memory as
+/// [`zip317::FeeRule`](zcash_primitives::transaction::fees::zip317::FeeRule); this helper does
+/// not add serialization support for non-standard fee rule parameters.
+///
+/// Depending upon the recipient address, more than one transaction may be constructed
+/// in the execution of the returned proposal.
+///
+/// This method uses the basic [`GreedyInputSelector`] for input selection.
+#[cfg(feature = "non-standard-fees")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_zip317_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    fee_rule: prim_zip317::FeeRule,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    confirmations_policy: ConfirmationsPolicy,
+    to: &Address,
+    amount: Zatoshis,
+    memo: Option<MemoBytes>,
+    change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+) -> Result<
+    Proposal<prim_zip317::FeeRule, DbT::NoteRef>,
+    ProposeTransferErrT<
+        DbT,
+        CommitmentTreeErrT,
+        GreedyInputSelector<DbT>,
+        zip317::SingleOutputChangeStrategy<prim_zip317::FeeRule, DbT>,
+    >,
+>
+where
+    ParamsT: consensus::Parameters + Clone,
+    DbT: InputSource,
+    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
+    DbT::NoteRef: Copy + Eq + Ord,
+{
+    let request = zip321::TransactionRequest::new(vec![
+        Payment::new(
+            to.to_zcash_address(params),
+            Some(amount),
+            memo,
+            None,
+            None,
+            vec![],
+        )
+        .map_err(Error::Payment)?,
+    ])
+    .expect(
+        "It should not be possible for this to violate ZIP 321 request construction invariants.",
+    );
+
+    let input_selector = GreedyInputSelector::<DbT>::new();
+    let change_strategy = zip317::SingleOutputChangeStrategy::<prim_zip317::FeeRule, DbT>::new(
+        fee_rule,
+        change_memo,
+        fallback_change_pool,
+        DustOutputPolicy::default(),
+    );
+
+    propose_transfer(
+        wallet_db,
+        params,
+        spend_from_account,
+        &input_selector,
+        &change_strategy,
+        request,
+        confirmations_policy,
+        #[cfg(feature = "unstable")]
+        proposed_version,
+    )
+}
+
+/// Proposes making a payment to the specified address from the given account,
+/// using a ZIP 317 fee rule with an explicit marginal fee.
+///
+/// This is a convenience wrapper around [`propose_zip317_transfer_to_address`].
+/// It constructs a non-standard ZIP 317 fee rule using `marginal_fee` and the
+/// standard ZIP 317 values for grace actions and P2PKH input/output sizes. This
+/// helper does not add serialization support for non-standard fee rule parameters.
+///
+/// # Privacy
+///
+/// Non-standard fee values can make transactions distinguishable from other ZIP
+/// 317 transactions. Callers should only use this API when they have accounted
+/// for the resulting fingerprinting risk.
+#[cfg(feature = "non-standard-fees")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_zip317_transfer_to_address_with_marginal_fee<DbT, ParamsT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    marginal_fee: Zatoshis,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    confirmations_policy: ConfirmationsPolicy,
+    to: &Address,
+    amount: Zatoshis,
+    memo: Option<MemoBytes>,
+    change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+) -> Result<
+    Proposal<prim_zip317::FeeRule, DbT::NoteRef>,
+    ProposeTransferErrT<
+        DbT,
+        CommitmentTreeErrT,
+        GreedyInputSelector<DbT>,
+        zip317::SingleOutputChangeStrategy<prim_zip317::FeeRule, DbT>,
+    >,
+>
+where
+    ParamsT: consensus::Parameters + Clone,
+    DbT: InputSource,
+    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
+    DbT::NoteRef: Copy + Eq + Ord,
+{
+    let fee_rule = prim_zip317::FeeRule::non_standard(
+        marginal_fee,
+        prim_zip317::GRACE_ACTIONS,
+        prim_zip317::P2PKH_STANDARD_INPUT_SIZE,
+        prim_zip317::P2PKH_STANDARD_OUTPUT_SIZE,
+    )
+    .expect("ZIP 317 standard P2PKH input and output sizes are non-zero");
+
+    propose_zip317_transfer_to_address(
+        wallet_db,
+        params,
+        fee_rule,
+        spend_from_account,
+        confirmations_policy,
+        to,
+        amount,
+        memo,
+        change_memo,
+        fallback_change_pool,
+        #[cfg(feature = "unstable")]
+        proposed_version,
+    )
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that would spend all available funds from the given `spend_pool`s that can then
 /// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
@@ -1016,6 +1217,111 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    create_proposed_transactions_internal(
+        wallet_db,
+        params,
+        spend_prover,
+        output_prover,
+        spending_keys,
+        ovk_policy,
+        proposal,
+        None,
+        #[cfg(feature = "unstable")]
+        proposed_version,
+    )
+}
+
+/// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
+/// the given proposal and an explicit expiry height delta, and persist it to the wallet database.
+///
+/// Returns the database identifier for each newly constructed transaction, or an error if
+/// `proposal.min_target_height() + expiry_height_delta` exceeds [`MAX_TX_EXPIRY_HEIGHT`], or if an
+/// error occurs in transaction construction, proving, or signing.
+///
+/// # Privacy
+///
+/// The expiry height is committed to the transaction ID. Using an expiry delta
+/// other than the wallet default can make transactions distinguishable from
+/// transactions created with the standard wallet policy.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn create_proposed_transactions_with_expiry_delta<
+    DbT,
+    ParamsT,
+    InputsErrT,
+    FeeRuleT,
+    ChangeErrT,
+    N,
+>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
+    spending_keys: &SpendingKeys,
+    ovk_policy: OvkPolicy,
+    proposal: &Proposal<FeeRuleT, N>,
+    expiry_height_delta: NonZeroU32,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+) -> Result<NonEmpty<TxId>, CreateWithExpiryDeltaErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+{
+    let expiry_height =
+        expiry_height_from_delta(proposal.min_target_height(), expiry_height_delta)?;
+
+    create_proposed_transactions_internal(
+        wallet_db,
+        params,
+        spend_prover,
+        output_prover,
+        spending_keys,
+        ovk_policy,
+        proposal,
+        Some(expiry_height),
+        #[cfg(feature = "unstable")]
+        proposed_version,
+    )
+    .map_err(CreateWithExpiryDeltaError::Create)
+}
+
+fn expiry_height_from_delta<E>(
+    min_target_height: TargetHeight,
+    expiry_height_delta: NonZeroU32,
+) -> Result<BlockHeight, CreateWithExpiryDeltaError<E>> {
+    let min_target_height_u32 = u32::from(min_target_height);
+    let expiry_height = min_target_height_u32
+        .checked_add(expiry_height_delta.get())
+        .filter(|height| *height <= u32::from(MAX_TX_EXPIRY_HEIGHT))
+        .map(BlockHeight::from_u32)
+        .ok_or(CreateWithExpiryDeltaError::ExpiryHeightTooHigh {
+            min_target_height,
+            expiry_height_delta,
+            max_expiry_height: MAX_TX_EXPIRY_HEIGHT,
+        })?;
+
+    Ok(expiry_height)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn create_proposed_transactions_internal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
+    spending_keys: &SpendingKeys,
+    ovk_policy: OvkPolicy,
+    proposal: &Proposal<FeeRuleT, N>,
+    expiry_height: Option<BlockHeight>,
+    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+{
     // The set of transparent `StepOutput`s available and unused from prior steps.
     // When a transparent `StepOutput` is created, it is added to the map. When it
     // is consumed, it is removed from the map.
@@ -1040,6 +1346,7 @@ where
             ovk_policy.clone(),
             proposal.fee_rule(),
             proposal.min_target_height(),
+            expiry_height,
             &step_results,
             step,
             #[cfg(feature = "transparent-inputs")]
@@ -1774,6 +2081,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: TargetHeight,
+    expiry_height: Option<BlockHeight>,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1790,7 +2098,7 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
+    let mut build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
         params,
         &spending_keys.usk.to_unified_full_viewing_key(),
@@ -1804,6 +2112,16 @@ where
         #[cfg(feature = "unstable")]
         proposed_version,
     )?;
+
+    if let Some(expiry_height) = expiry_height {
+        // `expiry_height` is only provided by `create_proposed_transactions_with_expiry_delta`,
+        // which computes it from a `NonZeroU32` delta, checks it against
+        // `MAX_TX_EXPIRY_HEIGHT`, and uses the standard non-coinbase build path.
+        build_state
+            .builder
+            .set_expiry_height(expiry_height)
+            .expect("explicit expiry height must have been validated by the public API");
+    }
 
     // Build the transaction with the specified fee rule
     #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
@@ -2755,4 +3073,59 @@ where
         #[cfg(feature = "unstable")]
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use assert_matches::assert_matches;
+    use zcash_primitives::transaction::builder::MAX_TX_EXPIRY_HEIGHT;
+
+    use super::{CreateWithExpiryDeltaError, TargetHeight, expiry_height_from_delta};
+
+    #[test]
+    fn expiry_height_from_delta_accepts_maximum_expiry_height() {
+        let delta = NonZeroU32::new(1).expect("1 is nonzero");
+        let min_target_height = TargetHeight::from(u32::from(MAX_TX_EXPIRY_HEIGHT) - delta.get());
+
+        assert_matches!(
+            expiry_height_from_delta::<()>(min_target_height, delta),
+            Ok(height) if height == MAX_TX_EXPIRY_HEIGHT
+        );
+    }
+
+    #[test]
+    fn expiry_height_from_delta_rejects_expiry_above_maximum() {
+        let delta = NonZeroU32::new(1).expect("1 is nonzero");
+        let min_target_height = TargetHeight::from(u32::from(MAX_TX_EXPIRY_HEIGHT));
+
+        assert_matches!(
+            expiry_height_from_delta::<()>(min_target_height, delta),
+            Err(CreateWithExpiryDeltaError::ExpiryHeightTooHigh {
+                min_target_height: actual_min_target_height,
+                expiry_height_delta: actual_delta,
+                max_expiry_height,
+            }) if actual_min_target_height == min_target_height
+                && actual_delta == delta
+                && max_expiry_height == MAX_TX_EXPIRY_HEIGHT
+        );
+    }
+
+    #[test]
+    fn expiry_height_from_delta_rejects_overflow() {
+        let delta = NonZeroU32::new(1).expect("1 is nonzero");
+        let min_target_height = TargetHeight::from(u32::MAX);
+
+        assert_matches!(
+            expiry_height_from_delta::<()>(min_target_height, delta),
+            Err(CreateWithExpiryDeltaError::ExpiryHeightTooHigh {
+                min_target_height: actual_min_target_height,
+                expiry_height_delta: actual_delta,
+                max_expiry_height,
+            }) if actual_min_target_height == min_target_height
+                && actual_delta == delta
+                && max_expiry_height == MAX_TX_EXPIRY_HEIGHT
+        );
+    }
 }
