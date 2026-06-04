@@ -184,16 +184,16 @@ pub struct SentNote {
 pub struct Recipient {
     #[prost(enumeration = "RecipientType", tag = "1")]
     pub recipient_type: i32,
-    /// either the zcash address if external or transparent address if EphemeralTransparent
+    /// either the zcash address if External, or transparent address if EphemeralTransparent / InternalTransparent
     #[prost(string, optional, tag = "2")]
     pub address: ::core::option::Option<::prost::alloc::string::String>,
     /// the shielded protocol if External
     #[prost(enumeration = "PoolType", optional, tag = "3")]
     pub pool_type: ::core::option::Option<i32>,
-    /// the account id if EphemeralTransparent or InternalAccount
+    /// the account id if EphemeralTransparent, InternalTransparent, or InternalAccount
     #[prost(uint32, optional, tag = "4")]
     pub account_id: ::core::option::Option<u32>,
-    /// the outpoint metadata if InternalAccount
+    /// the outpoint metadata if EphemeralTransparent
     #[prost(message, optional, tag = "5")]
     pub outpoint: ::core::option::Option<OutPoint>,
     /// the note if InternalAccount
@@ -284,6 +284,7 @@ pub enum RecipientType {
     ExternalRecipient = 0,
     EphemeralTransparent = 1,
     InternalAccount = 2,
+    InternalTransparent = 3,
 }
 impl RecipientType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -295,6 +296,7 @@ impl RecipientType {
             Self::ExternalRecipient => "ExternalRecipient",
             Self::EphemeralTransparent => "EphemeralTransparent",
             Self::InternalAccount => "InternalAccount",
+            Self::InternalTransparent => "InternalTransparent",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -303,6 +305,7 @@ impl RecipientType {
             "ExternalRecipient" => Some(Self::ExternalRecipient),
             "EphemeralTransparent" => Some(Self::EphemeralTransparent),
             "InternalAccount" => Some(Self::InternalAccount),
+            "InternalTransparent" => Some(Self::InternalTransparent),
             _ => None,
         }
     }

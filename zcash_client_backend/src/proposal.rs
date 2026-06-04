@@ -41,6 +41,8 @@ pub enum ProposalError {
     ShieldingInvalid,
     /// No anchor information could be obtained for the specified block height.
     AnchorNotFound(BlockHeight),
+    /// Selected Orchard notes were backed by incompatible PIR witness anchors.
+    PIRWitnessAnchorMismatch,
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
@@ -70,6 +72,10 @@ pub enum ProposalError {
     /// activity.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressLinkability,
+    /// A shielding proposal was constructed with a destination address that has no shielded
+    /// receiver. Shielding requires the destination to be able to receive shielded value.
+    #[cfg(feature = "transparent-inputs")]
+    ShieldingRequiresShieldedRecipient,
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
     #[cfg(feature = "unstable")]
@@ -103,6 +109,10 @@ impl Display for ProposalError {
             ProposalError::AnchorNotFound(h) => {
                 write!(f, "Unable to compute anchor for block height {h:?}")
             }
+            ProposalError::PIRWitnessAnchorMismatch => write!(
+                f,
+                "Selected Orchard inputs were backed by incompatible PIR witness anchors."
+            ),
             ProposalError::ReferenceError(r) => {
                 write!(f, "No prior step output found for reference {r:?}")
             }
@@ -150,6 +160,11 @@ impl Display for ProposalError {
             ProposalError::EphemeralAddressLinkability => write!(
                 f,
                 "The proposal requested spending funds in a way that would link activity on an ephemeral address to other wallet activity."
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::ShieldingRequiresShieldedRecipient => write!(
+                f,
+                "A shielding proposal's destination must have a shielded receiver."
             ),
             #[cfg(feature = "unstable")]
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
@@ -304,7 +319,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn single_step(
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
@@ -397,7 +412,7 @@ impl StepOutput {
 pub struct Step<NoteRef> {
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
-    transparent_inputs: Vec<WalletTransparentOutput>,
+    transparent_inputs: Vec<WalletTransparentOutput<()>>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
@@ -428,7 +443,7 @@ impl<NoteRef> Step<NoteRef> {
         prior_steps: &[Step<NoteRef>],
         transaction_request: TransactionRequest,
         payment_pools: BTreeMap<usize, PoolType>,
-        transparent_inputs: Vec<WalletTransparentOutput>,
+        transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
@@ -537,7 +552,7 @@ impl<NoteRef> Step<NoteRef> {
         &self.payment_pools
     }
     /// Returns the transparent inputs that have been selected to fund the transaction.
-    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
+    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput<()>] {
         &self.transparent_inputs
     }
     /// Returns the shielded inputs that have been selected to fund the transaction.

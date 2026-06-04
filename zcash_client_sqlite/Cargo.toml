@@ -79,7 +79,7 @@ schemerz.workspace = true
 schemerz-rusqlite.workspace = true
 time.workspace = true
 uuid = { workspace = true, features = ["v4"] }
-regex = "1.4"
+regex = { workspace = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -168,6 +168,11 @@ expensive-tests = []
 ## A feature used to enable PCZT-specific tests without interfering with the
 ## protocol-specific flags. Test-only.
 pczt-tests = ["serde", "zcash_client_backend/pczt"]
+
+## Enables PIR (Private Information Retrieval) for immediate Orchard note spendability:
+## spent-note tracking via nullifier PIR queries and Merkle witness fetching for
+## spending notes before the wallet finishes scanning.
+spendability-pir = ["orchard", "zcash_client_backend/spendability-pir"]
 
 [lib]
 bench = false

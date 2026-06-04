@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     ops::Range,
 };
 
@@ -20,6 +20,7 @@ use zcash_client_backend::{
         AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT, TransactionStatus,
         WalletCommitmentTrees as _, Zip32Derivation,
         chain::ChainState,
+        error::RewindError,
         scanning::{ScanPriority, ScanRange},
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
@@ -48,7 +49,7 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::TxOut},
+    ::transparent::{address::TransparentAddress, bundle::TxOut, keys::TransparentKeyScope},
     zcash_client_backend::{
         data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
     },
@@ -598,7 +599,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error> {
         tracing::debug!("put_received_transparent_utxo");
         #[cfg(feature = "transparent-inputs")]
@@ -683,7 +684,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         &sent_tx_output,
                     );
                 }
-                TransferType::WalletInternal => {
+                TransferType::AccountInternal => {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
@@ -711,6 +712,9 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                 TransferType::Incoming => {
                     todo!("store decrypted tx sapling incoming")
                 }
+                TransferType::WalletInternal => unreachable!(
+                    "TransferType::WalletInternal is only produced for transparent outputs"
+                ),
             }
         }
 
@@ -754,7 +758,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         &sent_tx_output,
                     );
                 }
-                TransferType::WalletInternal => {
+                TransferType::AccountInternal => {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
@@ -782,6 +786,9 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                 TransferType::Incoming => {
                     todo!("store decrypted tx orchard incoming")
                 }
+                TransferType::WalletInternal => unreachable!(
+                    "TransferType::WalletInternal is only produced for transparent outputs"
+                ),
             }
         }
 
@@ -840,6 +847,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                             ),
                             txout.clone(),
                             d_tx.mined_height(),
+                            Some(account_id),
+                            // TODO: Get from somewhere
+                            None,
+                            None,
                         )
                         .unwrap();
                         self.put_transparent_output(
@@ -1065,7 +1076,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         todo!()
     }
 
-    fn rewind_to_height(&mut self, _max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+    fn rewind_to_chain_state(
+        &mut self,
+        _chain_state: ChainState,
+        _reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
         todo!()
     }
 
@@ -1169,6 +1184,9 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                             outpoint.clone(),
                             TxOut::new(output.value(), ephemeral_address.script().into()),
                             None,
+                            Some(*receiving_account),
+                            Some(TransparentKeyScope::EPHEMERAL),
+                            Some(*sent_tx.funding_account()),
                         )
                         .unwrap();
                         self.put_transparent_output(&txo, receiving_account, true)?;

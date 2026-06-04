@@ -402,25 +402,25 @@ mod tests {
     }
 
     #[test]
-    fn rewind_to_height_deep_sapling() {
-        testing::pool::rewind_to_height_deep::<SaplingPoolTester>()
+    fn rewind_to_chain_state_deep_sapling() {
+        testing::pool::rewind_to_chain_state_deep::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn rewind_to_height_deep_orchard() {
-        testing::pool::rewind_to_height_deep::<OrchardPoolTester>()
+    fn rewind_to_chain_state_deep_orchard() {
+        testing::pool::rewind_to_chain_state_deep::<OrchardPoolTester>()
     }
 
     #[test]
-    fn rewind_to_height_shallow_sapling() {
-        testing::pool::rewind_to_height_shallow::<SaplingPoolTester>()
+    fn rewind_to_chain_state_shallow_sapling() {
+        testing::pool::rewind_to_chain_state_shallow::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn rewind_to_height_shallow_orchard() {
-        testing::pool::rewind_to_height_shallow::<OrchardPoolTester>()
+    fn rewind_to_chain_state_shallow_orchard() {
+        testing::pool::rewind_to_chain_state_shallow::<OrchardPoolTester>()
     }
 
     #[test]

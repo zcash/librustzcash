@@ -859,6 +859,89 @@ where
         .map_err(Error::from)
 }
 
+/// Errors that may be generated in construction of proposals for shielding coinbase
+/// transparent outputs to an arbitrary shielded recipient via
+/// [`propose_shielding_coinbase`].
+#[cfg(feature = "transparent-inputs")]
+pub type ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    CommitmentTreeErrT,
+    <InputsT as ShieldingSelector>::Error,
+    <FeeRuleT as FeeRule>::Error,
+    <FeeRuleT as FeeRule>::Error,
+    Infallible,
+>;
+
+/// Constructs a proposal to shield one or more coinbase transparent outputs to an
+/// arbitrary shielded recipient.
+///
+/// Unlike [`propose_shielding`], this method:
+///
+/// - Restricts input selection to coinbase outputs only. The restriction is enforced
+///   at the API boundary; it cannot be overridden by callers. Coinbase outputs have
+///   no prior transparent transaction graph, which is what makes it acceptable to
+///   send them to an arbitrary shielded recipient.
+/// - Requires `to_address` to be a shielded address (Sapling, or a Unified Address
+///   with a shielded receiver). Transparent and TEX destinations are rejected with
+///   [`ProposalError::ShieldingRequiresShieldedRecipient`]. The address may belong
+///   to an account outside the caller's wallet.
+/// - Accepts an optional `memo` to be attached to the shielded payment.
+/// - Accepts an optional `limit` capping the number of transparent inputs to at
+///   most `n`, keeping the highest-value UTXOs (with a stable tiebreaker by
+///   outpoint). `Some(0)` selects no inputs and therefore returns
+///   [`InputSelectorError::InsufficientFunds`].
+///
+/// The resulting proposal carries an explicit ZIP-321 payment to `to_address` for
+/// `input_total - fee`. **No change is produced**, in either the transparent or any
+/// shielded pool: a shielded change output would let the recipient (or any chain
+/// observer) learn the sender's total selected-coinbase value by summing the public
+/// transparent input values and subtracting the visible payment amount.
+///
+/// [`InputSelectorError::InsufficientFunds`]: crate::data_api::wallet::input_selection::InputSelectorError::InsufficientFunds
+/// [`ProposalError::ShieldingRequiresShieldedRecipient`]: crate::proposal::ProposalError::ShieldingRequiresShieldedRecipient
+#[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_shielding_coinbase<DbT, ParamsT, InputsT, FeeRuleT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    input_selector: &InputsT,
+    fee_rule: &FeeRuleT,
+    shielding_threshold: Zatoshis,
+    from_addrs: &[TransparentAddress],
+    to_address: ZcashAddress,
+    memo: Option<MemoBytes>,
+    limit: Option<usize>,
+) -> Result<
+    Proposal<FeeRuleT, Infallible>,
+    ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT>,
+>
+where
+    ParamsT: consensus::Parameters,
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    InputsT: ShieldingSelector<InputSource = DbT>,
+    FeeRuleT: FeeRule + Clone,
+{
+    let chain_tip_height = wallet_db
+        .chain_height()
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
+    input_selector
+        .propose_shielding_coinbase(
+            params,
+            wallet_db,
+            fee_rule,
+            shielding_threshold,
+            from_addrs,
+            to_address,
+            memo,
+            limit,
+            (chain_tip_height + 1).into(),
+        )
+        .map_err(Error::from)
+}
+
 struct StepResult<AccountId> {
     build_result: BuildResult,
     outputs: Vec<SentTransactionOutput<AccountId>>,
@@ -916,6 +999,10 @@ impl SpendingKeys {
 /// step is not supported, because the ultimate positions of those notes in the global note
 /// commitment tree cannot be known until the transaction that produces those notes is mined,
 /// and therefore the required spend proofs for such notes cannot be constructed.
+///
+/// `use_pir_witnesses` selects the Orchard witness source: when `true`, PIR-stored
+/// witnesses are used directly; when `false`, witnesses are computed from the local
+/// ShardTree. `spendability-pir` feature must be enabled. Otherwise, this parameter is ignored.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
@@ -927,6 +1014,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    #[cfg(feature = "spendability-pir")] use_pir_witnesses: bool,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -963,6 +1051,8 @@ where
             &mut unused_transparent_outputs,
             #[cfg(feature = "unstable")]
             proposed_version,
+            #[cfg(feature = "spendability-pir")]
+            use_pir_witnesses,
         )?;
         step_results.push((step, step_result));
     }
@@ -1114,6 +1204,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         (TransparentAddress, OutPoint),
     >,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    #[cfg(feature = "spendability-pir")] use_pir_witnesses: bool,
 ) -> Result<
     BuildState<'static, ParamsT, DbT::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -1199,46 +1290,62 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let (orchard_anchor, orchard_inputs) = if proposal_step
-        .involves(PoolType::Shielded(ShieldedProtocol::Orchard))
-    {
-        proposal_step.shielded_inputs().map_or_else(
-            || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
-            |inputs| {
-                wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|orchard_tree| {
-                    let anchor = orchard_tree
-                        .root_at_checkpoint_id(&inputs.anchor_height())?
-                        .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
-                        .into();
+    #[cfg_attr(not(feature = "spendability-pir"), allow(unused_labels))]
+    let (orchard_anchor, orchard_inputs) = 'orchard: {
+        if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Orchard)) {
+            // When `use_pir_witnesses` is set, Orchard witnesses come from
+            // pre-fetched PIR data instead of the local ShardTree.
+            #[cfg(feature = "spendability-pir")]
+            if use_pir_witnesses {
+                let pir_result = match proposal_step.shielded_inputs() {
+                    Some(inputs) => pir_orchard_witnesses(wallet_db, inputs)?,
+                    None => (Some(orchard::Anchor::empty_tree()), vec![]),
+                };
+                break 'orchard pir_result;
+            }
 
-                    let orchard_inputs = inputs
-                        .notes()
-                        .iter()
-                        .filter_map(|selected| match selected.note() {
-                            #[cfg(feature = "orchard")]
-                            Note::Orchard(note) => orchard_tree
-                                .witness_at_checkpoint_id_caching(
-                                    selected.note_commitment_tree_position(),
-                                    &inputs.anchor_height(),
-                                )
-                                .and_then(|witness| {
-                                    witness
-                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+            proposal_step.shielded_inputs().map_or_else(
+                || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
+                |inputs| {
+                    wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _, _, _>>(
+                        |orchard_tree| {
+                            let anchor = orchard_tree
+                                .root_at_checkpoint_id(&inputs.anchor_height())?
+                                .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
+                                .into();
+
+                            let orchard_inputs = inputs
+                                .notes()
+                                .iter()
+                                .filter_map(|selected| match selected.note() {
+                                    #[cfg(feature = "orchard")]
+                                    Note::Orchard(note) => orchard_tree
+                                        .witness_at_checkpoint_id_caching(
+                                            selected.note_commitment_tree_position(),
+                                            &inputs.anchor_height(),
+                                        )
+                                        .and_then(|witness| {
+                                            witness.ok_or(ShardTreeError::Query(
+                                                QueryError::CheckpointPruned,
+                                            ))
+                                        })
+                                        .map(|merkle_path| Some((note, merkle_path)))
+                                        .map_err(Error::from)
+                                        .transpose(),
+                                    Note::Sapling(_) => None,
                                 })
-                                .map(|merkle_path| Some((note, merkle_path)))
-                                .map_err(Error::from)
-                                .transpose(),
-                            Note::Sapling(_) => None,
-                        })
-                        .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
+                                .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
 
-                    Ok((Some(anchor), orchard_inputs))
-                })
-            },
-        )?
-    } else {
-        (None, vec![])
+                            Ok((Some(anchor), orchard_inputs))
+                        },
+                    )
+                },
+            )?
+        } else {
+            (None, vec![])
+        }
     };
+
     #[cfg(not(feature = "orchard"))]
     let orchard_anchor = None;
 
@@ -1676,6 +1783,110 @@ where
     })
 }
 
+/// Retrieves a `MerklePath` for each Orchard note from PIR-stored witness data.
+/// All PIR witnesses must share the same anchor root; that root becomes the
+/// transaction's Orchard anchor.
+#[cfg(all(feature = "orchard", feature = "spendability-pir"))]
+#[allow(clippy::type_complexity)]
+fn pir_orchard_witnesses<'a, DbT, InputsErrT, FeeErrT, ChangeErrT, N>(
+    wallet_db: &mut DbT,
+    inputs: &'a crate::proposal::ShieldedInputs<N>,
+) -> Result<
+    (
+        Option<orchard::Anchor>,
+        Vec<(
+            &'a orchard::Note,
+            incrementalmerkletree::MerklePath<orchard::tree::MerkleHashOrchard, 32>,
+        )>,
+    ),
+    Error<
+        <DbT as WalletRead>::Error,
+        <DbT as WalletCommitmentTrees>::Error,
+        InputsErrT,
+        FeeErrT,
+        ChangeErrT,
+        N,
+    >,
+>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+{
+    use crate::wallet::Note;
+
+    let mut pir_anchor: Option<orchard::Anchor> = None;
+    let mut pir_anchor_height: Option<u64> = None;
+    let mut orchard_inputs = vec![];
+    for selected in inputs.notes().iter() {
+        if let Note::Orchard(note) = selected.note() {
+            let position = selected.note_commitment_tree_position();
+
+            let (merkle_path, anchor_height, anchor_root) = wallet_db
+                .get_pir_orchard_merkle_path(position)
+                .map_err(|e| Error::CommitmentTree(ShardTreeError::Storage(e)))?
+                .ok_or(Error::CommitmentTree(ShardTreeError::Query(
+                    QueryError::CheckpointPruned,
+                )))?;
+
+            let root_hash: orchard::tree::MerkleHashOrchard =
+                Option::from(orchard::tree::MerkleHashOrchard::from_bytes(&anchor_root))
+                    .ok_or_else(|| {
+                        Error::CommitmentTree(ShardTreeError::Query(QueryError::CheckpointPruned))
+                    })?;
+            let anchor: orchard::Anchor = root_hash.into();
+            let ecmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+            let cmx = orchard::tree::MerkleHashOrchard::from_cmx(&ecmx);
+            let witness_root: orchard::Anchor = merkle_path.root(cmx).into();
+
+            if witness_root != anchor {
+                tracing::warn!(
+                    position = ?position,
+                    value = note.value().inner(),
+                    anchor_height,
+                    anchor_root = %hex::encode(anchor_root),
+                    "PIR witness root does not match stored anchor before add_orchard_spend",
+                );
+                return Err(Error::Proposal(ProposalError::PIRWitnessAnchorMismatch));
+            }
+
+            match &pir_anchor_height {
+                None => pir_anchor_height = Some(anchor_height),
+                Some(existing) if *existing == anchor_height => {}
+                Some(existing) => {
+                    tracing::warn!(
+                        position = ?position,
+                        value = note.value().inner(),
+                        first_anchor_height = existing,
+                        anchor_height,
+                        "selected Orchard notes span multiple PIR witness anchor heights",
+                    );
+                    return Err(Error::Proposal(ProposalError::PIRWitnessAnchorMismatch));
+                }
+            }
+
+            match &pir_anchor {
+                None => pir_anchor = Some(anchor),
+                Some(existing) if *existing == anchor => {}
+                Some(_) => {
+                    tracing::warn!(
+                        position = ?position,
+                        value = note.value().inner(),
+                        anchor_height,
+                        anchor_root = %hex::encode(anchor_root),
+                        "selected Orchard notes span multiple PIR witness anchors",
+                    );
+                    return Err(Error::Proposal(ProposalError::PIRWitnessAnchorMismatch));
+                }
+            }
+            orchard_inputs.push((note, merkle_path));
+        }
+    }
+
+    Ok((
+        pir_anchor.or(Some(orchard::Anchor::empty_tree())),
+        orchard_inputs,
+    ))
+}
+
 // `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
 // that have not been consumed so far, to the corresponding pair of
 // `TransparentAddress` and `Outpoint`.
@@ -1698,6 +1909,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
         (TransparentAddress, OutPoint),
     >,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    #[cfg(feature = "spendability-pir")] use_pir_witnesses: bool,
 ) -> Result<
     StepResult<<DbT as WalletRead>::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -1720,6 +1932,8 @@ where
         unused_transparent_outputs,
         #[cfg(feature = "unstable")]
         proposed_version,
+        #[cfg(feature = "spendability-pir")]
+        use_pir_witnesses,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -1942,6 +2156,8 @@ where
         unused_transparent_outputs,
         #[cfg(feature = "unstable")]
         None,
+        #[cfg(feature = "spendability-pir")]
+        false,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -2671,5 +2887,7 @@ where
         &proposal,
         #[cfg(feature = "unstable")]
         None,
+        #[cfg(feature = "spendability-pir")]
+        false,
     )
 }

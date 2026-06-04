@@ -654,4 +654,44 @@ pub(crate) mod tests {
     fn coinbase_only_filtering() {
         testing::pool::coinbase_only_filtering::<SaplingPoolTester>();
     }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_succeeds() {
+        testing::pool::propose_shielding_coinbase_succeeds::<SaplingPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_transparent_recipient_rejected() {
+        testing::pool::propose_shielding_coinbase_transparent_recipient_rejected::<SaplingPoolTester>(
+        );
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_memo_succeeds() {
+        testing::pool::propose_shielding_coinbase_with_memo_succeeds::<SaplingPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_limit_truncates_inputs() {
+        testing::pool::propose_shielding_coinbase_with_limit_truncates_inputs::<SaplingPoolTester>(
+        );
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_shielding_coinbase_with_zero_limit_insufficient_funds() {
+        testing::pool::propose_shielding_coinbase_with_zero_limit_insufficient_funds::<
+            SaplingPoolTester,
+        >();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn propose_and_build_shielding_coinbase_succeeds() {
+        testing::pool::propose_and_build_shielding_coinbase_succeeds::<SaplingPoolTester>();
+    }
 }
