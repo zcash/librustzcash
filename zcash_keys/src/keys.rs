@@ -55,7 +55,7 @@ pub mod sapling {
     ///
     /// # Panics
     ///
-    /// Panics if `seed` is shorter than 32 bytes.
+    /// Panics if `seed` is shorter than 16 bytes.
     ///
     /// # Examples
     ///
@@ -68,8 +68,8 @@ pub mod sapling {
     /// ```
     /// [`ExtendedSpendingKey`]: sapling::zip32::ExtendedSpendingKey
     pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
-        if seed.len() < 32 {
-            panic!("ZIP 32 seeds MUST be at least 32 bytes");
+        if seed.len() < 16 {
+            panic!("ZIP 32 seeds MUST be at least 16 bytes");
         }
 
         ExtendedSpendingKey::from_path(
@@ -239,8 +239,8 @@ impl UnifiedSpendingKey {
         seed: &[u8],
         _account: AccountId,
     ) -> Result<UnifiedSpendingKey, DerivationError> {
-        if seed.len() < 32 {
-            panic!("ZIP 32 seeds MUST be at least 32 bytes");
+        if seed.len() < 16 {
+            panic!("ZIP 32 seeds MUST be at least 16 bytes");
         }
 
         UnifiedSpendingKey::from_checked_parts(
@@ -1932,7 +1932,15 @@ mod tests {
     #[should_panic]
     #[cfg(feature = "sapling")]
     fn spending_key_panics_on_short_seed() {
-        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId::ZERO);
+        let _ = sapling::spending_key(&[0; 15][..], 0, AccountId::ZERO);
+    }
+
+    #[test]
+    #[cfg(feature = "sapling")]
+    fn spending_key_accepts_16_byte_seed() {
+        // 16 bytes is the minimum entropy required by ZIP 315 for wallet seeds,
+        // matching e.g. 20-word SLIP-39 master secrets.
+        let _ = sapling::spending_key(&[0x42; 16][..], 0, AccountId::ZERO);
     }
 
     #[cfg(feature = "transparent-inputs")]
