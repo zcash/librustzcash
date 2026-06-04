@@ -669,7 +669,6 @@ typedef struct equi equi;
   void equi_digitK(equi *eq, const u32 id) {
     collisiondata cd;
     htlayout htl = htlayout_new(eq, WK);
-u32 nc = 0;
     for (u32 bucketid = id; bucketid < NBUCKETS; bucketid++) {
       collisiondata_clear(&cd);
       slot0 *buck = htl.hta.trees0[(WK-1)/2][bucketid];
@@ -681,11 +680,10 @@ u32 nc = 0;
         for (; nextcollision(&cd); ) {
           const u32 s0 = slot(&cd);
           if (htlayout_equal(&htl, buck[s0].hash, pslot1->hash))
-nc++,       candidate(eq, tree_from_bid(bucketid, s0, s1));
+            candidate(eq, tree_from_bid(bucketid, s0, s1));
         }
       }
     }
-//printf(" %d candidates\n", nc);
   }
 
   size_t equi_nsols(const equi *eq) {

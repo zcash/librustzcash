@@ -79,7 +79,7 @@ schemerz.workspace = true
 schemerz-rusqlite.workspace = true
 time.workspace = true
 uuid = { workspace = true, features = ["v4"] }
-regex = "1.4"
+regex = { workspace = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
