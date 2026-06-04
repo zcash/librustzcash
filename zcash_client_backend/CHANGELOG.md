@@ -11,6 +11,10 @@ workspace.
 ## [0.23.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::proposal::Proposal::transparent_input_count` and
+  `zcash_client_backend::proposal::Proposal::transparent_input_total`, which
+  report the number and total value of the transparent coins selected as
+  inputs across all steps of a proposal.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`
