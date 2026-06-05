@@ -97,9 +97,7 @@ mod tests {
         #[cfg(zcash_unstable = "nu7")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_nu7 = BlockHeight::from_u32(10);
-        #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(11);
+        let expected_z_future = BlockHeight::from_u32(10);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -148,9 +146,7 @@ mod tests {
         #[cfg(zcash_unstable = "nu7")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_nu7 = BlockHeight::from_u32(10);
-        #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(11);
+        let expected_z_future = BlockHeight::from_u32(10);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -230,9 +226,7 @@ mod tests {
         #[cfg(zcash_unstable = "nu7")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_nu7 = BlockHeight::from_u32(10);
-        #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(11);
+        let expected_z_future = BlockHeight::from_u32(10);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
