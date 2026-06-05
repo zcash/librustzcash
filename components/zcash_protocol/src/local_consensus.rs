@@ -95,11 +95,11 @@ mod tests {
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(9);
+        let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(10);
+        let expected_z_future = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -126,10 +126,12 @@ mod tests {
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6, expected_nu6));
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_1, expected_nu6_1));
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_2, expected_nu6_2));
+        // nu7 must not be activated at or below the nu6_2 height
         #[cfg(zcash_unstable = "nu7")]
-        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu6));
+        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu6_2));
+        // zfuture must not be activated at or below the nu6_2 height
         #[cfg(zcash_unstable = "zfuture")]
-        assert!(!regtest.is_nu_active(NetworkUpgrade::ZFuture, expected_nu6));
+        assert!(!regtest.is_nu_active(NetworkUpgrade::ZFuture, expected_nu6_2));
     }
 
     #[test]
@@ -144,11 +146,11 @@ mod tests {
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(9);
+        let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(10);
+        let expected_z_future = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -226,11 +228,11 @@ mod tests {
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(9);
+        let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_nu7 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "zfuture")]
-        let expected_z_future = BlockHeight::from_u32(10);
+        let expected_z_future = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
