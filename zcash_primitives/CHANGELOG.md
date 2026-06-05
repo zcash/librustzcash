@@ -24,6 +24,10 @@ workspace.
   an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
   argument.
 
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-2x4w-pxqw-58v9).
+
 ### Security
 - Deserialization of v5 Orchard bundles now rejects proofs whose length is not
   the canonical size for the number of actions, preventing a proof padded with

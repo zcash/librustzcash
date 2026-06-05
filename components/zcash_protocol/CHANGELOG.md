@@ -21,6 +21,10 @@ workspace.
 - `zcash_protocol::local_consensus`:
   - `LocalNetwork` has a new field `nu6_2`.
 
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-2x4w-pxqw-58v9).
+
 ## [0.8.0] - 2026-04-23
 
 ### Added

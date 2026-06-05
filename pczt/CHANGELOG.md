@@ -14,6 +14,10 @@ workspace.
 - Migrated to `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`, `zcash_primitives 0.28.0`,
   `zcash_proofs 0.28.0`.
 
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-2x4w-pxqw-58v9).
+
 ## [0.6.0] - 2026-04-27
 
 ### Added
