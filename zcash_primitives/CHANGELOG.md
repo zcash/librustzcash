@@ -10,6 +10,31 @@ workspace.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-06-02
+
+### Added
+- Support for the NU6.2 consensus branch. The following now handle
+  `zcash_protocol::consensus::BranchId::Nu6_2` (mapped to `TxVersion::V5`):
+  - `zcash_primitives::transaction::TxVersion::suggested_for_branch`
+  - `zcash_primitives::transaction::TxVersion::valid_in_branch`
+
+### Changed
+- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
+  argument.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46).
+
+### Security
+- Deserialization of v5 Orchard bundles now rejects proofs whose length is not
+  the canonical size for the number of actions, preventing a proof padded with
+  arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
+  transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
+  for earlier branches to preserve the ability to parse historical transactions.
+
 ## [0.27.1] - 2026-05-14
 
 ### Fixed

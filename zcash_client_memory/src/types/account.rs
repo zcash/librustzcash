@@ -182,7 +182,7 @@ impl Accounts {
         address: &TransparentAddress,
         tx_id: TxId,
     ) -> Result<(), Error> {
-        for (_, account) in self.accounts.iter_mut() {
+        for account in self.accounts.values_mut() {
             account.mark_ephemeral_address_as_seen(address, tx_id)?
         }
         Ok(())
