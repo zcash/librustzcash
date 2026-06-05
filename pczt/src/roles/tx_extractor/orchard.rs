@@ -19,6 +19,7 @@ pub(super) fn verify_bundle(
             Err(OrchardError::InvalidProof)
         }
     } else {
+        // PCZT extraction produces new transactions, which use the NU6.2 (fixed) circuit.
         let vk = VerifyingKey::build();
         if validator.validate(&vk, rng) {
             Ok(())

@@ -2017,9 +2017,9 @@ dependencies = [
 
 [[package]]
 name = "halo2_gadgets"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
+checksum = "fb2a697cad929f706b7987fe804ad57d43622cd37463ba7e4d662a926fdcfea3"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -2966,9 +2966,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a36733033adae631acacf46f542f027d508d9025d14797d9b35059494c99eb3"
+checksum = "a54f8d29bfb1e76a9d4e868a1a08cce2e57dd2bdc66232982822ad3114b91ab3"
 dependencies = [
  "aes",
  "bitvec",
@@ -3145,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7025,7 +7025,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7039,7 +7039,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7160,7 +7160,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.20.2"
+version = "0.21.0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7254,7 +7254,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7306,7 +7306,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.27.1"
+version = "0.28.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
@@ -7342,7 +7342,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7365,7 +7365,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "corez",
  "document-features",
@@ -7405,7 +7405,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "bip32",
  "bs58",
@@ -7496,7 +7496,7 @@ dependencies = [
 
 [[package]]
 name = "zip321"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64",
  "nom",
