@@ -228,3 +228,31 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+# Highest-value memory-safety control. Use `deny` rather than `forbid` so FFI
+# crates (e.g. equihash) can carve out with a local `#![allow(unsafe_code)]`;
+# `forbid` cannot be downgraded and breaks those crates.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Panic hygiene: a panic in consensus or verification code is a crash vector.
+unwrap_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+expect_used = "warn"
+unreachable = "warn"
+
+# Integer and cast correctness: a frequent source of crypto bugs.
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+cast_lossless = "warn"
+integer_division = "warn"
+modulo_arithmetic = "warn"
+
+# Crypto should not touch floating point: non-determinism plus timing.
+float_arithmetic = "deny"
+
+# mem::forget on a zeroizing wrapper leaks the secret instead of scrubbing it.
+mem_forget = "deny"
