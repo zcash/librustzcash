@@ -58,40 +58,41 @@ pub mod service;
 impl compact_formats::CompactBlock {
     /// Returns the [`BlockHash`] for this block.
     ///
-    /// # Panics
-    ///
-    /// This function will panic if [`field@Self::header`] is not set and
-    /// [`field@Self::hash`] is not exactly 32 bytes.
-    pub fn hash(&self) -> BlockHash {
+    /// Returns an error if [`field@Self::header`] is not set and [`field@Self::hash`] is not
+    /// exactly 32 bytes.
+    pub fn hash(&self) -> Result<BlockHash, CompactFormatError> {
         if let Some(header) = self.header() {
-            header.hash()
+            Ok(header.hash())
         } else {
-            BlockHash::from_slice(&self.hash)
+            let bytes: [u8; 32] = self.hash[..]
+                .try_into()
+                .map_err(CompactFormatError::InvalidLength)?;
+            Ok(BlockHash(bytes))
         }
     }
 
     /// Returns the [`BlockHash`] for this block's parent.
     ///
-    /// # Panics
-    ///
-    /// This function will panic if [`field@Self::header`] is not set and
-    /// [`field@Self::prev_hash`] is not exactly 32 bytes.
-    pub fn prev_hash(&self) -> BlockHash {
+    /// Returns an error if [`field@Self::header`] is not set and [`field@Self::prev_hash`] is
+    /// not exactly 32 bytes.
+    pub fn prev_hash(&self) -> Result<BlockHash, CompactFormatError> {
         if let Some(header) = self.header() {
-            header.prev_block
+            Ok(header.prev_block)
         } else {
-            BlockHash::from_slice(&self.prev_hash)
+            let bytes: [u8; 32] = self.prev_hash[..]
+                .try_into()
+                .map_err(CompactFormatError::InvalidLength)?;
+            Ok(BlockHash(bytes))
         }
     }
 
     /// Returns the [`BlockHeight`] value for this block
     ///
-    /// # Panics
-    ///
-    /// This function will panic if [`field@Self::height`] is not representable within a
-    /// `u32`.
-    pub fn height(&self) -> BlockHeight {
-        self.height.try_into().unwrap()
+    /// Returns an error if [`field@Self::height`] is not representable within a `u32`.
+    pub fn height(&self) -> Result<BlockHeight, CompactFormatError> {
+        self.height
+            .try_into()
+            .map_err(|_| CompactFormatError::OutOfRange)
     }
 
     /// Returns the [`BlockHeader`] for this block if present.
@@ -107,11 +108,14 @@ impl compact_formats::CompactBlock {
 }
 
 impl compact_formats::CompactTx {
-    /// Returns the transaction Id
-    pub fn txid(&self) -> TxId {
-        let mut txid_bytes = [0u8; 32];
-        txid_bytes.copy_from_slice(&self.txid);
-        TxId::from_bytes(txid_bytes)
+    /// Returns the transaction Id.
+    ///
+    /// Returns an error if [`field@Self::txid`] is not exactly 32 bytes.
+    pub fn txid(&self) -> Result<TxId, CompactFormatError> {
+        let txid_bytes: [u8; 32] = self.txid[..]
+            .try_into()
+            .map_err(CompactFormatError::InvalidLength)?;
+        Ok(TxId::from_bytes(txid_bytes))
     }
 }
 
@@ -122,6 +126,8 @@ pub enum CompactFormatError {
     InvalidLength(TryFromSliceError),
     /// A field value did not represent a valid protocol element.
     InvalidValue,
+    /// A numeric field had a value out of range for the expected target type.
+    OutOfRange,
 }
 
 impl Display for CompactFormatError {
@@ -130,6 +136,12 @@ impl Display for CompactFormatError {
             CompactFormatError::InvalidLength(e) => write!(f, "Invalid compact format field: {e}"),
             CompactFormatError::InvalidValue => {
                 write!(f, "Compact format field is not a valid protocol element")
+            }
+            CompactFormatError::OutOfRange => {
+                write!(
+                    f,
+                    "Compact format field value is out of range for its target type"
+                )
             }
         }
     }
@@ -140,8 +152,9 @@ impl compact_formats::CompactSaplingOutput {
     ///
     /// A convenience method that parses [`field@Self::cmu`].
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, CompactFormatError> {
-        let mut repr = [0; 32];
-        repr.copy_from_slice(&self.cmu[..]);
+        let repr: [u8; 32] = self.cmu[..]
+            .try_into()
+            .map_err(CompactFormatError::InvalidLength)?;
         Option::from(ExtractedNoteCommitment::from_bytes(&repr))
             .ok_or(CompactFormatError::InvalidValue)
     }

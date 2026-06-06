@@ -20,7 +20,7 @@ use zip32::Scope;
 
 use crate::{
     data_api::{BlockMetadata, NullifierQuery, ScannedBlock, WalletRead},
-    proto::compact_formats::CompactBlock,
+    proto::{CompactFormatError, compact_formats::CompactBlock},
     scan::DecryptedOutput,
     wallet::WalletOutput,
 };
@@ -475,6 +475,24 @@ pub enum ScanError {
         index: usize,
     },
 
+    /// A block-level compact-format field (block hash, parent hash, or height) could not be
+    /// decoded from its protobuf representation.
+    BlockEncodingInvalid {
+        /// The block's height, if it was decodable. `None` indicates that decoding the height
+        /// itself was the failure.
+        at_height: Option<BlockHeight>,
+        error: CompactFormatError,
+    },
+
+    /// A transaction-level compact-format field (transaction id, block-relative index, or
+    /// nullifier) could not be decoded from its protobuf representation.
+    TxEncodingInvalid {
+        at_height: BlockHeight,
+        /// The 0-based position of the transaction within `block.vtx`.
+        block_index: usize,
+        error: CompactFormatError,
+    },
+
     /// The hash of the parent block given by a proposed new chain tip does not match the hash of
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
@@ -518,6 +536,8 @@ impl ScanError {
         use ScanError::*;
         match self {
             EncodingInvalid { .. } => false,
+            BlockEncodingInvalid { .. } => false,
+            TxEncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
@@ -526,16 +546,21 @@ impl ScanError {
         }
     }
 
-    /// Returns the block height at which the scan error occurred
-    pub fn at_height(&self) -> BlockHeight {
+    /// Returns the block height at which the scan error occurred, if known.
+    ///
+    /// Returns `None` only for [`ScanError::BlockEncodingInvalid`] when the height field of the
+    /// block itself failed to decode.
+    pub fn at_height(&self) -> Option<BlockHeight> {
         use ScanError::*;
         match self {
-            EncodingInvalid { at_height, .. } => *at_height,
-            PrevHashMismatch { at_height } => *at_height,
-            BlockHeightDiscontinuity { new_height, .. } => *new_height,
-            TreeSizeMismatch { at_height, .. } => *at_height,
-            TreeSizeUnknown { at_height, .. } => *at_height,
-            TreeSizeInvalid { at_height, .. } => *at_height,
+            EncodingInvalid { at_height, .. } => Some(*at_height),
+            BlockEncodingInvalid { at_height, .. } => *at_height,
+            TxEncodingInvalid { at_height, .. } => Some(*at_height),
+            PrevHashMismatch { at_height } => Some(*at_height),
+            BlockHeightDiscontinuity { new_height, .. } => Some(*new_height),
+            TreeSizeMismatch { at_height, .. } => Some(*at_height),
+            TreeSizeUnknown { at_height, .. } => Some(*at_height),
+            TreeSizeInvalid { at_height, .. } => Some(*at_height),
         }
     }
 }
@@ -552,6 +577,24 @@ impl fmt::Display for ScanError {
             } => write!(
                 f,
                 "{pool_type:?} output {index} of transaction {txid} was improperly encoded."
+            ),
+            BlockEncodingInvalid { at_height, error } => match at_height {
+                Some(h) => write!(
+                    f,
+                    "Block-level field of compact block at height {h} was improperly encoded: {error}"
+                ),
+                None => write!(
+                    f,
+                    "Block-level field of compact block (height not decodable) was improperly encoded: {error}"
+                ),
+            },
+            TxEncodingInvalid {
+                at_height,
+                block_index,
+                error,
+            } => write!(
+                f,
+                "Transaction at block-index {block_index} in compact block at height {at_height} was improperly encoded: {error}"
             ),
             PrevHashMismatch { at_height } => write!(
                 f,

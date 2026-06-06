@@ -78,12 +78,12 @@ impl TestCache for BlockCache {
             .0
             .execute(
                 "INSERT INTO compactblocks (height, data) VALUES (?, ?)",
-                params![u32::from(cb.height()), cb_bytes,],
+                params![u32::from(cb.height().unwrap()), cb_bytes,],
             )
             .unwrap();
 
         BlockCacheInsertionResult {
-            txids: cb.vtx.iter().map(|tx| tx.txid()).collect(),
+            txids: cb.vtx.iter().map(|tx| tx.txid().unwrap()).collect(),
             note_commitments,
         }
     }
@@ -146,10 +146,10 @@ impl TestCache for FsBlockCache {
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         use std::io::Write;
 
-        let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
+        let txids = cb.vtx.iter().map(|tx| tx.txid().unwrap()).collect();
         let block_meta = BlockMeta {
-            height: cb.height(),
-            block_hash: cb.hash(),
+            height: cb.height().unwrap(),
+            block_hash: cb.hash().unwrap(),
             block_time: cb.time,
             sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
             orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),

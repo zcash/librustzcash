@@ -17,7 +17,10 @@ use zcash_protocol::{
 use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
 use crate::{
     data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
-    proto::compact_formats::{ChainMetadata, CompactBlock, CompactTx},
+    proto::{
+        CompactFormatError,
+        compact_formats::{ChainMetadata, CompactBlock, CompactTx},
+    },
     scan::{Batch, BatchRunner, CompactDecryptor, Tasks},
     wallet::{WalletSpend, WalletTx},
 };
@@ -121,12 +124,25 @@ where
         P: consensus::Parameters + Send + 'static,
         IvkTag: Copy + Send + 'static,
     {
-        let block_hash = block.hash();
-        let block_height = block.height();
+        let block_height =
+            block
+                .height()
+                .map_err(|error| ScanError::BlockEncodingInvalid {
+                    at_height: None,
+                    error,
+                })?;
+        let block_hash = block.hash().map_err(|error| ScanError::BlockEncodingInvalid {
+            at_height: Some(block_height),
+            error,
+        })?;
         let zip212_enforcement = zip212_enforcement(params, block_height);
 
-        for tx in block.vtx.into_iter() {
-            let txid = tx.txid();
+        for (block_index, tx) in block.vtx.into_iter().enumerate() {
+            let txid = tx.txid().map_err(|error| ScanError::TxEncodingInvalid {
+                at_height: block_height,
+                block_index,
+                error,
+            })?;
 
             self.sapling.add_outputs(
                 block_hash,
@@ -188,45 +204,65 @@ where
     TS: SaplingTasks<IvkTag> + Sync,
     TO: OrchardTasks<IvkTag> + Sync,
 {
+    // Decode block-level fields up front so that any malformed field surfaces as a
+    // `BlockEncodingInvalid` error rather than panicking deeper in the scanner.
+    let cur_height = block
+        .height()
+        .map_err(|error| ScanError::BlockEncodingInvalid {
+            at_height: None,
+            error,
+        })?;
+    let cur_hash = block.hash().map_err(|error| ScanError::BlockEncodingInvalid {
+        at_height: Some(cur_height),
+        error,
+    })?;
+
     fn check_hash_continuity(
         block: &CompactBlock,
+        cur_height: BlockHeight,
         prior_block_metadata: Option<&BlockMetadata>,
-    ) -> Option<ScanError> {
+    ) -> Result<Option<ScanError>, ScanError> {
         if let Some(prev) = prior_block_metadata {
-            if block.height() != prev.block_height() + 1 {
+            if cur_height != prev.block_height() + 1 {
                 debug!(
                     "Block height discontinuity at {:?}, previous was {:?} ",
-                    block.height(),
+                    cur_height,
                     prev.block_height()
                 );
-                return Some(ScanError::BlockHeightDiscontinuity {
+                return Ok(Some(ScanError::BlockHeightDiscontinuity {
                     prev_height: prev.block_height(),
-                    new_height: block.height(),
-                });
+                    new_height: cur_height,
+                }));
             }
 
-            if block.prev_hash() != prev.block_hash() {
-                debug!("Block hash discontinuity at {:?}", block.height());
-                return Some(ScanError::PrevHashMismatch {
-                    at_height: block.height(),
-                });
+            let prev_hash =
+                block
+                    .prev_hash()
+                    .map_err(|error| ScanError::BlockEncodingInvalid {
+                        at_height: Some(cur_height),
+                        error,
+                    })?;
+            if prev_hash != prev.block_hash() {
+                debug!("Block hash discontinuity at {:?}", cur_height);
+                return Ok(Some(ScanError::PrevHashMismatch {
+                    at_height: cur_height,
+                }));
             }
         }
 
-        None
+        Ok(None)
     }
 
-    if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
+    if let Some(scan_error) = check_hash_continuity(&block, cur_height, prior_block_metadata)? {
         return Err(scan_error);
     }
 
-    trace!("Block continuity okay at {:?}", block.height());
+    trace!("Block continuity okay at {:?}", cur_height);
 
-    let cur_height = block.height();
-    let cur_hash = block.hash();
     let zip212_enforcement = zip212_enforcement(params, cur_height);
 
-    let mut pos_tracker = PositionTracker::for_compact_block(params, &block, prior_block_metadata)?;
+    let mut pos_tracker =
+        PositionTracker::for_compact_block(params, &block, cur_height, prior_block_metadata)?;
 
     let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
 
@@ -238,19 +274,34 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
-    for tx in block.vtx.into_iter() {
-        let txid = tx.txid();
+    for (block_index, tx) in block.vtx.into_iter().enumerate() {
+        let txid = tx.txid().map_err(|error| ScanError::TxEncodingInvalid {
+            at_height: cur_height,
+            block_index,
+            error,
+        })?;
         let tx_index =
-            TxIndex::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
+            TxIndex::try_from(tx.index).map_err(|_| ScanError::TxEncodingInvalid {
+                at_height: cur_height,
+                block_index,
+                error: CompactFormatError::OutOfRange,
+            })?;
 
+        let sapling_spend_nfs: Vec<sapling::Nullifier> = tx
+            .spends
+            .iter()
+            .map(|spend| {
+                spend.nf().map_err(|error| ScanError::TxEncodingInvalid {
+                    at_height: cur_height,
+                    block_index,
+                    error,
+                })
+            })
+            .collect::<Result<_, _>>()?;
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
-            &tx.spends,
+            &sapling_spend_nfs,
             &nullifiers.sapling,
-            |spend| {
-                spend.nf().expect(
-                    "Could not deserialize nullifier for spend from protobuf representation.",
-                )
-            },
+            |&nf| nf,
             WalletSpend::from_parts,
         );
 
@@ -258,14 +309,23 @@ where
 
         #[cfg(feature = "orchard")]
         let orchard_spends = {
+            let orchard_spend_nfs: Vec<orchard::note::Nullifier> = tx
+                .actions
+                .iter()
+                .map(|action| {
+                    action
+                        .nf()
+                        .map_err(|error| ScanError::TxEncodingInvalid {
+                            at_height: cur_height,
+                            block_index,
+                            error,
+                        })
+                })
+                .collect::<Result<_, _>>()?;
             let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
-                &tx.actions,
+                &orchard_spend_nfs,
                 &nullifiers.orchard,
-                |spend| {
-                    spend.nf().expect(
-                        "Could not deserialize nullifier for spend from protobuf representation.",
-                    )
-                },
+                |&nf| nf,
                 WalletSpend::from_parts,
             );
             orchard_nullifier_map.push((tx_index, txid, orchard_unlinked_nullifiers));
@@ -400,6 +460,7 @@ impl PositionTracker {
     fn for_compact_block<P>(
         params: &P,
         block: &CompactBlock,
+        at_height: BlockHeight,
         prior_block_metadata: Option<&BlockMetadata>,
     ) -> Result<Self, ScanError>
     where
@@ -411,6 +472,7 @@ impl PositionTracker {
         fn tree_sizes_around<P>(
             params: &P,
             block: &CompactBlock,
+            at_height: BlockHeight,
             prior_block_metadata: Option<&BlockMetadata>,
             protocol: ShieldedProtocol,
             activation_nu: NetworkUpgrade,
@@ -421,7 +483,6 @@ impl PositionTracker {
         where
             P: consensus::Parameters,
         {
-            let at_height = block.height();
 
             let start_tree_size = prior_block_metadata.and_then(prior_tree_size).map_or_else(
                 || {
@@ -485,6 +546,7 @@ impl PositionTracker {
         let (sapling_prior_tree_size, sapling_final_tree_size) = tree_sizes_around(
             params,
             block,
+            at_height,
             prior_block_metadata,
             ShieldedProtocol::Sapling,
             NetworkUpgrade::Sapling,
@@ -497,6 +559,7 @@ impl PositionTracker {
         let (orchard_prior_tree_size, orchard_final_tree_size) = tree_sizes_around(
             params,
             block,
+            at_height,
             prior_block_metadata,
             ShieldedProtocol::Orchard,
             NetworkUpgrade::Nu5,
@@ -810,6 +873,308 @@ mod tests {
                     marking: Marking::None
                 }
             ]
+        );
+    }
+
+    // Regression tests for GHSA-cx5g-7x2r-g5vc. Each test constructs a `CompactBlock` whose
+    // protobuf representation satisfies `compact_formats.proto` but encodes a field that
+    // previously triggered an unrecoverable panic inside `scan_block`. The expected behavior is
+    // that `scan_block` now returns the appropriate `ScanError::{Block,Tx,}EncodingInvalid` (or
+    // `EncodingInvalid` for output-level defects) variant.
+
+    use crate::{
+        proto::compact_formats::{
+            ChainMetadata as ProtoChainMetadata, CompactBlock as ProtoCompactBlock,
+            CompactSaplingOutput as ProtoCompactSaplingOutput,
+            CompactSaplingSpend as ProtoCompactSaplingSpend, CompactTx as ProtoCompactTx,
+        },
+        scanning::ScanError,
+    };
+
+    #[cfg(feature = "orchard")]
+    use crate::proto::compact_formats::CompactOrchardAction as ProtoCompactOrchardAction;
+
+    fn poc_well_formed_block() -> ProtoCompactBlock {
+        ProtoCompactBlock {
+            proto_version: 1,
+            height: 1,
+            hash: vec![1u8; 32],
+            prev_hash: vec![0u8; 32],
+            chain_metadata: Some(ProtoChainMetadata {
+                sapling_commitment_tree_size: 0,
+                orchard_commitment_tree_size: 0,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn poc_no_panic_on_tx_index_overflowing_u16() {
+        // Finding 01(a): tx.index is uint64 in protobuf but TxIndex is u16. A hostile
+        // lightwalletd that sends index >= 65536 used to panic the wallet at compact.rs:244.
+        let mut block = poc_well_formed_block();
+        block.vtx.push(ProtoCompactTx {
+            index: 65_536,
+            txid: vec![2u8; 32],
+            ..Default::default()
+        });
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            None,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::TxEncodingInvalid {
+                    block_index: 0,
+                    ..
+                })
+            ),
+            "expected TxEncodingInvalid at block_index 0",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_sapling_nf_wrong_length() {
+        // Finding 01(b): CompactSaplingSpend.nf is `bytes` in protobuf with no length
+        // constraint, but compact.rs:250 unwrapped the conversion to a 32-byte sapling::Nullifier
+        // and panicked on any other length.
+        let mut block = poc_well_formed_block();
+        let mut tx = ProtoCompactTx {
+            index: 0,
+            txid: vec![2u8; 32],
+            ..Default::default()
+        };
+        tx.spends.push(ProtoCompactSaplingSpend {
+            nf: vec![0u8; 31],
+        });
+        block.vtx.push(tx);
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            None,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::TxEncodingInvalid {
+                    block_index: 0,
+                    ..
+                })
+            ),
+            "expected TxEncodingInvalid at block_index 0",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_compact_block_hash_wrong_length() {
+        // Finding 01(g): CompactBlock.hash is bytes in protobuf with no length constraint.
+        // CompactBlock::hash() at proto.rs:65-70 called BlockHash::from_slice which panicked
+        // on a non-32-byte input.
+        let mut block = poc_well_formed_block();
+        block.hash = vec![0u8; 16];
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            None,
+        );
+        assert!(
+            matches!(result, Err(ScanError::BlockEncodingInvalid { .. })),
+            "expected BlockEncodingInvalid",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_compact_block_prev_hash_wrong_length() {
+        // Finding 01(h): CompactBlock.prev_hash is bytes in protobuf with no length constraint.
+        // CompactBlock::prev_hash() at proto.rs:79-84 called BlockHash::from_slice which panicked
+        // on a non-32-byte input. Reachable from check_hash_continuity when prior_block_metadata
+        // is Some.
+        let mut block = poc_well_formed_block();
+        block.height = 2;
+        block.prev_hash = vec![0u8; 16];
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let prior = BlockMetadata::from_parts(
+            BlockHeight::from(1),
+            BlockHash([0u8; 32]),
+            Some(0),
+            #[cfg(feature = "orchard")]
+            Some(0),
+        );
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            Some(&prior),
+        );
+        assert!(
+            matches!(result, Err(ScanError::BlockEncodingInvalid { .. })),
+            "expected BlockEncodingInvalid",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_compact_block_height_overflowing_u32() {
+        // Finding 01(d): CompactBlock.height is uint64 in protobuf. proto.rs:94 unwrapped the
+        // conversion to BlockHeight (a u32). A hostile lightwalletd could crash any wallet that
+        // called scan_block by setting height >= 2^32.
+        let mut block = poc_well_formed_block();
+        block.height = u64::from(u32::MAX) + 1;
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            None,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::BlockEncodingInvalid {
+                    at_height: None,
+                    ..
+                })
+            ),
+            "expected BlockEncodingInvalid with at_height=None",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_compact_tx_txid_wrong_length() {
+        // Finding 01(e): CompactTx.txid is bytes in protobuf with no length constraint.
+        // CompactTx::txid() at proto.rs:111-115 called copy_from_slice into a [0u8; 32] buffer,
+        // which panicked on any non-32 length input.
+        let mut block = poc_well_formed_block();
+        block.vtx.push(ProtoCompactTx {
+            index: 0,
+            txid: vec![0u8; 16],
+            ..Default::default()
+        });
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            None,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::TxEncodingInvalid {
+                    block_index: 0,
+                    ..
+                })
+            ),
+            "expected TxEncodingInvalid at block_index 0",
+        );
+    }
+
+    #[test]
+    fn poc_no_panic_on_compact_sapling_output_cmu_wrong_length() {
+        // Finding 01(f): CompactSaplingOutput::cmu() at proto.rs:142-147 called copy_from_slice
+        // into [0u8; 32] from `self.cmu`. Even though the function returns Result, the panic
+        // happened inside copy_from_slice on a length mismatch — the Result could never carry
+        // the InvalidLength signal because we panicked first. Reachable through find_received's
+        // CompactOutputDescription::try_from which calls value.cmu()?.
+        let mut block = poc_well_formed_block();
+        if let Some(meta) = block.chain_metadata.as_mut() {
+            meta.sapling_commitment_tree_size = 1;
+        }
+        let mut tx = ProtoCompactTx {
+            index: 0,
+            txid: vec![2u8; 32],
+            ..Default::default()
+        };
+        tx.outputs.push(ProtoCompactSaplingOutput {
+            cmu: vec![0u8; 16],
+            ephemeral_key: vec![0u8; 32],
+            ciphertext: vec![0u8; 52],
+        });
+        block.vtx.push(tx);
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let prior = BlockMetadata::from_parts(
+            BlockHeight::from(0),
+            BlockHash([0u8; 32]),
+            Some(0),
+            #[cfg(feature = "orchard")]
+            Some(0),
+        );
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            Some(&prior),
+        );
+        assert!(
+            matches!(result, Err(ScanError::EncodingInvalid { .. })),
+            "expected EncodingInvalid",
+        );
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn poc_no_panic_on_orchard_nf_wrong_length() {
+        // Finding 01(c): CompactOrchardAction.nullifier is `bytes` in protobuf with no length
+        // constraint. compact.rs:265 unwrapped the conversion to a 32-byte array. A 31-byte
+        // (or any non-32-byte) value panicked the wallet.
+        let mut block = poc_well_formed_block();
+        let mut tx = ProtoCompactTx {
+            index: 0,
+            txid: vec![2u8; 32],
+            ..Default::default()
+        };
+        tx.actions.push(ProtoCompactOrchardAction {
+            nullifier: vec![0u8; 31],
+            cmx: vec![0u8; 32],
+            ephemeral_key: vec![0u8; 32],
+            ciphertext: vec![0u8; 52],
+        });
+        block.vtx.push(tx);
+
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
+        let prior = BlockMetadata::from_parts(
+            BlockHeight::from(0),
+            BlockHash([0u8; 32]),
+            Some(0),
+            Some(0),
+        );
+        let result = scan_block(
+            &Network::TestNetwork,
+            block,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            Some(&prior),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::TxEncodingInvalid {
+                    block_index: 0,
+                    ..
+                })
+            ),
+            "expected TxEncodingInvalid at block_index 0",
         );
     }
 }

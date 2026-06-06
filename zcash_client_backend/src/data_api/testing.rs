@@ -303,7 +303,7 @@ impl CachedBlock {
     }
 
     fn roll_forward(&self, cb: &CompactBlock) -> Self {
-        assert_eq!(self.chain_state.block_height() + 1, cb.height());
+        assert_eq!(self.chain_state.block_height() + 1, cb.height().unwrap());
 
         let sapling_final_tree = cb.vtx.iter().flat_map(|tx| tx.outputs.iter()).fold(
             self.chain_state.final_sapling_tree().clone(),
@@ -331,8 +331,8 @@ impl CachedBlock {
 
         Self {
             chain_state: ChainState::new(
-                cb.height(),
-                cb.hash(),
+                cb.height().unwrap(),
+                cb.hash().unwrap(),
                 sapling_final_tree,
                 #[cfg(feature = "orchard")]
                 orchard_final_tree,
@@ -548,7 +548,7 @@ where
         compact_block: CompactBlock,
     ) -> Cache::InsertResult {
         self.cached_blocks.insert(
-            compact_block.height(),
+            compact_block.height().unwrap(),
             prev_block.roll_forward(&compact_block),
         );
         self.cache.insert(&compact_block)
@@ -707,7 +707,7 @@ where
             initial_orchard_tree_size,
             &mut self.rng,
         );
-        assert_eq!(cb.height(), height);
+        assert_eq!(cb.height().unwrap(), height);
 
         let res = self.cache_block(&prior_cached_block, cb);
         self.latest_block_height = Some(height);
@@ -742,7 +742,7 @@ where
             prior_cached_block.orchard_end_size,
             &mut self.rng,
         );
-        assert_eq!(cb.height(), height);
+        assert_eq!(cb.height().unwrap(), height);
 
         let res = self.cache_block(&prior_cached_block, cb);
         self.latest_block_height = Some(height);
@@ -796,7 +796,7 @@ where
             prior_cached_block.orchard_end_size,
             &mut self.rng,
         );
-        assert_eq!(cb.height(), height);
+        assert_eq!(cb.height().unwrap(), height);
 
         let res = self.cache_block(&prior_cached_block, cb);
         self.latest_block_height = Some(height);

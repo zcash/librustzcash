@@ -45,7 +45,7 @@ impl BlockSource for MemBlockCache {
             .iter()
             .filter(|(_, cb)| {
                 if let Some(from_height) = from_height {
-                    cb.height() >= from_height
+                    cb.height().map(|h| h >= from_height).unwrap_or(false)
                 } else {
                     true
                 }
@@ -70,7 +70,7 @@ impl BlockCache for MemBlockCache {
             let range = range.block_range();
             for h in (u32::from(range.start)..u32::from(range.end)).rev() {
                 if let Some(cb) = inner.get(&h.into()) {
-                    return Ok(Some(cb.height()));
+                    return Ok(cb.height().ok());
                 }
             }
         } else {
@@ -96,7 +96,9 @@ impl BlockCache for MemBlockCache {
     async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
         let mut inner = self.0.write().unwrap();
         compact_blocks.into_iter().for_each(|compact_block| {
-            inner.insert(compact_block.height(), compact_block);
+            if let Ok(height) = compact_block.height() {
+                inner.insert(height, compact_block);
+            }
         });
         Ok(())
     }

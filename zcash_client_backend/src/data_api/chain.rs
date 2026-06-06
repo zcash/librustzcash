@@ -89,8 +89,9 @@
 //!                     // Pick a height to rewind to, which must be at least one block before
 //!                     // the height at which the error occurred, but may be an earlier height
 //!                     // determined based on heuristics such as the platform, available bandwidth,
-//!                     // size of recent CompactBlocks, etc.
-//!                     let rewind_height = err.at_height().saturating_sub(10);
+//!                     // size of recent CompactBlocks, etc. Continuity errors always carry a
+//!                     // height, so `err.at_height()` is `Some(_)` here.
+//!                     let rewind_height = err.at_height().expect("continuity errors carry a height").saturating_sub(10);
 //!
 //!                     // Rewind to the chosen height.
 //!                     wallet_db.truncate_to_height(rewind_height).map_err(Error::Wallet)?;
@@ -162,7 +163,7 @@ use crate::{
     data_api::WalletWrite,
     proto::compact_formats::CompactBlock,
     scanning::{
-        Nullifiers, ScanningKeys,
+        Nullifiers, ScanError, ScanningKeys,
         compact::{BatchRunners, scan_block_with_runners},
     },
 };
@@ -628,7 +629,14 @@ where
         Some(from_height),
         Some(limit),
         |block: CompactBlock| {
-            scan_summary.scanned_range.end = block.height() + 1;
+            let block_height =
+                block
+                    .height()
+                    .map_err(|error| ScanError::BlockEncodingInvalid {
+                        at_height: None,
+                        error,
+                    })?;
+            scan_summary.scanned_range.end = block_height + 1;
             let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
                 params,
                 block,
