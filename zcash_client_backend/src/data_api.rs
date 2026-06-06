@@ -155,14 +155,27 @@ pub type TransparentBalances = HashMap<TransparentAddress, (TransparentKeyOrigin
 ///
 /// This conforms to the structure of subtree data returned by
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
+// Exact division: the note commitment tree depth is even.
+#[allow(clippy::integer_division)]
 pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
+
+// Compile-time proof that the division above is exact (no truncation).
+const _: () =
+    assert!(SAPLING_SHARD_HEIGHT as usize * 2 == sapling::NOTE_COMMITMENT_TREE_DEPTH as usize);
 
 /// The height of subtree roots in the Orchard note commitment tree.
 ///
 /// This conforms to the structure of subtree data returned by
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
+// Exact division: the note commitment tree depth is even.
 #[cfg(feature = "orchard")]
+#[allow(clippy::integer_division)]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
+
+// Compile-time proof that the division above is exact (no truncation).
+#[cfg(feature = "orchard")]
+const _: () =
+    assert!(ORCHARD_SHARD_HEIGHT as usize * 2 == orchard::NOTE_COMMITMENT_TREE_DEPTH as usize);
 
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.

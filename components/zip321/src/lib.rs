@@ -552,6 +552,10 @@ mod render {
 
     /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
+    // `coins` is the whole-ZEC part (floor) and `zats` the fractional zatoshis;
+    // together they recover the amount: `coins * COIN + zats == amount`.
+    // Verified by `tests::amount_str_known_values`.
+    #[allow(clippy::integer_division)]
     pub fn amount_str(amount: Zatoshis) -> String {
         let coins = u64::from(amount) / COIN;
         let zats = u64::from(amount) % COIN;
@@ -977,6 +981,30 @@ mod tests {
         let req_uri = req.to_uri();
         let parsed = TransactionRequest::from_uri(&req_uri).unwrap();
         assert_eq!(parsed, req);
+    }
+
+    /// Pins the floor/modulo decomposition in `amount_str` to known decimal
+    /// strings, so a regression in the `/ COIN` or `% COIN` split is caught.
+    #[test]
+    fn amount_str_known_values() {
+        let cases = [
+            (0u64, "0"),
+            (100_000_000, "1"),   // exactly 1 ZEC
+            (150_000_000, "1.5"), // trailing zeros trimmed
+            (100_000_001, "1.00000001"),
+            (123_456_789, "1.23456789"),
+            (99_999_999, "0.99999999"), // whole part floors to 0
+        ];
+        for (zats, expected) in cases {
+            let amt = Zatoshis::const_from_u64(zats);
+            assert_eq!(amount_str(amt), expected, "zats={zats}");
+            // Round-trips back to the same value.
+            assert_eq!(
+                parse_amount(&amount_str(amt)).unwrap().1,
+                amt,
+                "zats={zats}"
+            );
+        }
     }
 
     #[test]

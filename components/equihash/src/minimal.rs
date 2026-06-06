@@ -6,7 +6,12 @@ use crate::params::Params;
 
 // Rough translation of CompressArray() from:
 // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L39-L76
+// `out_len = bit_len * array.len() / (8 * in_width)` is the packed output
+// length, mirroring the reference `CompressArray`. The flooring is intended;
+// the inverse relationship with `expand_array` is checked by
+// `tests::array_compression_and_expansion`.
 #[cfg(any(feature = "solver", test))]
+#[allow(clippy::integer_division)]
 fn compress_array(array: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     let index_bytes = (u32::BITS / 8) as usize;
     assert!(bit_len >= 8);
@@ -32,7 +37,7 @@ fn compress_array(array: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
             for x in byte_pad..in_width {
                 acc_value |= (
                     // Apply bit_len_mask across byte boundaries
-                    (array[j + x] & ((bit_len_mask >> (8 * (in_width - x - 1))) as u8)) as u32
+                    u32::from(array[j + x] & ((bit_len_mask >> (8 * (in_width - x - 1))) as u8))
                 )
                     .wrapping_shl(8 * (in_width - x - 1) as u32); // Big-endian
             }
@@ -47,6 +52,11 @@ fn compress_array(array: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     out
 }
 
+// `out_len = 8 * out_width * vin.len() / bit_len` is the expanded output
+// length, mirroring the reference `ExpandArray`. The flooring is intended; the
+// inverse relationship with `compress_array` is checked by
+// `tests::array_compression_and_expansion`.
+#[allow(clippy::integer_division)]
 pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     assert!(bit_len >= 8);
     assert!(u32::BITS as usize >= 7 + bit_len);
@@ -94,7 +104,9 @@ pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u
 
 // Rough translation of GetMinimalFromIndices() from:
 // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L130-L145
+// `u32::BITS / 8` is an exact constant (the byte width of a `u32` index).
 #[cfg(any(feature = "solver", test))]
+#[allow(clippy::integer_division)]
 pub(crate) fn minimal_from_indices(p: Params, indices: &[u32]) -> Vec<u8> {
     let c_bit_len = p.collision_bit_length();
     let index_bytes = (u32::BITS / 8) as usize;
@@ -124,6 +136,11 @@ fn read_u32_be(csr: &mut Cursor<Vec<u8>>) -> corez::io::Result<u32> {
 }
 
 /// Returns `None` if the parameters are invalid for this minimal encoding.
+// Both integer divisions here are exact for a well-formed `minimal`: the
+// length check uses `(2^k * (c_bit_len + 1)) / 8` (exact because `k >= 3`),
+// and `len_indices` derives from a length that is a multiple of
+// `c_bit_len + 1`. Verified by `tests::indices_from_minimal_length_is_exact`.
+#[allow(clippy::integer_division)]
 pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>> {
     let c_bit_len = p.collision_bit_length();
     // Division is exact because k >= 3.
@@ -261,5 +278,40 @@ mod tests {
             ],
             &[68, 41, 2097151, 1233, 665, 1023, 1, 1048575],
         );
+    }
+
+    /// The length check in `indices_from_minimal` divides
+    /// `(1 << k) * (collision_bit_length + 1)` by 8. That division is exact for
+    /// every valid parameter set because `Params::new` guarantees `k >= 3`,
+    /// which makes `1 << k` a multiple of 8. A full round-trip also recovers
+    /// exactly `1 << k` indices.
+    #[test]
+    fn indices_from_minimal_length_is_exact() {
+        for n in 8u32..=256 {
+            // `k` is bounded so `1 << k` stays representable; this still
+            // exercises every realistic parameter set (`k >= 3`).
+            for k in 0u32..=28 {
+                let Some(p) = Params::new(n, k) else { continue };
+                assert!(p.k >= 3, "Params::new admitted k < 3 for n={n} k={k}");
+                let numerator = (1u64 << k) * (p.collision_bit_length() as u64 + 1);
+                assert_eq!(
+                    numerator % 8,
+                    0,
+                    "length division truncates for n={n} k={k}"
+                );
+            }
+        }
+
+        let p = Params::new(80, 3).expect("(80, 3) are valid parameters");
+        let indices = vec![68, 41, 2097151, 1233, 665, 1023, 1, 1048575];
+        let minimal = minimal_from_indices(p, &indices);
+        assert_eq!(
+            minimal.len() * 8,
+            (1usize << p.k) * (p.collision_bit_length() + 1),
+            "minimal length is not an exact multiple of the packed bit width"
+        );
+        let recovered = indices_from_minimal(p, &minimal).expect("valid minimal");
+        assert_eq!(recovered.len(), 1usize << p.k);
+        assert_eq!(recovered, indices);
     }
 }

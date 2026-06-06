@@ -135,6 +135,10 @@ struct State<'a> {
 
 impl<'a> State<'a> {
     fn new(message: &'a mut [u8]) -> Self {
+        // Floor split: the left half is `floor(len / 2)` bytes (capped at
+        // OUTBYTES), the right half takes the remainder. Round-trip is covered
+        // by the `f4jumble`/`f4jumble_inv` tests.
+        #[allow(clippy::integer_division)]
         let left_length = min(OUTBYTES, message.len() / 2);
         let (left, right) = message.split_at_mut(left_length);
         State { left, right }
@@ -183,7 +187,7 @@ fn xor(target: &mut [u8], source: &[u8]) {
 }
 
 fn ceildiv(num: usize, den: usize) -> usize {
-    (num + den - 1) / den
+    num.div_ceil(den)
 }
 
 /// Encodes the given message in-place using F4Jumble.

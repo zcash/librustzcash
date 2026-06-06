@@ -363,6 +363,9 @@ impl Zatoshis {
     }
 
     /// Divides this `Zatoshis` value by the given divisor and returns the quotient and remainder.
+    // Floor division paired with the matching remainder; `quotient * divisor +
+    // remainder == self`. Verified by `tests::div_with_remainder_reconstructs`.
+    #[allow(clippy::integer_division)]
     pub fn div_with_remainder(&self, divisor: NonZeroU64) -> QuotRem<Zatoshis> {
         let divisor = u64::from(divisor);
         // `self` is already bounds-checked, and both the quotient and remainder
@@ -471,6 +474,8 @@ impl<'a> Sum<&'a Zatoshis> for Option<Zatoshis> {
 impl Div<NonZeroU64> for Zatoshis {
     type Output = Zatoshis;
 
+    // Floor division; the quotient is <= self and so stays in range.
+    #[allow(clippy::integer_division)]
     fn div(self, rhs: NonZeroU64) -> Zatoshis {
         // `self` is already bounds-checked and the quotient is <= self, so
         // we don't need to re-check it
@@ -553,9 +558,47 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    // Some tests reproduce the integer-division math they verify.
+    #![allow(clippy::integer_division)]
+
     use crate::value::MAX_BALANCE;
 
     use super::ZatBalance;
+
+    /// `div_with_remainder` and the `Div` operator must floor the quotient and
+    /// produce a remainder that exactly reconstructs the original value:
+    /// `quotient * divisor + remainder == self`.
+    #[test]
+    fn div_with_remainder_reconstructs() {
+        use super::Zatoshis;
+        use core::num::NonZeroU64;
+
+        let cases = [
+            (0u64, 1u64),
+            (1, 1),
+            (7, 3),
+            (100, 7),
+            (1, 100),
+            (123_456_789, 1000),
+            (MAX_BALANCE as u64, 13),
+        ];
+        for (value, divisor) in cases {
+            let v = Zatoshis::const_from_u64(value);
+            let d = NonZeroU64::new(divisor).expect("non-zero divisor");
+
+            let qr = v.div_with_remainder(d);
+            let q = u64::from(*qr.quotient());
+            let r = u64::from(*qr.remainder());
+
+            // Exact reconstruction, proper remainder, floored quotient.
+            assert_eq!(q * divisor + r, value, "value={value} divisor={divisor}");
+            assert!(r < divisor, "value={value} divisor={divisor}");
+            assert_eq!(q, value / divisor, "value={value} divisor={divisor}");
+
+            // The `Div` operator agrees with the quotient.
+            assert_eq!(u64::from(v / d), q, "value={value} divisor={divisor}");
+        }
+    }
 
     #[test]
     fn amount_in_range() {

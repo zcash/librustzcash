@@ -77,7 +77,7 @@ impl TryFrom<u64> for BlockHeight {
 
 impl From<BlockHeight> for u64 {
     fn from(value: BlockHeight) -> u64 {
-        value.0 as u64
+        u64::from(value.0)
     }
 }
 
@@ -99,7 +99,7 @@ impl TryFrom<i64> for BlockHeight {
 
 impl From<BlockHeight> for i64 {
     fn from(value: BlockHeight) -> i64 {
-        value.0 as i64
+        i64::from(value.0)
     }
 }
 

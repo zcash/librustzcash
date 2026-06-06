@@ -32,7 +32,7 @@ mod serialization {
                         "Attempting to deserialize orchard supporting wallet using library built without orchard feature"
                     ),
                 },
-                output_index: note_id.output_index() as u32,
+                output_index: u32::from(note_id.output_index()),
             }
         }
     }

@@ -887,7 +887,10 @@ pub(crate) fn unspent_notes_meta(
                     )?
                     .collect::<Result<Vec<_>, _>>()?;
 
-                // Pick a bucket index by scaling the requested percentile to the number of buckets
+                // Pick a bucket index by scaling the requested percentile to the number of buckets.
+                // Floor division is intended; the result is read via `.get()`, so an
+                // out-of-range index cannot panic (it yields `None`).
+                #[allow(clippy::integer_division)]
                 let i = (bucket_maxima.len() * usize::from(*n) / 100).saturating_sub(1);
                 Ok(bucket_maxima.get(i).copied())
             }

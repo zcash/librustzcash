@@ -19,6 +19,11 @@ struct Node {
 }
 
 impl Node {
+    // Integer divisions select the hash block and 8-aligned byte offsets for
+    // index `i`: `i / ipho` is an intended floor (block index), and the byte
+    // offsets are exact because `n` is a multiple of 8. The offsets are proven
+    // in-bounds by `params::tests::node_byte_offsets_stay_in_bounds`.
+    #[allow(clippy::integer_division)]
     fn new(p: &Params, state: &Blake2bState, i: u32) -> Self {
         let hash = generate_hash(state, i / p.indices_per_hash_output());
         let start = ((i % p.indices_per_hash_output()) * p.n / 8) as usize;
@@ -205,6 +210,10 @@ fn is_valid_solution_iterative(
     }
 }
 
+// `end / 2` is an intended floor split of the index range into two halves;
+// for `end >= 2` it satisfies `0 < mid < end`, so both recursive sub-slices
+// are non-empty and together cover the whole range.
+#[allow(clippy::integer_division)]
 fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<Node, Error> {
     if indices.len() > 1 {
         let end = indices.len();
@@ -256,6 +265,9 @@ pub fn is_valid_solution(
 
 #[cfg(test)]
 mod tests {
+    // `mutated[i / 8]` indexes a byte from a bit position; the floor is intended.
+    #![allow(clippy::integer_division)]
+
     use super::{is_valid_solution, is_valid_solution_iterative, is_valid_solution_recursive};
     use crate::test_vectors::{INVALID_TEST_VECTORS, VALID_TEST_VECTORS};
 
