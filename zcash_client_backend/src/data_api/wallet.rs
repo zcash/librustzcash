@@ -36,6 +36,8 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 
 use nonempty::NonEmpty;
 use rand_core::OsRng;
+#[cfg(feature = "orchard")]
+use std::collections::BTreeSet;
 use std::{
     num::NonZeroU32,
     ops::{Add, Sub},
@@ -52,6 +54,7 @@ use crate::{
         WalletRead, WalletWrite, error::Error, wallet::input_selection::propose_send_max,
     },
     decrypt_transaction,
+    proto::compact_formats,
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
@@ -82,6 +85,11 @@ use zcash_protocol::{
 };
 use zip32::Scope;
 use zip321::Payment;
+#[cfg(feature = "orchard")]
+use {
+    orchard::note_encryption::{CompactAction as OrchardCompactAction, OrchardDomain},
+    zcash_note_encryption::try_compact_note_decryption,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -103,7 +111,6 @@ use zcash_script::script::{self as zs_script, Evaluable};
 use {
     crate::data_api::error::PcztError,
     bip32::ChildNumber,
-    orchard::note_encryption::OrchardDomain,
     pczt::roles::{
         creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
         tx_extractor::TransactionExtractor, updater::Updater,
@@ -226,6 +233,58 @@ where
     ))?;
 
     Ok(())
+}
+
+/// Trial-decrypt Orchard compact actions and return the set of wallet accounts that match.
+///
+/// This supports reduced-payload decrypt flows where callers have compact Orchard action data
+/// (`nf`, `cmx`, `ephemeral_key`, `ciphertext`) but do not have full transaction bytes.
+pub fn decrypt_orchard_compact_actions<DbT>(
+    data: &DbT,
+    actions: &[compact_formats::CompactOrchardAction],
+) -> Result<Vec<DbT::AccountId>, DbT::Error>
+where
+    DbT: WalletRead,
+    DbT::AccountId: Copy + Ord,
+{
+    #[cfg(feature = "orchard")]
+    {
+        let ufvks = data.get_unified_full_viewing_keys()?;
+        let compact_actions: Vec<OrchardCompactAction> = actions
+            .iter()
+            .filter_map(|action| OrchardCompactAction::try_from(action).ok())
+            .collect();
+
+        let mut matched_accounts = BTreeSet::new();
+        for (account, ufvk) in &ufvks {
+            let Some(fvk) = ufvk.orchard() else {
+                continue;
+            };
+
+            let ivk_external =
+                orchard::keys::PreparedIncomingViewingKey::new(&fvk.to_ivk(Scope::External));
+            let ivk_internal =
+                orchard::keys::PreparedIncomingViewingKey::new(&fvk.to_ivk(Scope::Internal));
+
+            for action in &compact_actions {
+                let domain = OrchardDomain::for_compact_action(action);
+                let hit = try_compact_note_decryption(&domain, &ivk_external, action).is_some()
+                    || try_compact_note_decryption(&domain, &ivk_internal, action).is_some();
+                if hit {
+                    matched_accounts.insert(*account);
+                    break;
+                }
+            }
+        }
+
+        Ok(matched_accounts.into_iter().collect())
+    }
+
+    #[cfg(not(feature = "orchard"))]
+    {
+        let _ = (data, actions);
+        Ok(Vec::new())
+    }
 }
 
 /// Errors that may be generated in construction of proposals for shielded->shielded or
