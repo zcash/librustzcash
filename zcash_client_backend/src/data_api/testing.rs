@@ -2051,7 +2051,7 @@ impl TestFvk for DiversifiableFullViewingKey {
             compact_sapling_output(params, height, recipient, value, sender_ovk.copied(), rng);
         ctx.outputs.push(cout);
 
-        note.nf(&self.fvk().vk.nk, position as u64)
+        note.nf(&self.fvk().vk.nk, u64::from(position))
     }
 
     #[allow(clippy::too_many_arguments)]
