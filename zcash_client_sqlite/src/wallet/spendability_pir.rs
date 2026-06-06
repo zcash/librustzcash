@@ -33,23 +33,11 @@ pub struct UnspentOrchardNote {
     pub id: i64,
     /// Orchard nullifier encoded as 32 bytes.
     pub nf: [u8; 32],
-    /// Note value in zatoshis.
-    pub value: u64,
 }
 
 // =========================================================================
 // Types — witness data
 // =========================================================================
-
-/// A canonical Orchard note that is eligible for PIR witness fetch or refresh.
-pub struct NoteNeedingWitness {
-    /// Primary key in `orchard_received_notes`.
-    pub id: i64,
-    /// Global Orchard note commitment tree position.
-    pub position: u64,
-    /// Note value in zatoshis.
-    pub value: u64,
-}
 
 /// A stored PIR witness for an Orchard note.
 pub struct PirWitnessRow {
@@ -90,7 +78,7 @@ impl PirWitnessValidation {
 // =========================================================================
 
 const UNSPENT_ORCHARD_NOTES_SQL: &str = "\
-    SELECT rn.id, rn.nf, rn.value FROM orchard_received_notes rn \
+    SELECT rn.id, rn.nf FROM orchard_received_notes rn \
     WHERE rn.nf IS NOT NULL \
     AND NOT EXISTS ( \
         SELECT 1 FROM orchard_received_note_spends sp \
@@ -101,11 +89,20 @@ const UNSPENT_ORCHARD_NOTES_SQL: &str = "\
 // SQL — witness data
 // =========================================================================
 
-const NOTES_NEEDING_WITNESS_SQL: &str = "\
-    SELECT rn.id, rn.commitment_tree_position, rn.value \
+const NOTE_NEEDS_WITNESS_SQL: &str = "\
+    SELECT rn.commitment_tree_position \
     FROM orchard_received_notes rn \
-    WHERE rn.commitment_tree_position IS NOT NULL \
-    AND rn.nf IS NOT NULL \
+    WHERE rn.id = ?1 \
+    AND rn.commitment_tree_position IS NOT NULL \
+    AND rn.recipient_key_scope IS NOT NULL \
+    AND NOT EXISTS ( \
+        SELECT 1 FROM orchard_received_note_spends sp \
+        WHERE sp.orchard_received_note_id = rn.id \
+    )";
+const POSITION_NEEDS_WITNESS_SQL: &str = "\
+    SELECT rn.id \
+    FROM orchard_received_notes rn \
+    WHERE rn.commitment_tree_position = ?1 \
     AND rn.recipient_key_scope IS NOT NULL \
     AND NOT EXISTS ( \
         SELECT 1 FROM orchard_received_note_spends sp \
@@ -128,13 +125,12 @@ pub fn get_unspent_orchard_notes_for_pir(
         .query_map([], |row| {
             let id: i64 = row.get(0)?;
             let nf_blob: Vec<u8> = row.get(1)?;
-            let value: i64 = row.get(2)?;
-            Ok((id, nf_blob, value as u64))
+            Ok((id, nf_blob))
         })?
         .filter_map(|r| r.ok())
-        .filter_map(|(id, nf_blob, value)| {
+        .filter_map(|(id, nf_blob)| {
             let nf: [u8; 32] = nf_blob.try_into().ok()?;
-            Some(UnspentOrchardNote { id, nf, value })
+            Some(UnspentOrchardNote { id, nf })
         })
         .collect();
 
@@ -145,30 +141,34 @@ pub fn get_unspent_orchard_notes_for_pir(
 // Functions — witness data
 // =========================================================================
 
-/// Returns canonical Orchard notes that are candidates for PIR witnessing:
-/// they have a tree position, are unspent, and have a known nullifier.
-///
-/// Existing PIR witnesses do not exclude a note from this result so callers can
-/// proactively refresh witnesses for notes that remain spendable during sync.
-pub fn get_notes_needing_pir_witness(
+/// Returns the note's commitment tree position if it currently qualifies for
+/// PIR witness fetch or refresh.
+pub fn note_needs_pir_witness(
     conn: &Connection,
-) -> Result<Vec<NoteNeedingWitness>, SqliteClientError> {
-    let mut stmt = conn.prepare(NOTES_NEEDING_WITNESS_SQL)?;
+    note_id: i64,
+) -> Result<Option<u64>, SqliteClientError> {
+    let position = conn
+        .query_row(NOTE_NEEDS_WITNESS_SQL, [note_id], |row| {
+            let position: i64 = row.get(0)?;
+            Ok(position as u64)
+        })
+        .optional()?;
+    Ok(position)
+}
 
-    let notes = stmt
-        .query_map([], |row| {
-            let id: i64 = row.get(0)?;
-            let position: i64 = row.get(1)?;
-            let value: i64 = row.get(2)?;
-            Ok(NoteNeedingWitness {
-                id,
-                position: position as u64,
-                value: value as u64,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(notes)
+/// Returns the note id at the given commitment tree position if it currently
+/// qualifies for PIR witness fetch or refresh.
+pub fn position_needs_pir_witness(
+    conn: &Connection,
+    position: u64,
+) -> Result<Option<i64>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+        POSITION_NEEDS_WITNESS_SQL,
+        [position as i64],
+        |row| row.get(0),
+    )
+    .optional()?)
 }
 
 /// Stores a PIR-obtained witness for a note. Existing rows are refreshed only
@@ -200,7 +200,7 @@ pub fn insert_pir_witness(
 }
 
 /// Retrieves a stored PIR witness for a specific note.
-pub fn get_pir_witness(
+fn get_pir_witness(
     conn: &Connection,
     note_id: i64,
 ) -> Result<Option<PirWitnessRow>, SqliteClientError> {
@@ -344,35 +344,16 @@ pub fn validate_orchard_witness<P: consensus::Parameters>(
     params: &P,
     note_id: i64,
     siblings: &[[u8; 32]; 32],
-    anchor_height: u64,
     anchor_root: &[u8; 32],
 ) -> Result<PirWitnessValidation, SqliteClientError> {
     let received_note = get_orchard_received_note(conn, params, note_id)?;
-    let txid = hex::encode(received_note.txid().as_ref());
-    let action_index = received_note.output_index();
     let position = received_note.note_commitment_tree_position();
-    let value = received_note.note().value().inner();
-    let mined_height = received_note.mined_height().map(u32::from);
 
     let merkle_path = merkle_path_from_siblings(siblings, position)?;
     let note = received_note.note();
     let ecmx: ExtractedNoteCommitment = note.commitment().into();
     let cmx = MerkleHashOrchard::from_cmx(&ecmx);
     let computed_root = merkle_path.root(cmx).to_bytes();
-    let witness_root_matches_anchor = computed_root == *anchor_root;
-
-    if !witness_root_matches_anchor {
-        tracing::warn!(
-            note_id,
-            txid = %txid,
-            action_index,
-            position = u64::from(position),
-            value,
-            mined_height,
-            anchor_height,
-            "wallet PIR witness validation root mismatch",
-        );
-    }
 
     Ok(PirWitnessValidation {
         provided_anchor_root: *anchor_root,
@@ -743,10 +724,9 @@ mod tests {
         let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].id, 1);
-        assert_eq!(notes[0].value, 50_000);
         assert_eq!(notes[0].nf, [0xAA; 32]);
         assert_eq!(notes[1].id, 2);
-        assert_eq!(notes[1].value, 75_000);
+        assert_eq!(notes[1].nf, [0xBB; 32]);
     }
 
     #[test]
@@ -796,8 +776,10 @@ mod tests {
 
         let notes = get_unspent_orchard_notes_for_pir(db.conn()).unwrap();
         assert_eq!(notes.len(), 2);
-        let total: u64 = notes.iter().map(|n| n.value).sum();
-        assert_eq!(total, 500);
+        let ids: Vec<i64> = notes.iter().map(|n| n.id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&4));
+        assert!(!ids.contains(&2));
     }
 
     #[test]
@@ -816,74 +798,43 @@ mod tests {
     }
 
     // =====================================================================
-    // Notes needing witness
+    // Note-needs-witness query
     // =====================================================================
 
     #[test]
-    fn witness_empty_table_returns_no_notes() {
+    fn note_needs_witness_true_for_eligible_note() {
         let db = PirTestDb::new();
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert!(notes.is_empty());
+        insert_test_note_with_position(db.conn(), 7, 40_000, Some(&make_nf(0xAB)), Some(777));
+
+        assert_eq!(note_needs_pir_witness(db.conn(), 7).unwrap(), Some(777));
     }
 
     #[test]
-    fn returns_unspent_canonical_notes_with_position() {
+    fn note_needs_witness_false_for_spent_or_missing_note() {
         let db = PirTestDb::new();
-        insert_test_note_with_position(db.conn(), 1, 50_000, Some(&make_nf(0xAA)), Some(1000));
-        insert_test_note_with_position(db.conn(), 2, 75_000, Some(&make_nf(0xBB)), Some(2000));
+        insert_test_note_with_position(db.conn(), 8, 41_000, Some(&make_nf(0xCD)), Some(888));
+        mark_spent(db.conn(), 8);
 
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert_eq!(notes.len(), 2);
-        assert_eq!(notes[0].id, 1);
-        assert_eq!(notes[0].position, 1000);
-        assert_eq!(notes[0].value, 50_000);
+        assert_eq!(note_needs_pir_witness(db.conn(), 8).unwrap(), None);
+        assert_eq!(note_needs_pir_witness(db.conn(), 999).unwrap(), None);
     }
 
     #[test]
-    fn witness_excludes_notes_without_position() {
+    fn position_needs_witness_returns_note_id_for_eligible_position() {
         let db = PirTestDb::new();
-        insert_test_note_with_position(db.conn(), 1, 50_000, Some(&make_nf(0xAA)), Some(1000));
-        insert_test_note(db.conn(), 2, 75_000, Some(&make_nf(0xBB)));
+        insert_test_note_with_position(db.conn(), 9, 42_000, Some(&make_nf(0xEF)), Some(999));
 
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].id, 1);
+        assert_eq!(position_needs_pir_witness(db.conn(), 999).unwrap(), Some(9));
     }
 
     #[test]
-    fn witness_excludes_notes_without_nullifier() {
+    fn position_needs_witness_returns_none_for_spent_or_missing_position() {
         let db = PirTestDb::new();
-        insert_test_note_with_position(db.conn(), 1, 50_000, Some(&make_nf(0xAA)), Some(1000));
-        insert_test_note_with_position(db.conn(), 2, 75_000, None, Some(2000));
+        insert_test_note_with_position(db.conn(), 10, 43_000, Some(&make_nf(0xF1)), Some(1001));
+        mark_spent(db.conn(), 10);
 
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].id, 1);
-    }
-
-    #[test]
-    fn witness_excludes_spent_notes() {
-        let db = PirTestDb::new();
-        insert_test_note_with_position(db.conn(), 1, 50_000, Some(&make_nf(0xAA)), Some(1000));
-        insert_test_note_with_position(db.conn(), 2, 75_000, Some(&make_nf(0xBB)), Some(2000));
-        mark_spent(db.conn(), 2);
-
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].id, 1);
-    }
-
-    #[test]
-    fn includes_notes_already_witnessed_for_refresh() {
-        let db = PirTestDb::new();
-        insert_test_note_with_position(db.conn(), 1, 50_000, Some(&make_nf(0xAA)), Some(1000));
-        insert_test_note_with_position(db.conn(), 2, 75_000, Some(&make_nf(0xBB)), Some(2000));
-        insert_pir_witness(db.conn(), 2, &make_siblings(0x10), 100, &make_root(0xFF)).unwrap();
-
-        let notes = get_notes_needing_pir_witness(db.conn()).unwrap();
-        assert_eq!(notes.len(), 2);
-        assert_eq!(notes[0].id, 1);
-        assert_eq!(notes[1].id, 2);
+        assert_eq!(position_needs_pir_witness(db.conn(), 1001).unwrap(), None);
+        assert_eq!(position_needs_pir_witness(db.conn(), 4040).unwrap(), None);
     }
 
     // =====================================================================
@@ -1037,7 +988,7 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn validate_orchard_witness_accepts_real_merkle_path() {
-        let (st, _account, note_id, _note_position, siblings, anchor_root, anchor_height) =
+        let (st, _account, note_id, _note_position, siblings, anchor_root, _anchor_height) =
             real_orchard_witness_fixture!();
 
         let validation = validate_orchard_witness(
@@ -1045,7 +996,6 @@ mod tests {
             st.network(),
             note_id,
             &siblings,
-            anchor_height,
             &anchor_root,
         )
         .expect("real Orchard witness should validate");
@@ -1061,7 +1011,7 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn validate_orchard_witness_rejects_tampered_real_merkle_path() {
-        let (st, _account, note_id, _note_position, mut siblings, anchor_root, anchor_height) =
+        let (st, _account, note_id, _note_position, mut siblings, anchor_root, _anchor_height) =
             real_orchard_witness_fixture!();
 
         siblings.swap(0, 1);
@@ -1070,7 +1020,6 @@ mod tests {
             st.network(),
             note_id,
             &siblings,
-            anchor_height,
             &anchor_root,
         )
         .expect("tampered Orchard witness should still produce a validation result");
@@ -1311,7 +1260,6 @@ mod tests {
             .validate_pir_orchard_witness(
                 note_id,
                 &siblings_bytes,
-                anchor_height,
                 &anchor_root_bytes,
             )
             .unwrap();
@@ -1399,7 +1347,6 @@ mod tests {
             .validate_pir_orchard_witness(
                 note_id,
                 &tampered_siblings,
-                server_anchor_height,
                 &server_anchor_root,
             )
             .unwrap();
