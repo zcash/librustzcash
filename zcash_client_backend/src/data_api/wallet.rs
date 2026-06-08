@@ -1977,6 +1977,18 @@ where
 ///
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
+/// Builds a PCZT from a proposal that the caller can later prove, sign, and extract.
+///
+/// `target_expiry_height`, when set, replaces the builder-derived expiry on the
+/// resulting `PcztParts` before the Creator role produces the [`pczt::Pczt`].
+/// This is the only stage at which `expiry_height` can be changed without
+/// invalidating the dummy spends that the IO Finalizer signs immediately
+/// afterwards: the IO Finalizer computes the shielded sighash over the PCZT
+/// global it sees, signs every dummy action with its `dummy_sk` against that
+/// sighash, and then consumes `dummy_sk` from the PCZT. A wire-format Updater
+/// that mutates `Global::expiry_height` post-finalization produces dummy
+/// `spend_auth_sig`s that no longer verify, and the failure surfaces later as
+/// [`pczt::roles::tx_extractor::Error::SighashMismatch`] at extraction time.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
@@ -1986,6 +1998,7 @@ pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
+    target_expiry_height: Option<zcash_protocol::consensus::BlockHeight>,
 ) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -2028,7 +2041,11 @@ where
     )?;
 
     // Build the transaction with the specified fee rule
-    let build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+    let mut build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+
+    if let Some(target) = target_expiry_height {
+        build_result.pczt_parts.expiry_height = target;
+    }
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
 
