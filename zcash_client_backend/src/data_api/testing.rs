@@ -1229,6 +1229,7 @@ where
             spend_from_account,
             ovk_policy,
             proposal,
+            None,
         )
     }
 
