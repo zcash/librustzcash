@@ -134,6 +134,10 @@ workspace.
   - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
     which records that a transparent outpoint was confirmed unspent as of a given
     height.
+- `zcash_client_backend::data_api::error::Error::ExpiryHeightBelowTargetHeight`
+  (behind the `pczt` feature flag), returned by `create_pczt_from_proposal`
+  when the caller-supplied `target_expiry_height` is a nonzero height below
+  the proposal's minimum target height.
 
 ### Changed
 - `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
@@ -219,6 +223,23 @@ workspace.
   unspendable data outputs and skipped silently, instead of being logged as
   unsupported script kinds. Other unrecognized transparent script kinds continue to
   be logged.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes
+  an additional `target_expiry_height: Option<BlockHeight>` argument. When set,
+  it replaces the builder-derived expiry on `PcztParts` before the Creator runs,
+  so the IO Finalizer signs dummy actions against the caller-pinned sighash. A
+  post-Creator Updater that mutates `Global::expiry_height` cannot reach the
+  same result because `IoFinalizer::finalize_io` consumes each dummy's
+  `dummy_sk`, leaving the dummy `spend_auth_sig` over a stale sighash and the
+  Extractor returning `SighashMismatch`. Existing callers should pass `None`
+  to preserve the prior behaviour. A nonzero `target_expiry_height` below the
+  proposal's minimum target height is rejected with
+  `Error::ExpiryHeightBelowTargetHeight` before any transaction building
+  occurs; a `target_expiry_height` of zero, which disables expiry, is exempt.
+- The signature of
+  `zcash_client_backend::data_api::testing::TestState::create_pczt_from_proposal`
+  now takes the same `target_expiry_height: Option<BlockHeight>` argument as
+  `create_pczt_from_proposal`. This only affects users of the
+  `test-dependencies` feature.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`

@@ -1284,6 +1284,7 @@ where
         spend_from_account: <DbT as InputSource>::AccountId,
         ovk_policy: OvkPolicy,
         proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+        target_expiry_height: Option<BlockHeight>,
     ) -> Result<
         pczt::Pczt,
         super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
@@ -1302,6 +1303,7 @@ where
             spend_from_account,
             ovk_policy,
             proposal,
+            target_expiry_height,
         )
     }
 

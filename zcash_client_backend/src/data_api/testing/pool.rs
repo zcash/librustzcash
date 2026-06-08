@@ -6106,6 +6106,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
 pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
+    pin_expiry_above_target: Option<u32>,
 ) where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
@@ -6176,13 +6177,32 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         )
         .unwrap();
 
-    let _min_target_height = proposal0.min_target_height();
+    let min_target_height = proposal0.min_target_height();
     assert_eq!(proposal0.steps().len(), 1);
+
+    let target_expiry_height =
+        pin_expiry_above_target.map(|delta| BlockHeight::from(min_target_height) + delta);
+
+    if target_expiry_height.is_some() {
+        // A nonzero expiry below the proposal's minimum target height must be rejected
+        // before any transaction building occurs, so this earlier call has no effect on
+        // note selection for the successful call below.
+        assert_matches!(
+            st.create_pczt_from_proposal::<Infallible, _, Infallible>(
+                account.id(),
+                OvkPolicy::Sender,
+                &proposal0,
+                Some(min_target_height.saturating_sub(1)),
+            ),
+            Err(Error::ExpiryHeightBelowTargetHeight { .. })
+        );
+    }
 
     let create_proposed_result = st.create_pczt_from_proposal::<Infallible, _, Infallible>(
         account.id(),
         OvkPolicy::Sender,
         &proposal0,
+        target_expiry_height,
     );
     assert_matches!(&create_proposed_result, Ok(_));
     let pczt_created = create_proposed_result.unwrap();
@@ -6229,6 +6249,11 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     let extract_and_store_result = st.extract_and_store_transaction_from_pczt(pczt_authorized);
     assert_matches!(&extract_and_store_result, Ok(_));
     let txid = extract_and_store_result.unwrap();
+
+    if let Some(expiry_height) = target_expiry_height {
+        let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+        assert_eq!(tx.expiry_height(), expiry_height);
+    }
 
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
