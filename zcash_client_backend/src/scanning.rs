@@ -1,8 +1,8 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
+use core::convert::TryFrom;
+use core::fmt::{self, Debug};
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt::{self, Debug};
 use std::hash::Hash;
 
 use incrementalmerkletree::{Marking, Position, Retention};
@@ -618,7 +618,7 @@ impl fmt::Display for ScanError {
     }
 }
 
-impl std::error::Error for ScanError {}
+impl core::error::Error for ScanError {}
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKeys`].
 ///
