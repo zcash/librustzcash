@@ -304,6 +304,24 @@ impl Block {
         Ok(())
     }
 
+    /// Constructs a block from its component parts.
+    ///
+    /// This does not validate any consensus rules; in particular, `claimed_height` is not
+    /// checked against the height encoded in the coinbase transaction. It is intended for
+    /// use in constructing test blocks.
+    #[cfg(feature = "test-dependencies")]
+    pub fn from_parts(
+        header: BlockHeader,
+        vtx: NonEmpty<Transaction>,
+        claimed_height: BlockHeight,
+    ) -> Self {
+        Block {
+            header,
+            vtx,
+            claimed_height,
+        }
+    }
+
     /// Breaks this block into its component parts for further processing.
     pub fn into_parts(self) -> (BlockHeader, NonEmpty<Transaction>) {
         (self.header, self.vtx)

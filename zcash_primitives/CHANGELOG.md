@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::block::Block::from_parts` (behind the `test-dependencies`
+  feature flag).
+
+### Changed
+
+### Fixed
+
 ## [0.28.0] - 2026-06-02
 
 ### Added
