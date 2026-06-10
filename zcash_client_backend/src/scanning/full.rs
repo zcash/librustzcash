@@ -235,9 +235,11 @@ impl<IvkTag> PendingBatch<IvkTag> {
 /// engine) and consumed by [`scan_block`]; it is not intended to be inspected directly.
 pub struct BatchResult<IvkTag> {
     tx: Transaction,
-    sapling: HashMap<usize, DecryptedOutput<IvkTag, SaplingDomain, <SaplingDomain as Domain>::Memo>>,
+    sapling:
+        HashMap<usize, DecryptedOutput<IvkTag, SaplingDomain, <SaplingDomain as Domain>::Memo>>,
     #[cfg(feature = "orchard")]
-    orchard: HashMap<usize, DecryptedOutput<IvkTag, OrchardDomain, <OrchardDomain as Domain>::Memo>>,
+    orchard:
+        HashMap<usize, DecryptedOutput<IvkTag, OrchardDomain, <OrchardDomain as Domain>::Memo>>,
 }
 
 /// Decrypts a block with a set of [`ScanningKeys`].
@@ -603,7 +605,10 @@ fn tree_sizes_around(
         // size is zero; otherwise the starting size is unknown.
         None => match activation_height {
             Some(activation_height) if at_height >= activation_height => {
-                return Err(ScanError::TreeSizeUnknown { protocol, at_height });
+                return Err(ScanError::TreeSizeUnknown {
+                    protocol,
+                    at_height,
+                });
             }
             _ => 0,
         },
@@ -614,13 +619,37 @@ fn tree_sizes_around(
     // set the tree checkpoint in `find_received`. Note commitment tree sizes are
     // `u32`-bounded by the protocol, so overflow here indicates corrupt or adversarial
     // input rather than a valid chain state.
-    let overflow = || ScanError::TreeSizeOverflow { protocol, at_height };
+    let overflow = || ScanError::TreeSizeOverflow {
+        protocol,
+        at_height,
+    };
     let end_tree_size = output_counts.try_fold(start_tree_size, |acc, tx_outputs| {
         let tx_outputs = u32::try_from(tx_outputs).map_err(|_| overflow())?;
         acc.checked_add(tx_outputs).ok_or_else(overflow)
     })?;
 
     Ok((start_tree_size, end_tree_size))
+}
+
+/// Returns the number of Sapling outputs in `tx`.
+///
+/// Note commitment tree sizes are `u32`-bounded by the protocol, so a valid transaction
+/// can never contain more than `u32::MAX` outputs.
+fn sapling_output_count(tx: &Transaction) -> u32 {
+    tx.sapling_bundle().map_or(0, |b| {
+        u32::try_from(b.shielded_outputs().len()).expect("Sapling output count cannot exceed a u32")
+    })
+}
+
+/// Returns the number of Orchard actions in `tx`.
+///
+/// Note commitment tree sizes are `u32`-bounded by the protocol, so a valid transaction
+/// can never contain more than `u32::MAX` actions.
+#[cfg(feature = "orchard")]
+fn orchard_action_count(tx: &Transaction) -> u32 {
+    tx.orchard_bundle().map_or(0, |b| {
+        u32::try_from(b.actions().len()).expect("Orchard action count cannot exceed a u32")
+    })
 }
 
 impl PositionTracker {
@@ -637,8 +666,10 @@ impl PositionTracker {
             at_height,
             params.activation_height(NetworkUpgrade::Sapling),
             prior_block_metadata.and_then(|m| m.sapling_tree_size()),
-            vtx.iter()
-                .map(|b| b.tx.sapling_bundle().map_or(0, |bd| bd.shielded_outputs().len())),
+            vtx.iter().map(|b| {
+                b.tx.sapling_bundle()
+                    .map_or(0, |bd| bd.shielded_outputs().len())
+            }),
             ShieldedProtocol::Sapling,
         )?;
 
@@ -662,35 +693,50 @@ impl PositionTracker {
         })
     }
 
+    /// Returns `true` if a transaction contributing `sapling_output_count` outputs would
+    /// bring the Sapling tree position up to the block's final Sapling tree size; that is,
+    /// such a transaction contains the last Sapling output in the block.
+    fn contains_last_sapling_outputs(&self, sapling_output_count: u32) -> bool {
+        self.sapling_tree_position + sapling_output_count == self.sapling_final_tree_size
+    }
+
     fn tx_contains_last_sapling_outputs_in_block(&self, tx: &Transaction) -> bool {
-        self.sapling_tree_position
-            + tx.sapling_bundle().map_or(0, |b| {
-                u32::try_from(b.shielded_outputs().len())
-                    .expect("Sapling output count cannot exceed a u32")
-            })
-            == self.sapling_final_tree_size
+        self.contains_last_sapling_outputs(sapling_output_count(tx))
+    }
+
+    /// Returns `true` if a transaction contributing `orchard_action_count` actions would
+    /// bring the Orchard tree position up to the block's final Orchard tree size; that is,
+    /// such a transaction contains the last Orchard output in the block.
+    #[cfg(feature = "orchard")]
+    fn contains_last_orchard_actions(&self, orchard_action_count: u32) -> bool {
+        self.orchard_tree_position + orchard_action_count == self.orchard_final_tree_size
     }
 
     #[cfg(feature = "orchard")]
     fn tx_contains_last_orchard_actions_in_block(&self, tx: &Transaction) -> bool {
-        self.orchard_tree_position
-            + tx.orchard_bundle().map_or(0, |b| {
-                u32::try_from(b.actions().len()).expect("Orchard action count cannot exceed a u32")
-            })
-            == self.orchard_final_tree_size
+        self.contains_last_orchard_actions(orchard_action_count(tx))
+    }
+
+    /// Advances the tracked tree positions past a transaction with the given output
+    /// counts.
+    fn increment(
+        &mut self,
+        sapling_output_count: u32,
+        #[cfg(feature = "orchard")] orchard_action_count: u32,
+    ) {
+        self.sapling_tree_position += sapling_output_count;
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard_tree_position += orchard_action_count;
+        }
     }
 
     fn increment_over_tx(&mut self, tx: &Transaction) {
-        self.sapling_tree_position += tx.sapling_bundle().map_or(0, |b| {
-            u32::try_from(b.shielded_outputs().len())
-                .expect("Sapling output count cannot exceed a u32")
-        });
-        #[cfg(feature = "orchard")]
-        {
-            self.orchard_tree_position += tx.orchard_bundle().map_or(0, |b| {
-                u32::try_from(b.actions().len()).expect("Orchard action count cannot exceed a u32")
-            });
-        }
+        self.increment(
+            sapling_output_count(tx),
+            #[cfg(feature = "orchard")]
+            orchard_action_count(tx),
+        );
     }
 
     fn check_end_of_block_consistency(&self) -> Result<(), ScanError> {
@@ -707,128 +753,255 @@ impl PositionTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::tree_sizes_around;
+    use proptest::prelude::*;
+
+    use zcash_protocol::{consensus::BlockHeight, testing::arb_protocol};
+
+    use super::{PositionTracker, tree_sizes_around};
     use crate::scanning::ScanError;
-    use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
 
-    #[test]
-    fn uses_known_prior_size() {
-        // A known prior tree size is the starting point, and each transaction's outputs
-        // are added to reach the final size.
-        let result = tree_sizes_around(
-            BlockHeight::from(100u32),
-            Some(BlockHeight::from(1u32)),
-            Some(10),
-            [2usize, 3].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert_eq!(result.unwrap(), (10, 15));
+    // The behaviour of `tree_sizes_around` is independent of the shielded protocol (the
+    // protocol is only echoed back in errors), so these properties are checked for a
+    // `ShieldedProtocol` drawn uniformly at random via `arb_protocol`.
+    proptest! {
+        /// A known prior tree size is the starting point, and each transaction's outputs
+        /// are summed onto it to reach the final size. An empty block (no transactions, or
+        /// transactions with no outputs) leaves the size unchanged.
+        #[test]
+        fn uses_known_prior_size(
+            protocol in arb_protocol(),
+            at_height in 0u32..1_000_000,
+            prior in 0u32..100_000,
+            counts in prop::collection::vec(0usize..1_000, 0..16),
+        ) {
+            let expected_end = prior + counts.iter().map(|c| *c as u32).sum::<u32>();
+            let result = tree_sizes_around(
+                BlockHeight::from(at_height),
+                Some(BlockHeight::from(1u32)),
+                Some(prior),
+                counts.into_iter(),
+                protocol,
+            );
+            prop_assert_eq!(result.unwrap(), (prior, expected_end));
+        }
+
+        /// With no prior size and a block below the activation height, the tree starts
+        /// empty.
+        #[test]
+        fn zero_below_activation_without_prior(
+            protocol in arb_protocol(),
+            at_height in 0u32..1_000_000,
+            activation_offset in 1u32..1_000,
+            counts in prop::collection::vec(0usize..1_000, 0..16),
+        ) {
+            // `at_height` is strictly below the activation height.
+            let activation = at_height + activation_offset;
+            let expected_end: u32 = counts.iter().map(|c| *c as u32).sum();
+            let result = tree_sizes_around(
+                BlockHeight::from(at_height),
+                Some(BlockHeight::from(activation)),
+                None,
+                counts.into_iter(),
+                protocol,
+            );
+            prop_assert_eq!(result.unwrap(), (0, expected_end));
+        }
+
+        /// With no prior size and no activation height (e.g. a protocol not activated on
+        /// this network), the tree starts empty regardless of the block height.
+        #[test]
+        fn zero_when_activation_unset(
+            protocol in arb_protocol(),
+            at_height in 0u32..1_000_000,
+            counts in prop::collection::vec(0usize..1_000, 0..16),
+        ) {
+            let expected_end: u32 = counts.iter().map(|c| *c as u32).sum();
+            let result = tree_sizes_around(
+                BlockHeight::from(at_height),
+                None,
+                None,
+                counts.into_iter(),
+                protocol,
+            );
+            prop_assert_eq!(result.unwrap(), (0, expected_end));
+        }
+
+        /// A known prior size is used even when the block is below the activation height.
+        #[test]
+        fn prior_size_takes_precedence_below_activation(
+            protocol in arb_protocol(),
+            at_height in 0u32..1_000_000,
+            activation_offset in 1u32..1_000,
+            prior in 0u32..100_000,
+            counts in prop::collection::vec(0usize..1_000, 0..16),
+        ) {
+            let activation = at_height + activation_offset;
+            let expected_end = prior + counts.iter().map(|c| *c as u32).sum::<u32>();
+            let result = tree_sizes_around(
+                BlockHeight::from(at_height),
+                Some(BlockHeight::from(activation)),
+                Some(prior),
+                counts.into_iter(),
+                protocol,
+            );
+            prop_assert_eq!(result.unwrap(), (prior, expected_end));
+        }
+
+        /// At or above the activation height with no prior size, the starting size cannot
+        /// be determined, and the error reports the queried protocol and height.
+        #[test]
+        fn unknown_at_or_above_activation_without_prior(
+            protocol in arb_protocol(),
+            activation in 0u32..1_000_000,
+            delta in 0u32..1_000,
+        ) {
+            // `at_height` is at or above the activation height.
+            let at_height = activation + delta;
+            let result = tree_sizes_around(
+                BlockHeight::from(at_height),
+                Some(BlockHeight::from(activation)),
+                None,
+                std::iter::empty(),
+                protocol,
+            );
+            let matched = matches!(
+                result,
+                Err(ScanError::TreeSizeUnknown { protocol: p, at_height: h })
+                    if p == protocol && h == BlockHeight::from(at_height)
+            );
+            prop_assert!(matched);
+        }
+
+        /// Applying the block's outputs would push the tree size beyond the `u32` range,
+        /// and the error reports the queried protocol.
+        #[test]
+        fn overflow_is_reported(
+            protocol in arb_protocol(),
+            headroom in 0u32..100,
+            extra in 1u32..100,
+        ) {
+            // A single transaction whose output count exceeds the remaining headroom takes
+            // the tree size past `u32::MAX`.
+            let prior = u32::MAX - headroom;
+            let count = headroom as usize + extra as usize;
+            let result = tree_sizes_around(
+                BlockHeight::from(100u32),
+                Some(BlockHeight::from(1u32)),
+                Some(prior),
+                std::iter::once(count),
+                protocol,
+            );
+            let matched = matches!(
+                result,
+                Err(ScanError::TreeSizeOverflow { protocol: p, .. }) if p == protocol
+            );
+            prop_assert!(matched);
+        }
+
+        /// Reaching exactly `u32::MAX` is a valid (non-overflowing) final size.
+        #[test]
+        fn exact_u32_max_boundary_is_not_overflow(
+            protocol in arb_protocol(),
+            count in 0u32..1_000,
+        ) {
+            let prior = u32::MAX - count;
+            let result = tree_sizes_around(
+                BlockHeight::from(100u32),
+                Some(BlockHeight::from(1u32)),
+                Some(prior),
+                std::iter::once(count as usize),
+                protocol,
+            );
+            prop_assert_eq!(result.unwrap(), (prior, u32::MAX));
+        }
     }
 
     #[test]
-    fn zero_below_activation_without_prior() {
-        // No prior size, and the block is below the activation height: the tree starts
-        // empty.
-        let result = tree_sizes_around(
-            BlockHeight::from(5u32),
-            Some(BlockHeight::from(10u32)),
-            None,
-            [1usize, 1].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert_eq!(result.unwrap(), (0, 2));
+    fn contains_last_sapling_outputs_detects_boundary() {
+        let tracker = PositionTracker {
+            sapling_tree_position: 10,
+            sapling_final_tree_size: 15,
+            #[cfg(feature = "orchard")]
+            orchard_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            orchard_final_tree_size: 0,
+        };
+
+        // A transaction adding exactly the remaining outputs contains the block's last
+        // Sapling output; any other count does not land on the boundary.
+        assert!(tracker.contains_last_sapling_outputs(5));
+        assert!(!tracker.contains_last_sapling_outputs(0));
+        assert!(!tracker.contains_last_sapling_outputs(4));
+        assert!(!tracker.contains_last_sapling_outputs(6));
     }
 
     #[test]
-    fn zero_when_activation_unset() {
-        // No prior size and no activation height (e.g. a protocol not activated on this
-        // network): the tree starts empty.
-        let result = tree_sizes_around(
-            BlockHeight::from(100u32),
-            None,
-            None,
-            [4usize].into_iter(),
-            ShieldedProtocol::Orchard,
+    fn increment_advances_sapling_position_to_final_size() {
+        let mut tracker = PositionTracker {
+            sapling_tree_position: 0,
+            sapling_final_tree_size: 6,
+            #[cfg(feature = "orchard")]
+            orchard_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            orchard_final_tree_size: 0,
+        };
+
+        // Walk a block of three transactions with 2, 0 and 4 Sapling outputs; only the
+        // last one lands on the boundary.
+        assert!(!tracker.contains_last_sapling_outputs(2));
+        tracker.increment(
+            2,
+            #[cfg(feature = "orchard")]
+            0,
         );
-        assert_eq!(result.unwrap(), (0, 4));
+        assert!(!tracker.contains_last_sapling_outputs(0));
+        tracker.increment(
+            0,
+            #[cfg(feature = "orchard")]
+            0,
+        );
+        assert!(tracker.contains_last_sapling_outputs(4));
+        tracker.increment(
+            4,
+            #[cfg(feature = "orchard")]
+            0,
+        );
+
+        assert_eq!(tracker.sapling_tree_position, 6);
+        tracker.check_end_of_block_consistency().unwrap();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn increment_advances_orchard_position_to_final_size() {
+        let mut tracker = PositionTracker {
+            sapling_tree_position: 0,
+            sapling_final_tree_size: 0,
+            orchard_tree_position: 4,
+            orchard_final_tree_size: 9,
+        };
+
+        assert!(tracker.contains_last_orchard_actions(5));
+        assert!(!tracker.contains_last_orchard_actions(4));
+        tracker.increment(0, 5);
+
+        assert_eq!(tracker.orchard_tree_position, 9);
+        tracker.check_end_of_block_consistency().unwrap();
     }
 
     #[test]
-    fn prior_size_takes_precedence_below_activation() {
-        // A known prior size is used even when the block is below the activation height.
-        let result = tree_sizes_around(
-            BlockHeight::from(5u32),
-            Some(BlockHeight::from(10u32)),
-            Some(7),
-            [1usize].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert_eq!(result.unwrap(), (7, 8));
-    }
-
-    #[test]
-    fn unknown_at_or_above_activation_without_prior() {
-        // At the activation height with no prior size, the starting size cannot be
-        // determined.
-        let result = tree_sizes_around(
-            BlockHeight::from(10u32),
-            Some(BlockHeight::from(10u32)),
-            None,
-            [1usize].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert!(matches!(
-            result,
-            Err(ScanError::TreeSizeUnknown {
-                protocol: ShieldedProtocol::Sapling,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn overflow_is_reported() {
-        // Applying the block's outputs would push the tree size beyond the `u32` range.
-        let result = tree_sizes_around(
-            BlockHeight::from(100u32),
-            Some(BlockHeight::from(1u32)),
-            Some(u32::MAX - 1),
-            [2usize].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert!(matches!(
-            result,
-            Err(ScanError::TreeSizeOverflow {
-                protocol: ShieldedProtocol::Sapling,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn empty_block_leaves_size_unchanged() {
-        // A pool with no outputs in any transaction of the block leaves the size
-        // unchanged (start == end).
-        let result = tree_sizes_around(
-            BlockHeight::from(100u32),
-            Some(BlockHeight::from(1u32)),
-            Some(10),
-            std::iter::empty::<usize>(),
-            ShieldedProtocol::Sapling,
-        );
-        assert_eq!(result.unwrap(), (10, 10));
-    }
-
-    #[test]
-    fn exact_u32_max_boundary_is_not_overflow() {
-        // Reaching exactly `u32::MAX` is a valid (non-overflowing) final size.
-        let result = tree_sizes_around(
-            BlockHeight::from(100u32),
-            Some(BlockHeight::from(1u32)),
-            Some(u32::MAX - 5),
-            [5usize].into_iter(),
-            ShieldedProtocol::Sapling,
-        );
-        assert_eq!(result.unwrap(), (u32::MAX - 5, u32::MAX));
+    #[should_panic]
+    fn check_end_of_block_consistency_panics_when_incomplete() {
+        // Failing to increment over every transaction in the block is a programming error,
+        // surfaced as a panic.
+        let tracker = PositionTracker {
+            sapling_tree_position: 3,
+            sapling_final_tree_size: 6,
+            #[cfg(feature = "orchard")]
+            orchard_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            orchard_final_tree_size: 0,
+        };
+        let _ = tracker.check_end_of_block_consistency();
     }
 }

@@ -165,7 +165,7 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
-zcash_protocol = { workspace = true, features = ["local-consensus"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
 
 [features]
 default = ["time/default"]
