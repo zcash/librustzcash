@@ -150,7 +150,9 @@ impl<A: Authorization> Bundle<A> {
 /// A pointer to a transparent Zcash transaction output.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
+    /// The txid of the transaction containing the output being pointed to.
     pub(crate) hash: TxId,
+    /// The index of the output being pointed to within its transaction.
     pub(crate) n: u32,
 }
 
@@ -181,6 +183,8 @@ impl OutPoint {
         }
     }
 
+    /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
+    /// followed by the output index as a little-endian `u32`.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
@@ -189,6 +193,8 @@ impl OutPoint {
         Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
     }
 
+    /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
+    /// followed by the output index as a little-endian `u32`.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.hash.as_ref())?;
         writer.write_all(&self.n.to_le_bytes())
