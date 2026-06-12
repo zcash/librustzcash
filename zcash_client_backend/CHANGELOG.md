@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.23.0] - PLANNED
+## [0.24.0] - PLANNED
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
@@ -33,6 +33,16 @@ workspace.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
+- `zcash_client_backend::wallet::WalletTx::transparent_outputs`
+- `zcash_client_backend::scanning`:
+  - `full` module, providing full-block scanning.
+  - `Nullifiers::unspent` and `Nullifiers::update_with` are now public, for use
+    when driving block scanning via the `full` module.
+  - `ScanError::TreeSizeOverflow`
+  - `impl std::error::Error for ScanError`
+- `zcash_client_backend::sync`:
+  - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
+    Tokio-based batch decryption engine for full blocks and transactions.
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -68,10 +78,24 @@ workspace.
 - `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector`
   now requires implementors to provide `propose_shielding_coinbase` in
   addition to `propose_shielding`.
+- `zcash_client_backend::wallet::WalletTx::new` now takes a `transparent_outputs`
+  argument.
 
 ### Removed
-- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput` 
+- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`
   instead).
+
+## [0.23.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`,
+  `zcash_transparent 0.8.0`, `zip321 0.8.0`, `zcash_keys 0.14.0`,
+  `zcash_primitives 0.28.0`, `zcash_proofs 0.28.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
 
 ## [0.22.0] - 2026-04-27
 

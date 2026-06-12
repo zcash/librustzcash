@@ -538,7 +538,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                 ":recover_until_height": birthday.recover_until().map(u32::from),
-                ":has_spend_key": spending_key_available as i64,
+                ":has_spend_key": i64::from(spending_key_available),
             ],
             |row| row.get(0).map(AccountRef),
         )
@@ -4935,6 +4935,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
         &WalletTx::new(
             txid,
             index,
+            vec![],
             vec![],
             vec![],
             #[cfg(feature = "orchard")]

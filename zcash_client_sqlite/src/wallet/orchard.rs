@@ -491,6 +491,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn scan_full_block_detects_outputs() {
+        testing::pool::scan_full_block_detects_outputs::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn spend_max_spendable_single_step_proposed_transfer() {
         testing::pool::spend_max_spendable_single_step_proposed_transfer::<OrchardPoolTester>()
     }

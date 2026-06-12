@@ -40,6 +40,7 @@ exceptions = [
     { name = "inotify", allow = ["ISC"] },
     { name = "inotify-sys", allow = ["ISC"] },
     { name = "minreq", allow = ["ISC"] },
+    { name = "nanorand", allow = ["Zlib"] },
     { name = "notify", allow = ["CC0-1.0"] },
     { name = "option-ext", allow = ["MPL-2.0"] },
     { name = "priority-queue", allow = ["MPL-2.0"] },

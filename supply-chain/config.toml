@@ -546,6 +546,10 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.flume]]
+version = "0.11.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.fpe]]
 version = "0.6.1"
 criteria = "safe-to-deploy"
@@ -788,6 +792,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.multimap]]
 version = "0.8.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.nanorand]]
+version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.nonany]]

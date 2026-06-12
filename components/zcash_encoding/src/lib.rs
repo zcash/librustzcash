@@ -36,7 +36,7 @@ impl CompactSize {
         let flag = flag_bytes[0];
 
         let result = if flag < 253 {
-            Ok(flag as u64)
+            Ok(u64::from(flag))
         } else if flag == 253 {
             let mut bytes = [0; 2];
             reader.read_exact(&mut bytes)?;
@@ -45,7 +45,7 @@ impl CompactSize {
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
                 )),
-                n => Ok(n as u64),
+                n => Ok(u64::from(n)),
             }
         } else if flag == 254 {
             let mut bytes = [0; 4];
@@ -55,7 +55,7 @@ impl CompactSize {
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
                 )),
-                n => Ok(n as u64),
+                n => Ok(u64::from(n)),
             }
         } else {
             let mut bytes = [0; 8];

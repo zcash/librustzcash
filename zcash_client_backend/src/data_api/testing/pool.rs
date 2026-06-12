@@ -350,6 +350,183 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
 }
 
+/// Builds a real transaction via the proposal/creation path, assembles it into a full
+/// block, and verifies that [`decrypt_block`] followed by [`scan_block`] detects the
+/// wallet output (the change note) that it contains.
+///
+/// [`decrypt_block`]: crate::scanning::full::decrypt_block
+/// [`scan_block`]: crate::scanning::full::scan_block
+pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use incrementalmerkletree::Retention;
+    use nonempty::NonEmpty;
+    use zcash_primitives::block::{Block, BlockHeaderData};
+
+    use crate::{
+        data_api::BlockMetadata,
+        scanning::{
+            Nullifiers, ScanningKeys,
+            full::{decrypt_block, scan_block},
+        },
+    };
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note.
+    let (h, _, _) = st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    // Propose and create a transfer to an external recipient. The resulting transaction
+    // has two shielded outputs: the payment, and the change returned to the wallet.
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let account = st.get_account();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap();
+    assert_eq!(txids.len(), 1);
+
+    let tx = st
+        .wallet()
+        .get_transaction(*txids.first())
+        .unwrap()
+        .expect("the created transaction was stored");
+
+    // Build a `ScanningKeys` set for the wallet account. The account identifier used for
+    // scanning is independent of the wallet database's account identifier.
+    let ufvk = account.usk().to_unified_full_viewing_key();
+    let scanning_keys = ScanningKeys::from_account_ufvks([(zip32::AccountId::ZERO, ufvk)]);
+
+    // Assemble a single-transaction block containing the created transaction. The block
+    // is scanned in isolation, so we treat the note commitment trees as empty as of the
+    // immediately preceding block.
+    let network = *st.network();
+    let header = BlockHeaderData {
+        version: 4,
+        prev_block: BlockHash([0; 32]),
+        merkle_root: [0; 32],
+        final_sapling_root: [0; 32],
+        time: 0,
+        bits: 0,
+        nonce: [0; 32],
+        solution: vec![],
+    }
+    .freeze()
+    .unwrap();
+    let block = Block::from_parts(header, NonEmpty::singleton(tx), h);
+
+    let prior_block_metadata = BlockMetadata::from_parts(
+        h - 1,
+        BlockHash([0; 32]),
+        Some(0),
+        #[cfg(feature = "orchard")]
+        Some(0),
+    );
+
+    // Phase 1: decrypt the block's shielded outputs.
+    let (header, vtx) = decrypt_block(&network, block, &scanning_keys);
+
+    // Phase 2: scan the decrypted block.
+    #[cfg(feature = "transparent-inputs")]
+    let scanned = scan_block(
+        &network,
+        h,
+        &header,
+        vtx,
+        &scanning_keys,
+        &Nullifiers::empty(),
+        Some(&prior_block_metadata),
+        |_addr| Ok::<_, Infallible>(None),
+    )
+    .expect("scanning the block succeeds");
+    #[cfg(not(feature = "transparent-inputs"))]
+    let scanned = scan_block::<_, _, _, Infallible>(
+        &network,
+        h,
+        &header,
+        vtx,
+        &scanning_keys,
+        &Nullifiers::empty(),
+        Some(&prior_block_metadata),
+    )
+    .expect("scanning the block succeeds");
+
+    // The wallet should have detected exactly the change output returned to its internal
+    // address; the payment output was sent to a recipient outside the wallet.
+    assert_eq!(scanned.transactions().len(), 1);
+    let received_outputs: usize = scanned
+        .transactions()
+        .iter()
+        .map(|wtx| {
+            let n = wtx.sapling_outputs().len();
+            #[cfg(feature = "orchard")]
+            let n = n + wtx.orchard_outputs().len();
+            n
+        })
+        .sum();
+    assert_eq!(received_outputs, 1);
+
+    // The note commitment tree should have grown by exactly the two shielded outputs in
+    // the block's single transaction (the payment and the change), starting from the
+    // empty prior tree. The outputs all belong to the pool under test; the other pool (if
+    // compiled in) sees no outputs.
+    let total_commitments = scanned.sapling().commitments().len();
+    #[cfg(feature = "orchard")]
+    let total_commitments = total_commitments + scanned.orchard().commitments().len();
+    assert_eq!(total_commitments, 2);
+
+    let total_final_tree_size = scanned.sapling().final_tree_size();
+    #[cfg(feature = "orchard")]
+    let total_final_tree_size = total_final_tree_size + scanned.orchard().final_tree_size();
+    assert_eq!(total_final_tree_size, 2);
+
+    // The final note added in the block must be marked as a checkpoint at this block
+    // height; this is what lets the wallet anchor witnesses to the block. Getting the
+    // "last outputs in the block" boundary wrong is the most error-prone part of position
+    // tracking, so we assert it explicitly.
+    let last_retention = scanned.sapling().commitments().last().map(|(_, r)| *r);
+    #[cfg(feature = "orchard")]
+    let last_retention = scanned
+        .orchard()
+        .commitments()
+        .last()
+        .map(|(_, r)| *r)
+        .or(last_retention);
+    assert!(
+        matches!(last_retention, Some(Retention::Checkpoint { id, .. }) if id == h),
+        "final note commitment should be a checkpoint at height {h:?}, got {last_retention:?}",
+    );
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ConfirmationStep {
     i: u32,
@@ -6655,6 +6832,8 @@ pub fn propose_shielding_coinbase_with_limit_truncates_inputs<T: ShieldedPoolTes
 
 /// Verifies that `propose_shielding_coinbase` with `limit = Some(0)` selects no
 /// inputs, returning [`InputSelectorError::InsufficientFunds`].
+///
+/// [`InputSelectorError::InsufficientFunds`]: crate::data_api::wallet::input_selection::InputSelectorError::InsufficientFunds
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
 pub fn propose_shielding_coinbase_with_zero_limit_insufficient_funds<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,

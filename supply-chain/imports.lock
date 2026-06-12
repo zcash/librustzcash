@@ -37,8 +37,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.halo2_gadgets]]
-version = "0.4.0"
-when = "2025-12-04"
+version = "0.5.0"
+when = "2026-06-03"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -86,15 +86,15 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.13.0"
-when = "2026-04-22"
+version = "0.14.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.6.0"
-when = "2026-04-28"
+version = "0.7.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -442,22 +442,22 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.11.0"
-when = "2026-04-24"
+version = "0.12.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.22.0"
-when = "2026-04-28"
+version = "0.23.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.20.2"
-when = "2026-05-07"
+version = "0.21.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -484,29 +484,29 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.13.0"
-when = "2026-04-28"
+version = "0.14.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.27.1"
-when = "2026-05-14"
+version = "0.28.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.27.0"
-when = "2026-04-28"
+version = "0.28.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.8.0"
-when = "2026-04-24"
+version = "0.9.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -526,8 +526,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.7.0"
-when = "2026-04-24"
+version = "0.8.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -540,8 +540,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.7.0"
-when = "2026-04-24"
+version = "0.8.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -2479,7 +2479,7 @@ who = "Manish Goregaokar <manishsmail@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
 start = "2019-11-06"
-end = "2026-02-01"
+end = "2027-04-23"
 notes = "All code written or reviewed by Manish"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
@@ -2488,7 +2488,7 @@ who = "Manish Goregaokar <manishsmail@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
 start = "2019-05-15"
-end = "2026-02-01"
+end = "2027-04-23"
 notes = "All code written or reviewed by Manish"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 

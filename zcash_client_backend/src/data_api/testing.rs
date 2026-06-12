@@ -1512,6 +1512,7 @@ impl TestBuilder<(), ()> {
         nu5: Some(BlockHeight::from_u32(100_000)),
         nu6: None,
         nu6_1: None,
+        nu6_2: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
         #[cfg(zcash_unstable = "zfuture")]
@@ -2050,7 +2051,7 @@ impl TestFvk for DiversifiableFullViewingKey {
             compact_sapling_output(params, height, recipient, value, sender_ovk.copied(), rng);
         ctx.outputs.push(cout);
 
-        note.nf(&self.fvk().vk.nk, position as u64)
+        note.nf(&self.fvk().vk.nk, u64::from(position))
     }
 
     #[allow(clippy::too_many_arguments)]

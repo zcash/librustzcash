@@ -21,6 +21,7 @@ use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
+use orchard::bundle::ProofSizeEnforcement;
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -235,6 +236,7 @@ impl TxVersion {
             BranchId::Nu5 => TxVersion::V5,
             BranchId::Nu6 => TxVersion::V5,
             BranchId::Nu6_1 => TxVersion::V5,
+            BranchId::Nu6_2 => TxVersion::V5,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => TxVersion::V6,
             #[cfg(zcash_unstable = "zfuture")]
@@ -253,7 +255,7 @@ impl TxVersion {
             TxVersion::V3 => consensus_branch_id == Overwinter,
             TxVersion::V4 => match consensus_branch_id {
                 Sprout | Overwinter => false,
-                Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => true,
+                Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu6_2 => true,
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => false, // ZIP 2003
                 #[cfg(zcash_unstable = "zfuture")]
@@ -261,7 +263,7 @@ impl TxVersion {
             },
             TxVersion::V5 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy => false,
-                Nu5 | Nu6 | Nu6_1 => true,
+                Nu5 | Nu6 | Nu6_1 | Nu6_2 => true,
                 #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true,
                 #[cfg(zcash_unstable = "zfuture")]
@@ -270,13 +272,13 @@ impl TxVersion {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
-                | Nu6_1 => false,
+                | Nu6_1 | Nu6_2 => false,
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
             },
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
-                | Nu6_1 => false,
+                | Nu6_1 | Nu6_2 => false,
                 ZFuture => true,
             },
         }
@@ -946,7 +948,25 @@ impl Transaction {
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
+        let orchard_bundle = orchard_serialization::read_v5_bundle(
+            &mut reader,
+            match consensus_branch_id {
+                BranchId::Sprout
+                | BranchId::Overwinter
+                | BranchId::Sapling
+                | BranchId::Blossom
+                | BranchId::Heartwood
+                | BranchId::Canopy
+                | BranchId::Nu5
+                | BranchId::Nu6
+                | BranchId::Nu6_1 => ProofSizeEnforcement::Unenforced,
+                BranchId::Nu6_2 => ProofSizeEnforcement::Strict,
+                #[cfg(zcash_unstable = "nu7")]
+                BranchId::Nu7 => ProofSizeEnforcement::Strict,
+                #[cfg(zcash_unstable = "zfuture")]
+                BranchId::ZFuture => ProofSizeEnforcement::Strict,
+            },
+        )?;
 
         let data = TransactionData {
             version,
@@ -1335,6 +1355,7 @@ pub mod testing {
             BranchId::Nu5 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6_1 => Just(TxVersion::V5).boxed(),
+            BranchId::Nu6_2 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => Just(TxVersion::V6).boxed(),
             #[cfg(zcash_unstable = "zfuture")]

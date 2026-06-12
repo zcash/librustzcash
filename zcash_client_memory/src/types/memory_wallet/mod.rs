@@ -941,7 +941,10 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 .fold(0, |sum, (_, block)| {
                     sum + block.sapling_output_count.unwrap_or(0)
                 });
-            Ok(Some(Ratio::new(outputs_sum as u64, outputs_sum as u64)))
+            Ok(Some(Ratio::new(
+                u64::from(outputs_sum),
+                u64::from(outputs_sum),
+            )))
         } else {
             // Get the starting note commitment tree size from the wallet birthday, or failing that
             // from the blocks table.
@@ -961,9 +964,10 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                         .iter()
                         .filter(|(height, _)| height <= &birthday_height)
                         .map(|(_, block)| {
-                            (block.sapling_commitment_tree_size.unwrap_or(0)
-                                - block.sapling_output_count.unwrap_or(0))
-                                as u64
+                            u64::from(
+                                block.sapling_commitment_tree_size.unwrap_or(0)
+                                    - block.sapling_output_count.unwrap_or(0),
+                            )
                         })
                         .max()
                 });
@@ -974,7 +978,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 .iter()
                 .filter(|(height, _)| height > &birthday_height)
                 .fold(0_u64, |acc, (_, block)| {
-                    acc + block.sapling_output_count.unwrap_or(0) as u64
+                    acc + u64::from(block.sapling_output_count.unwrap_or(0))
                 });
 
             // We don't have complete information on how many outputs will exist in the shard at
@@ -1019,7 +1023,10 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 .fold(0, |sum, (_, block)| {
                     sum + block.orchard_action_count.unwrap_or(0)
                 });
-            Ok(Some(Ratio::new(outputs_sum as u64, outputs_sum as u64)))
+            Ok(Some(Ratio::new(
+                u64::from(outputs_sum),
+                u64::from(outputs_sum),
+            )))
         } else {
             // Get the starting note commitment tree size from the wallet birthday, or failing that
             // from the blocks table.
@@ -1039,9 +1046,10 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                         .iter()
                         .filter(|(height, _)| height <= &birthday_height)
                         .map(|(_, block)| {
-                            (block.orchard_commitment_tree_size.unwrap_or(0)
-                                - block.orchard_action_count.unwrap_or(0))
-                                as u64
+                            u64::from(
+                                block.orchard_commitment_tree_size.unwrap_or(0)
+                                    - block.orchard_action_count.unwrap_or(0),
+                            )
                         })
                         .max()
                 });
@@ -1052,7 +1060,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 .iter()
                 .filter(|(height, _)| height > &birthday_height)
                 .fold(0_u64, |acc, (_, block)| {
-                    acc + block.orchard_action_count.unwrap_or(0) as u64
+                    acc + u64::from(block.orchard_action_count.unwrap_or(0))
                 });
 
             // We don't have complete information on how many outputs will exist in the shard at

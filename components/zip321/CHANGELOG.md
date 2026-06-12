@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
 ## [0.7.0] - 2026-04-23
 
 ### Added

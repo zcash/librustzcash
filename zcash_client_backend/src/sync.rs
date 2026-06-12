@@ -9,38 +9,38 @@
 //! - There is no mechanism for interrupting the synchronization flow, other than ending
 //!   the process.
 
-use std::fmt;
-
-use futures_util::TryStreamExt;
-use shardtree::error::ShardTreeError;
-use subtle::ConditionallySelectable;
-use tonic::{
-    body::Body as TonicBody,
-    client::GrpcService,
-    codegen::{Body, Bytes, StdError},
-};
-use tracing::{debug, info};
-
-use zcash_primitives::merkle_tree::HashSer;
-use zcash_protocol::consensus::{BlockHeight, Parameters};
-
-use crate::{
-    data_api::{
-        WalletCommitmentTrees, WalletRead, WalletWrite,
-        chain::{
-            BlockCache, ChainState, CommitmentTreeRoot, error::Error as ChainError,
-            scan_cached_blocks,
+#[cfg(feature = "sync")]
+use {
+    crate::{
+        data_api::{
+            WalletCommitmentTrees, WalletRead, WalletWrite,
+            chain::{
+                BlockCache, ChainState, CommitmentTreeRoot, error::Error as ChainError,
+                scan_cached_blocks,
+            },
+            scanning::{ScanPriority, ScanRange},
         },
-        scanning::{ScanPriority, ScanRange},
+        proto::service::{self, BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
+        scanning::ScanError,
     },
-    proto::service::{self, BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
-    scanning::ScanError,
+    futures_util::TryStreamExt,
+    shardtree::error::ShardTreeError,
+    std::fmt,
+    subtle::ConditionallySelectable,
+    tonic::{
+        body::Body as TonicBody,
+        client::GrpcService,
+        codegen::{Body, Bytes, StdError},
+    },
+    tracing::{debug, info},
+    zcash_primitives::merkle_tree::HashSer,
+    zcash_protocol::consensus::{BlockHeight, Parameters},
 };
 
-#[cfg(feature = "orchard")]
+#[cfg(all(feature = "sync", feature = "orchard"))]
 use orchard::tree::MerkleHashOrchard;
 
-#[cfg(feature = "transparent-inputs")]
+#[cfg(all(feature = "sync", feature = "transparent-inputs"))]
 use {
     crate::wallet::WalletTransparentOutput,
     ::transparent::{
@@ -52,7 +52,11 @@ use {
     zcash_script::script,
 };
 
+#[cfg(feature = "sync-decryptor")]
+pub mod decryptor;
+
 /// Scans the chain until the wallet is up-to-date.
+#[cfg(feature = "sync")]
 pub async fn run<P, ChT, CaT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
@@ -82,6 +86,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "sync")]
 async fn running<P, ChT, CaT, DbT, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
@@ -220,6 +225,7 @@ where
     Ok(false)
 }
 
+#[cfg(feature = "sync")]
 async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
@@ -282,6 +288,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "sync")]
 async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
@@ -310,6 +317,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "sync")]
 async fn download_blocks<ChT, CaT, DbErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_cache: &CaT,
@@ -348,6 +356,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "sync")]
 async fn download_chain_state<ChT, CaErr, DbErr, TrErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     block_height: BlockHeight,
@@ -375,6 +384,7 @@ where
 /// chain tip is out of sync with blockchain history.
 ///
 /// Returns `true` if scanning these blocks materially changed the suggested scan ranges.
+#[cfg(feature = "sync")]
 async fn scan_blocks<P, CaT, DbT, TrErr>(
     params: &P,
     db_cache: &CaT,
@@ -471,7 +481,7 @@ where
 /// TXOs from `lightwalletd` instead of just UTXOs.
 ///
 /// [a comment in the Android SDK]: https://github.com/Electric-Coin-Company/zcash-android-wallet-sdk/blob/855204fc8ae4057fdac939f98df4aa38c8e662f1/sdk-lib/src/main/java/cash/z/ecc/android/sdk/block/processor/CompactBlockProcessor.kt#L979-L991
-#[cfg(feature = "transparent-inputs")]
+#[cfg(all(feature = "sync", feature = "transparent-inputs"))]
 async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
     params: &P,
     client: &mut CompactTxStreamerClient<ChT>,
@@ -544,6 +554,7 @@ where
 }
 
 /// Errors that can occur while syncing.
+#[cfg(feature = "sync")]
 #[derive(Debug)]
 pub enum Error<CaErr, DbErr, TrErr> {
     /// An error while interacting with a [`BlockCache`].
@@ -561,6 +572,7 @@ pub enum Error<CaErr, DbErr, TrErr> {
     WalletTrees(ShardTreeError<TrErr>),
 }
 
+#[cfg(feature = "sync")]
 impl<CaErr, DbErr, TrErr> fmt::Display for Error<CaErr, DbErr, TrErr>
 where
     CaErr: fmt::Display,
@@ -584,6 +596,7 @@ where
     }
 }
 
+#[cfg(feature = "sync")]
 impl<CaErr, DbErr, TrErr> std::error::Error for Error<CaErr, DbErr, TrErr>
 where
     CaErr: std::error::Error,
@@ -592,6 +605,7 @@ where
 {
 }
 
+#[cfg(feature = "sync")]
 impl<CaErr, DbErr, TrErr> From<ChainError<DbErr, CaErr>> for Error<CaErr, DbErr, TrErr> {
     fn from(e: ChainError<DbErr, CaErr>) -> Self {
         match e {
@@ -602,6 +616,7 @@ impl<CaErr, DbErr, TrErr> From<ChainError<DbErr, CaErr>> for Error<CaErr, DbErr,
     }
 }
 
+#[cfg(feature = "sync")]
 impl<CaErr, DbErr, TrErr> From<tonic::Status> for Error<CaErr, DbErr, TrErr> {
     fn from(status: tonic::Status) -> Self {
         Error::Server(status)
