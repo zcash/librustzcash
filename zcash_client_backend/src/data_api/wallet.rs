@@ -639,7 +639,8 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
 >
 where
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletRead<AccountId = <DbT as InputSource>::AccountId>
+        + InputSource<Error = <DbT as WalletRead>::Error>,
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
@@ -655,6 +656,17 @@ where
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
+    // Enumerate the account's own transparent receivers (external, change, and standalone
+    // imported addresses) so that the input selector can spend the account's transparent UTXOs
+    // as a fallback when shielded funds are insufficient. Ephemeral receivers are intentionally
+    // excluded, as they are reserved for ZIP-320 round-trips.
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_source_addrs: Vec<TransparentAddress> = wallet_db
+        .get_transparent_receivers(spend_from_account, true, true)
+        .map_err(InputSelectorError::DataSource)?
+        .into_keys()
+        .collect();
+
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
@@ -664,6 +676,8 @@ where
         spend_from_account,
         request,
         change_strategy,
+        #[cfg(feature = "transparent-inputs")]
+        &transparent_source_addrs,
         #[cfg(feature = "unstable")]
         proposed_version,
     )?;

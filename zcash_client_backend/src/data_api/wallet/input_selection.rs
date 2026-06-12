@@ -202,6 +202,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "transparent-inputs")] transparent_source_addrs: &[TransparentAddress],
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
@@ -461,6 +462,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "transparent-inputs")] transparent_source_addrs: &[TransparentAddress],
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
@@ -586,6 +588,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
+        // Transparent UTXOs belonging to the account are only brought into the selection as a
+        // fallback: we prefer a fully-shielded transaction for privacy, and only gather and spend
+        // transparent inputs once the shielded notes alone cannot cover the required amount. This
+        // also preserves the existing behavior for accounts that have sufficient shielded funds.
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent_inputs: Vec<WalletTransparentOutput<()>> = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent_loaded = false;
+
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
@@ -696,12 +707,23 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
             };
 
+            // The account's spendable transparent UTXOs (only populated as a fallback once
+            // shielded funds are exhausted; see the selection loop below). When the
+            // `transparent-inputs` feature is disabled this is always an empty slice, preserving
+            // the previous shielded-only behaviour.
+            #[cfg(feature = "transparent-inputs")]
+            let tr0_transparent_inputs: &[WalletTransparentOutput<()>] = &transparent_inputs;
+            #[cfg(not(feature = "transparent-inputs"))]
+            let tr0_transparent_inputs: &[WalletTransparentOutput<
+                <DbT as InputSource>::AccountId,
+            >] = &[];
+
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
             let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
-                &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
+                tr0_transparent_inputs,
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
@@ -738,6 +760,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         transaction_request,
                         payment_pools,
                         #[cfg(feature = "transparent-inputs")]
+                        transparent_inputs,
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        vec![],
+                        #[cfg(feature = "transparent-inputs")]
                         ephemeral_output_value.zip(tr1_balance_opt).map(
                             |(ephemeral_output_value, tr1_balance)| EphemeralStepConfig {
                                 ephemeral_output_value,
@@ -750,6 +776,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     .map_err(InputSelectorError::Proposal);
                 }
                 Err(ChangeError::DustInputs {
+                    #[cfg(feature = "transparent-inputs")]
+                    transparent,
                     mut sapling,
                     #[cfg(feature = "orchard")]
                     mut orchard,
@@ -758,6 +786,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     exclude.append(&mut sapling);
                     #[cfg(feature = "orchard")]
                     exclude.append(&mut orchard);
+                    // Drop any transparent inputs that the change strategy determined to be
+                    // uneconomic, so that the next iteration recomputes the balance without them.
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        let dust: BTreeSet<OutPoint> = transparent.into_iter().collect();
+                        transparent_inputs.retain(|i| !dust.contains(i.outpoint()));
+                    }
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
@@ -790,6 +825,23 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
             let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available {
+                // Shielded note selection can no longer make progress. Before reporting
+                // insufficient funds, bring the account's spendable transparent UTXOs into the
+                // selection (once) and retry: the next iteration will recompute the balance with
+                // those inputs included.
+                #[cfg(feature = "transparent-inputs")]
+                if !transparent_loaded {
+                    transparent_loaded = true;
+                    transparent_inputs = gather_account_transparent_inputs::<DbT, ChangeT::Error>(
+                        wallet_db,
+                        transparent_source_addrs,
+                        target_height,
+                        confirmations_policy,
+                    )?;
+                    if !transparent_inputs.is_empty() {
+                        continue;
+                    }
+                }
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
                     available: new_available,
@@ -1013,6 +1065,7 @@ where
         shielded_inputs,
         transaction_request,
         payment_pools,
+        vec![],
         #[cfg(feature = "transparent-inputs")]
         ephemeral_output_value
             .zip(tr1_fee)
@@ -1042,6 +1095,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
+    transparent_inputs: Vec<WalletTransparentOutput<()>>,
     #[cfg(feature = "transparent-inputs")] ephemeral_step_opt: Option<EphemeralStepConfig>,
 ) -> Result<Proposal<FeeRuleT, NoteRef>, ProposalError> {
     #[cfg(feature = "transparent-inputs")]
@@ -1087,7 +1141,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             &[],
             tr0,
             payment_pools,
-            vec![],
+            transparent_inputs,
             shielded_inputs,
             vec![],
             tr0_balance,
@@ -1117,7 +1171,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     Proposal::single_step(
         transaction_request,
         payment_pools,
-        vec![],
+        transparent_inputs,
         shielded_inputs,
         tr0_balance,
         fee_rule.clone(),
@@ -1347,6 +1401,49 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         )
         .map_err(InputSelectorError::Proposal)
     }
+}
+
+/// Gathers the account's spendable transparent UTXOs from each of the provided source
+/// addresses, for use as inputs to a general (non-shielding) transfer.
+///
+/// Unlike [`gather_shielding_inputs`], the source addresses here are the account's own
+/// transparent receivers (enumerated by the caller via
+/// [`WalletRead::get_transparent_receivers`]), none of which are ephemeral, so no
+/// ephemeral-linkability check is required.
+///
+/// [`WalletRead::get_transparent_receivers`]: crate::data_api::WalletRead::get_transparent_receivers
+#[cfg(feature = "transparent-inputs")]
+#[allow(clippy::type_complexity)]
+fn gather_account_transparent_inputs<DbT, ChangeErrT>(
+    wallet_db: &DbT,
+    source_addrs: &[TransparentAddress],
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<
+    Vec<WalletTransparentOutput<()>>,
+    InputSelectorError<
+        <DbT as InputSource>::Error,
+        GreedyInputSelectorError,
+        ChangeErrT,
+        DbT::NoteRef,
+    >,
+>
+where
+    DbT: InputSource,
+{
+    let mut inputs = vec![];
+    for addr in source_addrs {
+        let utxos = wallet_db
+            .get_spendable_transparent_outputs(
+                addr,
+                target_height,
+                confirmations_policy,
+                TransparentOutputFilter::All,
+            )
+            .map_err(InputSelectorError::DataSource)?;
+        inputs.extend(utxos.into_iter().map(|utxo| utxo.redact_account_data()));
+    }
+    Ok(inputs)
 }
 
 /// Gathers spendable transparent UTXOs from each source address, applying the

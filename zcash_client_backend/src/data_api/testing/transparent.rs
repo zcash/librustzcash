@@ -14,6 +14,7 @@ use zcash_keys::{
 };
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
+use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
 use {
@@ -355,6 +356,116 @@ where
         ConfirmationsPolicy::MIN,
         &zero_or_one_conf_value,
     );
+}
+
+pub fn propose_t2t_with_only_transparent_funds<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let sender_account = st.test_account().cloned().unwrap();
+    let unified_addr = st
+        .wallet()
+        .get_last_generated_address_matching(
+            sender_account.id(),
+            UnifiedAddressRequest::AllAvailableKeys,
+        )
+        .unwrap()
+        .unwrap();
+    let transparent_addr = unified_addr.transparent().unwrap();
+
+    // Sync some chain data with notes that DO NOT belong to us so that target/anchor
+    // heights resolve while the account remains without any shielded notes. Without this,
+    // `propose_transfer` would fail with an unrelated error (unresolved heights) instead
+    // of exercising the transparent-UTXO selection path we want to test.
+    let some_viewing_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let a_thousand_zatoshis = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) = st.generate_next_block(
+        &some_viewing_key,
+        AddressType::DefaultExternal,
+        a_thousand_zatoshis,
+    );
+    for _ in 1..10 {
+        st.generate_next_block(
+            &some_viewing_key,
+            AddressType::DefaultExternal,
+            a_thousand_zatoshis,
+        );
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with a transparent UTXO well above the marginal fee.
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let txout = TxOut::new(utxo_value, transparent_addr.script().into());
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        txout,
+        Some(height),
+        Some(sender_account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Build a t->t payment for less than the available transparent balance.
+    let recipient_transparent_address = TransparentAddress::PublicKeyHash([7u8; 20]);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let transaction_request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::Transparent(recipient_transparent_address).to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let proposal = st
+        .propose_transfer(
+            sender_account.id(),
+            &input_selector,
+            &change_strategy,
+            transaction_request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("propose_transfer must succeed for transparent UTXOs");
+
+    // The transfer is a single step (no ZIP-320 ephemeral roundtrip is involved).
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+
+    // The funding UTXO must appear as a transparent input of the step
+    assert_eq!(
+        step.transparent_inputs().len(),
+        1,
+        "expected exactly one transparent input selected from the account's UTXOs",
+    );
+    assert_eq!(step.transparent_inputs()[0].outpoint(), utxo.outpoint());
+    assert_eq!(step.transparent_inputs()[0].txout().value(), utxo_value);
+
+    // Sanity-check the proposal balance. `TransactionBalance::total()` is `change + fee`, which
+    // by the balance equation equals the input total minus the explicit payment; so it must be
+    // `utxo_value - transfer_amount`. A non-zero fee must be charged, and the remainder of the
+    // funding UTXO must be returned to the wallet as a change output.
+    assert_eq!(
+        step.balance().total(),
+        (utxo_value - transfer_amount).unwrap(),
+    );
+    assert!(step.balance().fee_required() > Zatoshis::ZERO);
+    assert!(!step.balance().proposed_change().is_empty());
 }
 
 /// Regression test for [PRO-291]: shielding a transparent balance composed of many P2PKH

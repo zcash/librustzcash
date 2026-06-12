@@ -2404,6 +2404,14 @@ mod tests {
     }
 
     #[test]
+    fn propose_t2t_with_only_transparent_funds() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_with_only_transparent_funds(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn shielding_many_transparent_utxos() {
         zcash_client_backend::data_api::testing::transparent::shielding_many_transparent_utxos(
             TestDbFactory::default(),
