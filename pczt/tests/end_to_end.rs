@@ -217,7 +217,8 @@ fn transparent_p2sh_multisig_to_orchard() {
         .iter()
         .map(|sk| sk.to_account_pubkey())
         .collect();
-    let fvk = zip48::FullViewingKey::standard(2, key_info).unwrap();
+    let fvk =
+        zip48::FullViewingKey::standard(std::num::NonZeroU8::new(2).unwrap(), key_info).unwrap();
 
     // Derive its first external address, and corresponding spending keys.
     let (p2sh_addr, redeem_script) =
