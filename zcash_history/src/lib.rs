@@ -12,9 +12,9 @@ mod tree;
 mod version;
 
 pub use entry::{Entry, MAX_ENTRY_SIZE};
-pub use node_data::{MAX_NODE_DATA_SIZE, NodeData};
+pub use node_data::{MAX_NODE_DATA_SIZE, NodeData, V2 as NodeDataV2, V3 as NodeDataV3};
 pub use tree::Tree;
-pub use version::{V1, V2, Version};
+pub use version::{V1, V2, V3, Version};
 
 /// Crate-level error type
 #[derive(Debug)]

@@ -326,13 +326,13 @@ fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a
 #[cfg(test)]
 mod tests {
     use super::{Entry, EntryKind, EntryLink, Tree};
-    use crate::{NodeData, V2, Version, node_data};
+    use crate::{NodeData, NodeDataV2, NodeDataV3, V2, V3, Version};
 
     use assert_matches::assert_matches;
     use proptest::prelude::*;
 
-    fn leaf(height: u32) -> node_data::V2 {
-        node_data::V2 {
+    fn leaf(height: u32) -> NodeDataV2 {
+        NodeDataV2 {
             v1: NodeData {
                 consensus_branch_id: 1,
                 subtree_commitment: [0u8; 32],
@@ -350,6 +350,15 @@ mod tests {
             start_orchard_root: [0u8; 32],
             end_orchard_root: [0u8; 32],
             orchard_tx: 42,
+        }
+    }
+
+    fn ironwood_leaf(height: u32) -> NodeDataV3 {
+        NodeDataV3 {
+            v2: leaf(height),
+            start_ironwood_root: [height as u8; 32],
+            end_ironwood_root: [height as u8; 32],
+            ironwood_tx: u64::from(height),
         }
     }
 
@@ -374,6 +383,18 @@ mod tests {
         }
 
         tree
+    }
+
+    fn ironwood_initial() -> Tree<V3> {
+        let node1 = Entry::new_leaf(ironwood_leaf(1));
+        let node2 = Entry::new_leaf(ironwood_leaf(2));
+
+        let node3 = Entry {
+            data: V3::combine(&node1.data, &node2.data),
+            kind: EntryKind::Leaf,
+        };
+
+        Tree::populate(vec![node1, node2, node3], EntryLink::Stored(2))
     }
 
     #[test]
@@ -603,6 +624,33 @@ mod tests {
         // two stored nodes should leave us (leaf 16 and no longer needed node 17)
         assert_eq!(deleted, 2);
         assert_eq!(tree.len(), 16);
+    }
+
+    #[test]
+    fn ironwood_version_append_and_truncate() {
+        let mut tree = ironwood_initial();
+
+        let appended = tree
+            .append_leaf(ironwood_leaf(3))
+            .expect("Failed to append");
+        let root = tree.root_node().expect("Failed to resolve root").node;
+
+        assert_eq!(appended.len(), 1);
+        assert_eq!(root.data.v2.v1.start_height, 1);
+        assert_eq!(root.data.v2.v1.end_height, 3);
+        assert_eq!(root.data.start_ironwood_root, [1; 32]);
+        assert_eq!(root.data.end_ironwood_root, [3; 32]);
+        assert_eq!(root.data.ironwood_tx, 6);
+
+        let truncated = tree.truncate_leaf().expect("Failed to truncate");
+        let root = tree.root_node().expect("Failed to resolve root").node;
+
+        assert_eq!(truncated, 1);
+        assert_eq!(root.data.v2.v1.start_height, 1);
+        assert_eq!(root.data.v2.v1.end_height, 2);
+        assert_eq!(root.data.start_ironwood_root, [1; 32]);
+        assert_eq!(root.data.end_ironwood_root, [2; 32]);
+        assert_eq!(root.data.ironwood_tx, 3);
     }
 
     #[test]

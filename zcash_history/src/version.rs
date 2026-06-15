@@ -4,7 +4,7 @@ use std::io;
 use blake2b_simd::Params as Blake2Params;
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::{MAX_NODE_DATA_SIZE, NodeData, node_data};
+use crate::{MAX_NODE_DATA_SIZE, NodeData, NodeDataV2, NodeDataV3};
 
 fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
     let hash_result = Blake2Params::new()
@@ -149,7 +149,7 @@ impl Version for V1 {
 pub enum V2 {}
 
 impl Version for V2 {
-    type NodeData = node_data::V2;
+    type NodeData = NodeDataV2;
 
     fn consensus_branch_id(data: &Self::NodeData) -> u32 {
         data.v1.consensus_branch_id
@@ -168,11 +168,50 @@ impl Version for V2 {
         left: &Self::NodeData,
         right: &Self::NodeData,
     ) -> Self::NodeData {
-        node_data::V2::combine_inner(subtree_commitment, left, right)
+        NodeDataV2::combine_inner(subtree_commitment, left, right)
     }
 
     fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
-        node_data::V2::read(consensus_branch_id, r)
+        NodeDataV2::read(consensus_branch_id, r)
+    }
+
+    fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
+        data.write(w)
+    }
+}
+
+/// Version 3 of the Zcash chain history tree.
+///
+/// This version is used from the NU6.3 epoch for history nodes that include
+/// Ironwood shielded pool metadata. Earlier epochs continue to use the
+/// corresponding earlier history tree versions.
+pub enum V3 {}
+
+impl Version for V3 {
+    type NodeData = NodeDataV3;
+
+    fn consensus_branch_id(data: &Self::NodeData) -> u32 {
+        data.v2.v1.consensus_branch_id
+    }
+
+    fn start_height(data: &Self::NodeData) -> u64 {
+        data.v2.v1.start_height
+    }
+
+    fn end_height(data: &Self::NodeData) -> u64 {
+        data.v2.v1.end_height
+    }
+
+    fn combine_inner(
+        subtree_commitment: [u8; 32],
+        left: &Self::NodeData,
+        right: &Self::NodeData,
+    ) -> Self::NodeData {
+        NodeDataV3::combine_inner(subtree_commitment, left, right)
+    }
+
+    fn read<R: io::Read>(consensus_branch_id: u32, r: &mut R) -> io::Result<Self::NodeData> {
+        NodeDataV3::read(consensus_branch_id, r)
     }
 
     fn write<W: io::Write>(data: &Self::NodeData, w: &mut W) -> io::Result<()> {
