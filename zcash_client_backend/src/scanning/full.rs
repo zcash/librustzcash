@@ -559,7 +559,7 @@ where
         pos_tracker.increment_over_tx(&tx);
     }
 
-    pos_tracker.check_end_of_block_consistency()?;
+    pos_tracker.assert_end_of_block_consistency();
 
     Ok(ScannedBlock::from_parts(
         height,
@@ -739,15 +739,13 @@ impl PositionTracker {
         );
     }
 
-    fn check_end_of_block_consistency(&self) -> Result<(), ScanError> {
+    fn assert_end_of_block_consistency(&self) {
         // It is a programming error to construct `PositionTracker` from a `CompactBlock`
         // and then not call `PositionTracker::increment_over_tx` on every transaction
         // within the block.
         assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
         #[cfg(feature = "orchard")]
         assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
-
-        Ok(())
     }
 }
 
@@ -968,7 +966,7 @@ mod tests {
         );
 
         assert_eq!(tracker.sapling_tree_position, 6);
-        tracker.check_end_of_block_consistency().unwrap();
+        tracker.assert_end_of_block_consistency();
     }
 
     #[cfg(feature = "orchard")]
@@ -986,7 +984,7 @@ mod tests {
         tracker.increment(0, 5);
 
         assert_eq!(tracker.orchard_tree_position, 9);
-        tracker.check_end_of_block_consistency().unwrap();
+        tracker.assert_end_of_block_consistency();
     }
 
     #[test]
@@ -1002,6 +1000,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             orchard_final_tree_size: 0,
         };
-        let _ = tracker.check_end_of_block_consistency();
+        tracker.assert_end_of_block_consistency();
     }
 }
