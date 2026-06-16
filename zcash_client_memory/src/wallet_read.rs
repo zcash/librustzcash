@@ -580,14 +580,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .collect(),
             NullifierQuery::Unspent => nullifiers
                 .filter_map(|(account_id, _, nf)| {
-                    // find any tx we know of that spends this nullifier and if so require that it is unmined or expired
+                    // Scan relevance only excludes nullifiers spent by transactions confirmed mined.
                     if let Some((height, tx_index)) = self.nullifiers.get(&Nullifier::Sapling(nf)) {
                         if let Some(spending_tx) =
                             self.tx_table.get_by_height_and_index(*height, *tx_index)
                         {
-                            if matches!(spending_tx.status(), TransactionStatus::Mined(_))
-                                || spending_tx.expiry_height().is_none()
-                            {
+                            if matches!(spending_tx.status(), TransactionStatus::Mined(_)) {
                                 None
                             } else {
                                 Some((account_id, nf))
@@ -616,14 +614,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 .collect(),
             NullifierQuery::Unspent => nullifiers
                 .filter_map(|(account_id, _, nf)| {
-                    // find any tx we know of that spends this nullifier and if so require that it is unmined or expired
+                    // Scan relevance only excludes nullifiers spent by transactions confirmed mined.
                     if let Some((height, tx_index)) = self.nullifiers.get(&Nullifier::Orchard(nf)) {
                         if let Some(spending_tx) =
                             self.tx_table.get_by_height_and_index(*height, *tx_index)
                         {
-                            if matches!(spending_tx.status(), TransactionStatus::Mined(_))
-                                || spending_tx.expiry_height().is_none()
-                            {
+                            if matches!(spending_tx.status(), TransactionStatus::Mined(_)) {
                                 None
                             } else {
                                 Some((account_id, nf))

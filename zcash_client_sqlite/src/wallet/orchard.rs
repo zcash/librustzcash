@@ -308,10 +308,10 @@ pub(crate) fn put_received_note<
     Ok(account_id)
 }
 
-/// Retrieves the set of nullifiers for "potentially spendable" Orchard notes that the
-/// wallet is tracking.
+/// Retrieves the set of nullifiers for Orchard notes that the wallet is tracking and that have
+/// not been confirmed spent.
 ///
-/// "Potentially spendable" means:
+/// "Not confirmed spent" means:
 /// - The transaction in which the note was created has been observed as mined.
 /// - No transaction in which the note's nullifier appears has been observed as mined.
 pub(crate) fn get_orchard_nullifiers(

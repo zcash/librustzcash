@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Scanning now recovers internal change from wallet-created shielded spends
+  whose stored transaction has no expiry height, and from spends whose mined
+  status is learned before their containing block has been scanned.
+
 ### Added
 - The following columns have been added to the exposed `v_tx_outputs` view:
   - `transaction_id`

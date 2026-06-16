@@ -355,6 +355,38 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn scan_cached_blocks_recovers_internal_change_for_unmined_non_expiring_spend<
+    T: ShieldedPoolTester,
+>() {
+    use rusqlite::named_params;
+
+    zcash_client_backend::data_api::testing::pool::scan_cached_blocks_recovers_internal_change_for_unmined_non_expiring_spend::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |db, txid| {
+            db.conn_mut()
+                .execute(
+                    "UPDATE transactions
+                     SET expiry_height = 0
+                     WHERE txid = :txid",
+                    named_params! {
+                        ":txid": txid.as_ref(),
+                    },
+                )
+                .unwrap();
+        },
+    )
+}
+
+pub(crate) fn scan_cached_blocks_recovers_internal_change_after_mined_status_update<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::scan_cached_blocks_recovers_internal_change_after_mined_status_update::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_detects_spends_out_of_order::<
         T,
