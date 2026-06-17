@@ -522,6 +522,27 @@ jobs:
             uuidparse -n -o uuid $U4 | sort | uniq | wc -l
           )
 
+  prim-feature-flags:
+    name: zcash_primitives protocol feature flags
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: prim-feature-flags
+      # Transaction parsing must read the same wire format and compute the same consensus
+      # txid / authorizing-data digests with each shielded protocol enabled or disabled.
+      - name: Test with both shielded protocols disabled
+        run: cargo test -p zcash_primitives --no-default-features --features std
+      - name: Test with only Sapling enabled
+        run: cargo test -p zcash_primitives --no-default-features --features std,sapling
+      - name: Test with only Orchard enabled
+        run: cargo test -p zcash_primitives --no-default-features --features std,orchard
+
   required-checks:
     name: Required status checks have passed
     needs:
@@ -534,6 +555,7 @@ jobs:
       - fmt
       - protobuf
       - uuid
+      - prim-feature-flags
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
