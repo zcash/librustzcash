@@ -13,8 +13,27 @@ workspace.
 ### Added
 - `zcash_primitives::block::Block::from_parts` (behind the `test-dependencies`
   feature flag).
+- The `sapling` and `orchard` feature flags (both enabled by default), which gate
+  compilation of the `sapling` and `orchard` dependencies. When a feature is
+  disabled, transactions containing that protocol's bundle are still parsed,
+  re-serialized byte-identically, and have their txid and authorizing-data
+  commitments computed; only conversion to the typed domain bundle is omitted.
+- `zcash_primitives::transaction::TransactionData::{has_sapling, has_orchard}`,
+  available irrespective of the `sapling`/`orchard` feature flags.
+- `zcash_primitives::transaction::{SaplingBundle, OrchardBundle}` type aliases for
+  the per-protocol bundle type at a given authorization state.
 
 ### Changed
+- The `sapling` and `orchard` dependencies are now optional, behind features of
+  the same name that are part of the default feature set. To build without a
+  protocol, use `default-features = false` and select the features you need. The
+  `circuits` feature now implies both `sapling` and `orchard`.
+- `zcash_primitives::transaction::TransactionData::{sapling_bundle, orchard_bundle}`
+  are now only available when the corresponding feature is enabled; use the new
+  `has_sapling`/`has_orchard` methods for feature-independent presence checks.
+- `zcash_primitives::transaction::sighash::signature_hash` and the
+  `zcash_primitives::transaction::builder` module now require the `sapling`
+  feature (the builder, via `circuits`, requires both protocols).
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

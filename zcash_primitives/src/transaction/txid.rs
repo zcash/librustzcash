@@ -4,18 +4,26 @@ use core::convert::TryFrom;
 use corez::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params};
+#[cfg(feature = "sapling")]
 use ff::PrimeField;
 
+#[cfg(feature = "orchard")]
 use ::orchard::bundle::{self as orchard};
+#[cfg(feature = "sapling")]
 use ::sapling::bundle::{OutputDescription, SpendDescription};
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
-use zcash_protocol::{
-    consensus::{BlockHeight, BranchId},
-    value::ZatBalance,
-};
+use zcash_protocol::consensus::{BlockHeight, BranchId};
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+use zcash_protocol::value::ZatBalance;
+
+#[cfg(not(feature = "orchard"))]
+use super::components::orchard_raw::RawOrchardBundle;
+#[cfg(not(feature = "sapling"))]
+use super::components::sapling_raw::{RawSaplingBundle, RawSaplingOutput, RawSaplingSpend};
 
 use super::{
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+    Authorization, Authorized, OrchardBundle, SaplingBundle, TransactionDigest, TransparentDigests,
+    TxDigests, TxId, TxVersion,
 };
 
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
@@ -97,6 +105,7 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
 /// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized by ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION
+#[cfg(feature = "sapling")]
 pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
@@ -121,6 +130,28 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
     h.finalize()
 }
 
+/// Equivalent of [`hash_sapling_spends`] operating on the opaque byte representation of a
+/// Sapling bundle used when the `sapling` feature is disabled.
+#[cfg(not(feature = "sapling"))]
+fn hash_sapling_spends_raw(shielded_spends: &[RawSaplingSpend]) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
+    if !shielded_spends.is_empty() {
+        let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
+        let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
+        for s_spend in shielded_spends {
+            ch.write_all(&s_spend.nullifier).unwrap();
+
+            nh.write_all(&s_spend.cv).unwrap();
+            nh.write_all(&s_spend.anchor).unwrap();
+            nh.write_all(&s_spend.rk).unwrap();
+        }
+
+        h.write_all(ch.finalize().as_bytes()).unwrap();
+        h.write_all(nh.finalize().as_bytes()).unwrap();
+    }
+    h.finalize()
+}
+
 /// Implements [ZIP 244 section T.3b](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)
 ///
 /// Write disjoint parts of each Sapling shielded output as 3 separate hashes:
@@ -129,6 +160,7 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
 /// * \[(cv, enc_ciphertext\[564..\], out_ciphertext, zkproof)*\] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized with ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION
+#[cfg(feature = "sapling")]
 pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
     if !shielded_outputs.is_empty() {
@@ -145,6 +177,34 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
             nh.write_all(&s_out.cv().to_bytes()).unwrap();
             nh.write_all(&s_out.enc_ciphertext()[564..]).unwrap();
             nh.write_all(&s_out.out_ciphertext()[..]).unwrap();
+        }
+
+        h.write_all(ch.finalize().as_bytes()).unwrap();
+        h.write_all(mh.finalize().as_bytes()).unwrap();
+        h.write_all(nh.finalize().as_bytes()).unwrap();
+    }
+    h.finalize()
+}
+
+/// Equivalent of [`hash_sapling_outputs`] operating on the opaque byte representation of a
+/// Sapling bundle used when the `sapling` feature is disabled.
+#[cfg(not(feature = "sapling"))]
+fn hash_sapling_outputs_raw(shielded_outputs: &[RawSaplingOutput]) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
+    if !shielded_outputs.is_empty() {
+        let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
+        let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
+        let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
+        for s_out in shielded_outputs {
+            ch.write_all(&s_out.cmu).unwrap();
+            ch.write_all(&s_out.ephemeral_key).unwrap();
+            ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
+
+            mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
+
+            nh.write_all(&s_out.cv).unwrap();
+            nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
+            nh.write_all(&s_out.out_ciphertext[..]).unwrap();
         }
 
         h.write_all(ch.finalize().as_bytes()).unwrap();
@@ -206,6 +266,7 @@ pub(crate) fn hash_transparent_txid_data(
 }
 
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
+#[cfg(feature = "sapling")]
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, ZatBalance>,
 ) -> Blake2bHash {
@@ -223,8 +284,157 @@ fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     h.finalize()
 }
 
+/// Equivalent of [`hash_sapling_txid_data`] operating on the opaque byte representation of a
+/// Sapling bundle used when the `sapling` feature is disabled.
+#[cfg(not(feature = "sapling"))]
+fn hash_sapling_txid_data(bundle: &RawSaplingBundle) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
+    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+        h.write_all(hash_sapling_spends_raw(bundle.shielded_spends()).as_bytes())
+            .unwrap();
+
+        h.write_all(hash_sapling_outputs_raw(bundle.shielded_outputs()).as_bytes())
+            .unwrap();
+
+        h.write_all(&bundle.value_balance().to_i64_le_bytes())
+            .unwrap();
+    }
+    h.finalize()
+}
+
 fn hash_sapling_txid_empty() -> Blake2bHash {
     hasher(ZCASH_SAPLING_HASH_PERSONALIZATION).finalize()
+}
+
+// Personalizations for the Orchard ZIP 244 digests. When the `orchard` feature is enabled
+// these computations are performed by the `orchard` crate; when it is disabled they are
+// reimplemented here over the opaque byte representation of a parsed Orchard bundle.
+#[cfg(not(feature = "orchard"))]
+const ZCASH_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardHash";
+#[cfg(not(feature = "orchard"))]
+const ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActCHash";
+#[cfg(not(feature = "orchard"))]
+const ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActMHash";
+#[cfg(not(feature = "orchard"))]
+const ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrcActNHash";
+#[cfg(not(feature = "orchard"))]
+const ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthOrchaHash";
+
+/// Implements [ZIP 244 section T.5](https://zips.z.cash/zip-0244#t-5-orchard-digest).
+///
+/// When the `orchard` feature is enabled this delegates to the `orchard` crate; otherwise it
+/// reimplements the same computation over the opaque byte representation of a parsed bundle.
+#[cfg(feature = "orchard")]
+fn hash_orchard_txid_data<A: orchard::Authorization>(
+    bundle: &orchard::Bundle<A, ZatBalance>,
+) -> Blake2bHash {
+    bundle.commitment().0
+}
+
+#[cfg(not(feature = "orchard"))]
+fn hash_orchard_txid_data(bundle: &RawOrchardBundle) -> Blake2bHash {
+    let mut h = hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION);
+    let mut ch = hasher(ZCASH_ORCHARD_ACTIONS_COMPACT_HASH_PERSONALIZATION);
+    let mut mh = hasher(ZCASH_ORCHARD_ACTIONS_MEMOS_HASH_PERSONALIZATION);
+    let mut nh = hasher(ZCASH_ORCHARD_ACTIONS_NONCOMPACT_HASH_PERSONALIZATION);
+
+    for action in bundle.actions() {
+        ch.write_all(&action.nullifier).unwrap();
+        ch.write_all(&action.cmx).unwrap();
+        ch.write_all(&action.epk_bytes).unwrap();
+        ch.write_all(&action.enc_ciphertext[..52]).unwrap();
+
+        mh.write_all(&action.enc_ciphertext[52..564]).unwrap();
+
+        nh.write_all(&action.cv_net).unwrap();
+        nh.write_all(&action.rk).unwrap();
+        nh.write_all(&action.enc_ciphertext[564..]).unwrap();
+        nh.write_all(&action.out_ciphertext).unwrap();
+    }
+
+    h.write_all(ch.finalize().as_bytes()).unwrap();
+    h.write_all(mh.finalize().as_bytes()).unwrap();
+    h.write_all(nh.finalize().as_bytes()).unwrap();
+    h.write_all(&[bundle.flags()]).unwrap();
+    h.write_all(&bundle.value_balance().to_i64_le_bytes())
+        .unwrap();
+    h.write_all(bundle.anchor()).unwrap();
+    h.finalize()
+}
+
+#[cfg(feature = "orchard")]
+fn hash_orchard_txid_empty() -> Blake2bHash {
+    orchard::commitments::hash_bundle_txid_empty()
+}
+
+#[cfg(not(feature = "orchard"))]
+fn hash_orchard_txid_empty() -> Blake2bHash {
+    hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION).finalize()
+}
+
+/// Implements the Sapling authorizing-data digest (ZIP 244 section S.2-equivalent for the
+/// authorizing-data commitment), used by [`BlockTxCommitmentDigester`].
+#[cfg(feature = "sapling")]
+fn hash_sapling_auth_data(
+    sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = sapling_bundle {
+        for spend in bundle.shielded_spends() {
+            h.write_all(spend.zkproof()).unwrap();
+        }
+        for spend in bundle.shielded_spends() {
+            h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+                .unwrap();
+        }
+        for output in bundle.shielded_outputs() {
+            h.write_all(output.zkproof()).unwrap();
+        }
+        h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
+            .unwrap();
+    }
+    h.finalize()
+}
+
+#[cfg(not(feature = "sapling"))]
+fn hash_sapling_auth_data(sapling_bundle: Option<&RawSaplingBundle>) -> Blake2bHash {
+    let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = sapling_bundle {
+        for spend in bundle.shielded_spends() {
+            h.write_all(&spend.zkproof).unwrap();
+        }
+        for spend in bundle.shielded_spends() {
+            h.write_all(&spend.spend_auth_sig).unwrap();
+        }
+        for output in bundle.shielded_outputs() {
+            h.write_all(&output.zkproof).unwrap();
+        }
+        h.write_all(bundle.binding_sig()).unwrap();
+    }
+    h.finalize()
+}
+
+/// Implements the Orchard authorizing-data digest, used by [`BlockTxCommitmentDigester`].
+#[cfg(feature = "orchard")]
+fn hash_orchard_auth_data(
+    orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+) -> Blake2bHash {
+    orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
+        b.authorizing_commitment().0
+    })
+}
+
+#[cfg(not(feature = "orchard"))]
+fn hash_orchard_auth_data(orchard_bundle: Option<&RawOrchardBundle>) -> Blake2bHash {
+    let mut h = hasher(ZCASH_ORCHARD_SIGS_HASH_PERSONALIZATION);
+    if let Some(bundle) = orchard_bundle {
+        h.write_all(bundle.proof()).unwrap();
+        for action in bundle.actions() {
+            h.write_all(&action.spend_auth_sig).unwrap();
+        }
+        h.write_all(bundle.binding_sig()).unwrap();
+    }
+    h.finalize()
 }
 
 /// A TransactionDigest implementation that commits to all of the effecting
@@ -269,18 +479,12 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         transparent_bundle.map(transparent_digests)
     }
 
-    fn digest_sapling(
-        &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    ) -> Self::SaplingDigest {
+    fn digest_sapling(&self, sapling_bundle: Option<&SaplingBundle<A>>) -> Self::SaplingDigest {
         sapling_bundle.map(hash_sapling_txid_data)
     }
 
-    fn digest_orchard(
-        &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::OrchardDigest {
-        orchard_bundle.map(|b| b.commitment().0)
+    fn digest_orchard(&self, orchard_bundle: Option<&OrchardBundle<A>>) -> Self::OrchardDigest {
+        orchard_bundle.map(hash_orchard_txid_data)
     }
 
     fn combine(
@@ -324,7 +528,7 @@ pub(crate) fn to_hash(
     .unwrap();
     h.write_all(
         orchard_digest
-            .unwrap_or_else(orchard::commitments::hash_bundle_txid_empty)
+            .unwrap_or_else(hash_orchard_txid_empty)
             .as_bytes(),
     )
     .unwrap();
@@ -389,38 +593,15 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         h.finalize()
     }
 
-    fn digest_sapling(
-        &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
-    ) -> Blake2bHash {
-        let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
-        if let Some(bundle) = sapling_bundle {
-            for spend in bundle.shielded_spends() {
-                h.write_all(spend.zkproof()).unwrap();
-            }
-
-            for spend in bundle.shielded_spends() {
-                h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
-                    .unwrap();
-            }
-
-            for output in bundle.shielded_outputs() {
-                h.write_all(output.zkproof()).unwrap();
-            }
-
-            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
-                .unwrap();
-        }
-        h.finalize()
+    fn digest_sapling(&self, sapling_bundle: Option<&SaplingBundle<Authorized>>) -> Blake2bHash {
+        hash_sapling_auth_data(sapling_bundle)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
+        orchard_bundle: Option<&OrchardBundle<Authorized>>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
-            b.authorizing_commitment().0
-        })
+        hash_orchard_auth_data(orchard_bundle)
     }
 
     fn combine(

@@ -1,8 +1,14 @@
 //! Structs and methods for handling Zcash transactions.
+// The transaction builder constructs typed Sapling and Orchard bundles, and so requires both
+// protocol features. (A feature-off build can parse and re-serialize transactions, but not
+// build them.)
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 pub mod builder;
 pub mod components;
 pub mod fees;
 pub mod sighash;
+// The v4 signature hash reads the typed Sapling bundle directly (v4 predates Orchard).
+#[cfg(feature = "sapling")]
 pub mod sighash_v4;
 pub mod sighash_v5;
 #[cfg(zcash_unstable = "nu7")]
@@ -21,7 +27,6 @@ use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
-use orchard::bundle::ProofSizeEnforcement;
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -29,13 +34,25 @@ use zcash_protocol::{
 };
 
 use self::{
-    components::{
-        orchard as orchard_serialization, sapling as sapling_serialization,
-        sprout::{self, JsDescription},
-    },
+    components::sprout::{self, JsDescription},
     txid::{BlockTxCommitmentDigester, TxIdDigester, to_txid},
 };
 use ::transparent::util::sha256d::{HashReader, HashWriter};
+
+#[cfg(feature = "sapling")]
+use self::components::sapling as sapling_serialization;
+#[cfg(not(feature = "sapling"))]
+use self::components::sapling_raw as sapling_serialization;
+
+#[cfg(feature = "orchard")]
+use self::components::orchard as orchard_serialization;
+#[cfg(not(feature = "orchard"))]
+use self::components::orchard_raw as orchard_serialization;
+
+#[cfg(not(feature = "orchard"))]
+use self::components::orchard_raw::ProofSizeEnforcement;
+#[cfg(feature = "orchard")]
+use orchard::bundle::ProofSizeEnforcement;
 
 #[cfg(feature = "circuits")]
 use ::sapling::builder as sapling_builder;
@@ -241,7 +258,9 @@ impl TxVersion {
 /// Authorization state for a bundle of transaction data.
 pub trait Authorization {
     type TransparentAuth: transparent::Authorization;
+    #[cfg(feature = "sapling")]
     type SaplingAuth: sapling::bundle::Authorization;
+    #[cfg(feature = "orchard")]
     type OrchardAuth: orchard::bundle::Authorization;
 }
 
@@ -251,7 +270,9 @@ pub struct Authorized;
 
 impl Authorization for Authorized {
     type TransparentAuth = transparent::Authorized;
+    #[cfg(feature = "sapling")]
     type SaplingAuth = sapling::bundle::Authorized;
+    #[cfg(feature = "orchard")]
     type OrchardAuth = orchard::bundle::Authorized;
 }
 
@@ -281,6 +302,58 @@ impl Authorization for Coinbase {
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
         orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
+}
+
+/// The type of a transaction's Sapling bundle for a given authorization state.
+///
+/// When the `sapling` feature is enabled this is the typed [`sapling::Bundle`] domain
+/// representation; when it is disabled, parsed Sapling bundles are retained as an opaque
+/// byte representation that supports re-serialization and digest computation but not access
+/// to the typed components.
+#[cfg(feature = "sapling")]
+pub type SaplingBundle<A> = sapling::Bundle<<A as Authorization>::SaplingAuth, ZatBalance>;
+/// The type of a transaction's Sapling bundle (opaque byte representation; the `sapling`
+/// feature is disabled).
+#[cfg(not(feature = "sapling"))]
+pub type SaplingBundle<A> = <A as RawSaplingBundleFor>::Bundle;
+
+/// Helper trait used only when the `sapling` feature is disabled, so that the public
+/// [`SaplingBundle`] alias can refer to its type parameter (avoiding an unused-parameter
+/// error) while resolving to the opaque raw bundle type regardless of `A`.
+#[cfg(not(feature = "sapling"))]
+#[doc(hidden)]
+pub trait RawSaplingBundleFor {
+    type Bundle;
+}
+#[cfg(not(feature = "sapling"))]
+impl<A> RawSaplingBundleFor for A {
+    type Bundle = sapling_serialization::RawSaplingBundle;
+}
+
+/// The type of a transaction's Orchard bundle for a given authorization state.
+///
+/// When the `orchard` feature is enabled this is the typed [`orchard::Bundle`] domain
+/// representation; when it is disabled, parsed Orchard bundles are retained as an opaque
+/// byte representation that supports re-serialization and digest computation but not access
+/// to the typed components.
+#[cfg(feature = "orchard")]
+pub type OrchardBundle<A> = orchard::bundle::Bundle<<A as Authorization>::OrchardAuth, ZatBalance>;
+/// The type of a transaction's Orchard bundle (opaque byte representation; the `orchard`
+/// feature is disabled).
+#[cfg(not(feature = "orchard"))]
+pub type OrchardBundle<A> = <A as RawOrchardBundleFor>::Bundle;
+
+/// Helper trait used only when the `orchard` feature is disabled, so that the public
+/// [`OrchardBundle`] alias can refer to its type parameter (avoiding an unused-parameter
+/// error) while resolving to the opaque raw bundle type regardless of `A`.
+#[cfg(not(feature = "orchard"))]
+#[doc(hidden)]
+pub trait RawOrchardBundleFor {
+    type Bundle;
+}
+#[cfg(not(feature = "orchard"))]
+impl<A> RawOrchardBundleFor for A {
+    type Bundle = orchard_serialization::RawOrchardBundle;
 }
 
 /// A Zcash transaction.
@@ -315,8 +388,8 @@ pub struct TransactionData<A: Authorization> {
     zip233_amount: Zatoshis,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
+    sapling_bundle: Option<SaplingBundle<A>>,
+    orchard_bundle: Option<OrchardBundle<A>>,
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -359,8 +432,8 @@ impl<A: Authorization> TransactionData<A> {
         #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Zatoshis,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+        sapling_bundle: Option<SaplingBundle<A>>,
+        orchard_bundle: Option<OrchardBundle<A>>,
     ) -> Self {
         TransactionData {
             version,
@@ -402,12 +475,28 @@ impl<A: Authorization> TransactionData<A> {
         self.sprout_bundle.as_ref()
     }
 
+    #[cfg(feature = "sapling")]
     pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
         self.sapling_bundle.as_ref()
     }
 
+    #[cfg(feature = "orchard")]
     pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.orchard_bundle.as_ref()
+    }
+
+    /// Returns whether this transaction contains a Sapling bundle.
+    ///
+    /// This method is available irrespective of whether the `sapling` feature is enabled.
+    pub fn has_sapling(&self) -> bool {
+        self.sapling_bundle.is_some()
+    }
+
+    /// Returns whether this transaction contains an Orchard bundle.
+    ///
+    /// This method is available irrespective of whether the `orchard` feature is enabled.
+    pub fn has_orchard(&self) -> bool {
+        self.orchard_bundle.is_some()
     }
 
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
@@ -498,12 +587,8 @@ impl<A: Authorization> TransactionData<A> {
         f_transparent: impl FnOnce(
             Option<transparent::Bundle<A::TransparentAuth>>,
         ) -> Option<transparent::Bundle<B::TransparentAuth>>,
-        f_sapling: impl FnOnce(
-            Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-        ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
-        f_orchard: impl FnOnce(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-        ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
+        f_sapling: impl FnOnce(Option<SaplingBundle<A>>) -> Option<SaplingBundle<B>>,
+        f_orchard: impl FnOnce(Option<OrchardBundle<A>>) -> Option<OrchardBundle<B>>,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -529,14 +614,8 @@ impl<A: Authorization> TransactionData<A> {
             Option<transparent::Bundle<A::TransparentAuth>>,
         )
             -> Result<Option<transparent::Bundle<B::TransparentAuth>>, E>,
-        f_sapling: impl FnOnce(
-            Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-        )
-            -> Result<Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>, E>,
-        f_orchard: impl FnOnce(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-        )
-            -> Result<Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>, E>,
+        f_sapling: impl FnOnce(Option<SaplingBundle<A>>) -> Result<Option<SaplingBundle<B>>, E>,
+        f_orchard: impl FnOnce(Option<OrchardBundle<A>>) -> Result<Option<OrchardBundle<B>>, E>,
     ) -> Result<TransactionData<B>, E> {
         Ok(TransactionData {
             version: self.version,
@@ -555,8 +634,14 @@ impl<A: Authorization> TransactionData<A> {
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
-        mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
-        mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
+        #[cfg(feature = "sapling")] mut f_sapling: impl sapling_serialization::MapAuth<
+            A::SaplingAuth,
+            B::SaplingAuth,
+        >,
+        #[cfg(feature = "orchard")] mut f_orchard: impl orchard_serialization::MapAuth<
+            A::OrchardAuth,
+            B::OrchardAuth,
+        >,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -569,6 +654,9 @@ impl<A: Authorization> TransactionData<A> {
                 .transparent_bundle
                 .map(|b| b.map_authorization(f_transparent)),
             sprout_bundle: self.sprout_bundle,
+            // When the `sapling` feature is disabled the Sapling bundle is an opaque byte
+            // representation with no authorization to map, so it passes through unchanged.
+            #[cfg(feature = "sapling")]
             sapling_bundle: self.sapling_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_sapling,
@@ -578,6 +666,11 @@ impl<A: Authorization> TransactionData<A> {
                     |f, a| f.map_authorization(a),
                 )
             }),
+            #[cfg(not(feature = "sapling"))]
+            sapling_bundle: self.sapling_bundle,
+            // When the `orchard` feature is disabled the Orchard bundle is an opaque byte
+            // representation with no authorization to map, so it passes through unchanged.
+            #[cfg(feature = "orchard")]
             orchard_bundle: self.orchard_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_orchard,
@@ -585,6 +678,8 @@ impl<A: Authorization> TransactionData<A> {
                     |f, a| f.map_authorization(a),
                 )
             }),
+            #[cfg(not(feature = "orchard"))]
+            orchard_bundle: self.orchard_bundle,
         }
     }
 }
@@ -718,9 +813,9 @@ impl Transaction {
         let binding_sig = if version.has_sapling()
             && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
         {
-            let mut sig = [0; 64];
+            let mut sig = [0u8; 64];
             reader.read_exact(&mut sig)?;
-            Some(redjubjub::Signature::from(sig))
+            Some(sig)
         } else {
             None
         };
@@ -740,14 +835,12 @@ impl Transaction {
                 zip233_amount: Zatoshis::ZERO,
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.and_then(|binding_sig| {
-                    sapling::Bundle::from_parts(
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        sapling::bundle::Authorized { binding_sig },
-                    )
-                }),
+                sapling_bundle: sapling_serialization::build_v4_bundle(
+                    value_balance,
+                    shielded_spends,
+                    shielded_outputs,
+                    binding_sig,
+                ),
                 orchard_bundle: None,
             },
         })
@@ -878,7 +971,7 @@ impl Transaction {
         })
     }
 
-    #[cfg(feature = "temporary-zcashd")]
+    #[cfg(all(feature = "temporary-zcashd", feature = "sapling"))]
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>> {
@@ -934,7 +1027,10 @@ impl Transaction {
 
         if self.version.has_sapling() {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
+                #[cfg(feature = "sapling")]
                 writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+                #[cfg(not(feature = "sapling"))]
+                writer.write_all(bundle.binding_sig())?;
             }
         }
 
@@ -1005,7 +1101,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(feature = "temporary-zcashd")]
+    #[cfg(all(feature = "temporary-zcashd", feature = "sapling"))]
     pub fn temporary_zcashd_write_v5_sapling<W: Write>(
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
         writer: W,
@@ -1060,15 +1156,9 @@ pub trait TransactionDigest<A: Authorization> {
         transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
     ) -> Self::TransparentDigest;
 
-    fn digest_sapling(
-        &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    ) -> Self::SaplingDigest;
+    fn digest_sapling(&self, sapling_bundle: Option<&SaplingBundle<A>>) -> Self::SaplingDigest;
 
-    fn digest_orchard(
-        &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
-    ) -> Self::OrchardDigest;
+    fn digest_orchard(&self, orchard_bundle: Option<&OrchardBundle<A>>) -> Self::OrchardDigest;
 
     fn combine(
         &self,
@@ -1083,7 +1173,14 @@ pub enum DigestError {
     NotSigned,
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+// The proptest strategies in this module build typed Sapling and Orchard bundles, and so
+// require both protocol features. Feature-off builds exercise transaction parsing via the
+// static ZIP 244 / ZIP 143 / ZIP 243 test vectors instead.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "sapling",
+    feature = "orchard"
+))]
 pub mod testing {
     use proptest::prelude::*;
 

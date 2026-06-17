@@ -40,8 +40,8 @@ memuse.workspace = true
 ff.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
-orchard.workspace = true
-sapling.workspace = true
+orchard = { workspace = true, optional = true }
+sapling = { workspace = true, optional = true }
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
@@ -93,21 +93,33 @@ zip32.workspace = true
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 
 [features]
-default = ["multicore", "std", "circuits"]
+default = ["multicore", "std", "circuits", "sapling", "orchard"]
 std = [
     "document-features",
     "redjubjub/std",
-    "sapling/std",
-    "orchard/std",
+    "sapling?/std",
+    "orchard?/std",
     "transparent/std",
 ]
 zip-233 = []
 
-## Enables creating proofs
-circuits = ["orchard/circuit", "sapling/circuit"]
+## Enables conversion of parsed Sapling transaction data into typed domain bundles, and the
+## Sapling parts of the transaction builder. When disabled, the `sapling` crate is not
+## compiled; transactions are still parsed and re-serialized over the same wire format, with
+## Sapling bundles retained in an opaque byte representation.
+sapling = ["dep:sapling"]
+
+## Enables conversion of parsed Orchard transaction data into typed domain bundles, and the
+## Orchard parts of the transaction builder. When disabled, the `orchard` crate is not
+## compiled; transactions are still parsed and re-serialized over the same wire format, with
+## Orchard bundles retained in an opaque byte representation.
+orchard = ["dep:orchard"]
+
+## Enables creating proofs. Requires both the `sapling` and `orchard` features.
+circuits = ["sapling", "orchard", "orchard/circuit", "sapling/circuit"]
 
 ## Enables multithreading support for creating proofs.
-multicore = ["orchard/multicore", "sapling/multicore"]
+multicore = ["sapling?/multicore", "orchard?/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
 transparent-inputs = [
@@ -123,8 +135,8 @@ temporary-zcashd = []
 test-dependencies = [
     "dep:proptest",
     "incrementalmerkletree/test-dependencies",
-    "orchard/test-dependencies",
-    "sapling/test-dependencies",
+    "orchard?/test-dependencies",
+    "sapling?/test-dependencies",
     "transparent/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]

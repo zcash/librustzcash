@@ -4,11 +4,14 @@ use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "sapling")]
+use incrementalmerkletree::Hashable;
 use incrementalmerkletree::{
-    Address, Hashable, Level, MerklePath, Position,
+    Address, Level, MerklePath, Position,
     frontier::{CommitmentTree, Frontier, NonEmptyFrontier},
     witness::IncrementalWitness,
 };
+#[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
 
@@ -23,6 +26,7 @@ pub trait HashSer {
     fn write<W: Write>(&self, writer: W) -> io::Result<()>;
 }
 
+#[cfg(feature = "sapling")]
 impl HashSer for sapling::Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
@@ -40,6 +44,7 @@ impl HashSer for sapling::Node {
     }
 }
 
+#[cfg(feature = "orchard")]
 impl HashSer for MerkleHashOrchard {
     fn read<R: Read>(mut reader: R) -> io::Result<Self>
     where
@@ -105,6 +110,7 @@ pub fn read_address<R: Read>(mut reader: R) -> io::Result<Address> {
     Ok(Address::from_parts(level, index))
 }
 
+#[cfg(feature = "sapling")]
 pub fn read_frontier_v0<H: Hashable + HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<Frontier<H, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>> {
@@ -331,7 +337,9 @@ pub mod testing {
     }
 }
 
-#[cfg(test)]
+// These tests build Sapling commitment trees and use the `read_frontier_v0` helper, both of
+// which require the `sapling` feature.
+#[cfg(all(test, feature = "sapling"))]
 mod tests {
     use alloc::string::{String, ToString};
     use alloc::vec::Vec;
