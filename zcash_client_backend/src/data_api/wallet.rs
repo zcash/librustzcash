@@ -704,6 +704,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
+    #[cfg(feature = "transparent-inputs")] spend_policy: &input_selection::TransparentSpendPolicy,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
@@ -735,6 +736,8 @@ where
         spend_from_account,
         request,
         change_strategy,
+        #[cfg(feature = "transparent-inputs")]
+        spend_policy,
         #[cfg(feature = "unstable")]
         proposed_version,
     )?;
@@ -826,6 +829,8 @@ where
         &change_strategy,
         request,
         confirmations_policy,
+        #[cfg(feature = "transparent-inputs")]
+        &Default::default(),
         #[cfg(feature = "unstable")]
         proposed_version,
     )

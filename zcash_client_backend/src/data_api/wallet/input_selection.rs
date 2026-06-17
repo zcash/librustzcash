@@ -25,7 +25,7 @@ use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
+        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue, WalletRead,
         wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
@@ -202,6 +202,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "transparent-inputs")] spend_policy: &TransparentSpendPolicy,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
@@ -423,6 +424,111 @@ const MAX_BLOCK_BYTES: usize = 2_000_000;
 #[cfg(feature = "transparent-inputs")]
 const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 
+#[cfg(feature = "transparent-inputs")]
+/// A quick and easy non-empty `BTreeSet`.
+// This can be lifted out to a utils module or a separate crate later if
+// need be.
+#[derive(Clone)]
+pub struct NonEmptyBTreeSet<T> {
+    pub head: T,
+    pub tail: BTreeSet<T>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+/// Specifies the wallet's intent to spend transparent UTXOs in a transfer.
+///
+/// Spending transparent funds links the chosen transparent addresses on-chain,
+/// reducing privacy; callers must opt in explicitly. Corresponds to the legacy
+/// `AllowTransparentAddressLinking` privacy policy / `ANY_TADDR`.
+#[derive(Default)]
+pub enum TransparentSpendPolicy {
+    /// Do not spend any transparent UTXOs (default; fully-shielded behavior).
+    #[default]
+    ShieldedOnly,
+    /// Spend from arbitrary transparent receivers belonging to the account, as
+    /// needed to satisfy the request. The proposer chooses the addresses,
+    /// potentially linking them. (`ANY_TADDR`)
+    AnyAccountTaddr,
+    /// Spend only from the specified transparent addresses, intentionally
+    /// linking them. (Wrap a non-empty set in an immutable type to enforce
+    /// safe construction, per AGENTS.md.)
+    FromAddresses(NonEmptyBTreeSet<TransparentAddress>),
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentSpendPolicy {
+    /// Creates a policy that only spends from shielded UTXOs.
+    pub fn shielded_only() -> Self {
+        Self::ShieldedOnly
+    }
+
+    /// Creates a policy that spends from arbitrary transparent receivers
+    /// belonging to the account.
+    pub fn any_account_taddr() -> Self {
+        Self::AnyAccountTaddr
+    }
+
+    /// Creates a policy that only spends from the specified transparent addresses,
+    /// potentially leaking them. (`ANY_TADDR`)
+    pub fn from_transparent_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
+        Self::FromAddresses(NonEmptyBTreeSet {
+            head: taddrs.head,
+            tail: BTreeSet::from_iter(taddrs.tail),
+        })
+    }
+
+    /// Creates a policy that only spends from a single transparent address.
+    pub fn from_one_transparent_address(taddr: TransparentAddress) -> Self {
+        Self::FromAddresses(NonEmptyBTreeSet {
+            head: taddr,
+            tail: Default::default(),
+        })
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+/// Gathers the account's spendable transparent UTXOs from each of the provided source
+/// addresses, for use as inputs to a general (non-shielding) transfer.
+///
+/// Unlike [`gather_shielding_inputs`], the source addresses here are the account's own
+/// transparent receivers (enumerated by the caller via
+/// [`WalletRead::get_transparent_receivers`]), none of which are ephemeral, so no
+/// ephemeral-linkability check is required.
+///
+/// [`WalletRead::get_transparent_receivers`]: crate::data_api::WalletRead::get_transparent_receivers
+#[allow(clippy::type_complexity)]
+fn gather_account_transparent_inputs<DbT, ChangeErrT>(
+    wallet_db: &DbT,
+    source_addrs: &[TransparentAddress],
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+) -> Result<
+    Vec<WalletTransparentOutput<()>>,
+    InputSelectorError<
+        <DbT as InputSource>::Error,
+        GreedyInputSelectorError,
+        ChangeErrT,
+        DbT::NoteRef,
+    >,
+>
+where
+    DbT: InputSource,
+{
+    let mut inputs = vec![];
+    for addr in source_addrs {
+        let utxos = wallet_db
+            .get_spendable_transparent_outputs(
+                addr,
+                target_height,
+                confirmations_policy,
+                TransparentOutputFilter::All,
+            )
+            .map_err(InputSelectorError::DataSource)?;
+        inputs.extend(utxos.into_iter().map(|utxo| utxo.redact_account_data()));
+    }
+    Ok(inputs)
+}
+
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
@@ -482,7 +588,11 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
-impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
+impl<DbT> InputSelector for GreedyInputSelector<DbT>
+where
+    DbT: WalletRead
+        + InputSource<Error = <DbT as WalletRead>::Error, AccountId = <DbT as WalletRead>::AccountId>,
+{
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
 
@@ -497,6 +607,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+        #[cfg(feature = "transparent-inputs")] spend_policy: &TransparentSpendPolicy,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
@@ -616,6 +727,36 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
             }
         }
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let transparent_inputs = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent_inputs = {
+            let transparent_addrs = match spend_policy {
+                TransparentSpendPolicy::ShieldedOnly => {
+                    // No transparent addresses required
+                    vec![]
+                }
+                TransparentSpendPolicy::AnyAccountTaddr => {
+                    // return _all_ the known, non-ephemeral transparent receivers
+                    let t_recvs = wallet_db
+                        .get_transparent_receivers(account, true, true)
+                        .map_err(InputSelectorError::DataSource)?;
+                    t_recvs.into_keys().collect()
+                }
+                TransparentSpendPolicy::FromAddresses(set) => {
+                    let mut t_recvs = vec![set.head];
+                    t_recvs.extend(set.tail.iter());
+                    t_recvs
+                }
+            };
+            gather_account_transparent_inputs(
+                wallet_db,
+                &transparent_addrs,
+                target_height,
+                confirmations_policy,
+            )?
+        };
 
         let mut shielded_inputs = ReceivedNotes::empty();
         let mut prior_available = Zatoshis::ZERO;
@@ -783,7 +924,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
-                &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
+                &transparent_inputs,
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
@@ -817,6 +958,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         tr0_balance,
                         target_height,
                         shielded_inputs,
+                        transparent_inputs,
                         transaction_request,
                         payment_pools,
                         #[cfg(feature = "transparent-inputs")]
@@ -832,6 +974,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     .map_err(InputSelectorError::Proposal);
                 }
                 Err(ChangeError::DustInputs {
+                    #[cfg(feature = "transparent-inputs")]
+                    transparent,
                     mut sapling,
                     #[cfg(feature = "orchard")]
                     mut orchard,
@@ -840,6 +984,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     exclude.append(&mut sapling);
                     #[cfg(feature = "orchard")]
                     exclude.append(&mut orchard);
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        let dust: BTreeSet<OutPoint> = transparent.into_iter().collect();
+                        transparent_inputs.retain(|i| !dust.contains(i.outpoint()));
+                    }
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
@@ -1122,6 +1271,7 @@ where
         tr0_balance,
         target_height,
         shielded_inputs,
+        vec![],
         transaction_request,
         payment_pools,
         #[cfg(feature = "transparent-inputs")]
@@ -1146,11 +1296,13 @@ struct EphemeralStepConfig {
     tr1_payment_pools: BTreeMap<usize, PoolType>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     fee_rule: &FeeRuleT,
     tr0_balance: TransactionBalance,
     target_height: TargetHeight,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+    transparent_inputs: Vec<WalletTransparentOutput<()>>,
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
     #[cfg(feature = "transparent-inputs")] ephemeral_step_opt: Option<EphemeralStepConfig>,
@@ -1198,7 +1350,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             &[],
             tr0,
             payment_pools,
-            vec![],
+            transparent_inputs,
             shielded_inputs,
             vec![],
             tr0_balance,
@@ -1228,7 +1380,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     Proposal::single_step(
         transaction_request,
         payment_pools,
-        vec![],
+        transparent_inputs,
         shielded_inputs,
         tr0_balance,
         fee_rule.clone(),

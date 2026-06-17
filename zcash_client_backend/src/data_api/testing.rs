@@ -1001,6 +1001,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "transparent-inputs")]
+            &Default::default(),
             #[cfg(feature = "unstable")]
             None,
         )?;
@@ -1044,6 +1046,8 @@ where
             change_strategy,
             request,
             confirmations_policy,
+            #[cfg(feature = "transparent-inputs")]
+            &Default::default(),
             #[cfg(feature = "unstable")]
             None,
         )
