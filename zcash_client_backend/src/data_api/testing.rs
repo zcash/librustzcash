@@ -78,7 +78,7 @@ use crate::{
 use {
     super::{
         TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
-        wallet::input_selection::ShieldingSelector,
+        wallet::input_selection::{ShieldingSelector, TransparentSpendPolicy},
     },
     crate::wallet::TransparentAddressMetadata,
     ::transparent::address::TransparentAddress,
@@ -1048,6 +1048,45 @@ where
             confirmations_policy,
             #[cfg(feature = "transparent-inputs")]
             &Default::default(),
+            #[cfg(feature = "unstable")]
+            None,
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments and an explicit
+    /// [`TransparentSpendPolicy`].
+    ///
+    /// Unlike [`Self::propose_transfer`], which always uses the default
+    /// (shielded-only) spend policy, this allows tests to opt in to spending the
+    /// account's transparent UTXOs.
+    #[cfg(feature = "transparent-inputs")]
+    #[allow(clippy::type_complexity)]
+    pub fn propose_transfer_with_policy<InputsT, ChangeT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        input_selector: &InputsT,
+        change_strategy: &ChangeT,
+        request: zip321::TransactionRequest,
+        confirmations_policy: ConfirmationsPolicy,
+        spend_policy: &TransparentSpendPolicy,
+    ) -> Result<
+        Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
+    >
+    where
+        InputsT: InputSelector<InputSource = DbT>,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
+    {
+        let network = self.network().clone();
+        propose_transfer::<_, _, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            input_selector,
+            change_strategy,
+            request,
+            confirmations_policy,
+            spend_policy,
             #[cfg(feature = "unstable")]
             None,
         )

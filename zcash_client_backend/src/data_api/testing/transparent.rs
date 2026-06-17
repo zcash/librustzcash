@@ -14,6 +14,7 @@ use zcash_keys::{
 };
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
+use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
 use {
@@ -29,7 +30,7 @@ use crate::{
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            input_selection::{GreedyInputSelector, TransparentSpendPolicy},
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -1793,5 +1794,277 @@ where
         st.wallet_mut()
             .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
             .is_err()
+    );
+}
+
+/// Sets up a wallet whose account holds no shielded notes and a single spendable
+/// transparent UTXO at its default external transparent receiver, returning the test
+/// state, the account, the funding outpoint, and the UTXO value.
+///
+/// The chain is seeded with blocks containing notes that do *not* belong to the wallet,
+/// so that target/anchor heights resolve while the account remains shielded-empty. This
+/// isolates the transparent-UTXO selection path.
+#[allow(clippy::type_complexity)]
+fn setup_transparent_only_account<DSF>(
+    dsf: DSF,
+    cache: impl TestCache,
+    utxo_value: Zatoshis,
+) -> (
+    TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    TestAccount<<DSF as DataStoreFactory>::Account>,
+    OutPoint,
+)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve while
+    // the account remains without any shielded notes.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with a single transparent UTXO well above the marginal fee.
+    let txout = TxOut::new(utxo_value, taddr.script().into());
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let outpoint = OutPoint::fake();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        txout,
+        Some(height),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    (st, account, outpoint)
+}
+
+/// Builds a single-payment t->t [`TransactionRequest`] paying `amount` to a fixed
+/// external transparent recipient.
+fn t2t_request(network: &LocalNetwork, amount: Zatoshis) -> TransactionRequest {
+    let recipient = TransparentAddress::PublicKeyHash([7u8; 20]);
+    TransactionRequest::new(vec![Payment::without_memo(
+        Address::Transparent(recipient).to_zcash_address(network),
+        amount,
+    )])
+    .unwrap()
+}
+
+/// Regression test enforcing the privacy invariant: with the default
+/// [`TransparentSpendPolicy::ShieldedOnly`] policy, a transfer must NOT silently spend
+/// the account's transparent UTXOs as a fallback. An account holding only transparent
+/// funds must fail with [`InsufficientFunds`] rather than producing a t->t proposal.
+///
+/// [`InsufficientFunds`]: crate::data_api::error::Error::InsufficientFunds
+pub fn propose_t2t_shielded_only_is_insufficient<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let (mut st, account, _outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let result = st.propose_transfer_with_policy(
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &TransparentSpendPolicy::shielded_only(),
+    );
+
+    assert_matches!(
+        result,
+        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        "shielded-only policy must not spend transparent UTXOs as a fallback",
+    );
+}
+
+/// With [`TransparentSpendPolicy::AnyAccountTaddr`] (the legacy `ANY_TADDR` behavior), a
+/// transfer may spend the account's transparent UTXOs. Verifies that the funding UTXO is
+/// selected as a transparent input and that the proposal balance is consistent.
+pub fn propose_t2t_any_account_taddr<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let (mut st, account, outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, transfer_amount);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::any_account_taddr(),
+        )
+        .expect("transparent spend must succeed under AnyAccountTaddr");
+
+    // A pure t->t transfer is a single step (no ZIP-320 ephemeral roundtrip).
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+
+    assert_eq!(
+        step.transparent_inputs().len(),
+        1,
+        "expected exactly one transparent input selected from the account's UTXOs",
+    );
+    assert_eq!(step.transparent_inputs()[0].outpoint(), &outpoint);
+    assert_eq!(step.transparent_inputs()[0].txout().value(), utxo_value);
+
+    // `TransactionBalance::total()` is `change + fee`, which by the balance equation equals
+    // input total minus the explicit payment.
+    assert_eq!(
+        step.balance().total(),
+        (utxo_value - transfer_amount).unwrap(),
+    );
+    assert!(step.balance().fee_required() > Zatoshis::ZERO);
+    assert!(!step.balance().proposed_change().is_empty());
+}
+
+/// With [`TransparentSpendPolicy::FromAddresses`], only the explicitly named transparent
+/// addresses are eligible. Funds two of the account's external receivers but names only
+/// one; the proposal must select solely from the named address.
+pub fn propose_t2t_from_addresses<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    // Seed the chain with notes that do not belong to us so heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Enumerate two distinct external transparent receivers belonging to the account.
+    let external_taddrs = st
+        .wallet()
+        .get_transparent_receivers(account.id(), false, true)
+        .unwrap();
+    let mut taddrs_by_index = external_taddrs
+        .into_iter()
+        .filter_map(|(addr, meta)| meta.address_index().map(|i| (i, addr)))
+        .collect::<BTreeMap<_, _>>()
+        .into_values();
+    let addr_named = taddrs_by_index.next().expect("at least one external taddr");
+    let addr_other = taddrs_by_index
+        .next()
+        .expect("at least two external taddrs");
+
+    // Fund both receivers with a spendable UTXO each.
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let named_outpoint = OutPoint::new([1u8; 32], 0);
+    let other_outpoint = OutPoint::new([2u8; 32], 0);
+    for (addr, outpoint) in [
+        (addr_named, named_outpoint.clone()),
+        (addr_other, other_outpoint.clone()),
+    ] {
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint,
+            TxOut::new(utxo_value, addr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let network = *st.network();
+    let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::from_one_transparent_address(addr_named),
+        )
+        .expect("transparent spend from named address must succeed");
+
+    let step = &proposal.steps().head;
+    let selected: Vec<&OutPoint> = step
+        .transparent_inputs()
+        .iter()
+        .map(|i| i.outpoint())
+        .collect();
+    assert!(
+        selected.contains(&&named_outpoint),
+        "the named address's UTXO must be selected",
+    );
+    assert!(
+        !selected.contains(&&other_outpoint),
+        "an unnamed address's UTXO must not be selected",
     );
 }

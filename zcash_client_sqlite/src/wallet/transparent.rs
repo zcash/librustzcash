@@ -2656,6 +2656,30 @@ mod tests {
     }
 
     #[test]
+    fn propose_t2t_shielded_only_is_insufficient() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_shielded_only_is_insufficient(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_any_account_taddr() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_any_account_taddr(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_from_addresses() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_from_addresses(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),

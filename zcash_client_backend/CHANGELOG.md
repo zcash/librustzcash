@@ -16,6 +16,21 @@ workspace.
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
+- `zcash_client_backend::data_api::wallet::input_selection::TransparentSpendPolicy`
+  (behind the `transparent-inputs` feature flag): expresses a wallet's explicit,
+  privacy-acknowledging intent to spend transparent UTXOs in a transfer. Variants
+  are `ShieldedOnly` (the default; no transparent spends), `AnyAccountTaddr`
+  (the legacy `ANY_TADDR` behavior, spending from arbitrary account transparent
+  receivers and potentially linking them), and `FromAddresses` (spending only
+  from an explicitly named set of transparent addresses).
+- A new `spend-index` feature flag, for consumers whose chain-data source can
+  resolve the spend of an individual transparent output (e.g. a full node with a
+  spent-outpoint index). It gates:
+  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
+    a per-outpoint request to detect the spend of a specific transparent output.
+  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
+    which records that a transparent outpoint was confirmed unspent as of a given
+    height.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
   a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable
@@ -132,6 +147,13 @@ workspace.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+  now take an additional `&TransparentSpendPolicy` argument (behind the
+  `transparent-inputs` feature flag) that controls whether and how the
+  account's transparent UTXOs may be spent. The default policy preserves the
+  previous shielded-only behavior; transparent UTXOs are never spent unless the
+  caller explicitly opts in.
 - `zcash_client_backend::TransferType::WalletInternal` semantics have
   narrowed: it now specifically indicates a cross-account internal transfer
   (recipient and funder are distinct wallet accounts). Code that previously
