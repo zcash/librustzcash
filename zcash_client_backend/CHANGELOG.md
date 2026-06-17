@@ -11,6 +11,13 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::data_api::wallet::input_selection::TransparentSpendPolicy`
+  (behind the `transparent-inputs` feature flag): expresses a wallet's explicit,
+  privacy-acknowledging intent to spend transparent UTXOs in a transfer. Variants
+  are `ShieldedOnly` (the default; no transparent spends), `AnyAccountTaddr`
+  (the legacy `ANY_TADDR` behavior, spending from arbitrary account transparent
+  receivers and potentially linking them), and `FromAddresses` (spending only
+  from an explicitly named set of transparent addresses).
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
@@ -96,6 +103,13 @@ workspace.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+  now take an additional `&TransparentSpendPolicy` argument (behind the
+  `transparent-inputs` feature flag) that controls whether and how the
+  account's transparent UTXOs may be spent. The default policy preserves the
+  previous shielded-only behavior; transparent UTXOs are never spent unless the
+  caller explicitly opts in.
 - `zcash_client_backend::TransferType::WalletInternal` semantics have
   narrowed: it now specifically indicates a cross-account internal transfer
   (recipient and funder are distinct wallet accounts). Code that previously
