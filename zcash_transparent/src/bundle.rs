@@ -23,13 +23,13 @@ use crate::{
     sighash::TransparentAuthorizingContext,
 };
 
-pub trait Authorization: Debug {
+pub trait Authorization: Debug + Clone {
     type ScriptSig: Debug + Clone + PartialEq;
 }
 
 /// Marker type for a bundle that contains no authorizing data, and the necessary input
 /// information for creating sighashes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EffectsOnly {
     pub(crate) inputs: Vec<TxOut>,
 }

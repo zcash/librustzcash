@@ -102,7 +102,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
 
 /// Authorizing data for a transparent bundle in a transaction that is just missing
 /// binding signatures.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Unbound(EffectsOnly);
 
 impl Authorization for Unbound {

@@ -389,11 +389,7 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            Zatoshis::ZERO,
+            zcash_primitives::transaction::zip248::ValuePoolDeltas::empty(),
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
                 vout: vec![TxOut::new(

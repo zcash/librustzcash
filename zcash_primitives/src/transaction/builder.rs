@@ -17,6 +17,8 @@ use zcash_protocol::{
 };
 use zcash_script::opcode::PushValue;
 
+#[cfg(feature = "circuits")]
+use crate::transaction::zip248;
 use crate::transaction::{
     Transaction, TxVersion,
     fees::{
@@ -343,10 +345,7 @@ pub struct Builder<'a, P, U> {
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     zip233_amount: Zatoshis,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
@@ -504,10 +503,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config,
             target_height,
             expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
@@ -538,10 +534,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: self.zip233_amount,
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
@@ -691,10 +684,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             -ZatBalance::from(self.zip233_amount),
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
@@ -800,10 +790,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
             .map_err(FeeError::FeeRule)
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
@@ -1083,32 +1070,44 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         #[cfg(zcash_unstable = "zfuture")]
         let (tze_bundle, tze_signers) = build_future(self.tze_builder);
 
-        let unauthed_tx: TransactionData<A> = TransactionData {
-            version: self.tx_version,
-            consensus_branch_id: self.consensus_branch_id,
-            lock_time: 0,
-            expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle,
-            // We don't support constructing Sprout bundles.
-            //
-            // # Consensus
-            //
-            // > A coinbase transaction MUST NOT have any JoinSplit descriptions.
-            //
-            // > A coinbase transaction MUST NOT have any Spend descriptions.
-            //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle,
-        };
+        // Build value pool deltas from bundle value_balances + fee + zip233.
+        let mut vp_deltas = zip248::ValuePoolDeltas::empty();
+        if let Some(ref sb) = sapling_bundle {
+            vp_deltas.set_sapling(*sb.value_balance());
+        }
+        if let Some(ref ob) = orchard_bundle {
+            vp_deltas.set_orchard(*ob.value_balance());
+        }
+        if let Some(fee) = fee {
+            vp_deltas.set_fee(fee);
+        }
+        #[cfg(all(zcash_v6, feature = "zip-233"))]
+        vp_deltas.set_zip233(self.zip233_amount);
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        // We don't support constructing Sprout bundles.
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
+        #[cfg(zcash_unstable = "zfuture")]
+        if let Some(b) = tze_bundle {
+            bundles.insert_tze(b);
+        }
+
+        let unauthed_tx: TransactionData<A> = TransactionData::from_parts_v6(
+            self.tx_version,
+            self.consensus_branch_id,
+            0,
+            self.expiry_height,
+            vp_deltas,
+            bundles,
+        );
 
         //
         // Signatures -- everything but the signatures must already have been added.
@@ -1116,16 +1115,14 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         let txid_parts = unauthed_tx.digest(TxIdDigester);
 
         let transparent_bundle = unauthed_tx
-            .transparent_bundle
-            .as_ref()
+            .transparent_bundle()
             .map(|b| authorize_transparent(b, &unauthed_tx, &txid_parts))
             .transpose()
             .map_err(Error::TransparentBuild)?;
 
         #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = unauthed_tx
-            .tze_bundle
-            .as_ref()
+            .tze_bundle()
             .map(|b| authorize_future(b, &unauthed_tx, tze_signers))
             .transpose()
             .map_err(Error::TzeBuild)?;
@@ -1141,13 +1138,15 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .map(|extsk| extsk.expsk.ask.clone())
             .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
-            .sapling_bundle
+            .sapling_bundle()
+            .cloned()
             .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
             .map_err(Error::SaplingBuild)?;
 
         let orchard_bundle = unauthed_tx
-            .orchard_bundle
+            .orchard_bundle()
+            .cloned()
             .map(|b| {
                 b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
                     .and_then(|b| {
@@ -1161,23 +1160,32 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .transpose()
             .map_err(Error::OrchardBuild)?;
 
-        let authorized_tx = TransactionData {
-            version: unauthed_tx.version,
-            consensus_branch_id: unauthed_tx.consensus_branch_id,
-            lock_time: unauthed_tx.lock_time,
-            expiry_height: unauthed_tx.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: unauthed_tx.zip233_amount,
+        #[cfg(not(zcash_unstable = "zfuture"))]
+        let authorized_tx = TransactionData::from_parts(
+            unauthed_tx.version(),
+            unauthed_tx.consensus_branch_id(),
+            unauthed_tx.lock_time(),
+            unauthed_tx.expiry_height(),
+            unauthed_tx.value_pool_deltas().clone(),
             transparent_bundle,
-            sprout_bundle: unauthed_tx.sprout_bundle,
+            None, // sprout
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
+        );
+
+        #[cfg(zcash_unstable = "zfuture")]
+        let authorized_tx = TransactionData::from_parts_zfuture(
+            unauthed_tx.version(),
+            unauthed_tx.consensus_branch_id(),
+            unauthed_tx.lock_time(),
+            unauthed_tx.expiry_height(),
+            unauthed_tx.value_pool_deltas().clone(),
+            transparent_bundle,
+            None, // sprout
+            sapling_bundle,
+            orchard_bundle,
             tze_bundle,
-        };
+        );
 
         // The unwrap() here is safe because the txid hashing
         // of freeze() should be infalliable.
@@ -1427,10 +1435,7 @@ mod tests {
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_v6, feature = "zip-233"))]
             zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
@@ -1474,7 +1479,7 @@ mod tests {
             .mock_build(&transparent_signing_set, &[], &[], OsRng)
             .unwrap();
         // No binding signature, because only t input and outputs
-        assert!(res.transaction().sapling_bundle.is_none());
+        assert!(res.transaction().sapling_bundle().is_none());
     }
 
     #[test]

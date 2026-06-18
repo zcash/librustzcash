@@ -5,15 +5,20 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 pub mod sighash_v6;
 
 pub mod txid;
+pub mod zip248;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+#[cfg(zcash_v6)]
+use alloc::collections::BTreeMap;
+#[cfg(zcash_v6)]
+use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -45,7 +50,7 @@ use zcash_protocol::constants::{
     V5_VERSION_GROUP_ID,
 };
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(zcash_v6)]
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -82,7 +87,7 @@ pub enum TxVersion {
     /// and [ZIP 225](https://zips.z.cash/zip-0225).
     V5,
     /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(zcash_v6)]
     V6,
     /// This version is used exclusively for in-development transaction
     /// serialization, and will never be active under the consensus rules.
@@ -104,7 +109,7 @@ impl TxVersion {
                 (V3_TX_VERSION, V3_VERSION_GROUP_ID) => Ok(TxVersion::V3),
                 (V4_TX_VERSION, V4_VERSION_GROUP_ID) => Ok(TxVersion::V4),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(zcash_v6)]
                 (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
@@ -136,7 +141,7 @@ impl TxVersion {
                 TxVersion::V3 => V3_TX_VERSION,
                 TxVersion::V4 => V4_TX_VERSION,
                 TxVersion::V5 => V5_TX_VERSION,
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(zcash_v6)]
                 TxVersion::V6 => V6_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
@@ -149,7 +154,7 @@ impl TxVersion {
             TxVersion::V3 => V3_VERSION_GROUP_ID,
             TxVersion::V4 => V4_VERSION_GROUP_ID,
             TxVersion::V5 => V5_VERSION_GROUP_ID,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => V6_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
@@ -170,7 +175,7 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::V3 | TxVersion::V4 => true,
             TxVersion::V5 => false,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => false,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
@@ -187,7 +192,7 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::V3 => false,
             TxVersion::V4 => true,
             TxVersion::V5 => true,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
@@ -199,21 +204,18 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
             TxVersion::V5 => true,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn has_zip233(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
@@ -269,16 +271,23 @@ impl TxVersion {
                 #[cfg(zcash_unstable = "zfuture")]
                 ZFuture => true,
             },
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 | Nu6_2 => false,
+                #[cfg(zcash_unstable = "nu7")]
                 Nu7 => true, // ZIP 230 or ZIP 248, whichever is chosen for activation
+                // A v6 transaction is also valid under any speculative future
+                // upgrade that builds on top of NU7.
+                #[cfg(zcash_unstable = "zfuture")]
+                ZFuture => true,
             },
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => match consensus_branch_id {
                 Sprout | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5 | Nu6
                 | Nu6_1 | Nu6_2 => false,
+                #[cfg(zcash_unstable = "nu7")]
+                Nu7 => true,
                 ZFuture => true,
             },
         }
@@ -364,23 +373,18 @@ impl PartialEq for Transaction {
 }
 
 /// The information contained in a Zcash transaction.
+///
+/// The internal structure reflects [ZIP 248](https://zips.z.cash/zip-0248):
+/// - `value_pool_deltas`: Per-bundle value contributions to the transparent transaction value pool.
+/// - `bundles`: An ordered map of protocol bundles keyed by `(bundleType, bundleVariant)`.
 #[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    zip233_amount: Zatoshis,
-    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-    sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
-    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-    #[cfg(zcash_unstable = "zfuture")]
-    tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+    value_pool_deltas: zip248::ValuePoolDeltas,
+    bundles: zip248::BundleMap<A>,
 }
 
 impl Clone for TransactionData<Authorized> {
@@ -390,17 +394,8 @@ impl Clone for TransactionData<Authorized> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: self.transparent_bundle.clone(),
-            sprout_bundle: self.sprout_bundle.clone(),
-            sapling_bundle: self.sapling_bundle.clone(),
-            orchard_bundle: self.orchard_bundle.clone(),
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: self.tze_bundle.clone(),
+            value_pool_deltas: self.value_pool_deltas.clone(),
+            bundles: self.bundles.clone()
         }
     }
 }
@@ -418,6 +413,38 @@ impl Clone for Transaction {
 }
 
 impl<A: Authorization> TransactionData<A> {
+    /// Derives VP deltas from shielded bundle value balances and builds a
+    /// [`BundleMap`](zip248::BundleMap) from individual bundle options.
+    fn build_bundle_map(
+        value_pool_deltas: &mut zip248::ValuePoolDeltas,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sprout_bundle: Option<sprout::Bundle>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
+    ) -> zip248::BundleMap<A> {
+        if let Some(ref b) = sapling_bundle {
+            value_pool_deltas.set_sapling(*b.value_balance());
+        }
+        if let Some(ref b) = orchard_bundle {
+            value_pool_deltas.set_orchard(*b.value_balance());
+        }
+
+        let mut bundles = zip248::BundleMap::new();
+        if let Some(b) = transparent_bundle {
+            bundles.insert_transparent(b);
+        }
+        if let Some(b) = sprout_bundle {
+            bundles.insert_sprout(b);
+        }
+        if let Some(b) = sapling_bundle {
+            bundles.insert_sapling(b);
+        }
+        if let Some(b) = orchard_bundle {
+            bundles.insert_orchard(b);
+        }
+        bundles
+    }
+
     /// Constructs a `TransactionData` from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -425,33 +452,27 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        zip233_amount: Zatoshis,
+        mut value_pool_deltas: zip248::ValuePoolDeltas,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self {
-        TransactionData {
-            version,
-            consensus_branch_id,
-            lock_time,
-            expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount,
+        let bundles = Self::build_bundle_map(
+            &mut value_pool_deltas,
             transparent_bundle,
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: None,
-        }
+        );
+        Self::from_parts_v6(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            value_pool_deltas,
+            bundles,
+        )
     }
 
     /// Constructs a `TransactionData` from its constituent parts, including speculative
@@ -463,25 +484,50 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(feature = "zip-233")] zip233_amount: Zatoshis,
+        mut value_pool_deltas: zip248::ValuePoolDeltas,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
+        let mut bundles = Self::build_bundle_map(
+            &mut value_pool_deltas,
+            transparent_bundle,
+            sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
+        );
+        if let Some(b) = tze_bundle {
+            bundles.insert_tze(b);
+        }
+        Self::from_parts_v6(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            value_pool_deltas,
+            bundles,
+        )
+    }
+
+    /// Constructs a `TransactionData` directly from a [`BundleMap`](zip248::BundleMap)
+    /// and [`ValuePoolDeltas`](zip248::ValuePoolDeltas).
+    pub fn from_parts_v6(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        value_pool_deltas: zip248::ValuePoolDeltas,
+        bundles: zip248::BundleMap<A>,
+    ) -> Self {
         TransactionData {
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
-            zip233_amount,
-            transparent_bundle,
-            sprout_bundle,
-            sapling_bundle,
-            orchard_bundle,
-            tze_bundle,
+            value_pool_deltas,
+            bundles,
         }
     }
 
@@ -504,32 +550,47 @@ impl<A: Authorization> TransactionData<A> {
     }
 
     pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
-        self.transparent_bundle.as_ref()
+        self.bundles.transparent()
     }
 
     pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
-        self.sprout_bundle.as_ref()
+        self.bundles.sprout()
     }
 
     pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>> {
-        self.sapling_bundle.as_ref()
+        self.bundles.sapling()
     }
 
     pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
-        self.orchard_bundle.as_ref()
+        self.bundles.orchard()
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    /// Returns the ZIP 248 value pool deltas.
+    pub fn value_pool_deltas(&self) -> &zip248::ValuePoolDeltas {
+        &self.value_pool_deltas
+    }
+
+    /// Returns the ZIP 248 bundle map.
+    pub fn bundles(&self) -> &zip248::BundleMap<A> {
+        &self.bundles
+    }
+
+    /// Returns the ZIP 233 NSM amount, defaulting to zero if absent.
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     pub fn zip233_amount(&self) -> Zatoshis {
-        self.zip233_amount
+        self.value_pool_deltas
+            .zip233_amount()
+            .unwrap_or(Zatoshis::ZERO)
+    }
+
+    /// Returns the fee amount, if explicitly set (v6+).
+    pub fn fee_amount(&self) -> Option<Zatoshis> {
+        self.value_pool_deltas.fee()
     }
 
     #[cfg(zcash_unstable = "zfuture")]
     pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
-        self.tze_bundle.as_ref()
+        self.bundles.tze()
     }
 
     /// Returns the total fees paid by the transaction, given a function that can be used to
@@ -540,7 +601,7 @@ impl<A: Authorization> TransactionData<A> {
         E: From<BalanceError>,
         F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
     {
-        let transparent_balance = self.transparent_bundle.as_ref().map_or_else(
+        let transparent_balance = self.bundles.transparent().map_or_else(
             || Ok(Some(ZatBalance::zero())),
             |b| b.value_balance(get_prevout),
         )?;
@@ -549,21 +610,18 @@ impl<A: Authorization> TransactionData<A> {
             .map(|transparent_balance| {
                 let value_balances = [
                     transparent_balance,
-                    self.sprout_bundle.as_ref().map_or_else(
+                    self.bundles.sprout().map_or_else(
                         || Ok(ZatBalance::zero()),
                         |b| b.value_balance().ok_or(BalanceError::Overflow),
                     )?,
-                    self.sapling_bundle
-                        .as_ref()
+                    self.bundles
+                        .sapling()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    self.orchard_bundle
-                        .as_ref()
+                    self.bundles
+                        .orchard()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(all(
-                        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                        feature = "zip-233"
-                    ))]
-                    -ZatBalance::from(self.zip233_amount),
+                    #[cfg(all(zcash_v6, feature = "zip-233"))]
+                    -ZatBalance::from(self.zip233_amount()),
                 ];
 
                 let overall_balance = value_balances
@@ -584,18 +642,83 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
-                #[cfg(all(
-                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                    feature = "zip-233"
-                ))]
-                &self.zip233_amount,
+                #[cfg(all(zcash_v6, feature = "zip-233"))]
+                &self.zip233_amount(),
             ),
-            digester.digest_transparent(self.transparent_bundle.as_ref()),
-            digester.digest_sapling(self.sapling_bundle.as_ref()),
-            digester.digest_orchard(self.orchard_bundle.as_ref()),
+            digester.digest_transparent(self.bundles.transparent()),
+            digester.digest_sapling(self.bundles.sapling()),
+            digester.digest_orchard(self.bundles.orchard()),
             #[cfg(zcash_unstable = "zfuture")]
-            digester.digest_tze(self.tze_bundle.as_ref()),
+            digester.digest_tze(self.bundles.tze()),
         )
+    }
+
+    /// Produces v6 transaction digests per
+    /// [ZIP 248 §TxId Digest](https://zips.z.cash/zip-0248#txid-digest).
+    ///
+    /// The txid is a Merkle tree over five leaf categories:
+    ///   1. `header_digest` -- version, branch ID, lock_time, expiry
+    ///   2. `transparent_digests` -- prevouts, sequences, outputs (v5-style
+    ///      sub-tree, reused from ZIP 244)
+    ///   3. `sapling_digest` -- sapling effects only (auth is separate)
+    ///   4. `orchard_digest` -- orchard effects only
+    ///   5. `value_pool_deltas_digest` -- the full VP deltas map
+    ///
+    /// The tree is assembled in `txid::to_txid` which hashes these leaves
+    /// together with a branch-ID-tagged personalization to produce the final
+    /// 32-byte txid.
+    ///
+    /// Unknown-bundle digests are supplied as-is; they were stored at parse
+    /// time (or injected by the caller) and are folded into the tree alongside
+    /// known-protocol digests.
+    #[cfg(zcash_v6)]
+    pub fn digest_v6(&self) -> TxDigests<blake2b_simd::Hash> {
+        use txid::{
+            TxIdDigester, hash_v6_header, hash_v6_orchard_effects, hash_v6_sapling_effects,
+            hash_v6_value_pool_deltas,
+        };
+
+        let digester = TxIdDigester;
+
+        // Unknown-bundle digests (flat hashes of opaque vBundleData bytes).
+        let mut unknown_effect_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
+        let mut unknown_auth_digests: Vec<((u64, u64), blake2b_simd::Hash)> = Vec::new();
+        for (id, ub) in self.bundles.unknown_bundles() {
+            unknown_effect_digests.push((*id, ub.effect_digest));
+            if let Some(digest) = ub.auth_digest {
+                unknown_auth_digests.push((*id, digest));
+            }
+        }
+
+        TxDigests {
+            // Leaf 1: header fields (no auth data involved).
+            header_digest: hash_v6_header(
+                self.version,
+                self.consensus_branch_id,
+                self.lock_time,
+                self.expiry_height,
+            ),
+            // Leaf 2: transparent effect digests (prevouts, sequences, outputs).
+            // Reuses the v5/ZIP 244 sub-tree structure.
+            transparent_digests: <TxIdDigester as TransactionDigest<A>>::digest_transparent(
+                &digester,
+                self.bundles.transparent(),
+            ),
+            // Leaf 3: sapling effects only (spends, outputs, value balance).
+            sapling_digest: self.bundles.sapling().map(hash_v6_sapling_effects),
+            // Leaf 4: orchard effects only (actions, flags, value balance, anchor).
+            orchard_digest: self.bundles.orchard().map(hash_v6_orchard_effects),
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_digests: <TxIdDigester as TransactionDigest<A>>::digest_tze(
+                &digester,
+                self.bundles.tze(),
+            ),
+            // Leaf 5: the serialized VP deltas map.
+            value_pool_deltas_digest: Some(hash_v6_value_pool_deltas(&self.value_pool_deltas)),
+            // Unknown-bundle digests are folded in alongside the known leaves.
+            unknown_effect_digests,
+            unknown_auth_digests,
+        }
     }
 
     /// Changes the consensus branch ID stored in this transaction for pre-v5 transactions.
@@ -639,17 +762,14 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: f_transparent(self.transparent_bundle),
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle),
-            orchard_bundle: f_orchard(self.orchard_bundle),
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: f_tze(self.tze_bundle),
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self.bundles.map_authorization(
+                f_transparent,
+                f_sapling,
+                f_orchard,
+                #[cfg(zcash_unstable = "zfuture")]
+                f_tze,
+            ),
         }
     }
 
@@ -683,17 +803,14 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: f_transparent(self.transparent_bundle)?,
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: f_sapling(self.sapling_bundle)?,
-            orchard_bundle: f_orchard(self.orchard_bundle)?,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: f_tze(self.tze_bundle)?,
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self.bundles.try_map_authorization(
+                f_transparent,
+                f_sapling,
+                f_orchard,
+                #[cfg(zcash_unstable = "zfuture")]
+                f_tze,
+            )?,
         })
     }
 
@@ -709,41 +826,40 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount: self.zip233_amount,
-            transparent_bundle: self
-                .transparent_bundle
-                .map(|b| b.map_authorization(f_transparent)),
-            sprout_bundle: self.sprout_bundle,
-            sapling_bundle: self.sapling_bundle.map(|b| {
-                b.map_authorization(
-                    &mut f_sapling,
-                    |f, p| f.map_spend_proof(p),
-                    |f, p| f.map_output_proof(p),
-                    |f, s| f.map_auth_sig(s),
-                    |f, a| f.map_authorization(a),
-                )
-            }),
-            orchard_bundle: self.orchard_bundle.map(|b| {
-                b.map_authorization(
-                    &mut f_orchard,
-                    |f, _, s| f.map_spend_auth(s),
-                    |f, a| f.map_authorization(a),
-                )
-            }),
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
+            value_pool_deltas: self.value_pool_deltas,
+            bundles: self.bundles.map_authorization(
+                |tb| tb.map(|b| b.map_authorization(f_transparent)),
+                |sb| {
+                    sb.map(|b| {
+                        b.map_authorization(
+                            &mut f_sapling,
+                            |f, p| f.map_spend_proof(p),
+                            |f, p| f.map_output_proof(p),
+                            |f, s| f.map_auth_sig(s),
+                            |f, a| f.map_authorization(a),
+                        )
+                    })
+                },
+                |ob| {
+                    ob.map(|b| {
+                        b.map_authorization(
+                            &mut f_orchard,
+                            |f, _, s| f.map_spend_auth(s),
+                            |f, a| f.map_authorization(a),
+                        )
+                    })
+                },
+                #[cfg(zcash_unstable = "zfuture")]
+                |tb| tb.map(|b| b.map_authorization(f_tze)),
+            ),
         }
     }
 }
 
 impl<A: Authorization> TransactionData<A> {
     pub fn sapling_value_balance(&self) -> ZatBalance {
-        self.sapling_bundle
-            .as_ref()
+        self.bundles
+            .sapling()
             .map_or(ZatBalance::zero(), |b| *b.value_balance())
     }
 }
@@ -754,13 +870,11 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+#[cfg(zcash_v6)]
 struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(feature = "zip-233")]
-    zip233_amount: Zatoshis,
 }
 
 impl Transaction {
@@ -768,7 +882,7 @@ impl Transaction {
         match data.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
             TxVersion::V5 => Ok(Self::from_data_v5(data)),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => Ok(Self::from_data_v6(data)),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v6(data)),
@@ -796,13 +910,9 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    #[cfg(zcash_v6)]
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
-        let txid = to_txid(
-            data.version,
-            data.consensus_branch_id,
-            &data.digest(TxIdDigester),
-        );
+        let txid = to_txid(data.version, data.consensus_branch_id, &data.digest_v6());
 
         Transaction { txid, data }
     }
@@ -824,7 +934,7 @@ impl Transaction {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
@@ -884,33 +994,121 @@ impl Transaction {
         let hash_bytes = reader.into_hash();
         txid.copy_from_slice(&hash_bytes);
 
+        let sapling_bundle = binding_sig.and_then(|binding_sig| {
+            sapling::Bundle::from_parts(
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                sapling::bundle::Authorized { binding_sig },
+            )
+        });
+
         Ok(Transaction {
             txid: TxId::from_bytes(txid),
-            data: TransactionData {
+            data: TransactionData::from_parts(
                 version,
                 consensus_branch_id,
                 lock_time,
                 expiry_height,
-                #[cfg(all(
-                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                    feature = "zip-233"
-                ))]
-                zip233_amount: Zatoshis::ZERO,
+                zip248::ValuePoolDeltas::empty(),
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.and_then(|binding_sig| {
-                    sapling::Bundle::from_parts(
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        sapling::bundle::Authorized { binding_sig },
-                    )
-                }),
-                orchard_bundle: None,
-                #[cfg(zcash_unstable = "zfuture")]
-                tze_bundle: None,
-            },
+                sapling_bundle,
+                None,
+            ),
         })
+    }
+
+    /// Reads a v6 transparent bundle from its `mEffectBundles[0]` and
+    /// `mAuthBundles[0]` byte payloads.
+    ///
+    /// [ZIP 248 §Transparent Bundle](https://zips.z.cash/zip-0248#transparent-bundle)
+    ///
+    /// The v6 format splits transparent data into two halves:
+    ///   - **Effect data** (commits to the txid): prevouts, sequences, and
+    ///     outputs -- everything that determines *what* the transaction does.
+    ///   - **Auth data** (excluded from txid): per-input `scriptSig` and
+    ///     sighash info -- the witness proving the spender is authorized.
+    ///
+    /// This split allows the txid to be stable before signatures are added,
+    /// which is required for multi-party signing workflows and PCZT.
+    ///
+    /// The effect-auth split mirrors the v5 digest structure but at the
+    /// serialization level: v5 interleaves effect and auth per-input, while
+    /// v6 groups all effects together and all auth together as separate TLV
+    /// payloads keyed by `(bundleType=0, bundleVariant=1)`.
+    #[cfg(zcash_v6)]
+    fn read_v6_transparent_bundle(
+        effects: &[u8],
+        auth: Option<&[u8]>,
+    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
+        use ::transparent::address::Script;
+
+        // Effect data layout: nIn || (prevout, sequence)[nIn] || nOut || txout[nOut]
+        let mut effects_reader = effects;
+        let n_in = CompactSize::read_t::<_, usize>(&mut effects_reader)?;
+        let mut prevouts_and_sequences: Vec<(OutPoint, u32)> = Vec::with_capacity(n_in);
+        for _ in 0..n_in {
+            let prevout = OutPoint::read(&mut effects_reader)?;
+            let mut seq_bytes = [0u8; 4];
+            effects_reader.read_exact(&mut seq_bytes)?;
+            prevouts_and_sequences.push((prevout, u32::from_le_bytes(seq_bytes)));
+        }
+        let vout = Vector::read(&mut effects_reader, TxOut::read)?;
+        if !effects_reader.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "trailing bytes in v6 transparent effecting data",
+            ));
+        }
+
+        if n_in == 0 && vout.is_empty() {
+            if auth.is_some_and(|a| !a.is_empty()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "v6 transparent auth bundle present for an empty effecting bundle",
+                ));
+            }
+            return Ok(None);
+        }
+
+        let auth_bytes = if n_in == 0 {
+            // No inputs ⇒ no authorizing data, but the auth bundle entry may
+            // legally be omitted entirely or present-and-empty. We accept both.
+            auth.unwrap_or(&[])
+        } else {
+            auth.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "v6 transparent effecting bundle has inputs but no auth bundle",
+                )
+            })?
+        };
+        let mut auth_reader = auth_bytes;
+
+        // Auth data layout: for each input, sighashInfo || scriptSig.
+        // We zip auth data back together with the prevouts read from effects.
+        let mut vin: Vec<TxIn<transparent::Authorized>> = Vec::with_capacity(n_in);
+        for (prevout, sequence) in prevouts_and_sequences {
+            // TransparentSighashInfo: compactSize-prefixed bytes; sighash
+            // version 0 has empty associatedData, so the wire form is
+            // [0x01, 0x00].
+            zip248::consume_v6_sighash_v0_info(&mut auth_reader, "transparent input")?;
+            let script_sig = Script::read(&mut auth_reader)?;
+            vin.push(TxIn::from_parts(prevout, script_sig, sequence));
+        }
+        if !auth_reader.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "trailing bytes in v6 transparent authorizing data",
+            ));
+        }
+
+        Ok(Some(transparent::Bundle {
+            vin,
+            vout,
+            authorization: transparent::Authorized,
+        }))
     }
 
     fn read_transparent<R: Read>(
@@ -940,12 +1138,6 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        let zip233_amount = Zatoshis::ZERO;
-
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(
@@ -968,58 +1160,314 @@ impl Transaction {
             },
         )?;
 
+        let data = TransactionData::from_parts(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            zip248::ValuePoolDeltas::empty(),
+            transparent_bundle,
+            None,
+            sapling_bundle,
+            orchard_bundle,
+        );
+
+        Ok(Self::from_data_v5(data))
+    }
+
+    /// Deserializes a v6 transaction from the wire format defined in
+    /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format).
+    ///
+    /// The wire layout has four sections:
+    ///   1. **Header** -- version, versionGroupId, consensusBranchId,
+    ///      lock_time, expiryHeight (5 x u32).
+    ///   2. **Value pool deltas** (`mValuePoolDeltas`) -- per-bundle balance
+    ///      contributions, ordered by `(bundleType, assetClass, assetUuid)`.
+    ///   3. **Effect bundles** (`mEffectBundles`) -- per-protocol effect data,
+    ///      ordered by `bundleType`. These commit to the txid.
+    ///   4. **Auth bundles** (`mAuthBundles`) -- per-protocol witness/auth
+    ///      data, ordered by `bundleType`. These are excluded from the txid
+    ///      but commit to the auth digest.
+    #[cfg(zcash_v6)]
+    fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
+        // --- Section 1: Header (5 x u32) ---
+        let V6HeaderFragment {
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+        } = Self::read_v6_header_fragment(&mut reader)?;
+
+        // --- Section 2: Value pool deltas map (`mValuePoolDeltas`) ---
+        // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
+        //
+        // Each entry is (bundleType, assetClass, assetUuid, bundleVariant, value).
+        // Ordering is enforced on raw `(bundleType, assetClass, assetUuid)`
+        // tuples rather than typed keys because the wire may contain
+        // unrecognized bundle types that cannot be parsed into `BundleType`
+        // variants -- we must still reject misordered entries for those.
+        // Using raw u64/u8/[u8;64] avoids a TryFrom roundtrip that would
+        // fail for future bundle types this code does not yet know about.
+        let n_vp_deltas = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut vp = zip248::ValuePoolDeltas::empty();
+        // Track ordering with raw wire-level tuples so unrecognized bundle
+        // types are still subject to the canonical-order check.
+        let mut last_vp_raw: Option<(u64, u8, [u8; 64])> = None;
+        let mut vp_variants_by_type: BTreeMap<u64, u64> = BTreeMap::new();
+        for _ in 0..n_vp_deltas {
+            let entry = zip248::ValuePoolDeltaEntry::read(&mut reader)?;
+            let raw_key = (
+                entry.bundle_type,
+                entry.asset_class,
+                entry.asset_uuid.unwrap_or([0u8; 64]),
+            );
+            if let Some(prev) = &last_vp_raw {
+                if &raw_key <= prev {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mValuePoolDeltas is not in strictly increasing \
+                         (bundleType, assetClass, assetUuid) order",
+                    ));
+                }
+            }
+            last_vp_raw = Some(raw_key);
+            // ZIP 248 requires all entries sharing a bundleType to encode
+            // the same bundleVariant. This prevents e.g. a Sapling-v1 delta
+            // coexisting with a Sapling-v2 delta in the same transaction.
+            match vp_variants_by_type.get(&entry.bundle_type) {
+                Some(&existing) if existing != entry.bundle_variant => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mValuePoolDeltas has multiple bundleVariants for the same bundleType",
+                    ));
+                }
+                _ => {
+                    vp_variants_by_type.insert(entry.bundle_type, entry.bundle_variant);
+                }
+            }
+            // Route to known or unknown storage based on whether the
+            // bundle type is recognized.
+            if let (Some(bt), Some(bv)) = (
+                zip248::BundleType::from_u64(entry.bundle_type),
+                zip248::BundleVariant::from_u64(entry.bundle_variant),
+            ) {
+                let key = zip248::ValuePoolDeltaKey {
+                    bundle_type: bt,
+                    asset_class: entry.asset_class,
+                    asset_uuid: entry.asset_uuid.unwrap_or([0u8; 64]),
+                };
+                vp.insert_known(key, bv, entry.value);
+            } else {
+                vp.insert_unknown(
+                    entry.bundle_type,
+                    entry.asset_class,
+                    entry.asset_uuid.unwrap_or([0u8; 64]),
+                    entry.bundle_variant,
+                    entry.value,
+                );
+            }
+        }
+
+        // --- Section 3: Effect bundles map (`mEffectBundles`) ---
+        // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
+        // Each entry is a TLV: (bundleType, bundleVariant, compactSize-length, data).
+        // Keyed by raw u64 bundleType since the wire may contain
+        // unrecognized types that have no `BundleType` enum variant.
+        let n_effect_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut effect_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
+        let mut last_effect_type: Option<u64> = None;
+        for _ in 0..n_effect_bundles {
+            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
+            if let Some(prev) = last_effect_type {
+                if bt <= prev {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mEffectBundles is not in strictly increasing bundleType order",
+                    ));
+                }
+            }
+            last_effect_type = Some(bt);
+            effect_data_by_type.insert(bt, (bv, data));
+        }
+
+        // --- Section 4: Auth bundles map (`mAuthBundles`) ---
+        // Same TLV framing and strictly-increasing bundleType ordering as
+        // mEffectBundles. Auth data is excluded from the txid but included
+        // in the authorizing data commitment (auth_commitment_v6).
+        let n_auth_bundles = CompactSize::read_t::<_, usize>(&mut reader)?;
+        let mut auth_data_by_type: BTreeMap<u64, (u64, Vec<u8>)> = BTreeMap::new();
+        let mut last_auth_type: Option<u64> = None;
+        for _ in 0..n_auth_bundles {
+            let ((bt, bv), data) = zip248::read_bundle_data_framing(&mut reader)?;
+            if let Some(prev) = last_auth_type {
+                if bt <= prev {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 mAuthBundles is not in strictly increasing bundleType order",
+                    ));
+                }
+            }
+            last_auth_type = Some(bt);
+            auth_data_by_type.insert(bt, (bv, data));
+        }
+
+        // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
+        // Auth-implies-effect rule: an auth bundle without a corresponding
+        // effect bundle is nonsensical (you can't authorize something that
+        // has no effect). The bundleVariant must also match.
+        for (bundle_type, (auth_variant, _)) in &auth_data_by_type {
+            match effect_data_by_type.get(bundle_type) {
+                Some((effect_variant, _)) if effect_variant == auth_variant => {}
+                Some(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 transaction has mAuthBundles entry with a bundleVariant \
+                         that does not match the corresponding mEffectBundles entry",
+                    ));
+                }
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 transaction has mAuthBundles entry with no matching \
+                         mEffectBundles entry",
+                    ));
+                }
+            }
+        }
+
+        // [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
+        // Cross-map variant consistency: for each bundleType that appears in
+        // ANY of the three maps (VP deltas, effects, auth), every entry across
+        // all three must encode the same bundleVariant. This prevents e.g. a
+        // "Sapling v1" effect bundle coexisting with a "Sapling v2" VP delta.
+        // (mEffectBundles <-> mAuthBundles consistency was checked above; here
+        // we additionally check mValuePoolDeltas against mEffectBundles.)
+        for (bundle_type, vp_variant) in &vp_variants_by_type {
+            if let Some((effect_variant, _)) = effect_data_by_type.get(bundle_type) {
+                if effect_variant != vp_variant {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "v6 transaction has an mValuePoolDeltas bundleVariant that \
+                         does not match the corresponding mEffectBundles entry",
+                    ));
+                }
+            }
+        }
+
+        // [ZIP 248 §v6 Transaction Bundle Type Registry](https://zips.z.cash/zip-0248#v6-transaction-bundle-type-registry)
+        // bundleType 1 is Reserved and MUST NOT appear in any map.
+        // bundleTypes 4 (fee) and 5 (ZIP 233 NSM) carry only VP delta
+        // entries -- the registry marks their effect and auth columns as
+        // prohibited, so reject them in mEffectBundles / mAuthBundles.
+        for &value_only_bundle in &[
+            zip248::BundleType::Fee.to_u64(),
+            zip248::BundleType::Zip233Nsm.to_u64(),
+        ] {
+            if effect_data_by_type.contains_key(&value_only_bundle)
+                || auth_data_by_type.contains_key(&value_only_bundle)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "v6 transaction has a value-only bundle type (fee or ZIP 233 NSM) \
+                     in mEffectBundles or mAuthBundles",
+                ));
+            }
+        }
+        if vp_variants_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
+            || effect_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
+            || auth_data_by_type.contains_key(&zip248::BundleType::Reserved.to_u64())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "v6 transaction references the reserved bundleType 1",
+            ));
+        }
+
+        // --- Section 5: Reconstruct typed bundles from effect + auth data ---
+        //
+        // The `take_known` closure removes entries from both maps for each
+        // recognized bundle type. After all known types are extracted,
+        // whatever remains in effect_data_by_type / auth_data_by_type is by
+        // definition an unrecognized bundle type -- stored as opaque bytes.
+        let mut bundles = zip248::BundleMap::new();
+
+        // Pops the (variant, data) pair for a given bundle type out of both
+        // maps. This drain-then-remainder pattern lets us avoid a second pass
+        // to separate known from unknown entries.
+        let mut take_known = |bundle_type: u64| -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+            let effect = effect_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+            let auth = auth_data_by_type.remove(&bundle_type).map(|(_, d)| d);
+            (effect, auth)
+        };
+
+        let (transparent_effect, transparent_auth) =
+            take_known(zip248::BundleType::Transparent.to_u64());
+        if let Some(effect) = transparent_effect {
+            if let Some(b) = Self::read_v6_transparent_bundle(&effect, transparent_auth.as_deref())?
+            {
+                bundles.insert_transparent(b);
+            }
+        }
+
+        let (sapling_effect, sapling_auth) = take_known(zip248::BundleType::Sapling.to_u64());
+        if let Some(effect) = sapling_effect {
+            let value_balance = vp.sapling_value().unwrap_or(ZatBalance::zero());
+            if let Some(b) = sapling_serialization::read_v6_bundle(
+                &effect,
+                sapling_auth.as_deref(),
+                value_balance,
+            )? {
+                bundles.insert_sapling(b);
+            }
+        }
+
+        let (orchard_effect, orchard_auth) = take_known(zip248::BundleType::Orchard.to_u64());
+        if let Some(effect) = orchard_effect {
+            let value_balance = vp.orchard_value().unwrap_or(ZatBalance::zero());
+            if let Some(b) = orchard_serialization::read_v6_bundle(
+                &effect,
+                orchard_auth.as_deref(),
+                value_balance,
+            )? {
+                bundles.insert_orchard(b);
+            }
+        }
+
+        // Store any remaining (unrecognized) bundles as opaque
+        // `UnknownBundle` entries. The effects digest is computed as a flat
+        // BLAKE2b-256 of the raw vBundleData bytes with a (bundleType,
+        // bundleVariant)-derived personalization per ZIP 248 §T.3, allowing
+        // wallets to compute the txid without understanding the bundle.
+        // Auth data is stored for re-serialization but no auth digest is
+        // computed — the correct algorithm is defined by the bundle's ZIP.
+        for (bundle_type, (variant, effect)) in effect_data_by_type {
+            let auth = auth_data_by_type.remove(&bundle_type);
+            let effect_personal = zip248::opaque_effects_personalization(bundle_type, variant);
+            let effect_digest = blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(&effect_personal)
+                .hash(&effect);
+            bundles.insert_unknown(
+                bundle_type,
+                variant,
+                zip248::UnknownBundle {
+                    effect_data: effect,
+                    effect_digest,
+                    auth_data: auth.map(|(_, a)| a),
+                    auth_digest: None,
+                },
+            );
+        }
+
         let data = TransactionData {
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
-            zip233_amount,
-            transparent_bundle,
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle: None,
+            value_pool_deltas: vp,
+            bundles,
         };
 
-        Ok(Self::from_data_v5(data))
-    }
-
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
-    fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
-
-        let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
-
-        #[cfg(zcash_unstable = "zfuture")]
-        let tze_bundle = version
-            .has_tze()
-            .then(|| Self::read_tze(&mut reader))
-            .transpose()?
-            .flatten();
-
-        let data = TransactionData {
-            version,
-            consensus_branch_id: header_fragment.consensus_branch_id,
-            lock_time: header_fragment.lock_time,
-            expiry_height: header_fragment.expiry_height,
-            #[cfg(feature = "zip-233")]
-            zip233_amount: header_fragment.zip233_amount,
-            transparent_bundle,
-            sprout_bundle: None,
-            sapling_bundle,
-            orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_bundle,
-        };
-
-        Ok(Self::from_data_v5(data))
+        Ok(Self::from_data_v6(data))
     }
 
     /// Utility function for reading header data common to v5 and v6 transactions.
@@ -1043,7 +1491,11 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    /// Reads the v6 (ZIP 248) common transaction header fields after the
+    /// 4-byte `header` and `nVersionGroupId` (which are read by the caller).
+    /// v6 has no `zip233_amount` field in the header; ZIP 233 NSM lives in
+    /// `mValuePoolDeltas`.
+    #[cfg(zcash_v6)]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -1052,8 +1504,6 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(feature = "zip-233")]
-            zip233_amount: Self::read_zip233_amount(&mut reader)?,
         })
     }
 
@@ -1064,16 +1514,13 @@ impl Transaction {
         sapling_serialization::read_v5_bundle(reader)
     }
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    fn read_zip233_amount<R: Read>(mut reader: R) -> io::Result<Zatoshis> {
-        Zatoshis::from_u64(reader.read_u64_le()?)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip233Amount out of range"))
-    }
-
+    // `read_tze` is currently unused: v6 transactions reject TZE bundles in
+    // `read_v6` (since ZIP 248 has not yet assigned a bundleType for them),
+    // and pre-v6 transactions never carry TZE. The function is retained for
+    // symmetry with `write_tze` and so that a future read_v6 revision that
+    // accepts a TZE bundleType can easily call it.
     #[cfg(zcash_unstable = "zfuture")]
+    #[allow(dead_code)]
     fn read_tze<R: Read>(mut reader: &mut R) -> io::Result<Option<tze::Bundle<tze::Authorized>>> {
         let vin = Vector::read(&mut reader, TzeIn::read)?;
         let vout = Vector::read(&mut reader, TzeOut::read)?;
@@ -1092,7 +1539,7 @@ impl Transaction {
         match self.version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
             TxVersion::V5 => self.write_v5(writer),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(zcash_v6)]
             TxVersion::V6 => self.write_v6(writer),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v6(writer),
@@ -1100,7 +1547,7 @@ impl Transaction {
     }
 
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.orchard_bundle.is_some() {
+        if self.bundles.orchard().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Orchard components cannot be present when serializing to the V4 transaction format.",
@@ -1117,12 +1564,12 @@ impl Transaction {
 
         sapling_serialization::write_v4_components(
             &mut writer,
-            self.sapling_bundle.as_ref(),
+            self.bundles.sapling(),
             self.version.has_sapling(),
         )?;
 
         if self.version.has_sprout() {
-            if let Some(bundle) = self.sprout_bundle.as_ref() {
+            if let Some(bundle) = self.bundles.sprout() {
                 Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
                 writer.write_all(&bundle.joinsplit_pubkey)?;
                 writer.write_all(&bundle.joinsplit_sig)?;
@@ -1132,7 +1579,7 @@ impl Transaction {
         }
 
         if self.version.has_sapling() {
-            if let Some(bundle) = self.sapling_bundle.as_ref() {
+            if let Some(bundle) = self.bundles.sapling() {
                 writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
             }
         }
@@ -1141,7 +1588,7 @@ impl Transaction {
     }
 
     pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.transparent_bundle {
+        if let Some(bundle) = self.bundles.transparent() {
             Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
             Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
         } else {
@@ -1153,7 +1600,7 @@ impl Transaction {
     }
 
     pub fn write_v5<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.sprout_bundle.is_some() {
+        if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Sprout components cannot be present when serializing to the V5 transaction format.",
@@ -1162,27 +1609,144 @@ impl Transaction {
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v5_bundle(self.bundles.orchard(), &mut writer)?;
 
         Ok(())
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    /// Serializes this transaction in v6 (ZIP 248) wire format.
+    ///
+    /// [ZIP 248 §Transaction Format](https://zips.z.cash/zip-0248#transaction-format)
+    ///
+    /// Effect and auth bundles are serialized via a double-buffer pattern:
+    /// each bundle's payload is first written to a temporary `Vec<u8>`, then
+    /// the TLV framing (bundleType, bundleVariant, compactSize-length, data)
+    /// is written around it. This is necessary because the TLV length prefix
+    /// requires knowing the payload size before writing it to the outer
+    /// writer. `wire_key()` on `BundleId` returns the `(bundleType,
+    /// bundleVariant)` pair for each known protocol.
+    ///
+    /// `to_wire_entries()` is used for VP deltas because it merges known
+    /// (typed) and unknown (opaque) entries into a single sorted sequence,
+    /// preserving the canonical wire order required by the spec.
+    #[cfg(zcash_v6)]
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if self.sprout_bundle.is_some() {
+        if self.bundles.sprout().is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to the V6 transaction format.",
+                "Sprout components cannot be present when serializing to the v6 transaction format.",
             ));
         }
+        #[cfg(zcash_unstable = "zfuture")]
+        if self.bundles.tze().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "TZE components cannot be present when serializing to the v6 transaction format \
+                 until a bundleType is registered for them in ZIP 248.",
+            ));
+        }
+
+        // 1. Header (5 × u32): version, versionGroupId, consensusBranchId, lockTime, expiryHeight
         self.write_v6_header(&mut writer)?;
 
-        self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        // 2. Value pool deltas map -- to_wire_entries() merges known + unknown
+        // entries in canonical (bundleType, assetClass, assetUuid) order.
+        let vp_entries = self.value_pool_deltas.to_wire_entries();
+        CompactSize::write(&mut writer, vp_entries.len())?;
+        for entry in &vp_entries {
+            entry.write(&mut writer)?;
+        }
 
-        #[cfg(zcash_unstable = "zfuture")]
-        self.write_tze(&mut writer)?;
+        // 3. Effect bundles map -- each known bundle is double-buffered into a
+        // Vec<u8> so we can measure its length for the TLV framing. wire_key()
+        // returns the (bundleType, bundleVariant) pair from the ZIP 248 registry.
+        let mut effect_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            let mut buf = Vec::new();
+            zip248::write_v6_transparent_effects(&mut buf, tb)?;
+            effect_bundles.push((
+                zip248::BundleId::TRANSPARENT.wire_key().0,
+                zip248::BundleId::TRANSPARENT.wire_key().1,
+                buf,
+            ));
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_effects(&mut buf, sb)?;
+            effect_bundles.push((
+                zip248::BundleId::SAPLING.wire_key().0,
+                zip248::BundleId::SAPLING.wire_key().1,
+                buf,
+            ));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_effects(&mut buf, ob)?;
+            effect_bundles.push((
+                zip248::BundleId::ORCHARD.wire_key().0,
+                zip248::BundleId::ORCHARD.wire_key().1,
+                buf,
+            ));
+        }
+        // Append unknown bundles (already stored as opaque bytes) and then
+        // sort everything by bundleType to achieve canonical wire order.
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
+            effect_bundles.push((bt, bv, ub.effect_data.clone()));
+        }
+        effect_bundles.sort_by_key(|(bt, _, _)| *bt);
+
+        CompactSize::write(&mut writer, effect_bundles.len())?;
+        for (bt, bv, data) in &effect_bundles {
+            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
+        }
+
+        // 4. Auth bundles map -- same double-buffer + sort pattern as effects.
+        // Transparent auth is only emitted when inputs exist (no inputs means
+        // no signatures to authorize).
+        let mut auth_bundles: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+
+        if let Some(tb) = self.bundles.transparent() {
+            if !tb.vin.is_empty() {
+                let mut buf = Vec::new();
+                zip248::write_v6_transparent_auth(&mut buf, tb)?;
+                auth_bundles.push((
+                    zip248::BundleId::TRANSPARENT.wire_key().0,
+                    zip248::BundleId::TRANSPARENT.wire_key().1,
+                    buf,
+                ));
+            }
+        }
+        if let Some(sb) = self.bundles.sapling() {
+            let mut buf = Vec::new();
+            sapling_serialization::write_v6_auth(&mut buf, sb)?;
+            auth_bundles.push((
+                zip248::BundleId::SAPLING.wire_key().0,
+                zip248::BundleId::SAPLING.wire_key().1,
+                buf,
+            ));
+        }
+        if let Some(ob) = self.bundles.orchard() {
+            let mut buf = Vec::new();
+            orchard_serialization::write_v6_auth(&mut buf, ob)?;
+            auth_bundles.push((
+                zip248::BundleId::ORCHARD.wire_key().0,
+                zip248::BundleId::ORCHARD.wire_key().1,
+                buf,
+            ));
+        }
+        for (&(bt, bv), ub) in self.bundles.unknown_bundles() {
+            if let Some(ref auth_data) = ub.auth_data {
+                auth_bundles.push((bt, bv, auth_data.clone()));
+            }
+        }
+        auth_bundles.sort_by_key(|(bt, _, _)| *bt);
+
+        CompactSize::write(&mut writer, auth_bundles.len())?;
+        for (bt, bv, data) in &auth_bundles {
+            zip248::write_bundle_data_framing(&mut writer, *bt, *bv, data)?;
+        }
+
         Ok(())
     }
 
@@ -1194,15 +1758,16 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
+    /// Writes the v6 (ZIP 248) common transaction header: header, nVersionGroupId,
+    /// nConsensusBranchId, lock_time, nExpiryHeight (5 × u32). The ZIP 233 NSM
+    /// amount is not included here; it lives in `mValuePoolDeltas` under
+    /// `bundleType = 5`.
+    #[cfg(zcash_v6)]
     pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
         writer.write_u32_le(self.lock_time)?;
         writer.write_u32_le(u32::from(self.expiry_height))?;
-
-        #[cfg(feature = "zip-233")]
-        writer.write_u64_le(self.zip233_amount.into())?;
         Ok(())
     }
 
@@ -1215,12 +1780,12 @@ impl Transaction {
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
+        sapling_serialization::write_v5_bundle(writer, self.bundles.sapling())
     }
 
     #[cfg(zcash_unstable = "zfuture")]
     pub fn write_tze<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.tze_bundle {
+        if let Some(bundle) = self.bundles.tze() {
             Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
             Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
         } else {
@@ -1233,7 +1798,80 @@ impl Transaction {
 
     // TODO: should this be moved to `from_data` and stored?
     pub fn auth_commitment(&self) -> Blake2bHash {
-        self.data.digest(BlockTxCommitmentDigester)
+        match self.data.version {
+            #[cfg(zcash_v6)]
+            TxVersion::V6 => self.auth_commitment_v6(),
+            _ => self.data.digest(BlockTxCommitmentDigester),
+        }
+    }
+
+    /// Computes the v6 authorizing data commitment per
+    /// [ZIP 248 §Authorizing Data Commitment](https://zips.z.cash/zip-0248#authorizing-data-commitment).
+    ///
+    /// The auth commitment is structurally parallel to the txid digest but
+    /// covers only the witness / authorization data (scriptSig, spend auth
+    /// sigs, binding sig, Orchard proof, etc.). It is used by miners and
+    /// validators to commit to the authorization without affecting the txid.
+    ///
+    /// Structure: `BLAKE2b-256(auth_bundles_digest)` with a personalization
+    /// tag that embeds the consensus branch ID.
+    #[cfg(zcash_v6)]
+    fn auth_commitment_v6(&self) -> Blake2bHash {
+        use txid::{
+            hash_v6_auth_bundles, hash_v6_orchard_auth, hash_v6_sapling_auth,
+            hash_v6_transparent_auth, v6_bundle_digest_entries,
+        };
+
+        // Per-protocol auth digests. Each covers the bundle's witness data
+        // (scriptSig for transparent, spend/binding sigs for shielded).
+        let transparent_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .transparent()
+            .map(Some)
+            .map(hash_v6_transparent_auth);
+        let sapling_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .sapling()
+            .map(Some)
+            .map(hash_v6_sapling_auth);
+        let orchard_auth_digest: Option<Blake2bHash> = self
+            .data
+            .bundles
+            .orchard()
+            .map(Some)
+            .map(hash_v6_orchard_auth);
+
+        // Unknown bundles may carry pre-computed auth digests set by the
+        // caller via BundleMap::get_unknown_mut.
+        let unknown_auth_digests: Vec<((u64, u64), Blake2bHash)> = self
+            .data
+            .bundles
+            .unknown_bundles()
+            .filter_map(|(&key, ub)| ub.auth_digest.map(|digest| (key, digest)))
+            .collect();
+
+        // Merge known + unknown auth digests into a single sorted sequence,
+        // then hash them all into auth_bundles_digest.
+        let auth_bundles_digest = hash_v6_auth_bundles(v6_bundle_digest_entries(
+            transparent_auth_digest.as_ref(),
+            sapling_auth_digest.as_ref(),
+            orchard_auth_digest.as_ref(),
+            &unknown_auth_digests,
+        ));
+
+        // Final commitment: BLAKE2b-256 of auth_bundles_digest, personalized
+        // with the consensus branch ID to domain-separate across network upgrades.
+        let mut personal = [0; 16];
+        personal[..12].copy_from_slice(txid::ZCASH_AUTH_PERSONALIZATION_PREFIX);
+        (&mut personal[12..])
+            .write_u32_le(self.data.consensus_branch_id.into())
+            .unwrap();
+
+        let mut h = txid::hasher(&personal);
+        h.write_all(auth_bundles_digest.as_bytes()).unwrap();
+        h.finalize()
     }
 }
 
@@ -1259,6 +1897,19 @@ pub struct TxDigests<A> {
     pub orchard_digest: Option<A>,
     #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
+    /// v6 (ZIP 248): digest of the value pool deltas map.
+    #[cfg(zcash_v6)]
+    pub value_pool_deltas_digest: Option<A>,
+    /// v6 (ZIP 248): per-bundle effect-data digests for unknown bundle types,
+    /// in `(bundleType, bundleVariant)` order. These are folded into
+    /// `effects_bundles_digest` alongside the transparent/sapling/orchard digests.
+    #[cfg(zcash_v6)]
+    pub unknown_effect_digests: Vec<((u64, u64), A)>,
+    /// v6 (ZIP 248): per-bundle authorizing-data digests for unknown bundle types,
+    /// in `(bundleType, bundleVariant)` order. These are folded into
+    /// `auth_bundles_digest` alongside the transparent/sapling/orchard auth digests.
+    #[cfg(zcash_v6)]
+    pub unknown_auth_digests: Vec<((u64, u64), A)>,
 }
 
 pub trait TransactionDigest<A: Authorization> {
@@ -1278,11 +1929,7 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_v6, feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest;
 
     fn digest_transparent(
@@ -1317,6 +1964,189 @@ pub enum DigestError {
     NotSigned,
 }
 
+/// Errors that can be returned by [`TransactionData::check_v6_consensus_rules`].
+///
+/// Each variant corresponds to a transaction-local consensus rule from the
+/// "Consensus Rules" section of [ZIP 248]. Rules that require block context
+/// (the per-block fee bundle sum, and the coinbase ZEC value pool delta sum
+/// equal to `-BlockSubsidy(height)`) are not checked by this method and must
+/// be enforced by the consumer when validating a block.
+///
+/// [ZIP 248]: https://zips.z.cash/zip-0248
+#[cfg(zcash_v6)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum V6ConsensusError {
+    /// `mValuePoolDeltas` contains an entry with `bundleType = FeeBundleId`
+    /// and a non-ZEC `assetClass`. (Bundle-local rule: fee amounts are
+    /// denominated in ZEC and no other asset.)
+    FeeAssetClassNotZec { asset_class: u8 },
+    /// A coinbase transaction has the `enableSpendsOrchard` bit of
+    /// `flagsOrchard` set. (Bundle-local rule.)
+    CoinbaseEnableSpendsOrchardSet,
+    /// A coinbase transaction has a negative fee delta in
+    /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. The coinbase fee delta
+    /// represents fees collected from other transactions in the block and
+    /// must be nonnegative.
+    CoinbaseFeeDeltaNegative { value: ZatBalance },
+    /// A non-coinbase transaction has a positive fee delta in
+    /// `mValuePoolDeltas[(FeeBundleId, Zec)]`. Fees paid are encoded as
+    /// negative deltas (value removed from the transparent transaction
+    /// value pool), so the fee delta must be nonpositive.
+    NonCoinbaseFeeDeltaPositive { value: ZatBalance },
+    /// For a non-coinbase transaction, the per-asset sum of all entries in
+    /// `mValuePoolDeltas` must be zero. This variant is returned when the
+    /// sum for some asset is nonzero, indicating that value would be
+    /// created or destroyed by the transaction.
+    NonCoinbaseValueImbalance {
+        bundle_type_for_asset: u64,
+        asset_class: u8,
+        sum: ZatBalance,
+    },
+    /// A v6 transaction's per-asset value pool delta sum overflowed while
+    /// being computed. This is itself a consensus failure because a
+    /// well-formed sum must fit after the deltas are constrained to balance.
+    ValueDeltaSumOverflow,
+}
+
+#[cfg(zcash_v6)]
+impl core::fmt::Display for V6ConsensusError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            V6ConsensusError::FeeAssetClassNotZec { asset_class } => write!(
+                f,
+                "fee bundle value pool delta has non-ZEC assetClass {:#x}",
+                asset_class
+            ),
+            V6ConsensusError::CoinbaseEnableSpendsOrchardSet => write!(
+                f,
+                "coinbase transaction has enableSpendsOrchard set in Orchard flags"
+            ),
+            V6ConsensusError::CoinbaseFeeDeltaNegative { value } => write!(
+                f,
+                "coinbase fee bundle value pool delta is negative ({})",
+                i64::from(*value)
+            ),
+            V6ConsensusError::NonCoinbaseFeeDeltaPositive { value } => write!(
+                f,
+                "non-coinbase fee bundle value pool delta is positive ({}); fees are encoded as negative deltas",
+                i64::from(*value)
+            ),
+            V6ConsensusError::NonCoinbaseValueImbalance {
+                bundle_type_for_asset,
+                asset_class,
+                sum,
+            } => write!(
+                f,
+                "non-coinbase value pool deltas do not sum to zero for assetClass={:#x} (any-bundleType={}): sum={}",
+                asset_class,
+                bundle_type_for_asset,
+                i64::from(*sum)
+            ),
+            V6ConsensusError::ValueDeltaSumOverflow => {
+                write!(f, "value pool delta sum overflowed i64")
+            }
+        }
+    }
+}
+
+#[cfg(all(zcash_v6, feature = "std"))]
+impl std::error::Error for V6ConsensusError {}
+
+#[cfg(zcash_v6)]
+impl<A: Authorization> TransactionData<A> {
+    /// Checks the transaction-local consensus rules from
+    /// [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules).
+    ///
+    /// Returns `Ok(())` if all transaction-local rules are satisfied,
+    /// otherwise returns the first violation found.
+    ///
+    /// `is_coinbase` selects the rules that apply only to coinbase
+    /// transactions (`enableSpendsOrchard = 0`, fee delta nonnegative)
+    /// versus non-coinbase ones (fee delta nonpositive, per-asset sum
+    /// equals zero).
+    ///
+    /// Rules that require block context -- the per-block sum of fee bundle
+    /// values being zero, and the coinbase ZEC sum equal to
+    /// `-BlockSubsidy(height)` -- are *not* checked here and must be
+    /// enforced by the consumer when validating the containing block.
+    pub fn check_v6_consensus_rules(&self, is_coinbase: bool) -> Result<(), V6ConsensusError> {
+        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
+        // Bundle-local rule: fee entries are ZEC-only. A fee denominated in
+        // a non-ZEC asset has no defined meaning and must be rejected.
+        for (key, _) in self.value_pool_deltas.iter() {
+            if key.bundle_type == zip248::BundleType::Fee
+                && key.asset_class != zip248::ASSET_CLASS_ZEC
+            {
+                return Err(V6ConsensusError::FeeAssetClassNotZec {
+                    asset_class: key.asset_class,
+                });
+            }
+        }
+
+        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
+        // Bundle-local: coinbase must not enable Orchard spends (coinbase
+        // outputs are unspendable until maturity, and enabling spends would
+        // allow circumventing the maturity rule).
+        if is_coinbase {
+            if let Some(orchard_bundle) = self.bundles.orchard() {
+                if orchard_bundle.flags().spends_enabled() {
+                    return Err(V6ConsensusError::CoinbaseEnableSpendsOrchardSet);
+                }
+            }
+        }
+
+        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
+        // Cross-bundle rule: fee delta sign. Coinbase collects fees (delta
+        // >= 0), non-coinbase pays fees (delta <= 0). A positive non-coinbase
+        // fee would create value from nothing.
+        let fee_delta = self
+            .value_pool_deltas
+            .iter()
+            .find_map(|(key, &(_, value))| {
+                (key.bundle_type == zip248::BundleType::Fee
+                    && key.asset_class == zip248::ASSET_CLASS_ZEC)
+                    .then_some(value)
+            })
+            .unwrap_or(ZatBalance::zero());
+        if is_coinbase {
+            if i64::from(fee_delta) < 0 {
+                return Err(V6ConsensusError::CoinbaseFeeDeltaNegative { value: fee_delta });
+            }
+        } else if i64::from(fee_delta) > 0 {
+            return Err(V6ConsensusError::NonCoinbaseFeeDeltaPositive { value: fee_delta });
+        }
+
+        // [ZIP 248 §Consensus Rules](https://zips.z.cash/zip-0248#consensus-rules)
+        // Cross-bundle rule: non-coinbase per-asset conservation. The sum of
+        // all VP deltas for each (assetClass, assetUuid) must be zero, i.e.
+        // no value is created or destroyed. For coinbase the analogous rule
+        // ("ZEC sum == -BlockSubsidy(height)") requires block context.
+        if !is_coinbase {
+            // Group ALL entries (known + unknown) by (assetClass, assetUuid)
+            // and verify the sum is zero for each asset.
+            let mut by_asset: BTreeMap<(u8, [u8; 64]), (u64, ZatBalance)> = BTreeMap::new();
+            for entry in self.value_pool_deltas.to_wire_entries() {
+                let asset_key = (entry.asset_class, entry.asset_uuid.unwrap_or([0u8; 64]));
+                let acc = by_asset
+                    .entry(asset_key)
+                    .or_insert((entry.bundle_type, ZatBalance::zero()));
+                acc.1 = (acc.1 + entry.value).ok_or(V6ConsensusError::ValueDeltaSumOverflow)?;
+            }
+            for ((asset_class, _), (any_bundle_type, sum)) in by_asset {
+                if sum != ZatBalance::zero() {
+                    return Err(V6ConsensusError::NonCoinbaseValueImbalance {
+                        bundle_type_for_asset: any_bundle_type,
+                        asset_class,
+                        sum,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
@@ -1332,10 +2162,7 @@ pub mod testing {
         },
     };
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_v6, feature = "zip-233"))]
     use zcash_protocol::value::{MAX_MONEY, Zatoshis};
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1363,7 +2190,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(all(not(zcash_unstable = "nu7"), not(zcash_unstable = "zfuture")))]
+    #[cfg(not(zcash_v6))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),
@@ -1375,16 +2202,17 @@ pub mod testing {
             orchard_bundle in orchard::arb_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
-            TransactionData {
+            TransactionData::from_parts(
                 version,
                 consensus_branch_id,
                 lock_time,
-                expiry_height: expiry_height.into(),
+                expiry_height.into(),
+                super::zip248::ValuePoolDeltas::empty(),
                 transparent_bundle,
-                sprout_bundle: None,
+                None,
                 sapling_bundle,
                 orchard_bundle,
-            }
+            )
         }
     }
 
@@ -1400,16 +2228,17 @@ pub mod testing {
             orchard_bundle in orchard::arb_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
-            TransactionData {
+            TransactionData::from_parts(
                 version,
                 consensus_branch_id,
                 lock_time,
-                expiry_height: expiry_height.into(),
+                expiry_height.into(),
+                super::zip248::ValuePoolDeltas::empty(),
                 transparent_bundle,
-                sprout_bundle: None,
+                None,
                 sapling_bundle,
                 orchard_bundle,
-            }
+            )
         }
     }
 
@@ -1426,17 +2255,19 @@ pub mod testing {
             orchard_bundle in orchard::arb_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
-            TransactionData {
+            let mut vp = super::zip248::ValuePoolDeltas::empty();
+            vp.set_zip233(Zatoshis::from_u64(zip233_amount).unwrap());
+            TransactionData::from_parts(
                 version,
                 consensus_branch_id,
                 lock_time,
-                expiry_height: expiry_height.into(),
-                zip233_amount: Zatoshis::from_u64(zip233_amount).unwrap(),
+                expiry_height.into(),
+                vp,
                 transparent_bundle,
-                sprout_bundle: None,
+                None,
                 sapling_bundle,
                 orchard_bundle,
-            }
+            )
         }
     }
 
@@ -1453,17 +2284,18 @@ pub mod testing {
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)
         ) -> TransactionData<Authorized> {
-            TransactionData {
+            TransactionData::from_parts_zfuture(
                 version,
                 consensus_branch_id,
                 lock_time,
-                expiry_height: expiry_height.into(),
+                expiry_height.into(),
+                super::zip248::ValuePoolDeltas::empty(),
                 transparent_bundle,
-                sprout_bundle: None,
+                None,
                 sapling_bundle,
                 orchard_bundle,
-                tze_bundle
-            }
+                tze_bundle,
+            )
         }
     }
 
@@ -1481,18 +2313,20 @@ pub mod testing {
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)
         ) -> TransactionData<Authorized> {
-            TransactionData {
+            let mut vp = super::zip248::ValuePoolDeltas::empty();
+            vp.set_zip233(Zatoshis::from_u64(zip233_amount).unwrap());
+            TransactionData::from_parts_zfuture(
                 version,
                 consensus_branch_id,
                 lock_time,
-                expiry_height: expiry_height.into(),
-                zip233_amount: Zatoshis::from_u64(zip233_amount).unwrap(),
+                expiry_height.into(),
+                vp,
                 transparent_bundle,
-                sprout_bundle: None,
+                None,
                 sapling_bundle,
                 orchard_bundle,
-                tze_bundle
-            }
+                tze_bundle,
+            )
         }
     }
 
