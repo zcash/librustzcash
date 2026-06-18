@@ -8,6 +8,16 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## Unreleased
+
+### Fixed
+- Fixed a bug in `WalletDb::delete_account` that caused it to fail with
+  `rusqlite::Error::InvalidParameterName(":address")` when the account being
+  deleted was referenced by a `sent_notes` row via its `to_account_id` column
+  (for example, after an internal transfer to an address belonging to the
+  account being deleted). The `sent_notes` update statement bound a parameter
+  named `:address` while the SQL expected `:to_address`.
+
 ## [0.21.0] - 2026-06-02
 
 ### Changed
