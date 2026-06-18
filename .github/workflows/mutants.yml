@@ -96,7 +96,7 @@ jobs:
         shell: sh
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
         with:
           tool: cargo-mutants
       - run: cargo mutants --package "${{ matrix.package }}" --all-features -vV --in-place
