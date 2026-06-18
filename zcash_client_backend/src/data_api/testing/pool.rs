@@ -3117,6 +3117,110 @@ where
     );
 }
 
+/// Regression test for a bug in which [`WalletWrite::delete_account`] failed with a
+/// `rusqlite::Error::InvalidParameterName(":address")` panic when the account being
+/// deleted was referenced by a `sent_notes` row via its `to_account_id` column.
+///
+/// The triggering state is reached when a transaction is sent from one account in the
+/// wallet to an address belonging to a second account in the same wallet, and the
+/// transaction is then decrypted via [`decrypt_and_store_transaction`] so that the
+/// cross-account transfer is recorded with a non-null `to_account_id` and a received
+/// output that has an associated address. Deleting the recipient account then exercises
+/// the `sent_notes` update path inside `delete_account`.
+///
+/// [`WalletWrite::delete_account`]: crate::data_api::WalletWrite::delete_account
+pub fn account_deletion_with_internal_transfer<T: ShieldedPoolTester, DSF>(
+    ds_factory: DSF,
+    cache: impl TestCache,
+) where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::DataStore: Reset,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .build();
+
+    // Add two accounts to the wallet, derived from the same seed.
+    let seed = Secret::new([0u8; 32].to_vec());
+    let birthday = AccountBirthday::from_sapling_activation(st.network(), BlockHash([0; 32]));
+    let (account1, usk1) = st
+        .wallet_mut()
+        .create_account("account1", &seed, &birthday, None)
+        .unwrap();
+    let dfvk1 = T::sk_to_fvk(T::usk_to_sk(&usk1));
+
+    let (account2, usk2) = st
+        .wallet_mut()
+        .create_account("account2", &seed, &birthday, None)
+        .unwrap();
+    let dfvk2 = T::sk_to_fvk(T::usk_to_sk(&usk2));
+
+    // Add funds to account 1 in a single note.
+    let value = Zatoshis::from_u64(100000).unwrap();
+    let (h, _, _) = st.generate_next_block(&dfvk1, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(st.get_total_balance(account1), value);
+    assert_eq!(st.get_total_balance(account2), Zatoshis::ZERO);
+
+    // Send funds from account 1 to an address belonging to account 2.
+    let bal_2 = Zatoshis::from_u64(50000).unwrap();
+    let addr2 = T::fvk_default_address(&dfvk2);
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        addr2.to_zcash_address(st.network()),
+        bal_2,
+    )])
+    .unwrap();
+
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let txid = st
+        .spend(
+            &input_selector,
+            &change_strategy,
+            &usk1,
+            req,
+            OvkPolicy::Sender,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap()[0];
+
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(st.get_total_balance(account2), bal_2);
+
+    // Decrypt and store the transaction. Because the wallet owns the funding inputs
+    // (account 1) and the output is received by account 2, this records the send as an
+    // internal cross-account transfer, setting `sent_notes.to_account_id` to account 2
+    // and associating the received output with account 2's address. This is the state
+    // that triggers the `delete_account` bug.
+    let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Deleting account 2, the recipient of the internal transfer, must succeed. Prior to
+    // the fix this failed with `rusqlite::Error::InvalidParameterName(":address")` because
+    // the `sent_notes` update statement bound the wrong parameter name.
+    assert_matches!(st.wallet_mut().delete_account(account2), Ok(_));
+
+    // account 1 should still exist and retain its change balance.
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .unwrap()
+        .unwrap();
+    assert!(summary.account_balances().get(&account2).is_none());
+    assert!(summary.account_balances().contains_key(&account1));
+}
+
 pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
