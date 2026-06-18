@@ -607,6 +607,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn account_deletion_with_internal_transfer() {
+        testing::pool::account_deletion_with_internal_transfer::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             OrchardPoolTester,
