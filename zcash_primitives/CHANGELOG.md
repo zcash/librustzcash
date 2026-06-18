@@ -34,6 +34,14 @@ workspace.
 - `zcash_primitives::transaction::sighash::signature_hash` and the
   `zcash_primitives::transaction::builder` module now require the `sapling`
   feature (the builder, via `circuits`, requires both protocols).
+- The `zcash_primitives::transaction::TransactionDigest::{digest_sapling,
+  digest_orchard}` methods now take `Option<&SaplingBundle<A>>` /
+  `Option<&OrchardBundle<A>>` instead of the concrete `sapling::Bundle` /
+  `orchard::Bundle` types. With the corresponding feature enabled the alias
+  resolves to the same typed bundle (so existing implementations that name the
+  concrete type still compile); with the feature disabled it resolves to the
+  opaque byte representation, so an external implementor that supports
+  feature-off builds must handle that case.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

@@ -66,6 +66,33 @@ fn zip_0244_txid_auth_and_roundtrip() {
     }
 }
 
+/// Feature-independent v3/v4 transaction round-trip oracle, covering the v4 Sapling
+/// parse/serialize path that the (v5-only) ZIP 244 oracle does not. The ZIP 243 vectors carry
+/// v4 Sapling spends and outputs, so with the `sapling` feature disabled this exercises the
+/// opaque-byte representation of a v4 Sapling bundle. A v4 txid is the double-SHA256 of the
+/// re-serialized transaction, so byte-identical round-tripping is the consensus property under
+/// test.
+#[test]
+fn zip_0143_zip_0243_roundtrip() {
+    fn check(tx_bytes: &[u8], branch_id: BranchId) {
+        let tx = Transaction::read(tx_bytes, branch_id).unwrap();
+        let mut encoded = Vec::with_capacity(tx_bytes.len());
+        tx.write(&mut encoded).unwrap();
+        assert_eq!(tx_bytes, &encoded[..]);
+    }
+
+    let mut count = 0;
+    for tv in self::data::zip_0143::make_test_vectors() {
+        check(&tv.tx[..], tv.consensus_branch_id);
+        count += 1;
+    }
+    for tv in self::data::zip_0243::make_test_vectors() {
+        check(&tv.tx[..], tv.consensus_branch_id);
+        count += 1;
+    }
+    assert!(count > 0);
+}
+
 #[cfg(all(test, feature = "sapling", feature = "orchard"))]
 fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let mut txn_bytes = vec![];

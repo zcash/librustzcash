@@ -260,3 +260,79 @@ pub(crate) fn write_v6_bundle<W: Write>(
 ) -> io::Result<()> {
     write_v5_bundle(bundle, writer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ProofSizeEnforcement, expected_proof_size, read_v5_bundle};
+    use alloc::{vec, vec::Vec};
+    use corez::io::Write;
+    use zcash_encoding::Vector;
+
+    // Anchors the hand-copied proof-size constants to the canonical values from the orchard
+    // crate (`orchard::Proof::expected_proof_size`, cross-checked there against the action
+    // circuit), so they cannot silently drift from the feature-on path.
+    #[test]
+    fn proof_size_matches_known_values() {
+        assert_eq!(expected_proof_size(0), 2720);
+        assert_eq!(expected_proof_size(1), 4992);
+        assert_eq!(expected_proof_size(2), 7264);
+        assert_eq!(expected_proof_size(2) - expected_proof_size(1), 2272);
+    }
+
+    /// Wire bytes for a single-action Orchard bundle with a proof of the given length. The
+    /// action is all-zero bytes; feature-off parsing does not validate Pallas point membership,
+    /// so arbitrary 32-byte values parse.
+    fn single_action_bundle_bytes(proof_len: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let action = [0u8; 32 * 5 + 580 + 80];
+        Vector::write(&mut buf, &[action], |w, a| w.write_all(a)).unwrap();
+        buf.push(0u8); // flags
+        buf.extend_from_slice(&0i64.to_le_bytes()); // value_balance
+        buf.extend_from_slice(&[0u8; 32]); // anchor
+        Vector::write(&mut buf, &vec![0u8; proof_len], |w, b| w.write_all(&[*b])).unwrap();
+        buf.extend_from_slice(&[0u8; 64]); // per-action spend_auth_sig
+        buf.extend_from_slice(&[0u8; 64]); // binding_sig
+        buf
+    }
+
+    #[test]
+    fn strict_enforcement_rejects_noncanonical_proof_size() {
+        let canonical = expected_proof_size(1);
+
+        // Strict enforcement accepts the canonical size and rejects any other length
+        // (GHSA-2x4w-pxqw-58v9).
+        assert!(
+            read_v5_bundle(
+                &single_action_bundle_bytes(canonical)[..],
+                ProofSizeEnforcement::Strict,
+            )
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            read_v5_bundle(
+                &single_action_bundle_bytes(canonical + 1)[..],
+                ProofSizeEnforcement::Strict,
+            )
+            .is_err()
+        );
+        assert!(
+            read_v5_bundle(
+                &single_action_bundle_bytes(canonical - 1)[..],
+                ProofSizeEnforcement::Strict,
+            )
+            .is_err()
+        );
+
+        // Unenforced (pre-NU6.2) accepts a non-canonical size to preserve the ability to parse
+        // historical transactions.
+        assert!(
+            read_v5_bundle(
+                &single_action_bundle_bytes(canonical + 1)[..],
+                ProofSizeEnforcement::Unenforced,
+            )
+            .unwrap()
+            .is_some()
+        );
+    }
+}
