@@ -282,13 +282,6 @@ impl BuildConfig {
     }
 }
 
-fn orchard_bundle_kind(bundle_type: orchard::builder::BundleType) -> orchard::BundleKind {
-    match bundle_type {
-        orchard::builder::BundleType::Transactional { .. } => orchard::BundleKind::Transaction,
-        orchard::builder::BundleType::Coinbase => orchard::BundleKind::Coinbase,
-    }
-}
-
 /// The result of a transaction build operation, which includes the resulting transaction along
 /// with metadata describing how spends and outputs were shuffled in creating the transaction's
 /// shielded bundles.
@@ -472,8 +465,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
                 .orchard_builder_config()
                 .map(|(bundle_type, anchor)| {
                     orchard::builder::Builder::new(
-                        orchard_bundle_kind(bundle_type),
                         orchard::BundleProtocol::OrchardPreNu6_3,
+                        bundle_type,
                         anchor,
                     )
                 })
@@ -758,8 +751,12 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .zip(self.build_config.orchard_builder_config())
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
-                            .num_actions(builder.spends().len(), builder.outputs().len())
-                            .map_err(|e| FeeError::Bundle(e.as_static_str()))
+                            .num_actions(
+                                builder.spends().len(),
+                                builder.outputs().len(),
+                                builder.protocol(),
+                            )
+                            .map_err(FeeError::Bundle)
                     })?,
             )
             .map_err(FeeError::FeeRule)
@@ -804,8 +801,12 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .zip(self.build_config.orchard_builder_config())
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
-                            .num_actions(builder.spends().len(), builder.outputs().len())
-                            .map_err(|e| FeeError::Bundle(e.as_static_str()))
+                            .num_actions(
+                                builder.spends().len(),
+                                builder.outputs().len(),
+                                builder.protocol(),
+                            )
+                            .map_err(FeeError::Bundle)
                     })?,
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
