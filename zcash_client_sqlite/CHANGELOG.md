@@ -10,6 +10,8 @@ workspace.
 
 ## Unreleased
 
+## [0.21.1] - 2026-06-19
+
 ### Fixed
 - Fixed a bug in `WalletDb::delete_account` that caused it to fail with
   `rusqlite::Error::InvalidParameterName(":address")` when the account being
