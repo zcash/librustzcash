@@ -139,7 +139,7 @@ impl Pczt {
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         match version {
             PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(&bytes[8..])
-                .map(Into::into)
+                .map(Pczt::from)
                 .map_err(ParseError::Invalid),
             _ => Err(ParseError::UnknownVersion(version)),
         }
