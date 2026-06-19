@@ -38,7 +38,9 @@ use zcash_script::script::{self, Evaluable};
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
-    ORCHARD_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build)
+    ORCHARD_PROVING_KEY.get_or_init(|| {
+        orchard::circuit::ProvingKey::build(orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2)
+    })
 }
 
 fn check_round_trip(pczt: &Pczt) {
@@ -587,7 +589,8 @@ fn orchard_to_orchard() {
     let value = orchard::value::NoteValue::from_raw(1_000_000);
     let note = {
         let mut orchard_builder = orchard::builder::Builder::new(
-            orchard::builder::BundleType::DEFAULT,
+            orchard::BundleKind::Transaction,
+            orchard::BundleProtocol::OrchardPreNu6_3,
             orchard::Anchor::empty_tree(),
         );
         orchard_builder

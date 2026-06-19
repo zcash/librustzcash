@@ -125,7 +125,16 @@ mod serialization {
                         &rho,
                     )
                     .unwrap();
-                    Self::Orchard(orchard::Note::from_parts(recipient, value, rho, rseed).unwrap())
+                    Self::Orchard(
+                        orchard::Note::from_parts(
+                            recipient,
+                            value,
+                            rho,
+                            rseed,
+                            orchard::note::NoteVersion::V2,
+                        )
+                        .unwrap(),
+                    )
                 }
                 #[cfg(not(feature = "orchard"))]
                 _ => panic!("invalid protocol"),

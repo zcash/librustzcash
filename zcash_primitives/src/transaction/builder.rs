@@ -282,6 +282,13 @@ impl BuildConfig {
     }
 }
 
+fn orchard_bundle_kind(bundle_type: orchard::builder::BundleType) -> orchard::BundleKind {
+    match bundle_type {
+        orchard::builder::BundleType::Transactional { .. } => orchard::BundleKind::Transaction,
+        orchard::builder::BundleType::Coinbase => orchard::BundleKind::Coinbase,
+    }
+}
+
 /// The result of a transaction build operation, which includes the resulting transaction along
 /// with metadata describing how spends and outputs were shuffled in creating the transaction's
 /// shielded bundles.
@@ -463,7 +470,13 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
             build_config
                 .orchard_builder_config()
-                .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
+                .map(|(bundle_type, anchor)| {
+                    orchard::builder::Builder::new(
+                        orchard_bundle_kind(bundle_type),
+                        orchard::BundleProtocol::OrchardPreNu6_3,
+                        anchor,
+                    )
+                })
         } else {
             None
         };
@@ -746,7 +759,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
                             .num_actions(builder.spends().len(), builder.outputs().len())
-                            .map_err(FeeError::Bundle)
+                            .map_err(|e| FeeError::Bundle(e.as_static_str()))
                     })?,
             )
             .map_err(FeeError::FeeRule)
@@ -792,7 +805,7 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
                             .num_actions(builder.spends().len(), builder.outputs().len())
-                            .map_err(FeeError::Bundle)
+                            .map_err(|e| FeeError::Bundle(e.as_static_str()))
                     })?,
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
@@ -1149,14 +1162,14 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
-                    .and_then(|b| {
-                        b.apply_signatures(
-                            &mut rng,
-                            *shielded_sig_commitment.as_ref(),
-                            orchard_saks,
-                        )
-                    })
+                let circuit_version = b.circuit_version();
+                b.create_proof(
+                    &orchard::circuit::ProvingKey::build(circuit_version),
+                    &mut rng,
+                )
+                .and_then(|b| {
+                    b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), orchard_saks)
+                })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;

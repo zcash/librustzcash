@@ -8,6 +8,8 @@ use core::cmp::Ordering;
 #[cfg(feature = "orchard")]
 use ff::PrimeField;
 use getset::Getters;
+#[cfg(feature = "orchard")]
+use orchard::{bundle::BundleFormat, note::NoteVersion};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -419,6 +421,7 @@ impl Bundle {
                     action.spend.value,
                     action.spend.rho,
                     action.spend.rseed,
+                    NoteVersion::V2,
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
@@ -445,6 +448,7 @@ impl Bundle {
                     action.output.recipient,
                     action.output.value,
                     action.output.rseed,
+                    NoteVersion::V2,
                     action.output.ock,
                     action
                         .output
@@ -467,6 +471,7 @@ impl Bundle {
         orchard::pczt::Bundle::parse(
             actions,
             self.flags,
+            BundleFormat::PreNu6_3,
             self.value_sum,
             self.anchor,
             self.zkproof,
@@ -563,7 +568,10 @@ impl Bundle {
 
         Self {
             actions,
-            flags: bundle.flags().to_byte(),
+            flags: bundle
+                .flags()
+                .to_byte(BundleFormat::PreNu6_3)
+                .expect("Orchard flags must be representable in the v5 transaction format"),
             value_sum,
             anchor: bundle.anchor().to_bytes(),
             zkproof: bundle

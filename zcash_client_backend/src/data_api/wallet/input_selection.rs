@@ -871,7 +871,7 @@ where
         };
         orchard::builder::BundleType::DEFAULT
             .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
-            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s.as_static_str())))?
     };
     #[cfg(not(feature = "orchard"))]
     let orchard_action_count: usize = 0;

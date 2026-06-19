@@ -6097,7 +6097,9 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
 
     // Create proofs.
     let sapling_prover = LocalTxProver::bundled();
-    let orchard_pk = ::orchard::circuit::ProvingKey::build();
+    let orchard_pk = ::orchard::circuit::ProvingKey::build(
+        ::orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2,
+    );
     let pczt_proven = Prover::new(pczt_updated)
         .create_orchard_proof(&orchard_pk)
         .unwrap()
