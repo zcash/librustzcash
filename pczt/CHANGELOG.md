@@ -16,6 +16,7 @@ workspace.
 
 ### Added
 - `pczt::parse`, a free function for parsing PCZT encodings.
+- `pczt::SerializeError`, for errors that can occur during PCZT serialization.
 - `pczt::Pczt::serialize_v1`, for explicitly serializing the logical PCZT type
   with the version 1 encoding.
 

@@ -121,10 +121,10 @@ impl From<&Pczt> for v1::Pczt {
     }
 }
 
-/// Errors that can occur while serializing a PCZT using the v1 encoding.
+/// Errors that can occur while serializing a PCZT.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum V1SerializeError {}
+pub enum SerializeError {}
 
 impl Pczt {
     /// Parses a PCZT from its encoding.
@@ -152,7 +152,7 @@ impl Pczt {
     }
 
     /// Serializes this PCZT using the v1 encoding.
-    pub fn serialize_v1(&self) -> Result<Vec<u8>, V1SerializeError> {
+    pub fn serialize_v1(&self) -> Result<Vec<u8>, SerializeError> {
         let mut bytes = vec![];
         bytes.extend_from_slice(MAGIC_BYTES);
         bytes.extend_from_slice(&PCZT_VERSION_1.to_le_bytes());
