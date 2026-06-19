@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID}` under
+  `zcash_unstable = "nu6.3"`. The v6 version group ID is provisional until the
+  Ironwood / NU6.3 value is chosen.
+- `zcash_protocol::consensus::{NetworkUpgrade::Nu6_3, BranchId::Nu6_3}` under
+  `zcash_unstable = "nu6.3"`. The NU6.3 consensus branch ID is provisional until
+  the Ironwood / NU6.3 value is chosen.
+- `zcash_protocol::local_consensus::LocalNetwork::nu6_3` under
+  `zcash_unstable = "nu6.3"`.
+
 ## [0.9.0] - 2026-06-02
 
 ### Changed

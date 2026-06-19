@@ -1513,6 +1513,8 @@ impl TestBuilder<(), ()> {
         nu6: None,
         nu6_1: None,
         nu6_2: None,
+        #[cfg(zcash_unstable = "nu6.3")]
+        nu6_3: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
         #[cfg(zcash_unstable = "zfuture")]
