@@ -61,7 +61,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{TransactionDataRequest, TransparentOutputFilter},
+        data_api::{CoinbaseFilter, TransactionDataRequest},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::WalletTransparentOutput,
@@ -6335,7 +6335,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             &[to],
             dest_account_id,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     let result1 = st
@@ -6516,7 +6516,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 &t_addr,
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
-                TransparentOutputFilter::All,
+                CoinbaseFilter::AllTransparentOutputs,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -6539,7 +6539,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert!(
@@ -6560,13 +6560,13 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
 }
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-/// Tests that `TransparentOutputFilter::CoinbaseOnly` excludes non-coinbase outputs from
+/// Tests that `CoinbaseFilter::CoinbaseOnly` excludes non-coinbase outputs from
 /// UTXO selection and shielding proposals, and that `CoinbaseOnly` still allows proposing
 /// shielding when only coinbase UTXOs are available.
 pub fn coinbase_only_filtering<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
@@ -6615,20 +6615,20 @@ where
     st.add_empty_blocks(100);
     let target_height = TargetHeight::from(h + 101);
 
-    // 4. TransparentOutputFilter::All returns both UTXOs
+    // 4. CoinbaseFilter::All returns both UTXOs
     let all_utxos = st
         .wallet()
         .get_spendable_transparent_outputs(
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(
         all_utxos.len(),
         2,
-        "Expected both coinbase and non-coinbase UTXOs with TransparentOutputFilter::All"
+        "Expected both coinbase and non-coinbase UTXOs with CoinbaseFilter::AllTransparentOutputs"
     );
     let all_utxos_value = all_utxos
         .iter()
@@ -6640,20 +6640,20 @@ where
         "Unexpected total UTXO value when querying for all transparent transactions"
     );
 
-    // 5. TransparentOutputFilter::CoinbaseOnly returns only the coinbase UTXO
+    // 5. CoinbaseFilter::CoinbaseOnly returns only the coinbase UTXO
     let coinbase_utxos = st
         .wallet()
         .get_spendable_transparent_outputs(
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::CoinbaseOnly,
+            CoinbaseFilter::CoinbaseOnly,
         )
         .unwrap();
     assert_eq!(
         coinbase_utxos.len(),
         1,
-        "Expected only the coinbase UTXO with TransparentOutputFilter::CoinbaseOnly"
+        "Expected only the coinbase UTXO with CoinbaseFilter::CoinbaseOnly"
     );
     assert_eq!(coinbase_utxos[0].value(), coinbase_value);
 
@@ -6666,7 +6666,7 @@ where
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::CoinbaseOnly,
+            CoinbaseFilter::CoinbaseOnly,
         )
         .unwrap();
     let coinbase_inputs = proposal.steps().first().transparent_inputs();
@@ -6686,7 +6686,7 @@ where
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     let all_inputs = proposal_all.steps().first().transparent_inputs();

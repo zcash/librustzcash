@@ -38,7 +38,7 @@ use super::ConfirmationsPolicy;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::TransparentOutputFilter,
+        data_api::CoinbaseFilter,
         fees::ChangeValue,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
@@ -242,7 +242,7 @@ pub trait ShieldingSelector {
     /// [`InputSelectorError::InsufficientFunds`].
     ///
     /// The `output_filter` parameter controls which transparent outputs are eligible for
-    /// inclusion in the proposal. See [`TransparentOutputFilter`] for details.
+    /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_shielding<ParamsT, ChangeT>(
@@ -255,7 +255,7 @@ pub trait ShieldingSelector {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -464,13 +464,13 @@ impl TransparentSpendPolicy {
 
     /// Creates a policy that spends from arbitrary transparent receivers
     /// belonging to the account.
-    pub fn any_account_taddr() -> Self {
+    pub fn from_any_account_transparent_addresses() -> Self {
         Self::AnyAccountTaddr
     }
 
     /// Creates a policy that only spends from the specified transparent addresses,
     /// potentially leaking them. (`ANY_TADDR`)
-    pub fn from_transparent_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
+    pub fn from_specific_transparent_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
         Self::FromAddresses(NonEmptyBTreeSet {
             head: taddrs.head,
             tail: BTreeSet::from_iter(taddrs.tail),
@@ -521,7 +521,7 @@ where
                 addr,
                 target_height,
                 confirmations_policy,
-                TransparentOutputFilter::All,
+                CoinbaseFilter::AllTransparentOutputs,
             )
             .map_err(InputSelectorError::DataSource)?;
         inputs.extend(utxos.into_iter().map(|utxo| utxo.redact_account_data()));
@@ -1405,7 +1405,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -1491,7 +1491,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             // It doesn't matter here if we pass a 100 confirmations or 1 confirmations policy,
             // as coinbase txs require 100, which will be enforced by note selection.
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::CoinbaseOnly,
+            CoinbaseFilter::CoinbaseOnly,
             limit
                 .unwrap_or(usize::MAX)
                 .min(shielding_max_inputs(self.shielding_block_space_percent)),
@@ -1616,7 +1616,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
 }
 
 /// Gathers spendable transparent UTXOs from each source address, applying the
-/// supplied [`TransparentOutputFilter`] and rejecting input sets that would
+/// supplied [`CoinbaseFilter`] and rejecting input sets that would
 /// link activity on an ephemeral address to other wallet activity.
 ///
 /// Shared between `propose_shielding` and `propose_shielding_coinbase`.
@@ -1627,7 +1627,7 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
     source_addrs: &[TransparentAddress],
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
     max_inputs: usize,
 ) -> Result<
     Vec<WalletTransparentOutput<()>>,

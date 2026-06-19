@@ -1424,10 +1424,10 @@ impl NoteFilter {
 /// Controls which transparent outputs are eligible for selection.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TransparentOutputFilter {
+pub enum CoinbaseFilter {
     /// Select all spendable transparent outputs.
     #[default]
-    All,
+    AllTransparentOutputs,
     /// Select only coinbase transparent outputs.
     ///
     /// Coinbase transactions are identified by having `tx_index == 0` within
@@ -1534,7 +1534,7 @@ pub trait InputSource {
     ///   `target_height` (also taking into consideration the coinbase maturity rule).
     ///
     /// The `output_filter` parameter controls which transparent outputs are eligible. When set
-    /// to [`TransparentOutputFilter::CoinbaseOnly`], only outputs from coinbase transactions
+    /// to [`CoinbaseFilter::CoinbaseOnly`], only outputs from coinbase transactions
     /// should be returned.
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
@@ -1545,7 +1545,7 @@ pub trait InputSource {
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-        _output_filter: TransparentOutputFilter,
+        _output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1571,7 +1571,7 @@ pub trait InputSource {
         addresses: &[TransparentAddress],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
