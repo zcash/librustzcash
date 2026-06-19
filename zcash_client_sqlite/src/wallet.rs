@@ -3759,12 +3759,22 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
             gap_limits: *gap_limits,
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedProtocol::Sapling,
+                    height: truncation_height,
+                    error,
+                })?;
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedProtocol::Orchard,
+                    height: truncation_height,
+                    error,
+                })?;
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -3878,7 +3888,12 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     id: target_height,
                     marking: Marking::None,
                 },
-            )?;
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedProtocol::Sapling,
+                height: target_height,
+                error,
+            })?;
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -3890,7 +3905,12 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     id: target_height,
                     marking: Marking::None,
                 },
-            )?;
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedProtocol::Orchard,
+                height: target_height,
+                error,
+            })?;
             Ok::<_, SqliteClientError>(())
         })?;
     }

@@ -129,6 +129,20 @@ pub enum PutBlocksError<SE, TE> {
     Storage(SE),
     /// Wraps an error produced by [`shardtree`] insertion.
     ShardTree(ShardTreeError<TE>),
+    /// Wraps an error produced by [`shardtree`] while inserting the note commitment data for a
+    /// range of scanned blocks into one of the wallet's note commitment trees. The `pool` and
+    /// `block_range` fields record the shielded pool whose note commitment tree was being updated
+    /// and the range of block heights (start-inclusive, end-exclusive) that were being added to
+    /// the wallet when the error occurred.
+    ShardTreeForBlockRange {
+        /// The shielded pool whose note commitment tree was being updated when the error occurred.
+        pool: ShieldedProtocol,
+        /// The range of block heights that were being added to the wallet when the error
+        /// occurred.
+        block_range: Range<BlockHeight>,
+        /// The underlying error produced by [`shardtree`] insertion.
+        error: ShardTreeError<TE>,
+    },
     #[cfg(feature = "transparent-inputs")]
     GapAddresses(GapAddressesError<SE>),
 }
@@ -478,7 +492,11 @@ where
                     #[cfg(feature = "orchard")]
                     &mut missing_checkpoints,
                 )
-                .map_err(PutBlocksError::ShardTree)
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedProtocol::Sapling,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
             })?;
         }
 
@@ -496,7 +514,11 @@ where
                     &mut orchard_subtrees,
                     &mut missing_checkpoints,
                 )
-                .map_err(PutBlocksError::ShardTree)
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedProtocol::Orchard,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
             })?;
         }
 

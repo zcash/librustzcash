@@ -12,6 +12,12 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
+  a new variant that wraps a `shardtree` insertion error together with the
+  shielded pool whose note commitment tree was being updated and the range of
+  block heights that were being added to the wallet when the error occurred.
+  This makes it possible to identify which pool and which scanned blocks
+  triggered a note commitment tree conflict during `put_blocks`.
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`
   - `recipient_key_scope`
