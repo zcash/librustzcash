@@ -3678,6 +3678,16 @@ fn select_truncation_height(
 /// This should only be executed inside a transactional context.
 ///
 /// Returns the block height to which the database was truncated.
+///
+/// # Errors
+///
+/// - [`SqliteClientError::RequestedRewindInvalid`] if there is no note commitment tree
+///   checkpoint at or below `max_height` to truncate to. The error payload reports the
+///   safe rewind height, if one could be determined.
+/// - [`SqliteClientError::TruncateCommitmentTree`] if truncating one of the wallet's
+///   Sapling or Orchard note commitment trees to the resolved checkpoint fails. The error
+///   payload identifies the affected shielded pool and the target height.
+/// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -3815,6 +3825,15 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 ///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
 ///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
 ///   target height, and finally truncates to that new checkpoint.
+///
+/// # Errors
+///
+/// - [`SqliteClientError::TruncateCommitmentTree`] if inserting the chain-state frontier as a
+///   checkpoint, or truncating one of the wallet's Sapling or Orchard note commitment trees to a
+///   checkpoint, fails. The error payload identifies the affected shielded pool and the target
+///   height. Unlike [`truncate_to_height`], a missing checkpoint at the target height is not an
+///   error here: it is recovered from by inserting the provided frontier as a new checkpoint.
+/// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
     chain_state: ChainState,
