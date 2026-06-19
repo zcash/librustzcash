@@ -170,6 +170,9 @@ cargo test --workspace --all-features --features expensive-tests
 
 # NU6.3 unstable network upgrade tests
 RUSTFLAGS='--cfg zcash_unstable="nu6.3"' cargo test --workspace --all-features
+
+# NU7 unstable network upgrade tests
+RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --workspace --all-features
 ```
 
 ## Lint & Format
@@ -215,6 +218,7 @@ in-development functionality:
 
 - `zcash_unstable="zfuture"`
 - `zcash_unstable="nu6.3"`
+- `zcash_unstable="nu7"`
 
 ## Code Style
 
