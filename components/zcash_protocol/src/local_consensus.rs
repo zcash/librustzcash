@@ -32,7 +32,7 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 ///         nu6_2: Some(BlockHeight::from_u32(1)),
 ///     };
 ///     ```
-///     
+///
 #[derive(Clone, PartialEq, Eq, Copy, Debug, Hash)]
 pub struct LocalNetwork {
     pub overwinter: Option<BlockHeight>,
