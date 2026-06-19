@@ -18,6 +18,10 @@ workspace.
   (the legacy `ANY_TADDR` behavior, spending from arbitrary account transparent
   receivers and potentially linking them), and `FromAddresses` (spending only
   from an explicitly named set of transparent addresses).
+- `zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet`
+  (behind the `transparent-inputs` feature flag): a minimal non-empty
+  `BTreeSet` wrapper used by `TransparentSpendPolicy::FromAddresses` to hold
+  the explicit set of transparent addresses to spend from.
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
@@ -79,6 +83,7 @@ workspace.
     Tokio-based batch decryption engine for full blocks and transactions.
 
 ### Changed
+- Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to `CoinbaseFilter`
 - During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
   unspendable data outputs and skipped silently, instead of being logged as
   unsupported script kinds. Other unrecognized transparent script kinds continue to

@@ -25,8 +25,8 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, InputSource as _, TransparentOutputFilter, WalletRead as _,
-        WalletTest as _, WalletWrite,
+        Account as _, Balance, CoinbaseFilter, InputSource as _, WalletRead as _, WalletTest as _,
+        WalletWrite,
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
@@ -80,7 +80,7 @@ fn check_balance<DSF>(
                 taddr,
                 target_height,
                 confirmations_policy,
-                TransparentOutputFilter::All
+                CoinbaseFilter::AllTransparentOutputs
             )
             .unwrap()
             .into_iter()
@@ -147,7 +147,7 @@ where
             taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -181,7 +181,7 @@ where
                 taddr,
                 target_height,
                 ConfirmationsPolicy::MIN,
-                TransparentOutputFilter::All
+                CoinbaseFilter::AllTransparentOutputs
             )
             .as_deref(),
         Ok(&[])
@@ -197,7 +197,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, TransparentOutputFilter::All)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -519,7 +519,7 @@ where
             &taddrs,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -537,7 +537,7 @@ where
                     taddr,
                     target_height,
                     ConfirmationsPolicy::MIN,
-                    TransparentOutputFilter::All,
+                    CoinbaseFilter::AllTransparentOutputs,
                 )
                 .unwrap(),
         );
@@ -554,7 +554,7 @@ where
             &taddrs[..1],
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -567,7 +567,7 @@ where
                 &[],
                 target_height,
                 ConfirmationsPolicy::MIN,
-                TransparentOutputFilter::All,
+                CoinbaseFilter::AllTransparentOutputs,
             )
             .unwrap()
             .is_empty()
@@ -650,7 +650,7 @@ where
             &[*taddr],
             account.id(),
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .expect("shielding proposal should succeed");
 
@@ -1122,7 +1122,7 @@ where
             &taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1468,7 +1468,7 @@ where
             &taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1944,7 +1944,7 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &TransparentSpendPolicy::any_account_taddr(),
+            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
         )
         .expect("transparent spend must succeed under AnyAccountTaddr");
 

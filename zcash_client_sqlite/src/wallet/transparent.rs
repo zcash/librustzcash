@@ -22,8 +22,8 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, TransparentOutputFilter,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter,
+        TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     wallet::{
@@ -1249,7 +1249,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // Defer to the batched query with a singleton address set, so that there is a single query
     // body to maintain. `transparent_received_outputs.address` is always equal to the
@@ -1293,8 +1293,8 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     }
 
     let coinbase_only = match output_filter {
-        TransparentOutputFilter::All => 0i32,
-        TransparentOutputFilter::CoinbaseOnly => 1i32,
+        CoinbaseFilter::AllTransparentOutputs => 0i32,
+        CoinbaseFilter::CoinbaseOnly => 1i32,
     };
 
     let mut stmt_utxos = conn.prepare_cached(&format!(

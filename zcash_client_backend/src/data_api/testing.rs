@@ -77,7 +77,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     super::{
-        TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
+        CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
         wallet::input_selection::{ShieldingSelector, TransparentSpendPolicy},
     },
     crate::wallet::TransparentAddressMetadata,
@@ -1181,7 +1181,7 @@ where
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,

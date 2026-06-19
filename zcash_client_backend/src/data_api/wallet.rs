@@ -43,9 +43,9 @@ use std::{
 
 use shardtree::error::{QueryError, ShardTreeError};
 
-use super::InputSource;
 #[cfg(feature = "transparent-inputs")]
-use super::TransparentOutputFilter;
+use super::CoinbaseFilter;
+use super::InputSource;
 use crate::{
     data_api::{
         Account, MaxSpendMode, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
@@ -820,7 +820,7 @@ where
 /// addresses.
 ///
 /// The `output_filter` parameter controls which transparent outputs are eligible for
-/// inclusion in the proposal. See [`TransparentOutputFilter`] for details.
+/// inclusion in the proposal. See [`CoinbaseFilter`] for details.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -833,7 +833,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -2743,7 +2743,7 @@ where
         from_addrs,
         to_account,
         confirmations_policy,
-        TransparentOutputFilter::All,
+        CoinbaseFilter::AllTransparentOutputs,
     )?;
 
     create_proposed_transactions(
