@@ -43,6 +43,8 @@ fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
 fn check_round_trip(pczt: &Pczt) {
     let encoded = pczt.serialize();
     assert_eq!(encoded, Pczt::parse(&encoded).unwrap().serialize());
+    assert_eq!(encoded, pczt::parse(&encoded).unwrap().serialize());
+    assert_eq!(encoded, pczt.serialize_v1().unwrap());
 }
 
 #[test]

@@ -8,6 +8,17 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [0.8.0] - PLANNED
+
+### Changed
+- PCZT version 1 is now treated as a serialization format for the logical
+  `pczt::Pczt` type.
+
+### Added
+- `pczt::parse`, a free function for parsing PCZT encodings.
+- `pczt::Pczt::serialize_v1`, for explicitly serializing the logical PCZT type
+  with the version 1 encoding.
+
 ## [0.7.0] - 2026-06-02
 
 ### Changed
