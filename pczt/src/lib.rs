@@ -85,38 +85,53 @@ pub struct Pczt {
     pub(crate) orchard: orchard::Bundle,
 }
 
-mod v1 {
+/// Types and operations for the v1 Pczt encoding.
+pub mod v1 {
+    use alloc::vec::Vec;
     use serde::{Deserialize, Serialize};
 
     use crate::{common, orchard, sapling, transparent};
 
+    /// The in-memory type used for derived serialization of the v1 Pczt encoding.
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    pub(super) struct Pczt {
-        pub(super) global: common::Global,
-        pub(super) transparent: transparent::Bundle,
-        pub(super) sapling: sapling::Bundle,
-        pub(super) orchard: orchard::Bundle,
+    pub struct Pczt {
+        global: common::Global,
+        transparent: transparent::Bundle,
+        sapling: sapling::Bundle,
+        orchard: orchard::Bundle,
     }
-}
 
-impl From<v1::Pczt> for Pczt {
-    fn from(pczt: v1::Pczt) -> Self {
-        Self {
-            global: pczt.global,
-            transparent: pczt.transparent,
-            sapling: pczt.sapling,
-            orchard: pczt.orchard,
+    impl Pczt {
+        pub fn serialize(&self) -> Vec<u8> {
+            let mut bytes = vec![];
+            bytes.extend_from_slice(crate::MAGIC_BYTES);
+            bytes.extend_from_slice(&crate::PCZT_VERSION_1.to_le_bytes());
+            postcard::to_extend(&self, bytes).expect("can serialize into memory")
         }
     }
-}
 
-impl From<&Pczt> for v1::Pczt {
-    fn from(pczt: &Pczt) -> Self {
-        Self {
-            global: pczt.global.clone(),
-            transparent: pczt.transparent.clone(),
-            sapling: pczt.sapling.clone(),
-            orchard: pczt.orchard.clone(),
+    /// An encoder from the in-memory Pczt type to the type
+    impl TryFrom<super::Pczt> for Pczt {
+        type Error = super::EncodingError;
+
+        fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
+            Ok(Self {
+                global: pczt.global,
+                transparent: pczt.transparent,
+                sapling: pczt.sapling,
+                orchard: pczt.orchard,
+            })
+        }
+    }
+
+    impl From<Pczt> for super::Pczt {
+        fn from(pczt: Pczt) -> Self {
+            Self {
+                global: pczt.global,
+                transparent: pczt.transparent,
+                sapling: pczt.sapling,
+                orchard: pczt.orchard,
+            }
         }
     }
 }
@@ -124,7 +139,7 @@ impl From<&Pczt> for v1::Pczt {
 /// Errors that can occur while serializing a PCZT.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum SerializeError {}
+pub enum EncodingError {}
 
 impl Pczt {
     /// Parses a PCZT from its encoding.
@@ -146,17 +161,8 @@ impl Pczt {
     }
 
     /// Serializes this PCZT.
-    pub fn serialize(&self) -> Vec<u8> {
-        self.serialize_v1()
-            .expect("v1 can encode the current logical PCZT")
-    }
-
-    /// Serializes this PCZT using the v1 encoding.
-    pub fn serialize_v1(&self) -> Result<Vec<u8>, SerializeError> {
-        let mut bytes = vec![];
-        bytes.extend_from_slice(MAGIC_BYTES);
-        bytes.extend_from_slice(&PCZT_VERSION_1.to_le_bytes());
-        Ok(postcard::to_extend(&v1::Pczt::from(self), bytes).expect("can serialize into memory"))
+    pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
+        Ok(v1::Pczt::try_from(self.clone())?.serialize())
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided

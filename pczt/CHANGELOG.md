@@ -13,12 +13,15 @@ workspace.
 ### Changed
 - PCZT version 1 is now treated as a serialization format for the logical
   `pczt::Pczt` type.
+- `pczt::Pczt::serialize` now consumes `self` and returns
+  `Result<Vec<u8>, pczt::EncodingError>` rather than borrowing `self` and
+  returning `Vec<u8>`.
 
 ### Added
 - `pczt::parse`, a free function for parsing PCZT encodings.
-- `pczt::SerializeError`, for errors that can occur during PCZT serialization.
-- `pczt::Pczt::serialize_v1`, for explicitly serializing the logical PCZT type
-  with the version 1 encoding.
+- `pczt::EncodingError`, for errors that can occur during PCZT encoding.
+- `pczt::v1`, a module providing the version 1 PCZT serialization format via
+  `pczt::v1::Pczt`.
 
 ## [0.7.0] - 2026-06-02
 
