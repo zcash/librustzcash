@@ -340,6 +340,258 @@ pub(crate) fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester>() {
     )
 }
 
+/// Regression test: a note-commitment-tree error encountered while inserting the chain-state
+/// frontier during `truncate_to_chain_state` must surface as
+/// [`SqliteClientError::TruncateCommitmentTree`], carrying the affected shielded pool and the
+/// target height, rather than as the bare `CommitmentTree` variant (which reported only an opaque
+/// tree-node address).
+///
+/// The error is forced by replaying the same pruned scenario as
+/// [`truncate_to_chain_state_above_scanned`] (where the target-height checkpoint has been pruned,
+/// so `truncate_to_chain_state` reaches `insert_frontier`) but feeding it a *foreign* frontier:
+/// one captured from a second wallet that scanned the same number of blocks with different note
+/// values, so it has the same tree shape but conflicting node hashes.
+pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTester>() {
+    use zcash_client_backend::data_api::{
+        WalletWrite, chain::ChainState, testing::AddressType, testing::pool::dsl::TestDsl,
+    };
+    #[cfg(feature = "orchard")]
+    use zcash_protocol::ShieldedProtocol;
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
+
+    use crate::error::SqliteClientError;
+
+    // `zcash_client_backend::data_api::ll::wallet::PRUNING_DEPTH` is crate-private; mirror it
+    // here. Scanning this far past the captured height guarantees its checkpoint is pruned.
+    const PRUNING_DEPTH: u32 = 100;
+
+    // Wallet A: scan blocks to populate the note commitment tree, capture a consistent chain
+    // state, then scan well past the pruning depth so that the captured height's checkpoint is
+    // pruned (forcing `truncate_to_chain_state` down the `insert_frontier` path).
+    let mut wallet_a =
+        TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+            .build::<T>();
+    let activation = wallet_a
+        .network()
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap();
+    let fvk_a = T::sk_to_fvk(&T::sk(&[1u8; 32]));
+    let initial_blocks = 8u32;
+    for _ in 0..initial_blocks {
+        wallet_a.generate_next_block(
+            &fvk_a,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    wallet_a.scan_cached_blocks(activation, initial_blocks as usize);
+
+    let capture_height = activation + initial_blocks - 1;
+    let captured = wallet_a
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(captured.block_height(), capture_height);
+
+    let extra_blocks = PRUNING_DEPTH + 10;
+    for _ in 0..extra_blocks {
+        wallet_a.generate_next_block(
+            &fvk_a,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5_000),
+        );
+    }
+    wallet_a.scan_cached_blocks(capture_height + 1, extra_blocks as usize);
+
+    // Wallet B: identical structure but different note values, so its frontier at the same height
+    // has the same shape with conflicting node hashes.
+    let mut wallet_b =
+        TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+            .build::<T>();
+    let fvk_b = T::sk_to_fvk(&T::sk(&[2u8; 32]));
+    for _ in 0..initial_blocks {
+        wallet_b.generate_next_block(
+            &fvk_b,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(7_000),
+        );
+    }
+    wallet_b.scan_cached_blocks(activation, initial_blocks as usize);
+    let foreign = wallet_b
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(foreign.block_height(), capture_height);
+
+    // Claim wallet A's captured height/hash, but substitute wallet B's frontier for pool `T`.
+    #[cfg(feature = "orchard")]
+    let bad_chain_state = match T::SHIELDED_PROTOCOL {
+        ShieldedProtocol::Sapling => ChainState::new(
+            capture_height,
+            captured.block_hash(),
+            foreign.final_sapling_tree().clone(),
+            captured.final_orchard_tree().clone(),
+        ),
+        ShieldedProtocol::Orchard => ChainState::new(
+            capture_height,
+            captured.block_hash(),
+            captured.final_sapling_tree().clone(),
+            foreign.final_orchard_tree().clone(),
+        ),
+    };
+    #[cfg(not(feature = "orchard"))]
+    let bad_chain_state = ChainState::new(
+        capture_height,
+        captured.block_hash(),
+        foreign.final_sapling_tree().clone(),
+    );
+
+    match wallet_a
+        .wallet_mut()
+        .truncate_to_chain_state(bad_chain_state)
+    {
+        Err(SqliteClientError::TruncateCommitmentTree { pool, height, .. }) => {
+            assert_eq!(pool, T::SHIELDED_PROTOCOL);
+            assert_eq!(height, capture_height);
+        }
+        other => panic!("expected TruncateCommitmentTree error, got {other:?}"),
+    }
+}
+
+/// Regression test: a note-commitment-tree error encountered while storing scanned blocks via
+/// `put_blocks` must surface as [`SqliteClientError::PutBlocksCommitmentTree`], carrying the
+/// affected shielded pool and the range of block heights being added, rather than as the bare
+/// `CommitmentTree` variant.
+///
+/// The error is forced by scanning a contiguous range of wallet A's blocks but supplying a
+/// `from_state` whose frontier was captured from a second wallet that scanned the same number of
+/// blocks with different note values: the chain state has the same tree shape (so it passes
+/// `put_blocks`' sequentiality checks) but conflicting node hashes, so `insert_frontier` inside
+/// `put_blocks` fails.
+pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
+    use zcash_client_backend::data_api::{
+        chain::{ChainState, error::Error},
+        testing::AddressType,
+        testing::pool::dsl::TestDsl,
+    };
+    #[cfg(feature = "orchard")]
+    use zcash_protocol::ShieldedProtocol;
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
+
+    use crate::error::SqliteClientError;
+
+    // Wallet A: scan an initial range of blocks and capture its (consistent) chain state at the
+    // last scanned height.
+    let mut wallet_a =
+        TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+            .build::<T>();
+    let activation = wallet_a
+        .network()
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap();
+    let fvk_a = T::sk_to_fvk(&T::sk(&[1u8; 32]));
+    let initial_blocks = 8u32;
+    for _ in 0..initial_blocks {
+        wallet_a.generate_next_block(
+            &fvk_a,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    wallet_a.scan_cached_blocks(activation, initial_blocks as usize);
+
+    let from_height = activation + initial_blocks;
+    let captured = wallet_a
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(captured.block_height(), from_height - 1);
+
+    // Generate (but do not scan) a further range of wallet A's blocks; these will be scanned with
+    // the conflicting `from_state` below.
+    let scan_blocks = 3u32;
+    for _ in 0..scan_blocks {
+        wallet_a.generate_next_block(
+            &fvk_a,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(5_000),
+        );
+    }
+
+    // Wallet B: identical structure but different note values, so its frontier at the same height
+    // has the same shape with conflicting node hashes.
+    let mut wallet_b =
+        TestDsl::with_sapling_birthday_account(TestDbFactory::default(), BlockCache::new())
+            .build::<T>();
+    let fvk_b = T::sk_to_fvk(&T::sk(&[2u8; 32]));
+    for _ in 0..initial_blocks {
+        wallet_b.generate_next_block(
+            &fvk_b,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(7_000),
+        );
+    }
+    wallet_b.scan_cached_blocks(activation, initial_blocks as usize);
+    let foreign = wallet_b
+        .latest_cached_block()
+        .expect("should have cached blocks")
+        .chain_state()
+        .clone();
+    assert_eq!(foreign.block_height(), from_height - 1);
+
+    // Build a `from_state` claiming wallet A's last-scanned height/hash, but substituting wallet
+    // B's frontier for pool `T`.
+    #[cfg(feature = "orchard")]
+    let bad_from_state = match T::SHIELDED_PROTOCOL {
+        ShieldedProtocol::Sapling => ChainState::new(
+            from_height - 1,
+            captured.block_hash(),
+            foreign.final_sapling_tree().clone(),
+            captured.final_orchard_tree().clone(),
+        ),
+        ShieldedProtocol::Orchard => ChainState::new(
+            from_height - 1,
+            captured.block_hash(),
+            captured.final_sapling_tree().clone(),
+            foreign.final_orchard_tree().clone(),
+        ),
+    };
+    #[cfg(not(feature = "orchard"))]
+    let bad_from_state = ChainState::new(
+        from_height - 1,
+        captured.block_hash(),
+        foreign.final_sapling_tree().clone(),
+    );
+
+    match wallet_a.try_scan_cached_blocks_with_state(
+        from_height,
+        &bad_from_state,
+        scan_blocks as usize,
+    ) {
+        Err(Error::Wallet(SqliteClientError::PutBlocksCommitmentTree {
+            pool,
+            block_range,
+            ..
+        })) => {
+            assert_eq!(pool, T::SHIELDED_PROTOCOL);
+            // `put_blocks` reports the range as `from_state.block_height()..(last_scanned + 1)`,
+            // i.e. starting at the frontier/`from_state` height and ending one past the last
+            // scanned block.
+            assert_eq!(block_range, (from_height - 1)..(from_height + scan_blocks));
+        }
+        other => panic!("expected PutBlocksCommitmentTree error, got {other:?}"),
+    }
+}
+
 pub(crate) fn rewind_to_chain_state_deep<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::rewind_to_chain_state_deep::<T, _>(
         TestDbFactory::default(),
