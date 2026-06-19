@@ -382,7 +382,7 @@ mod serialization {
                 txid: read_optional!(value, tx_id)?.try_into()?,
                 output_index: value.output_index,
                 account_id: value.account_id.into(),
-                note: read_optional!(value, note)?.into(),
+                note: read_optional!(value, note)?.try_into()?,
                 nf: value.nullifier.map(|nf| nf.try_into()).transpose()?,
                 is_change: value.is_change,
                 memo: Memo::from_bytes(&value.memo)?,

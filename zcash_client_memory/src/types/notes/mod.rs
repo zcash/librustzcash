@@ -87,48 +87,71 @@ mod serialization {
         }
     }
 
-    impl From<proto::Note> for Note {
-        fn from(note: proto::Note) -> Self {
+    impl TryFrom<proto::Note> for Note {
+        type Error = Error;
+
+        fn try_from(note: proto::Note) -> Result<Self, Self::Error> {
             match note.protocol() {
                 proto::ShieldedProtocol::Sapling => {
-                    let recipient =
-                        sapling::PaymentAddress::from_bytes(&note.recipient.try_into().unwrap())
-                            .unwrap();
+                    let recipient_bytes: [u8; 43] = note.recipient.try_into()?;
+                    let recipient = sapling::PaymentAddress::from_bytes(&recipient_bytes)
+                        .ok_or_else(|| {
+                            Error::CorruptedData("invalid sapling recipient".to_string())
+                        })?;
                     let value = sapling::value::NoteValue::from_raw(note.value);
-                    let rseed = match note.rseed {
-                        Some(proto::RSeed {
+                    let rseed = match read_optional!(note, rseed)? {
+                        proto::RSeed {
                             rseed_type: Some(0),
                             payload,
-                        }) => sapling::Rseed::BeforeZip212(
-                            Fr::from_bytes(&payload.try_into().unwrap()).unwrap(),
-                        ),
-                        Some(proto::RSeed {
+                        } => {
+                            let payload: [u8; 32] = payload.try_into()?;
+                            let fr = Option::from(Fr::from_bytes(&payload)).ok_or_else(|| {
+                                Error::CorruptedData("invalid sapling rseed (BeforeZip212)".to_string())
+                            })?;
+                            sapling::Rseed::BeforeZip212(fr)
+                        }
+                        proto::RSeed {
                             rseed_type: Some(1),
                             payload,
-                        }) => sapling::Rseed::AfterZip212(payload.try_into().unwrap()),
-                        _ => panic!("rseed is required"),
+                        } => sapling::Rseed::AfterZip212(payload.try_into()?),
+                        _ => {
+                            return Err(Error::CorruptedData(
+                                "missing or unrecognized rseed_type".to_string(),
+                            ));
+                        }
                     };
-                    Self::Sapling(sapling::Note::from_parts(recipient, value, rseed))
+                    Ok(Self::Sapling(sapling::Note::from_parts(
+                        recipient, value, rseed,
+                    )))
                 }
                 #[cfg(feature = "orchard")]
                 proto::ShieldedProtocol::Orchard => {
-                    let recipient = orchard::Address::from_raw_address_bytes(
-                        &note.recipient.try_into().unwrap(),
-                    )
-                    .unwrap();
+                    let recipient_bytes: [u8; 43] = note.recipient.try_into()?;
+                    let recipient =
+                        Option::from(orchard::Address::from_raw_address_bytes(&recipient_bytes))
+                            .ok_or_else(|| {
+                                Error::CorruptedData("invalid orchard recipient".to_string())
+                            })?;
                     let value = orchard::value::NoteValue::from_raw(note.value);
-                    let rho =
-                        orchard::note::Rho::from_bytes(&note.rho.unwrap().try_into().unwrap())
-                            .unwrap();
-                    let rseed = orchard::note::RandomSeed::from_bytes(
-                        note.rseed.unwrap().payload.try_into().unwrap(),
+                    let rho_bytes: [u8; 32] = read_optional!(note, rho)?.try_into()?;
+                    let rho = Option::from(orchard::note::Rho::from_bytes(&rho_bytes))
+                        .ok_or_else(|| Error::CorruptedData("invalid orchard rho".to_string()))?;
+                    let rseed_payload: [u8; 32] =
+                        read_optional!(note, rseed)?.payload.try_into()?;
+                    let rseed = Option::from(orchard::note::RandomSeed::from_bytes(
+                        rseed_payload,
                         &rho,
-                    )
-                    .unwrap();
-                    Self::Orchard(orchard::Note::from_parts(recipient, value, rho, rseed).unwrap())
+                    ))
+                    .ok_or_else(|| Error::CorruptedData("invalid orchard rseed".to_string()))?;
+                    Ok(Self::Orchard(
+                        Option::from(orchard::Note::from_parts(recipient, value, rho, rseed))
+                            .ok_or_else(|| {
+                                Error::CorruptedData("invalid orchard note parts".to_string())
+                            })?,
+                    ))
                 }
                 #[cfg(not(feature = "orchard"))]
-                _ => panic!("invalid protocol"),
+                _ => Err(Error::OrchardNotEnabled),
             }
         }
     }
@@ -153,9 +176,75 @@ mod serialization {
             ));
 
             let proto_note: proto::Note = note.clone().into();
-            let recovered: Note = proto_note.into();
+            let recovered: Note = proto_note.try_into().unwrap();
 
             assert_eq!(note, recovered);
+        }
+
+        #[test]
+        fn try_from_proto_note_rejects_wrong_length_sapling_recipient() {
+            let proto_note = proto::Note {
+                protocol: proto::ShieldedProtocol::Sapling as i32,
+                recipient: vec![0u8; 16],
+                value: 99,
+                rseed: Some(proto::RSeed {
+                    rseed_type: Some(1),
+                    payload: vec![0u8; 32],
+                }),
+                rho: None,
+            };
+            assert!(matches!(
+                Note::try_from(proto_note),
+                Err(Error::ByteVecToArrayConversion(_)),
+            ));
+        }
+
+        #[test]
+        fn try_from_proto_note_rejects_unrecognized_rseed_type() {
+            let valid_recipient = vec![
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
+                0x9d, 0x72, 0x99, 0x2b, 0x56, 0x0d, 0x26, 0x50, 0xff, 0xe0, 0xbe, 0x7f, 0x35, 0x42,
+                0xfd, 0x97, 0x00, 0x3c, 0xb7, 0xcc, 0x3a, 0xbf, 0xf8, 0x1a, 0x7f, 0x90, 0x37, 0xf3,
+                0xea,
+            ];
+            let proto_note = proto::Note {
+                protocol: proto::ShieldedProtocol::Sapling as i32,
+                recipient: valid_recipient,
+                value: 99,
+                rseed: Some(proto::RSeed {
+                    rseed_type: Some(99),
+                    payload: vec![0u8; 32],
+                }),
+                rho: None,
+            };
+            assert!(matches!(
+                Note::try_from(proto_note),
+                Err(Error::CorruptedData(_)),
+            ));
+        }
+
+        #[test]
+        fn try_from_proto_note_rejects_wrong_length_rseed_payload() {
+            let valid_recipient = vec![
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
+                0x9d, 0x72, 0x99, 0x2b, 0x56, 0x0d, 0x26, 0x50, 0xff, 0xe0, 0xbe, 0x7f, 0x35, 0x42,
+                0xfd, 0x97, 0x00, 0x3c, 0xb7, 0xcc, 0x3a, 0xbf, 0xf8, 0x1a, 0x7f, 0x90, 0x37, 0xf3,
+                0xea,
+            ];
+            let proto_note = proto::Note {
+                protocol: proto::ShieldedProtocol::Sapling as i32,
+                recipient: valid_recipient,
+                value: 99,
+                rseed: Some(proto::RSeed {
+                    rseed_type: Some(0),
+                    payload: vec![0u8; 16],
+                }),
+                rho: None,
+            };
+            assert!(matches!(
+                Note::try_from(proto_note),
+                Err(Error::ByteVecToArrayConversion(_)),
+            ));
         }
     }
 }
