@@ -92,6 +92,13 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.pczt]]
+version = "0.7.0"
+when = "2026-06-03"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
 [[publisher.sapling-crypto]]
 version = "0.7.0"
 when = "2026-04-21"
