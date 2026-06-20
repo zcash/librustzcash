@@ -110,6 +110,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
                 orchard::value::NoteValue::from_raw(note_value),
                 rho,
                 rseed,
+                orchard::note::NoteVersion::V2,
             ))
             .ok_or_else(|| SqliteClientError::CorruptedData("Invalid Orchard note.".to_string()))?;
 

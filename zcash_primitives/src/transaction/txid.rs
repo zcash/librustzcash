@@ -365,7 +365,11 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         &self,
         orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map(|b| b.commitment().0)
+        orchard_bundle.map(|b| {
+            b.commitment(orchard::BundleFormat::PreNu6_3)
+                .expect("Orchard bundle flags must be representable in the v5 transaction format")
+                .0
+        })
     }
 
     #[cfg(zcash_unstable = "zfuture")]

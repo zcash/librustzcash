@@ -9,7 +9,7 @@ use nonempty::NonEmpty;
 
 use orchard::{
     Action, Anchor,
-    bundle::{Authorization, Authorized, Flags, ProofSizeEnforcement},
+    bundle::{Authorization, Authorized, BundleFormat, Flags, ProofSizeEnforcement},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
@@ -173,7 +173,7 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
     let mut byte = [0u8; 1];
     reader.read_exact(&mut byte)?;
-    Flags::from_byte(byte[0])
+    Flags::from_byte(byte[0], BundleFormat::PreNu6_3)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Orchard flags"))
 }
 
@@ -200,7 +200,16 @@ pub fn write_v5_bundle<W: Write>(
             write_action_without_auth(w, a)
         })?;
 
-        writer.write_all(&[bundle.flags().to_byte()])?;
+        let flags = bundle
+            .flags()
+            .to_byte(BundleFormat::PreNu6_3)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Orchard flags cannot be encoded in the v5 transaction format",
+                )
+            })?;
+        writer.write_all(&[flags])?;
         writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
         writer.write_all(&bundle.anchor().to_bytes())?;
         Vector::write(

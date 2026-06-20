@@ -870,7 +870,11 @@ where
             0
         };
         orchard::builder::BundleType::DEFAULT
-            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
+            .num_actions(
+                spendable_notes.orchard.len(),
+                requested_orchard_actions,
+                ::orchard::BundleProtocol::OrchardPreNu6_3,
+            )
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
     };
     #[cfg(not(feature = "orchard"))]
@@ -1264,7 +1268,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             PoolType::ORCHARD => {
                 let count = orchard::builder::BundleType::DEFAULT
-                    .num_actions(0, 1)
+                    .num_actions(0, 1, ::orchard::BundleProtocol::OrchardPreNu6_3)
                     .expect("orchard DEFAULT bundle type permits any (spends, outputs) count");
                 (0usize, count)
             }

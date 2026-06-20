@@ -463,7 +463,13 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
             build_config
                 .orchard_builder_config()
-                .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
+                .map(|(bundle_type, anchor)| {
+                    orchard::builder::Builder::new(
+                        orchard::BundleProtocol::OrchardPreNu6_3,
+                        bundle_type,
+                        anchor,
+                    )
+                })
         } else {
             None
         };
@@ -745,7 +751,11 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .zip(self.build_config.orchard_builder_config())
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
-                            .num_actions(builder.spends().len(), builder.outputs().len())
+                            .num_actions(
+                                builder.spends().len(),
+                                builder.outputs().len(),
+                                builder.protocol(),
+                            )
                             .map_err(FeeError::Bundle)
                     })?,
             )
@@ -791,7 +801,11 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
                     .zip(self.build_config.orchard_builder_config())
                     .map_or(Ok(0), |(builder, (bundle_type, _))| {
                         bundle_type
-                            .num_actions(builder.spends().len(), builder.outputs().len())
+                            .num_actions(
+                                builder.spends().len(),
+                                builder.outputs().len(),
+                                builder.protocol(),
+                            )
                             .map_err(FeeError::Bundle)
                     })?,
                 self.tze_builder.inputs(),
@@ -1149,14 +1163,14 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
-                    .and_then(|b| {
-                        b.apply_signatures(
-                            &mut rng,
-                            *shielded_sig_commitment.as_ref(),
-                            orchard_saks,
-                        )
-                    })
+                let circuit_version = b.circuit_version();
+                b.create_proof(
+                    &orchard::circuit::ProvingKey::build(circuit_version),
+                    &mut rng,
+                )
+                .and_then(|b| {
+                    b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), orchard_saks)
+                })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;
