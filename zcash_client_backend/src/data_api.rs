@@ -167,7 +167,14 @@ pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
 pub enum NullifierQuery {
+    /// Return nullifiers for notes that have not been confirmed spent by a transaction mined on
+    /// the chain.
+    ///
+    /// This is intended for scan relevance. It may include nullifiers for notes that are locked
+    /// by locally-created transactions that have not yet been mined, and therefore must not be
+    /// used as a spendability query.
     Unspent,
+    /// Return nullifiers for every note known to the wallet.
     All,
 }
 

@@ -190,10 +190,10 @@ pub(crate) fn select_unspent_note_meta(
     )
 }
 
-/// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
-/// wallet is tracking.
+/// Retrieves the set of nullifiers for Sapling notes that the wallet is tracking and that have
+/// not been confirmed spent.
 ///
-/// "Potentially spendable" means:
+/// "Not confirmed spent" means:
 /// - The transaction in which the note was created has been observed as mined.
 /// - No transaction in which the note's nullifier appears has been observed as mined.
 pub(crate) fn get_sapling_nullifiers(
