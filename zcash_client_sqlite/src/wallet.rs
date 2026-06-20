@@ -756,7 +756,7 @@ pub(crate) fn delete_account(
         if let Some(address) = row.get::<_, Option<String>>("to_address")? {
             update_sent_note.execute(named_params![
                 ":sent_note_id": row.get::<_, i64>("sent_note_id")?,
-                ":address": address
+                ":to_address": address
             ])?;
         }
     }

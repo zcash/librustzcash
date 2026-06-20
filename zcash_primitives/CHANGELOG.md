@@ -26,7 +26,7 @@ workspace.
 
 ### Fixed
 - Updated to crate versions that fix an Orchard soundness vulnerability
-  (GHSA-2x4w-pxqw-58v9).
+  (GHSA-ww9q-8r59-xv46).
 
 ### Security
 - Deserialization of v5 Orchard bundles now rejects proofs whose length is not

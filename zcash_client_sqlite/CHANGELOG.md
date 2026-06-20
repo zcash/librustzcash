@@ -8,6 +8,18 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## Unreleased
+
+## [0.21.1] - 2026-06-19
+
+### Fixed
+- Fixed a bug in `WalletDb::delete_account` that caused it to fail with
+  `rusqlite::Error::InvalidParameterName(":address")` when the account being
+  deleted was referenced by a `sent_notes` row via its `to_account_id` column
+  (for example, after an internal transfer to an address belonging to the
+  account being deleted). The `sent_notes` update statement bound a parameter
+  named `:address` while the SQL expected `:to_address`.
+
 ## [0.21.0] - 2026-06-02
 
 ### Changed
@@ -15,6 +27,7 @@ workspace.
 
 ### Fixed
 - Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
   (GHSA-2x4w-pxqw-58v9).
 
 ## [0.20.2] - 2026-05-07

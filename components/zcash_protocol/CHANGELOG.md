@@ -23,6 +23,7 @@ workspace.
 
 ### Fixed
 - Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
   (GHSA-2x4w-pxqw-58v9).
 
 ## [0.8.0] - 2026-04-23
