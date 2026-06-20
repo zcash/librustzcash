@@ -15,6 +15,7 @@ use pczt::{
         signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
         updater::Updater,
     },
+    v1,
 };
 use rand_core::OsRng;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
@@ -41,8 +42,19 @@ fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
 }
 
 fn check_round_trip(pczt: &Pczt) {
-    let encoded = pczt.serialize();
-    assert_eq!(encoded, Pczt::parse(&encoded).unwrap().serialize());
+    // The default encoding is the v1 encoding.
+    let v1_encoded = v1::Pczt::try_from(pczt.clone())
+        .expect("v1 encoding succeeds")
+        .serialize();
+
+    let encoded = pczt.clone().serialize().expect("serialization succeeds");
+    assert_eq!(encoded, v1_encoded);
+
+    let reencoded = Pczt::parse(&encoded)
+        .expect("can parse encoded PCZT")
+        .serialize()
+        .expect("serialization succeeds");
+    assert_eq!(encoded, reencoded);
 }
 
 #[test]
@@ -525,7 +537,7 @@ fn sapling_to_orchard() {
 
     // Pass the PCZT to be signed through a serialization cycle to ensure we don't lose
     // any information. This emulates passing it to another device.
-    let pczt = Pczt::parse(&pczt.serialize()).unwrap();
+    let pczt = Pczt::parse(&pczt.serialize().unwrap()).unwrap();
 
     // Apply signatures.
     let mut signer = Signer::new(pczt).unwrap();
@@ -537,7 +549,7 @@ fn sapling_to_orchard() {
 
     // Emulate passing the signed PCZT back to the first device.
     let pczt_with_sapling_signatures =
-        Pczt::parse(&pczt_with_sapling_signatures.serialize()).unwrap();
+        Pczt::parse(&pczt_with_sapling_signatures.serialize().unwrap()).unwrap();
 
     // Combine the three PCZTs into one.
     let pczt = Combiner::new(vec![

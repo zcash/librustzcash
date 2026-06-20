@@ -24,7 +24,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use getset::Getters;
-use serde::{Deserialize, Serialize};
 
 #[cfg(all(
     any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
@@ -55,15 +54,20 @@ pub mod orchard;
 pub mod sapling;
 pub mod transparent;
 
-const MAGIC_BYTES: &[u8] = b"PCZT";
-const PCZT_VERSION_1: u32 = 1;
+pub(crate) const MAGIC_BYTES: &[u8] = b"PCZT";
+pub(crate) const PCZT_VERSION_1: u32 = 1;
+
+/// Parses a PCZT from its encoding.
+pub fn parse(bytes: &[u8]) -> Result<Pczt, ParseError> {
+    Pczt::parse(bytes)
+}
 
 /// A partially-created Zcash transaction.
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, Getters)]
 pub struct Pczt {
     /// Global fields that are relevant to the transaction as a whole.
     #[getset(get = "pub")]
-    global: common::Global,
+    pub(crate) global: common::Global,
 
     //
     // Protocol-specific fields.
@@ -74,12 +78,68 @@ pub struct Pczt {
     // it has been determined whether there are protocol-specific inputs or outputs.
     //
     #[getset(get = "pub")]
-    transparent: transparent::Bundle,
+    pub(crate) transparent: transparent::Bundle,
     #[getset(get = "pub")]
-    sapling: sapling::Bundle,
+    pub(crate) sapling: sapling::Bundle,
     #[getset(get = "pub")]
-    orchard: orchard::Bundle,
+    pub(crate) orchard: orchard::Bundle,
 }
+
+/// Types and operations for the v1 Pczt encoding.
+pub mod v1 {
+    use alloc::vec::Vec;
+    use serde::{Deserialize, Serialize};
+
+    use crate::{common, orchard, sapling, transparent};
+
+    /// The in-memory type used for derived serialization of the v1 Pczt encoding.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct Pczt {
+        global: common::Global,
+        transparent: transparent::Bundle,
+        sapling: sapling::Bundle,
+        orchard: orchard::Bundle,
+    }
+
+    impl Pczt {
+        pub fn serialize(&self) -> Vec<u8> {
+            let mut bytes = vec![];
+            bytes.extend_from_slice(crate::MAGIC_BYTES);
+            bytes.extend_from_slice(&crate::PCZT_VERSION_1.to_le_bytes());
+            postcard::to_extend(&self, bytes).expect("can serialize into memory")
+        }
+    }
+
+    /// An encoder from the in-memory Pczt type to the type
+    impl TryFrom<super::Pczt> for Pczt {
+        type Error = super::EncodingError;
+
+        fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
+            Ok(Self {
+                global: pczt.global,
+                transparent: pczt.transparent,
+                sapling: pczt.sapling,
+                orchard: pczt.orchard,
+            })
+        }
+    }
+
+    impl From<Pczt> for super::Pczt {
+        fn from(pczt: Pczt) -> Self {
+            Self {
+                global: pczt.global,
+                transparent: pczt.transparent,
+                sapling: pczt.sapling,
+                orchard: pczt.orchard,
+            }
+        }
+    }
+}
+
+/// Errors that can occur while serializing a PCZT.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum EncodingError {}
 
 impl Pczt {
     /// Parses a PCZT from its encoding.
@@ -90,21 +150,19 @@ impl Pczt {
         if &bytes[..4] != MAGIC_BYTES {
             return Err(ParseError::NotPczt);
         }
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        if version != PCZT_VERSION_1 {
-            return Err(ParseError::UnknownVersion(version));
-        }
 
-        // This is a v1 PCZT.
-        postcard::from_bytes(&bytes[8..]).map_err(ParseError::Invalid)
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        match version {
+            PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(&bytes[8..])
+                .map(Pczt::from)
+                .map_err(ParseError::Invalid),
+            _ => Err(ParseError::UnknownVersion(version)),
+        }
     }
 
     /// Serializes this PCZT.
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut bytes = vec![];
-        bytes.extend_from_slice(MAGIC_BYTES);
-        bytes.extend_from_slice(&PCZT_VERSION_1.to_le_bytes());
-        postcard::to_extend(self, bytes).expect("can serialize into memory")
+    pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
+        Ok(v1::Pczt::try_from(self.clone())?.serialize())
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
@@ -238,9 +296,10 @@ impl Authorization for EffectsOnly {
 
 /// Helper to produce the correct sighash for a PCZT.
 ///
-/// At present, only V5 transaction signature hashes are supported, and a version check *MUST* be
-/// performed prior to invoking this function. It is intended for use exclusively for use in the
-/// context of a callback to the `extract_tx_data` function, which performs this check.
+/// At present, only V5 transaction signature hashes are supported, and a
+/// version check *MUST* be performed prior to invoking this function. It is
+/// intended for use exclusively for use in the context of a callback to the
+/// `extract_tx_data` function, which performs this check.
 #[cfg(any(feature = "io-finalizer", feature = "signer"))]
 pub(crate) fn sighash(
     tx_data: &TransactionData<EffectsOnly>,
@@ -269,11 +328,13 @@ pub enum ExtractError {
     SaplingExtract(::sapling::pczt::TxExtractorError),
     /// An error occurred parsing the Sapling PCZT bundle from the PCZT data.
     SaplingParse(::sapling::pczt::ParseError),
-    /// An error occurred extracting the transparent protocol bundle from the transparent PCZT bundle.
+    /// An error occurred extracting the transparent protocol bundle from the
+    /// transparent PCZT bundle.
     TransparentExtract(::transparent::pczt::TxExtractorError),
     /// An error occurred parsing the transparent PCZT bundle from the PCZT data.
     TransparentParse(::transparent::pczt::ParseError),
-    /// The consensus branch ID requested by the PCZT does not correspond to a known network upgrade.
+    /// The consensus branch ID requested by the PCZT does not correspond to a
+    /// known network upgrade.
     UnknownConsensusBranchId,
     /// The PCZT specifies an unsupported transaction version.
     UnsupportedTxVersion { version: u32, version_group_id: u32 },

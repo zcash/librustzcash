@@ -8,6 +8,21 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [0.8.0] - PLANNED
+
+### Changed
+- PCZT version 1 is now treated as a serialization format for the logical
+  `pczt::Pczt` type.
+- `pczt::Pczt::serialize` now consumes `self` and returns
+  `Result<Vec<u8>, pczt::EncodingError>` rather than borrowing `self` and
+  returning `Vec<u8>`.
+
+### Added
+- `pczt::parse`, a free function for parsing PCZT encodings.
+- `pczt::EncodingError`, for errors that can occur during PCZT encoding.
+- `pczt::v1`, a module providing the version 1 PCZT serialization format via
+  `pczt::v1::Pczt`.
+
 ## [0.7.0] - 2026-06-02
 
 ### Changed
