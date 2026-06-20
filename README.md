@@ -219,6 +219,8 @@ graph TB
   - light client protocol support
   - fee calculation
   - transaction proposals & high-level transaction construction APIs
+* `zcash_client_memory`: An in-memory wallet storage implementation that is
+  currently unsupported, undocumented, and not usable as a wallet backend
 * `zcash_client_sqlite`: SQLite-based implementation of `zcash_client_backend` storage APIs
 
 #### Utilities & Common Dependencies

@@ -1,3 +1,10 @@
+//! In-memory wallet storage implementation.
+//!
+//! This crate is currently unsupported, undocumented, and not usable as a
+//! wallet storage backend. It is included as a work-in-progress alternative to
+//! `zcash_client_sqlite`, but it is not suitable for production use or security
+//! review unless that review is specifically scoped to this crate.
+
 mod block_source;
 mod error;
 mod input_source;
