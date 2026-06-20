@@ -77,6 +77,7 @@ workspace = true
 features = ["pre-zip-212"]
 
 [dev-dependencies]
+bls12_381.workspace = true
 chacha20poly1305 = "0.10"
 criterion.workspace = true
 incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
@@ -86,7 +87,7 @@ rand_xorshift.workspace = true
 transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
-zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
 zip32.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]

@@ -13,8 +13,26 @@ workspace.
 ### Added
 - `zcash_primitives::block::Block::from_parts` (behind the `test-dependencies`
   feature flag).
+- `zcash_primitives::transaction`:
+  - `TxVersion::V6`, the NU6.3 transaction format supporting Transparent,
+    Sapling, Orchard, and Ironwood bundles.
+  - `TransactionData::from_parts_v6`, for constructing v6 transactions with
+    separate Orchard and Ironwood bundles.
+  - `TransactionData::ironwood_bundle`, for accessing the Ironwood bundle on a
+    transaction.
+  - `TxDigests::ironwood_digest`, for carrying the Ironwood bundle digest.
+  - `TransactionDigest::{IronwoodDigest, digest_ironwood}`, for digest
+    implementations that commit to Ironwood bundles.
 
 ### Changed
+- `zcash_primitives::transaction::builder`:
+  - NU6.3 standard builders use the NU6.3 Orchard bundle protocol when
+    constructing V6 transactions.
+  - NU6.3 coinbase builders no longer expose Orchard outputs.
+- `TransactionDigest::digest_orchard` now receives `TxVersion`, so digest
+  implementations can distinguish Orchard commitments by transaction format.
+- `TransactionDigest::digest_sapling` now receives `TxVersion`, so digest
+  implementations can distinguish Sapling commitments by transaction format.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever
@@ -36,6 +54,8 @@ workspace.
     `fees::FeeRule::fee_required_zfuture`.
 
 ### Fixed
+- V6 transaction IDs and authorizing commitments now use the v6 Sapling,
+  Orchard, and Ironwood digest domains.
 
 ## [0.28.0] - 2026-06-02
 
@@ -61,7 +81,6 @@ workspace.
   arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
   transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
   for earlier branches to preserve the ability to parse historical transactions.
-
 ## [0.27.1] - 2026-05-14
 
 ### Fixed
@@ -212,8 +231,8 @@ workspace.
   `test-dependencies` feature to provide access to test vectors.
 
 ### Changed
-- This release provides pre-release support for some planned Network Upgrade 7
-  features under the `zcash_unstable=nu7` configuration flag. This
+- This release provides pre-release support for some planned Ironwood / NU6.3
+  features under the `zcash_unstable="nu6.3"` configuration flag. This
   configuration flag guards SemVer-breaking changes that will appear in a
   future `zcash_primitives` release.
 
