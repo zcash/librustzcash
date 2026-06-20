@@ -68,7 +68,7 @@ redjubjub = { version = "0.8", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
-orchard = { git = "https://github.com/zcash/orchard", rev = "b2af0a11abe00f59c51258d349c2105fe7a16215", default-features = false }
+orchard = { version = "0.14", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -186,6 +186,9 @@ zip32 = { version = "0.2", default-features = false }
 
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"
+
+[patch.crates-io]
+orchard = { git = "https://github.com/zcash/orchard", rev = "b2af0a11abe00f59c51258d349c2105fe7a16215" }
 
 [workspace.metadata.release]
 consolidate-commits = false
