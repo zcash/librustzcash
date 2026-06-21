@@ -21,6 +21,7 @@ use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE}
 use zcash_primitives::transaction::{
     TransactionData, TxDigests, sighash::SignableInput, txid::TxIdDigester,
 };
+use zcash_protocol::value::Zatoshis;
 
 use crate::{
     ExtractError, ParsedPczt, Pczt,
@@ -110,13 +111,21 @@ impl Signer {
 
     /// Signs the transparent spend at the given index with the given spending key.
     ///
-    /// It is the caller's responsibility to perform any semantic validity checks on the
-    /// PCZT (for example, comfirming that the change amounts are correct) before calling
-    /// this method.
+    /// `expected_amount` is the value the caller believes is being spent. ZIP-244 binds
+    /// the input amount into the sighash; passing the wrong amount produces a signature
+    /// that consensus will reject. Caller derives `expected_amount` from already-trusted
+    /// context (the spend record being signed) before invoking the signer. The check is
+    /// compiler-enforced via [`transparent::pczt::SignerError::ValueMismatch`].
+    ///
+    /// This check does not replace the caller's broader responsibility to perform
+    /// semantic validity checks on the PCZT before signing. The caller must still
+    /// verify recipients, outputs, change amounts, fees, and any policy-specific
+    /// expectations against trusted context.
     pub fn sign_transparent(
         &mut self,
         index: usize,
         sk: &secp256k1::SecretKey,
+        expected_amount: Zatoshis,
     ) -> Result<(), Error> {
         self.generate_or_append_transparent_signature(index, |input, tx_data, txid_parts, secp| {
             input.sign(
@@ -124,6 +133,7 @@ impl Signer {
                 |input| sighash(tx_data, &SignableInput::Transparent(input), txid_parts),
                 sk,
                 secp,
+                expected_amount,
             )
         })
     }
@@ -167,8 +177,10 @@ impl Signer {
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
-        // Check consistency of the input being signed.
-        // TODO
+        // Consistency of input value is now checked at the input.sign() boundary via the
+        // `expected_amount: Zatoshis` precondition; see `transparent::pczt::Input::sign`
+        // and `SignerError::ValueMismatch`. Other semantic checks remain the caller's
+        // responsibility before invoking the signer.
 
         // Generate or apply the signature.
         f(input, &self.tx_data, &self.txid_parts, &self.secp).map_err(Error::TransparentSign)?;
