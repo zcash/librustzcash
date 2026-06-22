@@ -689,6 +689,7 @@ impl proposal::Proposal {
                     inputs,
                     balance,
                     is_shielding: step.is_shielding(),
+                    op_return_data: step.op_return_data().map(|d| d.to_vec()),
                 }
             })
             .collect();
@@ -888,7 +889,7 @@ impl proposal::Proposal {
                     )
                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
 
-                    let step = Step::from_parts(
+                    let built_step = Step::from_parts(
                         &steps,
                         transaction_request,
                         payment_pools,
@@ -900,7 +901,12 @@ impl proposal::Proposal {
                     )
                     .map_err(ProposalDecodingError::ProposalInvalid)?;
 
-                    steps.push(step);
+                    let built_step = match &step.op_return_data {
+                        Some(data) => built_step.with_op_return_data(data.clone()),
+                        None => built_step,
+                    };
+
+                    steps.push(built_step);
                 }
 
                 Proposal::multi_step(

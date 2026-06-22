@@ -40,6 +40,12 @@ message ProposalStep {
     // A flag indicating whether the step is for a shielding transaction,
     // used for determining which OVK to select for wallet-internal outputs.
     bool isShielding = 6;
+    // Optional `OP_RETURN` data to be included as a transparent null-data output in
+    // the constructed transaction (max 80 bytes per Bitcoin/Zcash standard relay rules).
+    // Used for cross-chain swap integrations (e.g., THORChain/MAYAChain) that require
+    // a memo embedded in the transaction's null-data output. When absent, no
+    // `OP_RETURN` output is added.
+    optional bytes opReturnData = 7;
 }
 
 enum ValuePool {

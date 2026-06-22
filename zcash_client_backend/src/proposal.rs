@@ -354,6 +354,34 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn steps(&self) -> &NonEmpty<Step<NoteRef>> {
         &self.steps
     }
+
+    /// Returns a copy of this proposal with the given `OP_RETURN` data attached to its final step.
+    ///
+    /// The final step is the one that produces the externally-visible transaction (in single-step
+    /// proposals this is the only step; in multi-step proposals such as TEX flows, it is the last
+    /// step). This is the appropriate target for swap memos (e.g., THORChain/MAYAChain) and other
+    /// cross-chain integrations where the memo must be embedded as an `OP_RETURN` output of the
+    /// outermost send.
+    ///
+    /// The data is not validated here; length limits are enforced at transaction build time by
+    /// `zcash_transparent::builder::TransparentBuilder::add_null_data_output` (max 80 bytes per
+    /// Bitcoin/Zcash standard relay rules).
+    pub fn with_op_return_data(self, data: Vec<u8>) -> Self {
+        let Self {
+            fee_rule,
+            min_target_height,
+            steps,
+        } = self;
+        // Move the steps into a Vec so we can replace the last entry without cloning the rest.
+        let mut vec: Vec<Step<NoteRef>> = steps.into_iter().collect();
+        let last = vec.pop().expect("NonEmpty guarantees at least one step");
+        vec.push(last.with_op_return_data(data));
+        Self {
+            fee_rule,
+            min_target_height,
+            steps: NonEmpty::from_vec(vec).expect("at least one step preserved"),
+        }
+    }
 }
 
 impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
@@ -411,6 +439,13 @@ pub struct Step<NoteRef> {
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
     is_shielding: bool,
+    /// Optional data to be included as an `OP_RETURN` transparent output in the constructed
+    /// transaction. Limited to 80 bytes by Bitcoin/Zcash standard relay rules.
+    ///
+    /// This is intended for cross-chain swap integrations (e.g., THORChain/MAYAChain) that
+    /// require a memo embedded in the transaction's null-data output. When `None`, no
+    /// `OP_RETURN` output is added.
+    op_return_data: Option<Vec<u8>>,
 }
 
 impl<NoteRef> Step<NoteRef> {
@@ -527,6 +562,7 @@ impl<NoteRef> Step<NoteRef> {
                 prior_step_inputs,
                 balance,
                 is_shielding,
+                op_return_data: None,
             })
         } else {
             Err(ProposalError::BalanceError {
@@ -567,6 +603,28 @@ impl<NoteRef> Step<NoteRef> {
     /// recipients).
     pub fn is_shielding(&self) -> bool {
         self.is_shielding
+    }
+
+    /// Returns the `OP_RETURN` payload to include in the transaction, if any.
+    ///
+    /// This is the data that will be encoded into a transparent `OP_RETURN` (null-data) output
+    /// when the transaction is built. Used for cross-chain swap integrations
+    /// (THORChain/MAYAChain memos). Returns `None` if no such output should be added.
+    pub fn op_return_data(&self) -> Option<&[u8]> {
+        self.op_return_data.as_deref()
+    }
+
+    /// Returns a copy of this step with the given `OP_RETURN` data attached.
+    ///
+    /// When the transaction is built from a proposal containing this step, an additional
+    /// transparent `OP_RETURN` output will be appended carrying the supplied data.
+    ///
+    /// The data is not validated here; length limits are enforced at transaction build time
+    /// by `zcash_transparent::builder::TransparentBuilder::add_null_data_output` (max 80 bytes
+    /// per Bitcoin/Zcash standard relay rules).
+    pub fn with_op_return_data(mut self, data: Vec<u8>) -> Self {
+        self.op_return_data = Some(data);
+        self
     }
 
     /// Returns whether or not this proposal requires interaction with the specified pool.

@@ -1744,6 +1744,13 @@ where
         }
     }
 
+    // If the proposal step requests an `OP_RETURN` output, append it. Length limits (max 80 bytes)
+    // are enforced by `TransparentBuilder::add_null_data_output`. This is used by cross-chain
+    // swap integrations (e.g., THORChain/MAYAChain) that require a memo embedded as null-data.
+    if let Some(op_return_data) = proposal_step.op_return_data() {
+        builder.add_transparent_null_data_output(op_return_data)?;
+    }
+
     Ok(BuildState {
         #[cfg(feature = "transparent-inputs")]
         step_index,

@@ -11,6 +11,23 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::proposal::Step::op_return_data` getter, returning the
+  optional `OP_RETURN` payload attached to the step.
+- `zcash_client_backend::proposal::Step::with_op_return_data`, a builder method
+  to attach `OP_RETURN` data to a step. The data is validated at transaction
+  build time against the 80-byte standard relay limit.
+- `zcash_client_backend::proposal::Proposal::with_op_return_data`, a convenience
+  builder that attaches `OP_RETURN` data to the final step of a proposal.
+- Support for `OP_RETURN` transparent null-data outputs in
+  `zcash_client_backend::data_api::wallet::create_proposed_transactions`,
+  driven by the new `op_return_data` field on `Step`. Enables wallet integrations
+  with cross-chain swap protocols (THORChain, MAYAChain) that require a swap
+  memo embedded in the transaction's null-data output. The underlying primitive
+  `add_transparent_null_data_output` was introduced in #1786 for direct-builder
+  use cases; this change exposes the same capability through the high-level
+  `Proposal`-based API.
+- `op_return_data` field added to the `ProposalStep` protobuf message (optional
+  bytes, field 7), preserving backwards compatibility.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`

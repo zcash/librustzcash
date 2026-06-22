@@ -45,6 +45,13 @@ pub struct ProposalStep {
     /// used for determining which OVK to select for wallet-internal outputs.
     #[prost(bool, tag = "6")]
     pub is_shielding: bool,
+    /// Optional `OP_RETURN` data to be included as a transparent null-data output in
+    /// the constructed transaction (max 80 bytes per Bitcoin/Zcash standard relay rules).
+    /// Used for cross-chain swap integrations (e.g., THORChain/MAYAChain) that require
+    /// a memo embedded in the transaction's null-data output. When absent, no
+    /// `OP_RETURN` output is added.
+    #[prost(bytes = "vec", optional, tag = "7")]
+    pub op_return_data: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
 }
 /// A mapping from ZIP 321 payment index to the output pool that has been chosen
 /// for that payment, based upon the payment address and the selected inputs to
