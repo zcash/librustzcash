@@ -11,7 +11,6 @@ members = [
     "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
-    "zcash_extensions",
     "zcash_history",
     "zcash_keys",
     "zcash_primitives",
@@ -225,6 +224,6 @@ debug = true
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(tokio_unstable)',
-  'cfg(zcash_unstable, values("zfuture", "nu7"))',
+  'cfg(zcash_unstable, values("nu7"))',
   'cfg(live_network_tests)',
 ] }

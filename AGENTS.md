@@ -212,7 +212,6 @@ These feature flags are used consistently across crates in the repository:
 These are `cfg` flags (not Cargo feature flags) that enable unstable or
 in-development functionality:
 
-- `zcash_unstable="zfuture"`
 - `zcash_unstable="nu7"`
 
 ## Code Style

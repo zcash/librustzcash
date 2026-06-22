@@ -26,7 +26,6 @@ graph TB
             zcash_primitives
             zcash_transparent
             zcash_proofs
-            zcash_extensions
             zcash_protocol
             pczt
             zcash_client_backend
@@ -65,7 +64,6 @@ graph TB
 
     zcash_client_backend --> zcash_proofs
 
-    zcash_extensions --> zcash_primitives
     zcash_proofs --> zcash_primitives
     pczt --> zcash_primitives
     %% zcash_client_backend --> zcash_primitives
@@ -91,7 +89,6 @@ graph TB
     %% zcash_primitives --> zcash_protocol
     %% zcash_client_backend --> zcash_protocol
     %% pczt --> zcash_protocol
-    %% zcash_extensions --> zcash_protocol
     zcash_address --> zcash_protocol
     %% zip321 --> zcash_protocol
 
@@ -151,7 +148,6 @@ graph TB
     click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
     click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
     click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
-    click zcash_extensions "https://docs.rs/zcash_extensions/" _blank
     click zcash_keys "https://docs.rs/zcash_keys/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
     click zcash_primitives "https://docs.rs/zcash_primitives/" _blank

@@ -25,7 +25,6 @@ on:
           - zcash_client_backend
           - zcash_client_sqlite
           - zcash_encoding
-          - zcash_extensions
           - zcash_history
           - zcash_keys
           - zcash_primitives
@@ -58,7 +57,6 @@ jobs:
           - zcash_client_backend
           - zcash_client_sqlite
           - zcash_encoding
-          - zcash_extensions
           - zcash_history
           - zcash_keys
           - zcash_primitives
@@ -77,7 +75,6 @@ jobs:
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_client_backend', 'zcash_client_backend', 'NONE') }}
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_client_sqlite',  'zcash_client_sqlite',  'NONE') }}
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_encoding',       'zcash_encoding',       'NONE') }}
-          - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_extensions',     'zcash_extensions',     'NONE') }}
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_history',        'zcash_history',        'NONE') }}
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_keys',           'zcash_keys',           'NONE') }}
           - package: ${{ case((github.event.inputs.package || 'all') != 'all' && (github.event.inputs.package || 'all') != 'zcash_primitives',     'zcash_primitives',     'NONE') }}

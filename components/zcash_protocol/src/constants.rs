@@ -42,18 +42,3 @@ pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
 #[cfg(zcash_unstable = "nu7")]
 pub const V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-
-/// This version is used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus transaction versions are added, all call sites
-/// using this constant should be inspected, and uses should be
-/// removed as appropriate in favor of the new transaction version.
-#[cfg(zcash_unstable = "zfuture")]
-pub const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
-/// This version group ID is used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus version group IDs are added, all call sites
-/// using this constant should be inspected, and uses should be
-/// removed as appropriate in favor of the new version group ID.
-#[cfg(zcash_unstable = "zfuture")]
-pub const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
