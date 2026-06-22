@@ -98,28 +98,41 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
     h.finalize()
 }
 
+/// The byte encodings of the Sapling spend-description fields that are committed to by the
+/// [ZIP 244 spends digest](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest).
+///
+/// Both the typed (`sapling` feature enabled) and byte-oriented (feature disabled) paths
+/// extract these fields and feed them to [`hash_sapling_spends_inner`], so the two
+/// implementations cannot drift.
+struct SaplingSpendDigestFields {
+    cv: [u8; 32],
+    anchor: [u8; 32],
+    nullifier: [u8; 32],
+    rk: [u8; 32],
+}
+
 /// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
 ///
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
 /// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
-/// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
+/// * \[(cv, anchor, rk)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized by ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION
-#[cfg(feature = "sapling")]
-pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
-    shielded_spends: &[SpendDescription<A>],
+fn hash_sapling_spends_inner(
+    shielded_spends: impl Iterator<Item = SaplingSpendDigestFields>,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
-    if !shielded_spends.is_empty() {
+    let mut shielded_spends = shielded_spends.peekable();
+    if shielded_spends.peek().is_some() {
         let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
         let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_spend in shielded_spends {
             // we build the hash of nullifiers separately for compact blocks.
-            ch.write_all(s_spend.nullifier().as_ref()).unwrap();
+            ch.write_all(&s_spend.nullifier).unwrap();
 
-            nh.write_all(&s_spend.cv().to_bytes()).unwrap();
-            nh.write_all(&s_spend.anchor().to_repr()).unwrap();
-            nh.write_all(&<[u8; 32]>::from(*s_spend.rk())).unwrap();
+            nh.write_all(&s_spend.cv).unwrap();
+            nh.write_all(&s_spend.anchor).unwrap();
+            nh.write_all(&s_spend.rk).unwrap();
         }
 
         let compact_digest = ch.finalize();
@@ -130,26 +143,53 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
     h.finalize()
 }
 
-/// Equivalent of [`hash_sapling_spends`] operating on the opaque byte representation of a
-/// Sapling bundle used when the `sapling` feature is disabled.
+/// Computes the [ZIP 244 spends digest](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
+/// from the typed representation of a Sapling bundle's spend descriptions.
+#[cfg(feature = "sapling")]
+pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
+    shielded_spends: &[SpendDescription<A>],
+) -> Blake2bHash {
+    hash_sapling_spends_inner(
+        shielded_spends
+            .iter()
+            .map(|s_spend| SaplingSpendDigestFields {
+                cv: s_spend.cv().to_bytes(),
+                anchor: s_spend.anchor().to_repr(),
+                nullifier: s_spend.nullifier().0,
+                rk: (*s_spend.rk()).into(),
+            }),
+    )
+}
+
+/// Computes the [ZIP 244 spends digest](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
+/// from the byte representation of a Sapling bundle's spend descriptions, used when the
+/// `sapling` feature is disabled.
 #[cfg(not(feature = "sapling"))]
 fn hash_sapling_spends_raw(shielded_spends: &[RawSaplingSpend]) -> Blake2bHash {
-    let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
-    if !shielded_spends.is_empty() {
-        let mut ch = hasher(ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION);
-        let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
-        for s_spend in shielded_spends {
-            ch.write_all(&s_spend.nullifier).unwrap();
+    hash_sapling_spends_inner(
+        shielded_spends
+            .iter()
+            .map(|s_spend| SaplingSpendDigestFields {
+                cv: s_spend.cv,
+                anchor: s_spend.anchor,
+                nullifier: s_spend.nullifier,
+                rk: s_spend.rk,
+            }),
+    )
+}
 
-            nh.write_all(&s_spend.cv).unwrap();
-            nh.write_all(&s_spend.anchor).unwrap();
-            nh.write_all(&s_spend.rk).unwrap();
-        }
-
-        h.write_all(ch.finalize().as_bytes()).unwrap();
-        h.write_all(nh.finalize().as_bytes()).unwrap();
-    }
-    h.finalize()
+/// The byte encodings of the Sapling output-description fields that are committed to by the
+/// [ZIP 244 outputs digest](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest).
+///
+/// Both the typed (`sapling` feature enabled) and byte-oriented (feature disabled) paths
+/// extract these fields and feed them to [`hash_sapling_outputs_inner`], so the two
+/// implementations cannot drift.
+struct SaplingOutputDigestFields<'a> {
+    cv: [u8; 32],
+    cmu: [u8; 32],
+    ephemeral_key: &'a [u8],
+    enc_ciphertext: &'a [u8],
+    out_ciphertext: &'a [u8],
 }
 
 /// Implements [ZIP 244 section T.3b](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)
@@ -157,26 +197,28 @@ fn hash_sapling_spends_raw(shielded_spends: &[RawSaplingSpend]) -> Blake2bHash {
 /// Write disjoint parts of each Sapling shielded output as 3 separate hashes:
 /// * \[(cmu, epk, enc_ciphertext\[..52\])*\] personalized with ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION
 /// * \[enc_ciphertext\[52..564\]*\] (memo ciphertexts) personalized with ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION
-/// * \[(cv, enc_ciphertext\[564..\], out_ciphertext, zkproof)*\] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
+/// * \[(cv, enc_ciphertext\[564..\], out_ciphertext)*\] personalized with ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized with ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION
-#[cfg(feature = "sapling")]
-pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
+fn hash_sapling_outputs_inner<'a>(
+    shielded_outputs: impl Iterator<Item = SaplingOutputDigestFields<'a>>,
+) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
-    if !shielded_outputs.is_empty() {
+    let mut shielded_outputs = shielded_outputs.peekable();
+    if shielded_outputs.peek().is_some() {
         let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
         let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
         let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_out in shielded_outputs {
-            ch.write_all(s_out.cmu().to_bytes().as_ref()).unwrap();
-            ch.write_all(s_out.ephemeral_key().as_ref()).unwrap();
-            ch.write_all(&s_out.enc_ciphertext()[..52]).unwrap();
+            ch.write_all(&s_out.cmu).unwrap();
+            ch.write_all(s_out.ephemeral_key).unwrap();
+            ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
 
-            mh.write_all(&s_out.enc_ciphertext()[52..564]).unwrap();
+            mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
 
-            nh.write_all(&s_out.cv().to_bytes()).unwrap();
-            nh.write_all(&s_out.enc_ciphertext()[564..]).unwrap();
-            nh.write_all(&s_out.out_ciphertext()[..]).unwrap();
+            nh.write_all(&s_out.cv).unwrap();
+            nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
+            nh.write_all(s_out.out_ciphertext).unwrap();
         }
 
         h.write_all(ch.finalize().as_bytes()).unwrap();
@@ -186,32 +228,39 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
     h.finalize()
 }
 
-/// Equivalent of [`hash_sapling_outputs`] operating on the opaque byte representation of a
-/// Sapling bundle used when the `sapling` feature is disabled.
+/// Computes the [ZIP 244 outputs digest](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)
+/// from the typed representation of a Sapling bundle's output descriptions.
+#[cfg(feature = "sapling")]
+pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>]) -> Blake2bHash {
+    hash_sapling_outputs_inner(
+        shielded_outputs
+            .iter()
+            .map(|s_out| SaplingOutputDigestFields {
+                cv: s_out.cv().to_bytes(),
+                cmu: s_out.cmu().to_bytes(),
+                ephemeral_key: s_out.ephemeral_key().as_ref(),
+                enc_ciphertext: s_out.enc_ciphertext(),
+                out_ciphertext: s_out.out_ciphertext(),
+            }),
+    )
+}
+
+/// Computes the [ZIP 244 outputs digest](https://zips.z.cash/zip-0244#t-3b-sapling-outputs-digest)
+/// from the byte representation of a Sapling bundle's output descriptions, used when the
+/// `sapling` feature is disabled.
 #[cfg(not(feature = "sapling"))]
 fn hash_sapling_outputs_raw(shielded_outputs: &[RawSaplingOutput]) -> Blake2bHash {
-    let mut h = hasher(ZCASH_SAPLING_OUTPUTS_HASH_PERSONALIZATION);
-    if !shielded_outputs.is_empty() {
-        let mut ch = hasher(ZCASH_SAPLING_OUTPUTS_COMPACT_HASH_PERSONALIZATION);
-        let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
-        let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
-        for s_out in shielded_outputs {
-            ch.write_all(&s_out.cmu).unwrap();
-            ch.write_all(&s_out.ephemeral_key).unwrap();
-            ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
-
-            mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
-
-            nh.write_all(&s_out.cv).unwrap();
-            nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
-            nh.write_all(&s_out.out_ciphertext[..]).unwrap();
-        }
-
-        h.write_all(ch.finalize().as_bytes()).unwrap();
-        h.write_all(mh.finalize().as_bytes()).unwrap();
-        h.write_all(nh.finalize().as_bytes()).unwrap();
-    }
-    h.finalize()
+    hash_sapling_outputs_inner(
+        shielded_outputs
+            .iter()
+            .map(|s_out| SaplingOutputDigestFields {
+                cv: s_out.cv,
+                cmu: s_out.cmu,
+                ephemeral_key: &s_out.ephemeral_key,
+                enc_ciphertext: &s_out.enc_ciphertext,
+                out_ciphertext: &s_out.out_ciphertext,
+            }),
+    )
 }
 
 /// The txid commits to the hash of all transparent outputs. The
