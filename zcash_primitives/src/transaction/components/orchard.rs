@@ -90,7 +90,7 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_v6_bundle<R: Read>(
     reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
@@ -223,7 +223,7 @@ pub fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,

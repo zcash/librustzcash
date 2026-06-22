@@ -18,17 +18,8 @@ use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
-#[cfg(all(
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-    feature = "zip-233"
-))]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use zcash_protocol::value::Zatoshis;
-
-#[cfg(zcash_unstable = "zfuture")]
-use super::{
-    TzeDigests,
-    components::tze::{self, TzeIn, TzeOut},
-};
 
 /// TxId tree root personalization
 const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
@@ -37,19 +28,11 @@ const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
 pub(crate) const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
 const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
-#[cfg(zcash_unstable = "zfuture")]
-const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
 
 // TxId transparent level 2 node personalization
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdPrevoutHash";
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSequencHash";
 const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOutputsHash";
-
-// TxId tze level 2 node personalization
-#[cfg(zcash_unstable = "zfuture")]
-const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZEIns_Hash";
-#[cfg(zcash_unstable = "zfuture")]
-const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZEOutsHash";
 
 // TxId sapling level 2 node personalization
 const ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSSpendsHash";
@@ -64,8 +47,6 @@ const ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxId
 const ZCASH_AUTH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZTxAuthHash_";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTransHash";
 const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
-#[cfg(zcash_unstable = "zfuture")]
-const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
     StateWrite(Params::new().hash_length(32).personal(personal).to_state())
@@ -105,32 +86,6 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
     let mut h = hasher(ZCASH_OUTPUTS_HASH_PERSONALIZATION);
     for t_out in vout {
         t_out.borrow().write(&mut h).unwrap();
-    }
-    h.finalize()
-}
-
-/// Sequentially append the serialized value of each TZE input, excluding
-/// witness data, to a hash personalized by ZCASH_TZE_INPUTS_HASH_PERSONALIZATION.
-/// In the case that no inputs are provided, this produces a default
-/// hash from just the personalization string.
-#[cfg(zcash_unstable = "zfuture")]
-pub(crate) fn hash_tze_inputs<A>(tze_inputs: &[TzeIn<A>]) -> Blake2bHash {
-    let mut h = hasher(ZCASH_TZE_INPUTS_HASH_PERSONALIZATION);
-    for tzein in tze_inputs {
-        tzein.write_without_witness(&mut h).unwrap();
-    }
-    h.finalize()
-}
-
-/// Sequentially append the full serialized value of each TZE output
-/// to a hash personalized by ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION.
-/// In the case that no outputs are provided, this produces a default
-/// hash from just the personalization string.
-#[cfg(zcash_unstable = "zfuture")]
-pub(crate) fn hash_tze_outputs(tze_outputs: &[TzeOut]) -> Blake2bHash {
-    let mut h = hasher(ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION);
-    for tzeout in tze_outputs {
-        tzeout.write(&mut h).unwrap();
     }
     h.finalize()
 }
@@ -211,16 +166,6 @@ fn transparent_digests<A: transparent::Authorization>(
     }
 }
 
-#[cfg(zcash_unstable = "zfuture")]
-fn tze_digests<A: tze::Authorization>(bundle: &tze::Bundle<A>) -> TzeDigests<Blake2bHash> {
-    // The txid commits to the hash for all outputs.
-    TzeDigests {
-        inputs_digest: hash_tze_inputs(&bundle.vin),
-        outputs_digest: hash_tze_outputs(&bundle.vout),
-        per_input_digest: None,
-    }
-}
-
 /// Implements [ZIP 244 section T.1](https://zips.z.cash/zip-0244#t-1-header-digest)
 fn hash_header_txid_data(
     version: TxVersion,
@@ -228,11 +173,7 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
-    zip233_amount: &Zatoshis,
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -243,10 +184,7 @@ fn hash_header_txid_data(
     h.write_u32_le(expiry_height.into()).unwrap();
 
     // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     if version.has_zip233() {
         h.write_u64_le((*zip233_amount).into()).unwrap();
     }
@@ -289,19 +227,6 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
     hasher(ZCASH_SAPLING_HASH_PERSONALIZATION).finalize()
 }
 
-#[cfg(zcash_unstable = "zfuture")]
-fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bHash {
-    let mut h = hasher(ZCASH_TZE_HASH_PERSONALIZATION);
-    if let Some(d) = tze_digests {
-        h.write_all(d.inputs_digest.as_bytes()).unwrap();
-        h.write_all(d.outputs_digest.as_bytes()).unwrap();
-        if let Some(s) = d.per_input_digest {
-            h.write_all(s.as_bytes()).unwrap();
-        }
-    }
-    h.finalize()
-}
-
 /// A TransactionDigest implementation that commits to all of the effecting
 /// data of a transaction to produce a nonmalleable transaction identifier.
 ///
@@ -317,9 +242,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type SaplingDigest = Option<Blake2bHash>;
     type OrchardDigest = Option<Blake2bHash>;
 
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeDigest = Option<TzeDigests<Blake2bHash>>;
-
     type Digest = TxDigests<Blake2bHash>;
 
     fn digest_header(
@@ -328,21 +250,14 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         hash_header_txid_data(
             version,
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             zip233_amount,
         )
     }
@@ -368,26 +283,18 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         orchard_bundle.map(|b| b.commitment().0)
     }
 
-    #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest {
-        tze_bundle.map(tze_digests)
-    }
-
     fn combine(
         &self,
         header_digest: Self::HeaderDigest,
         transparent_digests: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "zfuture")] tze_digests: Self::TzeDigest,
     ) -> Self::Digest {
         TxDigests {
             header_digest,
             transparent_digests,
             sapling_digest,
             orchard_digest,
-            #[cfg(zcash_unstable = "zfuture")]
-            tze_digests,
         }
     }
 }
@@ -399,7 +306,6 @@ pub(crate) fn to_hash(
     transparent_digest: Blake2bHash,
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
-    #[cfg(zcash_unstable = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
     personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
@@ -423,12 +329,6 @@ pub(crate) fn to_hash(
     )
     .unwrap();
 
-    #[cfg(zcash_unstable = "zfuture")]
-    if _txversion.has_tze() {
-        h.write_all(hash_tze_txid_data(tze_digests).as_bytes())
-            .unwrap();
-    }
-
     h.finalize()
 }
 
@@ -444,8 +344,6 @@ pub fn to_txid(
         hash_transparent_txid_data(digests.transparent_digests.as_ref()),
         digests.sapling_digest,
         digests.orchard_digest,
-        #[cfg(zcash_unstable = "zfuture")]
-        digests.tze_digests.as_ref(),
     );
 
     TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
@@ -465,9 +363,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type SaplingDigest = Blake2bHash;
     type OrchardDigest = Blake2bHash;
 
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeDigest = Blake2bHash;
-
     type Digest = Blake2bHash;
 
     fn digest_header(
@@ -476,11 +371,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
-        #[cfg(all(
-            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-            feature = "zip-233"
-        ))]
-        _zip233_amount: &Zatoshis,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] _zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }
@@ -532,24 +423,12 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         })
     }
 
-    #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<tze::Authorized>>) -> Blake2bHash {
-        let mut h = hasher(ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION);
-        if let Some(bundle) = tze_bundle {
-            for tzein in &bundle.vin {
-                h.write_all(&tzein.witness.payload.0).unwrap();
-            }
-        }
-        h.finalize()
-    }
-
     fn combine(
         &self,
         consensus_branch_id: Self::HeaderDigest,
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
         let digests = [transparent_digest, sapling_digest, orchard_digest];
 
@@ -562,11 +441,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(&personal);
         for digest in &digests {
             h.write_all(digest.as_bytes()).unwrap();
-        }
-
-        #[cfg(zcash_unstable = "zfuture")]
-        if TxVersion::suggested_for_branch(consensus_branch_id).has_tze() {
-            h.write_all(tze_digest.as_bytes()).unwrap();
         }
 
         h.finalize()

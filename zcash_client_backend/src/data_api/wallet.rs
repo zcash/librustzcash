@@ -1159,10 +1159,10 @@ impl<AccountId> BuildRecipient<AccountId> {
 }
 
 #[allow(clippy::type_complexity)]
-struct BuildState<'a, P, AccountId> {
+struct BuildState<P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     step_index: usize,
-    builder: Builder<'a, P, ()>,
+    builder: Builder<P, ()>,
     #[cfg(feature = "transparent-inputs")]
     transparent_input_addresses: HashMap<TransparentAddress, TransparentAddressMetadata>,
     #[cfg(feature = "orchard")]
@@ -1197,10 +1197,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         (TransparentAddress, OutPoint),
     >,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
-) -> Result<
-    BuildState<'static, ParamsT, DbT::AccountId>,
-    CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
->
+) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
