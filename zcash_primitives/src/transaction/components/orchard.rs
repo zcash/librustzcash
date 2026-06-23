@@ -91,6 +91,16 @@ fn read_bundle<R: Read>(
 }
 
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
+///
+/// This deliberately does not take the consensus branch ID to determine the
+/// format to read. Although NU6.3 does not disable v5 transactions, the Orchard
+/// action flags and wire serialization are identical before and after the
+/// upgrade, so a v5 bundle deserializes the same way regardless of activation
+/// height; only the bundle commitment domain varies across upgrades, and that
+/// affects the txid/sighash digests rather than deserialization. Since this is
+/// public API, keeping the signature unchanged also avoids an unnecessary
+/// breaking change. (By contrast, `read_v6_bundle` is reused across the
+/// Ironwood and Orchard v6 bundles, so its format is selected by the caller.)
 pub fn read_v5_bundle<R: Read>(
     reader: R,
     proof_size_enforcement: ProofSizeEnforcement,
