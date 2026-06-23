@@ -353,7 +353,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     fn digest_ironwood(
         &self,
-        _version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self::IronwoodDigest {
         ironwood_bundle.map(|b| {
@@ -604,7 +603,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     fn digest_ironwood(
         &self,
-        _version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
     ) -> Self::IronwoodDigest {
         ironwood_bundle.map_or_else(

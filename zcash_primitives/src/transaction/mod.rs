@@ -409,7 +409,7 @@ impl<A: Authorization> TransactionData<A> {
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v6(
         consensus_branch_id: BranchId,
@@ -525,7 +525,7 @@ impl<A: Authorization> TransactionData<A> {
 
     /// Computes this transaction's digest using the provided digest strategy.
     ///
-    /// When `zcash_unstable = "nu6.3"` is enabled, version 6 transactions include the Ironwood
+    /// When `zcash_unstable = "nu6.3"` or `"nu7"` is enabled, version 6 transactions include the Ironwood
     /// bundle digest as a separate Orchard-shaped digest with Ironwood personalization. Earlier
     /// transaction versions do not include Ironwood in their digest.
     pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
@@ -542,7 +542,7 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_sapling(self.version, self.sapling_bundle.as_ref()),
             digester.digest_orchard(self.version, self.orchard_bundle.as_ref()),
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-            digester.digest_ironwood(self.version, self.ironwood_bundle.as_ref()),
+            digester.digest_ironwood(self.ironwood_bundle.as_ref()),
         )
     }
 
@@ -567,7 +567,7 @@ impl<A: Authorization> TransactionData<A> {
     /// This shouldn't be necessary for most use cases; it is provided for handling the
     /// cross-FFI builder logic in `zcashd`.
     ///
-    /// Under `zcash_unstable="nu6.3"`, `f_orchard` is also applied to the
+    /// Under `zcash_unstable="nu6.3"` or `"nu7"`, `f_orchard` is also applied to the
     /// Ironwood bundle because Ironwood is represented with the Orchard bundle type.
     pub fn map_bundles<B: Authorization>(
         self,
@@ -603,7 +603,7 @@ impl<A: Authorization> TransactionData<A> {
     /// This shouldn't be necessary for most use cases; it is provided for handling the
     /// transaction extraction logic in the `pczt` crate.
     ///
-    /// Under `zcash_unstable="nu6.3"`, `f_orchard` is also applied to the
+    /// Under `zcash_unstable="nu6.3"` or `"nu7"`, `f_orchard` is also applied to the
     /// Ironwood bundle because Ironwood is represented with the Orchard bundle type.
     pub fn try_map_bundles<B: Authorization, E>(
         self,
@@ -1199,7 +1199,6 @@ pub trait TransactionDigest<A: Authorization> {
     #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     fn digest_ironwood(
         &self,
-        version: TxVersion,
         ironwood_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self::IronwoodDigest;
 
@@ -1293,6 +1292,11 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
+            ironwood_bundle in if version.has_ironwood() {
+                orchard::arb_bundle_for_version(version).boxed()
+            } else {
+                Just(None).boxed()
+            },
             version in Just(version),
         ) -> TransactionData<Authorized> {
             TransactionData {
@@ -1304,6 +1308,7 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                ironwood_bundle,
             }
         }
     }
@@ -1319,6 +1324,11 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
+            ironwood_bundle in if version.has_ironwood() {
+                orchard::arb_bundle_for_version(version).boxed()
+            } else {
+                Just(None).boxed()
+            },
             version in Just(version),
         ) -> TransactionData<Authorized> {
             TransactionData {
@@ -1331,11 +1341,12 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
+                ironwood_bundle,
             }
         }
     }
 
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id)
