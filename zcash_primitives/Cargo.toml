@@ -115,8 +115,17 @@ sapling = ["dep:sapling", "dep:ff", "dep:jubjub", "dep:redjubjub"]
 ## Orchard bundles retained in an opaque byte representation.
 orchard = ["dep:orchard"]
 
-## Enables creating proofs. Requires both the `sapling` and `orchard` features.
-circuits = ["sapling", "orchard", "orchard/circuit", "sapling/circuit"]
+## Enables creating Sapling proofs (the Sapling part of the transaction builder). Implies the
+## `sapling` feature.
+sapling-circuit = ["sapling", "sapling/circuit"]
+
+## Enables creating Orchard proofs (the Orchard part of the transaction builder). Implies the
+## `orchard` feature.
+orchard-circuit = ["orchard", "orchard/circuit"]
+
+## Enables creating proofs for both shielded protocols; a convenience alias for
+## `sapling-circuit` + `orchard-circuit`.
+circuits = ["sapling-circuit", "orchard-circuit"]
 
 ## Enables multithreading support for creating proofs.
 multicore = ["sapling?/multicore", "orchard?/multicore"]
