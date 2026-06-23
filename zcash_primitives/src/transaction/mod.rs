@@ -579,7 +579,8 @@ impl<A: Authorization> TransactionData<A> {
         ) -> Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>,
         mut f_orchard: impl FnMut(
             Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-        ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
+        )
+            -> Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -616,8 +617,10 @@ impl<A: Authorization> TransactionData<A> {
             -> Result<Option<sapling::Bundle<B::SaplingAuth, ZatBalance>>, E>,
         mut f_orchard: impl FnMut(
             Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-        )
-            -> Result<Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>, E>,
+        ) -> Result<
+            Option<orchard::bundle::Bundle<B::OrchardAuth, ZatBalance>>,
+            E,
+        >,
     ) -> Result<TransactionData<B>, E> {
         Ok(TransactionData {
             version: self.version,
