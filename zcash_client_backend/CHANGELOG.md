@@ -51,6 +51,10 @@ workspace.
     Tokio-based batch decryption engine for full blocks and transactions.
 
 ### Changed
+- During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
+  unspendable data outputs and skipped silently, instead of being logged as
+  unsupported script kinds. Other unrecognized transparent script kinds continue to
+  be logged.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
