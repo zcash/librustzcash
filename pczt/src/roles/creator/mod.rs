@@ -126,8 +126,6 @@ impl Creator {
             zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
             #[cfg(zcash_unstable = "nu7")]
             zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
-            #[cfg(zcash_unstable = "zfuture")]
-            zcash_primitives::transaction::TxVersion::ZFuture => None,
         }?;
 
         // Spends and outputs not modifiable.

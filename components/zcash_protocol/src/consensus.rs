@@ -497,8 +497,6 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu6_3 => None,
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => None,
         }
     }
 }
@@ -533,8 +531,6 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu6_3 => None,
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => None,
         }
     }
 }
@@ -617,13 +613,6 @@ pub enum NetworkUpgrade {
     /// [Nu7 (proposed)]: https://z.cash/upgrade/nu7/
     #[cfg(zcash_unstable = "nu7")]
     Nu7,
-    /// The ZFUTURE network upgrade.
-    ///
-    /// This upgrade is expected never to activate on mainnet;
-    /// it is intended for use in integration testing of functionality
-    /// that is a candidate for integration in a future network upgrade.
-    #[cfg(zcash_unstable = "zfuture")]
-    ZFuture,
 }
 
 #[cfg(feature = "std")]
@@ -645,8 +634,6 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Nu6_3 => write!(f, "Nu6.3"),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => write!(f, "Nu7"),
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => write!(f, "ZFUTURE"),
         }
     }
 }
@@ -667,8 +654,6 @@ impl NetworkUpgrade {
             NetworkUpgrade::Nu6_3 => BranchId::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => BranchId::Nu7,
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => BranchId::ZFuture,
         }
     }
 }
@@ -751,10 +736,6 @@ pub enum BranchId {
     /// The consensus rules to be deployed by [`NetworkUpgrade::Nu7`].
     #[cfg(zcash_unstable = "nu7")]
     Nu7,
-    /// Candidates for future consensus rules; this branch will never
-    /// activate on mainnet.
-    #[cfg(zcash_unstable = "zfuture")]
-    ZFuture,
 }
 
 #[cfg(feature = "std")]
@@ -780,8 +761,6 @@ impl TryFrom<u32> for BranchId {
             0xffff_ffff => Ok(BranchId::Nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             0xffff_ffff => Ok(BranchId::Nu7),
-            #[cfg(zcash_unstable = "zfuture")]
-            0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
         }
     }
@@ -805,8 +784,6 @@ impl From<BranchId> for u32 {
             BranchId::Nu6_3 => 0xffff_ffff,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => 0xffff_ffff,
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture => 0xffff_ffff,
         }
     }
 }
@@ -886,16 +863,7 @@ impl BranchId {
                     let upper = params.activation_height(NetworkUpgrade::Nu6_3);
                     #[cfg(all(not(zcash_unstable = "nu6.3"), zcash_unstable = "nu7"))]
                     let upper = params.activation_height(NetworkUpgrade::Nu7);
-                    #[cfg(all(
-                        not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")),
-                        zcash_unstable = "zfuture"
-                    ))]
-                    let upper = params.activation_height(NetworkUpgrade::ZFuture);
-                    #[cfg(not(any(
-                        zcash_unstable = "nu6.3",
-                        zcash_unstable = "nu7",
-                        zcash_unstable = "zfuture"
-                    )))]
+                    #[cfg(not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")))]
                     let upper = None;
                     (lower, upper)
                 }),
@@ -906,10 +874,6 @@ impl BranchId {
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => params
                 .activation_height(NetworkUpgrade::Nu7)
-                .map(|lower| (lower, None)),
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture => params
-                .activation_height(NetworkUpgrade::ZFuture)
                 .map(|lower| (lower, None)),
         }
     }
@@ -928,8 +892,6 @@ impl BranchId {
             BranchId::Nu6_3 => false,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => false,
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture => false,
         }
     }
 
@@ -943,8 +905,6 @@ impl BranchId {
             BranchId::Nu6_3 => true,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => true,
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture => true,
         }
     }
 
@@ -958,8 +918,6 @@ impl BranchId {
             BranchId::Nu6_3 => true,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => true,
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture => true,
         }
     }
 }
@@ -987,8 +945,6 @@ pub mod testing {
             BranchId::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7,
-            #[cfg(zcash_unstable = "zfuture")]
-            BranchId::ZFuture,
         ])
     }
 

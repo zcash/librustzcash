@@ -8,6 +8,33 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## Unreleased
+
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
+  new variant that records the shielded pool and the range of block heights
+  being added to the wallet when a note commitment tree error occurs during a
+  `put_blocks` operation. Previously such errors (for example a `shardtree`
+  `InsertionError::Conflict` raised by `insert_frontier`) surfaced as the
+  generic `CommitmentTree` variant, which only reported the conflicting tree
+  node address and not the affected pool or block range.
+- `zcash_client_sqlite::error::SqliteClientError::TruncateCommitmentTree`, a
+  new variant that records the shielded pool and the block height that the
+  wallet was being truncated to when a note commitment tree error occurs
+  during a truncation operation (`truncate_to_height` or
+  `truncate_to_chain_state`). Previously such errors surfaced as the generic
+  `CommitmentTree` variant without the affected pool or target height.
+
+## [0.21.1] - 2026-06-19
+
+### Fixed
+- Fixed a bug in `WalletDb::delete_account` that caused it to fail with
+  `rusqlite::Error::InvalidParameterName(":address")` when the account being
+  deleted was referenced by a `sent_notes` row via its `to_account_id` column
+  (for example, after an internal transfer to an address belonging to the
+  account being deleted). The `sent_notes` update statement bound a parameter
+  named `:address` while the SQL expected `:to_address`.
+
 ## [0.21.0] - 2026-06-02
 
 ### Changed

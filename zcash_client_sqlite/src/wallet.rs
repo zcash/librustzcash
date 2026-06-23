@@ -713,7 +713,7 @@ pub(crate) fn delete_account(
         if let Some(address) = row.get::<_, Option<String>>("to_address")? {
             update_sent_note.execute(named_params![
                 ":sent_note_id": row.get::<_, i64>("sent_note_id")?,
-                ":address": address
+                ":to_address": address
             ])?;
         }
     }
@@ -2849,10 +2849,7 @@ fn parse_tx<P: consensus::Parameters>(
                 BranchId::for_height(params, expiry_height),
                 tx_data.lock_time(),
                 expiry_height,
-                #[cfg(all(
-                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                    feature = "zip-233"
-                ))]
+                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
                 tx_data.zip233_amount(),
                 tx_data.transparent_bundle().cloned(),
                 tx_data.sprout_bundle().cloned(),
@@ -3678,6 +3675,16 @@ fn select_truncation_height(
 /// This should only be executed inside a transactional context.
 ///
 /// Returns the block height to which the database was truncated.
+///
+/// # Errors
+///
+/// - [`SqliteClientError::RequestedRewindInvalid`] if there is no note commitment tree
+///   checkpoint at or below `max_height` to truncate to. The error payload reports the
+///   safe rewind height, if one could be determined.
+/// - [`SqliteClientError::TruncateCommitmentTree`] if truncating one of the wallet's
+///   Sapling or Orchard note commitment trees to the resolved checkpoint fails. The error
+///   payload identifies the affected shielded pool and the target height.
+/// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -3759,12 +3766,22 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
             gap_limits: *gap_limits,
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedProtocol::Sapling,
+                    height: truncation_height,
+                    error,
+                })?;
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_to_checkpoint(&truncation_height)?;
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedProtocol::Orchard,
+                    height: truncation_height,
+                    error,
+                })?;
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -3805,6 +3822,15 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 ///   oldest checkpoint to ensure that the a checkpoint added at the provided frontier position does
 ///   not get immediately pruned, then inserts the provided frontier as a new checkpoint at the
 ///   target height, and finally truncates to that new checkpoint.
+///
+/// # Errors
+///
+/// - [`SqliteClientError::TruncateCommitmentTree`] if inserting the chain-state frontier as a
+///   checkpoint, or truncating one of the wallet's Sapling or Orchard note commitment trees to a
+///   checkpoint, fails. The error payload identifies the affected shielded pool and the target
+///   height. Unlike [`truncate_to_height`], a missing checkpoint at the target height is not an
+///   error here: it is recovered from by inserting the provided frontier as a new checkpoint.
+/// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
     chain_state: ChainState,
@@ -3878,7 +3904,12 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     id: target_height,
                     marking: Marking::None,
                 },
-            )?;
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedProtocol::Sapling,
+                height: target_height,
+                error,
+            })?;
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -3890,7 +3921,12 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                     id: target_height,
                     marking: Marking::None,
                 },
-            )?;
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedProtocol::Orchard,
+                height: target_height,
+                error,
+            })?;
             Ok::<_, SqliteClientError>(())
         })?;
     }

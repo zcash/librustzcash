@@ -248,13 +248,6 @@ pub fn v4_signature_hash<
                     );
                 }
             }
-
-            #[cfg(zcash_unstable = "zfuture")]
-            SignableInput::Tze { .. } => {
-                panic!(
-                    "A request has been made to sign a TZE input, but the transaction version is not ZFuture"
-                );
-            }
         }
 
         h.finalize()

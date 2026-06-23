@@ -2,6 +2,7 @@
 
 use std::error;
 use std::fmt;
+use std::ops::Range;
 
 #[cfg(feature = "orchard")]
 use incrementalmerkletree::Position;
@@ -18,7 +19,9 @@ use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::BalanceError};
+use zcash_protocol::{
+    PoolType, ShieldedProtocol, TxId, consensus::BlockHeight, value::BalanceError,
+};
 use zip32::DiversifierIndex;
 
 use crate::{
@@ -119,6 +122,34 @@ pub enum SqliteClientError {
     /// An error occurred in inserting data into or accessing data from one of the wallet's note
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
+
+    /// An error occurred while inserting the note commitment data for a range of scanned blocks
+    /// into one of the wallet's note commitment trees during a `put_blocks` operation. The `pool`
+    /// and `block_range` fields record the shielded pool whose note commitment tree was being
+    /// updated and the range of block heights (start-inclusive, end-exclusive) that were being
+    /// added to the wallet when the error occurred.
+    PutBlocksCommitmentTree {
+        /// The shielded pool whose note commitment tree was being updated when the error occurred.
+        pool: ShieldedProtocol,
+        /// The range of block heights that were being added to the wallet when the error
+        /// occurred.
+        block_range: Range<BlockHeight>,
+        /// The underlying note commitment tree error.
+        error: ShardTreeError<commitment_tree::Error>,
+    },
+
+    /// An error occurred in one of the wallet's note commitment trees while truncating the wallet
+    /// to the specified block height. The `pool` and `height` fields record the shielded pool
+    /// whose note commitment tree was being updated and the block height that the wallet was being
+    /// truncated to when the error occurred.
+    TruncateCommitmentTree {
+        /// The shielded pool whose note commitment tree was being updated when the error occurred.
+        pool: ShieldedProtocol,
+        /// The block height that the wallet was being truncated to when the error occurred.
+        height: BlockHeight,
+        /// The underlying note commitment tree error.
+        error: ShardTreeError<commitment_tree::Error>,
+    },
 
     /// The caller-supplied frontier passed to
     /// [`WalletDb::generate_orchard_witnesses_at_historical_height`] is
@@ -307,6 +338,25 @@ impl fmt::Display for SqliteClientError {
                 f,
                 "An error occurred accessing or updating note commitment tree data: {err}."
             ),
+            SqliteClientError::PutBlocksCommitmentTree {
+                pool,
+                block_range,
+                error,
+            } => write!(
+                f,
+                "An error occurred updating the {pool:?} note commitment tree while adding blocks in the range {}..{}: {error}.",
+                u32::from(block_range.start),
+                u32::from(block_range.end),
+            ),
+            SqliteClientError::TruncateCommitmentTree {
+                pool,
+                height,
+                error,
+            } => write!(
+                f,
+                "An error occurred updating the {pool:?} note commitment tree while truncating the wallet to height {}: {error}.",
+                u32::from(*height),
+            ),
             #[cfg(feature = "orchard")]
             SqliteClientError::HistoricalFrontierInvalid(err) => write!(
                 f,
@@ -461,6 +511,15 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             }
             ll::wallet::PutBlocksError::Storage(e) => e,
             ll::wallet::PutBlocksError::ShardTree(e) => SqliteClientError::from(e),
+            ll::wallet::PutBlocksError::ShardTreeForBlockRange {
+                pool,
+                block_range,
+                error,
+            } => SqliteClientError::PutBlocksCommitmentTree {
+                pool,
+                block_range,
+                error,
+            },
             #[cfg(feature = "transparent-inputs")]
             ll::wallet::PutBlocksError::GapAddresses(e) => SqliteClientError::from(e),
         }

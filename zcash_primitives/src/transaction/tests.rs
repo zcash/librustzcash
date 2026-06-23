@@ -17,9 +17,6 @@ use {
     zcash_script::script,
 };
 
-#[cfg(all(test, zcash_unstable = "zfuture"))]
-use super::components::tze;
-
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
 
@@ -47,8 +44,6 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
-    #[cfg(zcash_unstable = "zfuture")]
-    prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
     prop_assert_eq!(tx.lock_time, txo.lock_time);
     prop_assert_eq!(
         tx.transparent_bundle.as_ref(),
@@ -127,15 +122,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu7(tx in arb_tx(BranchId::Nu7)) {
-        check_roundtrip(tx)?;
-    }
-}
-
-#[cfg(zcash_unstable = "zfuture")]
-proptest! {
-    #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
-    fn tx_serialization_roundtrip_future(tx in arb_tx(BranchId::ZFuture)) {
         check_roundtrip(tx)?;
     }
 }
@@ -223,9 +209,6 @@ impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
-
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = tze::Authorized;
 }
 
 #[test]
@@ -278,7 +261,6 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -290,20 +272,6 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-        );
-        #[cfg(zcash_unstable = "zfuture")]
-        let tdata = TransactionData::from_parts_zfuture(
-            txdata.version(),
-            txdata.consensus_branch_id(),
-            txdata.lock_time(),
-            txdata.expiry_height(),
-            #[cfg(feature = "zip-233")]
-            txdata.zip233_amount,
-            test_bundle,
-            txdata.sprout_bundle().cloned(),
-            txdata.sapling_bundle().cloned(),
-            txdata.orchard_bundle().cloned(),
-            txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
     }
