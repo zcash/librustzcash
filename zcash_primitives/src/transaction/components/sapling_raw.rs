@@ -8,16 +8,18 @@
 //! can be re-serialized byte-identically and its consensus txid / authorizing-data digests
 //! computed (see [`crate::transaction::txid`]).
 //!
-//! Canonical field-element (`cmu`, `anchor`), value-commitment (`cv`, "not small order"),
-//! and verification-key (`rk`) encodings are validated here using `jubjub` and `redjubjub`,
-//! which are always compiled, so parse-rejection of malformed Sapling encodings matches the
-//! typed path exactly.
+//! Parsing here is *lenient*: it validates field lengths and structure, but it does NOT
+//! validate the curve encodings of `cv`/`anchor`/`cmu`/`rk` (the canonical field-element,
+//! value-commitment "not small order", and verification-key checks performed by the typed
+//! path). Those require `jubjub` and `redjubjub`, which are only compiled with the `sapling`
+//! feature; validation is therefore deferred to the point at which the bytes would be
+//! converted into a typed bundle, which requires that feature. This matches the byte-oriented
+//! Orchard path (see [`super::orchard_raw`]) and is sufficient to re-serialize
+//! byte-identically and to compute the correct consensus txid / authorizing-data digests.
 
 use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
-use ff::PrimeField;
 
-use redjubjub::SpendAuth;
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_protocol::value::ZatBalance;
 
@@ -104,50 +106,6 @@ impl RawSaplingBundle {
     }
 }
 
-/// Reads a value commitment, enforcing canonical encoding and rejecting small-order points
-/// (matching `sapling::value::ValueCommitment::from_bytes_not_small_order`).
-fn read_cv<R: Read>(mut reader: R) -> io::Result<[u8; 32]> {
-    let mut bytes = [0u8; 32];
-    reader.read_exact(&mut bytes)?;
-    // Matches `sapling::value::ValueCommitment::from_bytes_not_small_order`, which decodes the
-    // canonical Jubjub point encoding and rejects small-order points.
-    let affine = jubjub::AffinePoint::from_bytes(bytes);
-    if affine.is_none().into() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid cv"));
-    }
-    let cv = jubjub::ExtendedPoint::from(affine.unwrap());
-    if bool::from(cv.is_small_order()) {
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid cv"))
-    } else {
-        Ok(bytes)
-    }
-}
-
-/// Reads a base field element (`cmu` or `anchor`), enforcing canonical encoding (matching
-/// `jubjub::Base::from_repr`, as used by `ExtractedNoteCommitment::from_bytes`).
-fn read_base<R: Read>(mut reader: R) -> io::Result<[u8; 32]> {
-    let mut f = [0u8; 32];
-    reader.read_exact(&mut f)?;
-    if Option::<jubjub::Base>::from(jubjub::Base::from_repr(f)).is_none() {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "base value not a valid field element",
-        ))
-    } else {
-        Ok(f)
-    }
-}
-
-/// Reads a randomized verification key, enforcing canonical encoding (matching
-/// `redjubjub::VerificationKey::<SpendAuth>::try_from`).
-fn read_rk<R: Read>(mut reader: R) -> io::Result<[u8; 32]> {
-    let mut bytes = [0u8; 32];
-    reader.read_exact(&mut bytes)?;
-    redjubjub::VerificationKey::<SpendAuth>::try_from(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "verification key is invalid"))?;
-    Ok(bytes)
-}
-
 fn read_zkproof<R: Read>(mut reader: R) -> io::Result<[u8; GROTH_PROOF_SIZE]> {
     let mut zkproof = [0u8; GROTH_PROOF_SIZE];
     reader.read_exact(&mut zkproof)?;
@@ -161,10 +119,10 @@ fn read_array<const N: usize, R: Read>(mut reader: R) -> io::Result<[u8; N]> {
 }
 
 fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<RawSaplingSpend> {
-    let cv = read_cv(&mut reader)?;
-    let anchor = read_base(&mut reader)?;
+    let cv = read_array(&mut reader)?;
+    let anchor = read_array(&mut reader)?;
     let nullifier = read_array(&mut reader)?;
-    let rk = read_rk(&mut reader)?;
+    let rk = read_array(&mut reader)?;
     let zkproof = read_zkproof(&mut reader)?;
     let spend_auth_sig = read_array(&mut reader)?;
     Ok(RawSaplingSpend {
@@ -187,8 +145,8 @@ fn write_spend_v4<W: Write>(mut writer: W, spend: &RawSaplingSpend) -> io::Resul
 }
 
 fn read_output_v4<R: Read>(mut reader: R) -> io::Result<RawSaplingOutput> {
-    let cv = read_cv(&mut reader)?;
-    let cmu = read_base(&mut reader)?;
+    let cv = read_array(&mut reader)?;
+    let cmu = read_array(&mut reader)?;
     let ephemeral_key = read_array(&mut reader)?;
     let enc_ciphertext = read_array(&mut reader)?;
     let out_ciphertext = read_array(&mut reader)?;
@@ -278,14 +236,14 @@ pub(crate) fn write_v4_components<W: Write>(
 /// Reads a Sapling bundle from a v5 transaction format.
 pub(crate) fn read_v5_bundle<R: Read>(mut reader: R) -> io::Result<Option<RawSaplingBundle>> {
     let sd_v5s: Vec<([u8; 32], [u8; 32], [u8; 32])> = Vector::read(&mut reader, |r| {
-        let cv = read_cv(&mut *r)?;
+        let cv = read_array(&mut *r)?;
         let nullifier = read_array(&mut *r)?;
-        let rk = read_rk(&mut *r)?;
+        let rk = read_array(&mut *r)?;
         Ok((cv, nullifier, rk))
     })?;
     let od_v5s: Vec<RawSaplingOutput> = Vector::read(&mut reader, |r| {
-        let cv = read_cv(&mut *r)?;
-        let cmu = read_base(&mut *r)?;
+        let cv = read_array(&mut *r)?;
+        let cmu = read_array(&mut *r)?;
         let ephemeral_key = read_array(&mut *r)?;
         let enc_ciphertext = read_array(&mut *r)?;
         let out_ciphertext = read_array(&mut *r)?;
@@ -308,7 +266,7 @@ pub(crate) fn read_v5_bundle<R: Read>(mut reader: R) -> io::Result<Option<RawSap
     };
 
     let anchor = if n_spends > 0 {
-        Some(read_base(&mut reader)?)
+        Some(read_array(&mut reader)?)
     } else {
         None
     };

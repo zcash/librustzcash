@@ -37,8 +37,8 @@ sha2.workspace = true
 memuse.workspace = true
 
 # - Shielded protocols
-ff.workspace = true
-jubjub.workspace = true
+ff = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
 nonempty.workspace = true
 orchard = { workspace = true, optional = true }
 sapling = { workspace = true, optional = true }
@@ -67,7 +67,7 @@ document-features = { workspace = true, optional = true }
 hex.workspace = true
 
 # - Shielded protocols
-redjubjub.workspace = true
+redjubjub = { workspace = true, optional = true }
 
 # No-std support
 corez.workspace = true
@@ -96,7 +96,7 @@ pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 default = ["multicore", "std", "circuits", "sapling", "orchard"]
 std = [
     "document-features",
-    "redjubjub/std",
+    "redjubjub?/std",
     "sapling?/std",
     "orchard?/std",
     "transparent/std",
@@ -107,7 +107,7 @@ zip-233 = []
 ## Sapling parts of the transaction builder. When disabled, the `sapling` crate is not
 ## compiled; transactions are still parsed and re-serialized over the same wire format, with
 ## Sapling bundles retained in an opaque byte representation.
-sapling = ["dep:sapling"]
+sapling = ["dep:sapling", "dep:ff", "dep:jubjub", "dep:redjubjub"]
 
 ## Enables conversion of parsed Orchard transaction data into typed domain bundles, and the
 ## Orchard parts of the transaction builder. When disabled, the `orchard` crate is not
