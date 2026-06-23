@@ -18,6 +18,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
 };
+use zcash_script::solver::ScriptKind;
 
 use crate::{
     TransferType,
@@ -891,12 +892,17 @@ where
                 }
             }
         } else if let Some(script_kind) = script_kind {
-            warn!(
-                "Ignoring unsupported script kind '{}' for tx {} output {}",
-                script_kind.as_str(),
-                tx.txid(),
-                output_index
-            );
+            // `OP_RETURN` (nulldata) outputs are provably-unspendable data carriers with
+            // no recipient address; they are never wallet outputs, so skip them silently
+            // rather than reporting them as unsupported.
+            if !matches!(script_kind, ScriptKind::NullData { .. }) {
+                warn!(
+                    "Ignoring unsupported script kind '{}' for tx {} output {}",
+                    script_kind.as_str(),
+                    tx.txid(),
+                    output_index
+                );
+            }
         } else {
             warn!(
                 "Unable to determine recipient address for tx {} output {}",
