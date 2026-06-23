@@ -58,6 +58,10 @@ workspace.
   `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
   `zcash_proofs 0.29.0-pre.0`.
+- During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
+  unspendable data outputs and skipped silently, instead of being logged as
+  unsupported script kinds. Other unrecognized transparent script kinds continue to
+  be logged.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
