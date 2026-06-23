@@ -949,7 +949,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: None,
         };
 
@@ -1007,7 +1007,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: None,
         };
 
@@ -1196,7 +1196,10 @@ mod tests {
         zip32::AccountId,
     };
 
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
     fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         use zcash_protocol::consensus::BlockHeight;
 
@@ -1230,14 +1233,17 @@ mod tests {
             nu6: Some(BlockHeight::from_u32(7)),
             nu6_1: Some(BlockHeight::from_u32(8)),
             nu6_2: Some(BlockHeight::from_u32(9)),
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             nu6_3: None,
             nu7: Some(BlockHeight::from_u32(10)),
         }
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
     fn nu6_3_standard_builder_uses_v6_orchard_protocol() {
         let builder = Builder::new(
             nu6_3_test_network(),
@@ -1256,7 +1262,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
     fn nu6_3_standard_builder_preserves_branch_orchard_protocol_for_explicit_v5() {
         let mut builder = Builder::new(
             nu6_3_test_network(),
@@ -1278,7 +1287,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
     fn nu6_3_coinbase_builder_does_not_expose_orchard() {
         let builder = Builder::new(
             nu6_3_test_network(),
@@ -1302,7 +1314,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
     fn orchard_action_count_includes_change_outputs() {
         let fvk = orchard::keys::FullViewingKey::from(
             &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),

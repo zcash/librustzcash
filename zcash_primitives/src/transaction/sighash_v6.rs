@@ -1,16 +1,16 @@
-#[cfg(zcash_unstable = "nu6.3")]
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 use blake2b_simd::Hash as Blake2bHash;
 
-#[cfg(zcash_unstable = "nu6.3")]
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 use ::transparent::sighash::TransparentAuthorizingContext;
 
-#[cfg(zcash_unstable = "nu6.3")]
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 use crate::transaction::{
     Authorization, TransactionData, TxDigests, sighash::SignableInput,
     sighash_v5::transparent_sig_digest, txid::to_hash_v6,
 };
 
-#[cfg(zcash_unstable = "nu6.3")]
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
@@ -40,6 +40,3 @@ pub fn v6_signature_hash<
         txid_parts.ironwood_digest,
     )
 }
-
-#[cfg(all(zcash_unstable = "nu7", not(zcash_unstable = "nu6.3")))]
-pub use crate::transaction::sighash_v5::v5_signature_hash as v6_signature_hash;

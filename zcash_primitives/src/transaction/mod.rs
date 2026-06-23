@@ -182,7 +182,7 @@ impl TxVersion {
     }
 
     /// Returns `true` if this transaction version supports the Ironwood protocol.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub fn has_ironwood(&self) -> bool {
         matches!(self, TxVersion::V6)
     }
@@ -332,7 +332,7 @@ pub struct TransactionData<A: Authorization> {
     sprout_bundle: Option<sprout::Bundle>,
     sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     ironwood_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, ZatBalance>>,
 }
 
@@ -349,7 +349,7 @@ impl Clone for TransactionData<Authorized> {
             sprout_bundle: self.sprout_bundle.clone(),
             sapling_bundle: self.sapling_bundle.clone(),
             orchard_bundle: self.orchard_bundle.clone(),
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: self.ironwood_bundle.clone(),
         }
     }
@@ -392,7 +392,7 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: None,
         }
     }
@@ -409,7 +409,7 @@ impl<A: Authorization> TransactionData<A> {
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v6(
         consensus_branch_id: BranchId,
@@ -467,7 +467,7 @@ impl<A: Authorization> TransactionData<A> {
         self.orchard_bundle.as_ref()
     }
 
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub fn ironwood_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>> {
         self.ironwood_bundle.as_ref()
     }
@@ -504,7 +504,7 @@ impl<A: Authorization> TransactionData<A> {
                     self.orchard_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(zcash_unstable = "nu6.3")]
+                    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
                     self.ironwood_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
@@ -541,7 +541,7 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_transparent(self.transparent_bundle.as_ref()),
             digester.digest_sapling(self.version, self.sapling_bundle.as_ref()),
             digester.digest_orchard(self.version, self.orchard_bundle.as_ref()),
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             digester.digest_ironwood(self.version, self.ironwood_bundle.as_ref()),
         )
     }
@@ -593,7 +593,7 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: f_sapling(self.sapling_bundle),
             orchard_bundle: f_orchard(self.orchard_bundle),
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: f_orchard(self.ironwood_bundle),
         }
     }
@@ -633,7 +633,7 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: f_sapling(self.sapling_bundle)?,
             orchard_bundle: f_orchard(self.orchard_bundle)?,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: f_orchard(self.ironwood_bundle)?,
         })
     }
@@ -671,7 +671,7 @@ impl<A: Authorization> TransactionData<A> {
                     |f, a| f.map_authorization(a),
                 )
             }),
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: self.ironwood_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_orchard,
@@ -843,7 +843,7 @@ impl Transaction {
                     )
                 }),
                 orchard_bundle: None,
-                #[cfg(zcash_unstable = "nu6.3")]
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
                 ironwood_bundle: None,
             },
         })
@@ -912,7 +912,7 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle: None,
         };
 
@@ -926,7 +926,7 @@ impl Transaction {
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
-        #[cfg(zcash_unstable = "nu6.3")]
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         let ironwood_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
 
         let data = TransactionData {
@@ -940,7 +940,7 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu6.3")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood_bundle,
         };
 
@@ -1085,7 +1085,7 @@ impl Transaction {
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        #[cfg(zcash_unstable = "nu6.3")]
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
 
         Ok(())
@@ -1147,7 +1147,7 @@ pub struct TxDigests<A> {
     /// This is `None` when the transaction has no Ironwood bundle. When a version 6 transaction
     /// ID is derived from these digests, `None` is combined as the empty Ironwood bundle digest
     /// using the Ironwood bundle personalization.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub ironwood_digest: Option<A>,
 }
 
@@ -1157,7 +1157,7 @@ pub trait TransactionDigest<A: Authorization> {
     type SaplingDigest;
     type OrchardDigest;
     /// The digest type produced for the Ironwood bundle in version 6 transactions.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     type IronwoodDigest;
 
     type Digest;
@@ -1196,7 +1196,7 @@ pub trait TransactionDigest<A: Authorization> {
     /// `None`. Transaction commitment digesters may instead return an empty authorizing data
     /// digest when no Ironwood bundle is present, and may use a different anchor commitment
     /// policy than transaction ID digesters.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     fn digest_ironwood(
         &self,
         version: TxVersion,
@@ -1209,7 +1209,8 @@ pub trait TransactionDigest<A: Authorization> {
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "nu6.3")] ironwood_digest: Self::IronwoodDigest,
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        ironwood_digest: Self::IronwoodDigest,
     ) -> Self::Digest;
 }
 
@@ -1334,7 +1335,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id)
