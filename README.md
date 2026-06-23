@@ -26,11 +26,9 @@ graph TB
             zcash_primitives
             zcash_transparent
             zcash_proofs
-            zcash_extensions
             zcash_protocol
             pczt
             zcash_client_backend
-            zcash_client_memory
             zcash_client_sqlite
             zcash_keys
             zip321
@@ -58,25 +56,20 @@ graph TB
     %% they are deliberate edges) but commented out (to simplify the graph).
 
     zcash_client_sqlite --> zcash_client_backend
-    zcash_client_memory --> zcash_client_backend
 
     zcash_client_backend --> pczt
 
     %% zcash_client_sqlite --> zcash_keys
-    %% zcash_client_memory --> zcash_keys
     zcash_client_backend --> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 
-    zcash_extensions --> zcash_primitives
     zcash_proofs --> zcash_primitives
     pczt --> zcash_primitives
     %% zcash_client_backend --> zcash_primitives
     %% zcash_client_sqlite --> zcash_primitives
-    %% zcash_client_memory --> zcash_primitives
 
     %% zcash_client_sqlite --> zcash_transparent
-    %% zcash_client_memory --> zcash_transparent
     %% zcash_client_backend --> zcash_transparent
     %% pczt --> zcash_transparent
     zcash_keys --> zcash_transparent
@@ -88,23 +81,19 @@ graph TB
     %% zcash_keys --> zcash_address
     %% zcash_client_backend --> zcash_address
     %% zcash_client_sqlite --> zcash_address
-    %% zcash_client_memory --> zcash_address
     zip321 --> zcash_address
 
     %% zcash_transparent --> zcash_protocol
     %% zcash_keys --> zcash_protocol
     %% zcash_client_sqlite --> zcash_protocol
-    %% zcash_client_memory --> zcash_protocol
     %% zcash_primitives --> zcash_protocol
     %% zcash_client_backend --> zcash_protocol
     %% pczt --> zcash_protocol
-    %% zcash_extensions --> zcash_protocol
     zcash_address --> zcash_protocol
     %% zip321 --> zcash_protocol
 
     %% zcash_client_sqlite --> zcash_encoding
     %% zcash_transparent --> zcash_encoding
-    %% zcash_client_memory --> zcash_encoding
     %% zcash_client_backend --> zcash_encoding
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
@@ -119,10 +108,8 @@ graph TB
     zcash_keys --> orchard
     zcash_primitives --> orchard
     %% zcash_client_sqlite --> orchard
-    %% zcash_client_memory --> orchard
 
     %% zcash_client_sqlite --> sapling-crypto
-    %% zcash_client_memory --> sapling-crypto
     %% zcash_client_backend --> sapling-crypto
     zcash_keys --> sapling-crypto
     %% zcash_proofs --> sapling-crypto
@@ -136,7 +123,6 @@ graph TB
     %% zcash_client_backend --> zcash_note_encryption
 
     %% zcash_client_sqlite --> zip32
-    %% zcash_client_memory --> zip32
     %% zcash_client_backend --> zip32
     %% zcash_keys --> zip32
     orchard --> zip32
@@ -161,9 +147,7 @@ graph TB
     click zcash_address "https://docs.rs/zcash_address/" _blank
     click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
     click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
-    click zcash_client_memory "https://docs.rs/zcash_client_memory/" _blank
     click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
-    click zcash_extensions "https://docs.rs/zcash_extensions/" _blank
     click zcash_keys "https://docs.rs/zcash_keys/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
     click zcash_primitives "https://docs.rs/zcash_primitives/" _blank

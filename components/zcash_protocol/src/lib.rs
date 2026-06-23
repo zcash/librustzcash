@@ -14,11 +14,6 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-#[cfg(all(zcash_unstable = "nu6.3", zcash_unstable = "zfuture"))]
-compile_error!(
-    "zcash_unstable=\"nu6.3\" and zcash_unstable=\"zfuture\" cannot be enabled together"
-);
-
 #[cfg_attr(any(test, feature = "test-dependencies"), macro_use)]
 extern crate alloc;
 

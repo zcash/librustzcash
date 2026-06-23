@@ -16,9 +16,7 @@ CRATES_IN_GRAPH = set([
     # ./
     'pczt',
     'zcash_client_backend',
-    'zcash_client_memory',
     'zcash_client_sqlite',
-    'zcash_extensions',
     'zcash_history',
     'zcash_keys',
     'zcash_primitives',

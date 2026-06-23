@@ -16,6 +16,25 @@ workspace.
 
 ### Changed
 
+### Removed
+- All support for Transparent Zcash Extensions (TZEs), which was only ever
+  available behind the `--cfg zcash_unstable="zfuture"` development flag and has
+  been determined never to land. This removes the `zfuture` configuration and
+  everything it gated, including:
+  - `zcash_primitives::extensions` (the `transparent` extension traits and
+    types).
+  - `zcash_primitives::transaction::components::tze` and
+    `zcash_primitives::transaction::fees::tze`.
+  - `zcash_primitives::transaction::TxVersion::ZFuture`,
+    `TransactionData::{from_parts_zfuture, tze_bundle}`,
+    `TransactionData::write_tze`, `TransactionDigest::{TzeDigest, digest_tze}`,
+    and `TxDigests`/`TransactionDigest` no longer carry TZE digests.
+  - `zcash_primitives::transaction::builder::Builder::{build_zfuture,
+    get_fee_zfuture}`, the `ExtensionTxBuilder` implementation, and
+    `transaction::builder::Error::TzeBuild`.
+  - `zcash_primitives::transaction::fees::FutureFeeRule` and
+    `fees::FeeRule::fee_required_zfuture`.
+
 ### Fixed
 
 ## [0.28.0] - 2026-06-02

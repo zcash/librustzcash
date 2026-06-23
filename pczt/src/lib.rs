@@ -27,7 +27,7 @@ use getset::Getters;
 
 #[cfg(all(
     any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"),
-    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+    zcash_unstable = "nu7",
     feature = "zip-233",
 ))]
 use zcash_protocol::value::Zatoshis;
@@ -233,10 +233,7 @@ impl Pczt {
             consensus_branch_id,
             lock_time,
             global.expiry_height.into(),
-            #[cfg(all(
-                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                feature = "zip-233"
-            ))]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             Zatoshis::ZERO,
             transparent_bundle,
             None,
@@ -290,8 +287,6 @@ impl Authorization for EffectsOnly {
     type TransparentAuth = ::transparent::bundle::EffectsOnly;
     type SaplingAuth = ::sapling::bundle::EffectsOnly;
     type OrchardAuth = ::orchard::bundle::EffectsOnly;
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = core::convert::Infallible;
 }
 
 /// Helper to produce the correct sighash for a PCZT.

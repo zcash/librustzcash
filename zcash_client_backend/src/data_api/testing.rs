@@ -866,6 +866,34 @@ where
         )
     }
 
+    /// Invokes [`scan_cached_blocks`] with a caller-supplied `from_state` instead of deriving it
+    /// from the block cache.
+    ///
+    /// This is primarily useful for tests that need to drive [`WalletWrite::put_blocks`] with a
+    /// `from_state` that is deliberately inconsistent with the wallet's stored note commitment
+    /// tree state, in order to exercise the resulting error paths.
+    pub fn try_scan_cached_blocks_with_state(
+        &mut self,
+        from_height: BlockHeight,
+        from_state: &ChainState,
+        limit: usize,
+    ) -> Result<
+        ScanSummary,
+        super::chain::error::Error<
+            <DbT as WalletRead>::Error,
+            <Cache::BlockSource as BlockSource>::Error,
+        >,
+    > {
+        scan_cached_blocks(
+            &self.network,
+            self.cache.block_source(),
+            &mut self.wallet_data,
+            from_height,
+            from_state,
+            limit,
+        )
+    }
+
     /// Insert shard roots for both trees.
     pub fn put_subtree_roots(
         &mut self,
@@ -1517,8 +1545,6 @@ impl TestBuilder<(), ()> {
         nu6_3: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
-        #[cfg(zcash_unstable = "zfuture")]
-        z_future: None,
     };
 
     /// Constructs a new test environment builder.

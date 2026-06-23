@@ -402,6 +402,28 @@ mod tests {
     }
 
     #[test]
+    fn truncate_to_chain_state_commitment_tree_error_sapling() {
+        testing::pool::truncate_to_chain_state_commitment_tree_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncate_to_chain_state_commitment_tree_error_orchard() {
+        testing::pool::truncate_to_chain_state_commitment_tree_error::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn put_blocks_commitment_tree_error_sapling() {
+        testing::pool::put_blocks_commitment_tree_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn put_blocks_commitment_tree_error_orchard() {
+        testing::pool::put_blocks_commitment_tree_error::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn rewind_to_chain_state_deep_sapling() {
         testing::pool::rewind_to_chain_state_deep::<SaplingPoolTester>()
     }

@@ -20,6 +20,16 @@ workspace.
 - `zcash_protocol::local_consensus::LocalNetwork::nu6_3` under
   `zcash_unstable = "nu6.3"`.
 
+### Removed
+- All support for Transparent Zcash Extensions (TZEs), which was only ever
+  available behind the `--cfg zcash_unstable="zfuture"` development flag and has
+  been determined never to land. This removes the `zfuture` configuration and
+  everything it gated, including:
+  - `zcash_protocol::consensus::NetworkUpgrade::ZFuture` and
+    `zcash_protocol::consensus::BranchId::ZFuture`.
+  - `zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID}`.
+  - `zcash_protocol::local_consensus::LocalNetwork::z_future`.
+
 ## [0.9.0] - 2026-06-02
 
 ### Changed

@@ -6,21 +6,12 @@ use super::{
 };
 use ::sapling::bundle::GrothProofBytes;
 
-#[cfg(zcash_unstable = "zfuture")]
-use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
-
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 use super::sighash_v6::v6_signature_hash;
 
 pub enum SignableInput<'a> {
     Shielded,
     Transparent(transparent::sighash::SignableInput<'a>),
-    #[cfg(zcash_unstable = "zfuture")]
-    Tze {
-        index: usize,
-        precondition: &'a Precondition,
-        value: Zatoshis,
-    },
 }
 
 impl SignableInput<'_> {
@@ -28,8 +19,6 @@ impl SignableInput<'_> {
         match self {
             SignableInput::Shielded => ::transparent::sighash::SIGHASH_ALL,
             SignableInput::Transparent(input) => input.hash_type().encode(),
-            #[cfg(zcash_unstable = "zfuture")]
-            SignableInput::Tze { .. } => ::transparent::sighash::SIGHASH_ALL,
         }
     }
 }
@@ -64,7 +53,5 @@ pub fn signature_hash<
 
         #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
-        #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v6_signature_hash(tx, signable_input, txid_parts),
     })
 }

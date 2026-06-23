@@ -7,7 +7,7 @@ use crate::transaction::{
     sighash_v5::v5_signature_hash,
 };
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
