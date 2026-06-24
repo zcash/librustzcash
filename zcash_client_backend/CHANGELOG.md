@@ -225,7 +225,10 @@ workspace.
   - `TransparentOutputFilter` enum (behind `transparent-inputs` feature flag),
     allowing callers to control which transparent outputs are eligible for
     selection. Its variants are `AllTransparentOutputs`, `CoinbaseOnly`, and
-    `NonCoinbaseOnly`.
+    `NonCoinbaseOnly`. This is a selection control, not an encoding of any
+    consensus rule; `NonCoinbaseOnly` exists so that general (non-shielding)
+    transfers can exclude coinbase UTXOs from input selection (coinbase funds
+    are shielded separately via `propose_shielding_coinbase`).
   - `wallet::ConfirmationsPolicyError`
 - `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:
