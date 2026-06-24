@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_transparent::zip48::FullViewingKey::standard` now takes its `threshold`
+  argument as a `NonZeroU8` instead of a `u8`. This makes the
+  threshold-must-be-nonzero invariant explicit in the type and unrepresentable
+  by construction. Previously a zero threshold was accepted, producing a 0-of-N
+  (anyone-can-spend) P2SH multisig redeem script.
+
 ## [0.8.0] - 2026-06-02
 
 ### Changed
