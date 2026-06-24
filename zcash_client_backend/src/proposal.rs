@@ -354,6 +354,31 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn steps(&self) -> &NonEmpty<Step<NoteRef>> {
         &self.steps
     }
+
+    /// Returns the number of transparent coins selected as inputs across all steps of this
+    /// proposal.
+    pub fn transparent_input_count(&self) -> usize {
+        self.steps
+            .iter()
+            .map(|step| step.transparent_inputs().len())
+            .sum()
+    }
+
+    /// Returns the total value of the transparent coins selected as inputs across all steps of
+    /// this proposal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProposalError::Overflow`] if summing the transparent input values overflows the
+    /// valid range of [`Zatoshis`].
+    pub fn transparent_input_total(&self) -> Result<Zatoshis, ProposalError> {
+        self.steps
+            .iter()
+            .flat_map(|step| step.transparent_inputs())
+            .try_fold(Zatoshis::ZERO, |acc, utxo| {
+                (acc + utxo.value()).ok_or(ProposalError::Overflow)
+            })
+    }
 }
 
 impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
