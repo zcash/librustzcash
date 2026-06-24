@@ -944,7 +944,7 @@ impl Transaction {
             ironwood_bundle,
         };
 
-        Ok(Self::from_data_v5(data))
+        Ok(Self::from_data_v6(data))
     }
 
     /// Utility function for reading header data common to v5 and v6 transactions.
