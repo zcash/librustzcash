@@ -1435,6 +1435,8 @@ pub enum CoinbaseFilter {
     /// unknown are conservatively treated as non-coinbase and will be excluded
     /// when this filter is active.
     CoinbaseOnly,
+    /// Select only non-coinbase transparent outputs.
+    NonCoinbaseOnly,
 }
 
 /// A trait representing the capability to query a data store for unspent transaction outputs

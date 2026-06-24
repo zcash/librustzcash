@@ -1286,15 +1286,18 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     addresses: &[TransparentAddress],
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     if addresses.is_empty() {
         return Ok(vec![]);
     }
 
-    let coinbase_only = match output_filter {
+    // Encoding of the coinbase filter as understood by the SQL query below:
+    // 0 = all transparent outputs, 1 = coinbase outputs only, 2 = non-coinbase outputs only.
+    let coinbase_filter = match output_filter {
         CoinbaseFilter::AllTransparentOutputs => 0i32,
         CoinbaseFilter::CoinbaseOnly => 1i32,
+        CoinbaseFilter::NonCoinbaseOnly => 2i32,
     };
 
     let mut stmt_utxos = conn.prepare_cached(&format!(
@@ -1314,7 +1317,13 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
          AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives
+         AND (
+             :coinbase_filter == 0
+             OR (:coinbase_filter == 1 AND IFNULL(t.tx_index, 1) == 0)
+             OR (:coinbase_filter == 2 AND IFNULL(t.tx_index, 1) != 0)
+         ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
+           -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
+           -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
          ORDER BY addresses.cached_transparent_receiver_address, u.output_index",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
@@ -1341,7 +1350,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_only": coinbase_only,
+        ":coinbase_filter": coinbase_filter,
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
