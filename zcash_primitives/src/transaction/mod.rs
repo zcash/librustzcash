@@ -284,6 +284,8 @@ impl Authorization for Coinbase {
 }
 
 /// A Zcash transaction.
+///
+/// Redefined in zebra as [`transaction::Transaction`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction.rs).
 #[derive(Debug)]
 pub struct Transaction {
     txid: TxId,
@@ -305,6 +307,9 @@ impl PartialEq for Transaction {
 }
 
 /// The information contained in a Zcash transaction.
+///
+/// Redefined in zebra as the body of [`transaction::Transaction`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction.rs),
+/// whose enum variants carry the per-version fields modelled here.
 #[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,

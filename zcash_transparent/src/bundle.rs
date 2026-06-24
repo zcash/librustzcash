@@ -77,6 +77,11 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
+/// The transparent inputs and outputs of a Zcash transaction.
+///
+/// Zebra has no dedicated transparent bundle type; the equivalent
+/// `transparent::Input` and `transparent::Output` vectors are stored directly on
+/// [`transaction::Transaction`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction.rs).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bundle<A: Authorization> {
     pub vin: Vec<TxIn<A>>,
@@ -148,6 +153,8 @@ impl<A: Authorization> Bundle<A> {
 }
 
 /// A pointer to a transparent Zcash transaction output.
+///
+/// Redefined in zebra as [`transparent::OutPoint`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transparent.rs).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
     /// The txid of the transaction containing the output being pointed to.
@@ -222,6 +229,9 @@ impl OutPoint {
     }
 }
 
+/// A transparent input to a Zcash transaction.
+///
+/// Redefined in zebra as [`transparent::Input`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transparent.rs).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TxIn<A: Authorization> {
     #[deprecated(since = "0.4.1", note = "use the prevout() accessor instead.")]
@@ -364,6 +374,9 @@ impl TxIn<builder::Coinbase> {
     }
 }
 
+/// A transparent output of a Zcash transaction.
+///
+/// Redefined in zebra as [`transparent::Output`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transparent.rs).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
     #[deprecated(since = "0.4.1", note = "use the value() accessor instead.")]

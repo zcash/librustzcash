@@ -30,6 +30,8 @@ pub use equihash;
 /// The identifier for a Zcash block.
 ///
 /// This is the SHA-256d hash of the encoded [`BlockHeader`].
+///
+/// Redefined in zebra as [`block::Hash`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block/hash.rs).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
 
@@ -92,6 +94,8 @@ impl Deref for BlockHeader {
 }
 
 /// The information contained in a Zcash block header.
+///
+/// Redefined in zebra as [`Header`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block/header.rs).
 #[derive(Debug)]
 pub struct BlockHeaderData {
     pub version: i32,
@@ -177,6 +181,8 @@ impl BlockHeader {
 }
 
 /// A Zcash block.
+///
+/// Redefined in zebra as [`block::Block`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block.rs).
 #[derive(Debug)]
 pub struct Block {
     header: BlockHeader,

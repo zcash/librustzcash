@@ -22,6 +22,8 @@ pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 /// invalid ZatBalances would also be rejected by the network consensus rules.)
 ///
 /// [`Transaction`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/transaction/struct.Transaction.html
+///
+/// Redefined in zebra as [`amount::Amount<NegativeAllowed>`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/amount.rs).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ZatBalance(i64);
 
@@ -264,6 +266,9 @@ impl Mul<usize> for ZatBalance {
 ///
 /// A Zatoshis can only be constructed from an integer that is within the valid monetary
 /// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
+///
+/// Redefined in zebra as [`amount::Amount<NonNegative>`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/amount.rs);
+/// zebra's RPC layer already depends on this `Zatoshis` type directly.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Zatoshis(u64);
 

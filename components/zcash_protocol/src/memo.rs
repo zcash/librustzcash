@@ -52,6 +52,8 @@ impl fmt::Display for Error {
 impl error::Error for Error {}
 
 /// The unencrypted memo bytes received alongside a shielded note in a Zcash transaction.
+///
+/// Redefined in zebra as [`transaction::Memo`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/memo.rs).
 #[derive(Clone)]
 pub struct MemoBytes(pub(crate) Box<[u8; 512]>);
 
@@ -155,6 +157,9 @@ impl Deref for TextMemo {
 }
 
 /// An unencrypted memo received alongside a shielded note in a Zcash transaction.
+///
+/// Zebra has no equivalent of this interpreted enum; it stores raw memo bytes as
+/// [`transaction::Memo`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/memo.rs).
 #[derive(Clone, Default)]
 pub enum Memo {
     /// An empty memo field.
