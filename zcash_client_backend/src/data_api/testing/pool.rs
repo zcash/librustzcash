@@ -6555,9 +6555,10 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
 }
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-/// Tests that `CoinbaseFilter::CoinbaseOnly` excludes non-coinbase outputs from
-/// UTXO selection and shielding proposals, and that `CoinbaseOnly` still allows proposing
-/// shielding when only coinbase UTXOs are available.
+/// Tests that `CoinbaseFilter::CoinbaseOnly` excludes non-coinbase outputs and
+/// `CoinbaseFilter::NonCoinbaseOnly` excludes coinbase outputs from UTXO selection and
+/// shielding proposals, and that `CoinbaseOnly` still allows proposing shielding when only
+/// coinbase UTXOs are available.
 pub fn coinbase_only_filtering<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     Dsf: DataStoreFactory,
@@ -6646,6 +6647,25 @@ where
     );
     assert_eq!(coinbase_utxos[0].value(), coinbase_value);
 
+    // 5b. CoinbaseFilter::NonCoinbaseOnly returns only the non-coinbase UTXO.
+    // The non-coinbase UTXO was inserted with tx_index = NULL, which the filter treats as
+    // non-coinbase, so it must be included here.
+    let non_coinbase_utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            CoinbaseFilter::NonCoinbaseOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        non_coinbase_utxos.len(),
+        1,
+        "Expected only the non-coinbase UTXO with CoinbaseFilter::NonCoinbaseOnly"
+    );
+    assert_eq!(non_coinbase_utxos[0].value(), non_coinbase_value);
+
     // 6. propose_shielding with CoinbaseOnly includes only the coinbase input
     let proposal = st
         .propose_shielding(
@@ -6665,6 +6685,26 @@ where
         "CoinbaseOnly proposal should contain exactly one transparent input"
     );
     assert_eq!(coinbase_inputs[0].value(), coinbase_value);
+
+    // 6b. propose_shielding with NonCoinbaseOnly includes only the non-coinbase input
+    let proposal_non_coinbase = st
+        .propose_shielding(
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            Zatoshis::from_u64(10000).unwrap(),
+            &[t_addr],
+            account,
+            ConfirmationsPolicy::default(),
+            CoinbaseFilter::NonCoinbaseOnly,
+        )
+        .unwrap();
+    let non_coinbase_inputs = proposal_non_coinbase.steps().first().transparent_inputs();
+    assert_eq!(
+        non_coinbase_inputs.len(),
+        1,
+        "NonCoinbaseOnly proposal should contain exactly one transparent input"
+    );
+    assert_eq!(non_coinbase_inputs[0].value(), non_coinbase_value);
 
     // 7. propose_shielding with All includes both inputs
     let proposal_all = st

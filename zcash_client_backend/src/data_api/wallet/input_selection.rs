@@ -521,7 +521,10 @@ where
                 addr,
                 target_height,
                 confirmations_policy,
-                CoinbaseFilter::AllTransparentOutputs,
+                // We only want non-coinbase transparent UTXOs.
+                // This forces users to shield their coinbase first by using
+                // `propose_shielding` with the appropriate coinbase filter.
+                CoinbaseFilter::NonCoinbaseOnly,
             )
             .map_err(InputSelectorError::DataSource)?;
         inputs.extend(utxos.into_iter().map(|utxo| utxo.redact_account_data()));
