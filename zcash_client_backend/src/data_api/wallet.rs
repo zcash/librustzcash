@@ -759,7 +759,7 @@ where
         request,
         confirmations_policy,
         #[cfg(feature = "transparent-inputs")]
-        &Default::default(),
+        &input_selection::TransparentSpendPolicy::default(),
         #[cfg(feature = "unstable")]
         proposed_version,
     )

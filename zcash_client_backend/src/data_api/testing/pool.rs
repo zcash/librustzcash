@@ -1,6 +1,6 @@
 use std::{
     cmp::Eq,
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     convert::Infallible,
     hash::Hash,
     num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -6579,6 +6579,8 @@ where
         None,
     );
     let coinbase_tx = coinbase_build_result.transaction();
+    // The coinbase transaction has a single transparent output at index 0.
+    let coinbase_outpoint = OutPoint::new(coinbase_tx.txid().into(), 0);
     let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
     st.scan_cached_blocks(h, 1);
     let params = *st.network();
@@ -6588,8 +6590,9 @@ where
     // Inserted via put_received_transparent_utxo, which sets tx_index = NULL.
     // NULL tx_index is treated as non-coinbase by the filter.
     let non_coinbase_value = Zatoshis::const_from_u64(60000);
+    let non_coinbase_outpoint = OutPoint::fake();
     let utxo = WalletTransparentOutput::from_parts(
-        OutPoint::fake(),
+        non_coinbase_outpoint.clone(),
         TxOut::new(non_coinbase_value, t_addr.script().into()),
         Some(h),
         Some(account),
@@ -6646,6 +6649,7 @@ where
         "Expected only the coinbase UTXO with CoinbaseFilter::CoinbaseOnly"
     );
     assert_eq!(coinbase_utxos[0].value(), coinbase_value);
+    assert_eq!(coinbase_utxos[0].outpoint(), &coinbase_outpoint);
 
     // 5b. CoinbaseFilter::NonCoinbaseOnly returns only the non-coinbase UTXO.
     // The non-coinbase UTXO was inserted with tx_index = NULL, which the filter treats as
@@ -6665,6 +6669,7 @@ where
         "Expected only the non-coinbase UTXO with CoinbaseFilter::NonCoinbaseOnly"
     );
     assert_eq!(non_coinbase_utxos[0].value(), non_coinbase_value);
+    assert_eq!(non_coinbase_utxos[0].outpoint(), &non_coinbase_outpoint);
 
     // 6. propose_shielding with CoinbaseOnly includes only the coinbase input
     let proposal = st
@@ -6685,6 +6690,7 @@ where
         "CoinbaseOnly proposal should contain exactly one transparent input"
     );
     assert_eq!(coinbase_inputs[0].value(), coinbase_value);
+    assert_eq!(coinbase_inputs[0].outpoint(), &coinbase_outpoint);
 
     // 6b. propose_shielding with NonCoinbaseOnly includes only the non-coinbase input
     let proposal_non_coinbase = st
@@ -6705,6 +6711,7 @@ where
         "NonCoinbaseOnly proposal should contain exactly one transparent input"
     );
     assert_eq!(non_coinbase_inputs[0].value(), non_coinbase_value);
+    assert_eq!(non_coinbase_inputs[0].outpoint(), &non_coinbase_outpoint);
 
     // 7. propose_shielding with All includes both inputs
     let proposal_all = st
@@ -6723,6 +6730,16 @@ where
         all_inputs.len(),
         2,
         "All proposal should contain both transparent inputs"
+    );
+    // Input ordering is not guaranteed, so compare the set of outpoints.
+    let all_outpoints = all_inputs
+        .iter()
+        .map(|input| input.outpoint().clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        all_outpoints,
+        BTreeSet::from([coinbase_outpoint, non_coinbase_outpoint]),
+        "All proposal should contain both the coinbase and non-coinbase outpoints"
     );
 }
 

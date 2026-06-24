@@ -1000,7 +1000,7 @@ where
             request,
             confirmations_policy,
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &TransparentSpendPolicy::default(),
             #[cfg(feature = "unstable")]
             None,
         )?;
@@ -1045,7 +1045,7 @@ where
             request,
             confirmations_policy,
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &TransparentSpendPolicy::default(),
             #[cfg(feature = "unstable")]
             None,
         )
