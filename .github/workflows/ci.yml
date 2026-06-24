@@ -57,6 +57,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -71,7 +72,13 @@ jobs:
           save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
         run: >
+          cargo nextest run
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run doctests
+        run: >
           cargo test
+          --doc
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
@@ -126,6 +133,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -140,7 +148,13 @@ jobs:
           save-if: ${{ matrix.state == 'all-features' && matrix.target != 'Windows' }}
       - name: Run tests
         run: >
+          cargo nextest run
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Run doctests
+        run: >
           cargo test
+          --doc
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
@@ -183,6 +197,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: taiki-e/install-action@nextest
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -197,7 +212,7 @@ jobs:
           save-if: "false"
       - name: Run slow tests
         run: >
-          cargo test
+          cargo nextest run
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
