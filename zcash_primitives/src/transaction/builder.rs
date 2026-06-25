@@ -244,15 +244,22 @@ impl BuildConfig {
         }
     }
 
-    /// Returns the Orchard bundle type and anchor for this configuration.
-    pub fn orchard_builder_config(
+    /// Returns the Orchard builder for this configuration.
+    fn orchard_builder(
         &self,
-    ) -> Option<(orchard::builder::BundleType, orchard::Anchor)> {
+        protocol: orchard::BundleProtocol,
+    ) -> Option<orchard::builder::Builder> {
         match self {
-            BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
-                .as_ref()
-                .map(|a| (orchard::builder::BundleType::DEFAULT, *a)),
-            BuildConfig::Coinbase { .. } => Some((
+            BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor.as_ref().map(|a| {
+                orchard::builder::Builder::new(protocol, orchard::builder::BundleType::DEFAULT, *a)
+            }),
+            BuildConfig::Coinbase { .. }
+                if matches!(protocol, orchard::BundleProtocol::OrchardPostNu6_3) =>
+            {
+                None
+            }
+            BuildConfig::Coinbase { .. } => Some(orchard::builder::Builder::new(
+                protocol,
                 orchard::builder::BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
             )),
@@ -262,6 +269,37 @@ impl BuildConfig {
     /// Returns `true` if this configuration is for building a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
         matches!(self, BuildConfig::Coinbase { .. })
+    }
+}
+
+fn orchard_action_count(
+    builder: &orchard::builder::Builder,
+    is_coinbase: bool,
+) -> Result<usize, &'static str> {
+    let num_spends = builder.spends().len();
+    let num_outputs = builder
+        .outputs()
+        .len()
+        .checked_add(builder.changes().len())
+        .ok_or("num_outputs + num_changes overflowed")?;
+
+    let bundle_type = if is_coinbase {
+        orchard::builder::BundleType::Coinbase
+    } else {
+        orchard::builder::BundleType::DEFAULT
+    };
+
+    bundle_type.num_actions(num_spends, num_outputs, builder.protocol())
+}
+
+fn orchard_protocol_for_branch(consensus_branch_id: BranchId) -> orchard::BundleProtocol {
+    match consensus_branch_id {
+        #[cfg(zcash_unstable = "nu6.3")]
+        BranchId::Nu6_3 => orchard::BundleProtocol::OrchardPostNu6_3,
+        #[cfg(zcash_unstable = "nu7")]
+        BranchId::Nu7 => orchard::BundleProtocol::OrchardPostNu6_3,
+        BranchId::Nu6_2 => orchard::BundleProtocol::OrchardPreNu6_3,
+        _ => orchard::BundleProtocol::OrchardPreNu6_2,
     }
 }
 
@@ -436,16 +474,11 @@ impl<P: consensus::Parameters> Builder<P, ()> {
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
+        let consensus_branch_id = BranchId::for_height(&params, target_height);
+        let orchard_protocol = orchard_protocol_for_branch(consensus_branch_id);
+
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            build_config
-                .orchard_builder_config()
-                .map(|(bundle_type, anchor)| {
-                    orchard::builder::Builder::new(
-                        orchard::BundleProtocol::OrchardPreNu6_3,
-                        bundle_type,
-                        anchor,
-                    )
-                })
+            build_config.orchard_builder(orchard_protocol)
         } else {
             None
         };
@@ -476,7 +509,6 @@ impl<P: consensus::Parameters> Builder<P, ()> {
         };
 
         // Determine the default transaction version for the consensus branch
-        let consensus_branch_id = BranchId::for_height(&params, target_height);
         let tx_version = TxVersion::suggested_for_branch(consensus_branch_id);
 
         Builder {
@@ -645,7 +677,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(Error::TransparentBuild)
     }
 
-    /// Returns the sum of the transparent, Sapling, Orchard, zip233_amount and TZE value balances.
+    /// Returns the sum of the transparent, Sapling, Orchard, and zip233_amount value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
@@ -708,16 +740,10 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                     })?,
                 self.orchard_builder
                     .as_ref()
-                    .zip(self.build_config.orchard_builder_config())
-                    .map_or(Ok(0), |(builder, (bundle_type, _))| {
-                        bundle_type
-                            .num_actions(
-                                builder.spends().len(),
-                                builder.outputs().len(),
-                                builder.protocol(),
-                            )
-                            .map_err(FeeError::Bundle)
-                    })?,
+                    .map_or(Ok(0), |builder| {
+                        orchard_action_count(builder, self.build_config.is_coinbase())
+                    })
+                    .map_err(FeeError::Bundle)?,
             )
             .map_err(FeeError::FeeRule)
     }
@@ -923,6 +949,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_bundle: None,
         };
 
         //
@@ -979,6 +1007,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_bundle: None,
         };
 
         // The unwrap() here is safe because the txid hashing
@@ -1165,6 +1195,140 @@ mod tests {
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };
+
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+        use zcash_protocol::consensus::BlockHeight;
+
+        zcash_protocol::local_consensus::LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(BlockHeight::from_u32(2)),
+            blossom: Some(BlockHeight::from_u32(3)),
+            heartwood: Some(BlockHeight::from_u32(4)),
+            canopy: Some(BlockHeight::from_u32(5)),
+            nu5: Some(BlockHeight::from_u32(6)),
+            nu6: Some(BlockHeight::from_u32(7)),
+            nu6_1: Some(BlockHeight::from_u32(8)),
+            nu6_2: Some(BlockHeight::from_u32(9)),
+            nu6_3: Some(BlockHeight::from_u32(10)),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: None,
+        }
+    }
+
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+    fn nu7_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+        use zcash_protocol::consensus::BlockHeight;
+
+        zcash_protocol::local_consensus::LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(BlockHeight::from_u32(2)),
+            blossom: Some(BlockHeight::from_u32(3)),
+            heartwood: Some(BlockHeight::from_u32(4)),
+            canopy: Some(BlockHeight::from_u32(5)),
+            nu5: Some(BlockHeight::from_u32(6)),
+            nu6: Some(BlockHeight::from_u32(7)),
+            nu6_1: Some(BlockHeight::from_u32(8)),
+            nu6_2: Some(BlockHeight::from_u32(9)),
+            #[cfg(zcash_unstable = "nu6.3")]
+            nu6_3: None,
+            nu7: Some(BlockHeight::from_u32(10)),
+        }
+    }
+
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    fn nu6_3_standard_builder_uses_v6_orchard_protocol() {
+        let builder = Builder::new(
+            nu6_3_test_network(),
+            zcash_protocol::consensus::BlockHeight::from_u32(10),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            },
+        );
+
+        assert_eq!(builder.tx_version, crate::transaction::TxVersion::V6);
+        assert_eq!(
+            builder.orchard_builder.as_ref().map(|b| b.protocol()),
+            Some(orchard::BundleProtocol::OrchardPostNu6_3)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    fn nu6_3_standard_builder_preserves_branch_orchard_protocol_for_explicit_v5() {
+        let mut builder = Builder::new(
+            nu6_3_test_network(),
+            zcash_protocol::consensus::BlockHeight::from_u32(10),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            },
+        );
+
+        builder
+            .propose_version::<Infallible>(crate::transaction::TxVersion::V5)
+            .unwrap();
+
+        assert_eq!(
+            builder.orchard_builder.as_ref().map(|b| b.protocol()),
+            Some(orchard::BundleProtocol::OrchardPostNu6_3)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
+    fn nu6_3_coinbase_builder_does_not_expose_orchard() {
+        let builder = Builder::new(
+            nu6_3_test_network(),
+            zcash_protocol::consensus::BlockHeight::from_u32(10),
+            BuildConfig::Coinbase { miner_data: None },
+        );
+
+        assert!(builder.orchard_builder.is_none());
+    }
+
+    #[test]
+    #[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
+    fn nu7_coinbase_builder_does_not_expose_orchard() {
+        let builder = Builder::new(
+            nu7_test_network(),
+            zcash_protocol::consensus::BlockHeight::from_u32(10),
+            BuildConfig::Coinbase { miner_data: None },
+        );
+
+        assert!(builder.orchard_builder.is_none());
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "circuits",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
+    fn orchard_action_count_includes_change_outputs() {
+        let fvk = orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
+        );
+        let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+        let mut builder = orchard::builder::Builder::new(
+            orchard::BundleProtocol::OrchardPostNu6_3,
+            orchard::builder::BundleType::DEFAULT,
+            orchard::Anchor::empty_tree(),
+        );
+
+        builder
+            .add_change_output(
+                fvk,
+                None,
+                recipient,
+                orchard::value::NoteValue::from_raw(5_000),
+                [0u8; 512],
+            )
+            .unwrap();
+
+        assert_eq!(super::orchard_action_count(&builder, false).unwrap(), 2);
+    }
 
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.

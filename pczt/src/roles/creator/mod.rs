@@ -116,7 +116,7 @@ impl Creator {
 
         use crate::common::FLAG_HAS_SIGHASH_SINGLE;
 
-        #[cfg(zcash_unstable = "nu7")]
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         use zcash_protocol::constants::V6_TX_VERSION;
 
         let tx_version = match parts.version {
@@ -124,7 +124,7 @@ impl Creator {
             | zcash_primitives::transaction::TxVersion::V3 => None,
             zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
         }?;
 
