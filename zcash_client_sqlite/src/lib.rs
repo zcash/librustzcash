@@ -1399,6 +1399,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wdb.notify_address_checked(request, as_of_height))
     }
+
+    #[cfg(feature = "spend-index")]
+    fn notify_output_verified_unspent(
+        &mut self,
+        outpoint: OutPoint,
+        as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.notify_output_verified_unspent(outpoint, as_of_height))
+    }
 }
 
 /// This impl block is only usable when you already have an [`SqlTransaction`], meaning
@@ -1796,6 +1805,19 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             self.conn.0,
             &self.params,
             request.address(),
+            as_of_height,
+        )
+    }
+
+    #[cfg(feature = "spend-index")]
+    fn notify_output_verified_unspent(
+        &mut self,
+        outpoint: OutPoint,
+        as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::update_observed_unspent_height_for_outpoint(
+            self.conn.0,
+            &outpoint,
             as_of_height,
         )
     }

@@ -25,6 +25,13 @@ workspace.
   `truncate_to_chain_state`). Previously such errors surfaced as the generic
   `CommitmentTree` variant without the affected pool or target height.
 
+### Changed
+- (behind the new `spend-index` feature) `WalletRead::transaction_data_requests`
+  emits `TransactionDataRequest::GetSpendingTx` for transparent spend
+  detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
+  `TransactionsInvolvingAddress` is still emitted for ephemeral-address discovery,
+  and for spend detection when `spend-index` is disabled.
+
 ## [0.21.1] - 2026-06-19
 
 ### Fixed
