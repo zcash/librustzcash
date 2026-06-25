@@ -139,6 +139,14 @@ transparent-inputs = [
   "zcash_client_backend/transparent-inputs"
 ]
 
+## Emits per-outpoint `TransactionDataRequest::SpendsOfTransparentOutput` requests
+## (instead of address-based `TransactionsInvolvingAddress`) for transparent spend
+## detection, for wallets whose chain-data source has a spent-outpoint index.
+spend-index = [
+  "transparent-inputs",
+  "zcash_client_backend/spend-index",
+]
+
 # Enables operations that permit arbitrary transparent pubkeys to be associated
 # with an account in the wallet. Applications that rely on this feature mut
 # maintain spending keys corresponding to all imported pubkeys for any account

@@ -1106,10 +1106,14 @@ pub enum TransactionDataRequest {
     /// transparent address is requested.
     ///
     /// Fully transparent transactions, and transactions that do not contain either shielded inputs
-    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
-    /// scanning; as a consequence, the wallet must actively query to find transactions that spend
-    /// such funds. Ideally we'd be able to query by [`OutPoint`] but this is not currently
-    /// functionality that is supported by the light wallet server.
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of
+    /// out-of-order chain scanning due to race conditions related to advancing the transparent
+    /// address gap limit; as a consequence, the wallet must actively query to find transactions
+    /// that spend such funds. Ideally we'd be able to query by [`OutPoint`] but this is not
+    /// currently functionality that is supported by the light wallet server; for full-node wallets
+    /// or other arrangements that allow privacy-preserving retrieval of individually identifying
+    /// information such as backends that support private information retrieval (PIR) consider
+    /// enabling the `spend-index` feature.
     ///
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by detecting transactions involving the specified address within the provided block
@@ -1120,6 +1124,29 @@ pub enum TransactionDataRequest {
     /// `block_end_height - 1` as the `as_of_height` argument.
     #[cfg(feature = "transparent-inputs")]
     TransactionsInvolvingAddress(TransactionsInvolvingAddress),
+    /// The main-chain transaction that spends of a specific transparent output, or confirmation
+    /// that the output remains unspent, is requested.
+    ///
+    /// When the `spend-index` feature is enabled, `GetSpendingTx` requests will be emitted by the
+    /// backend instead of [`TransactionDataRequest::TransactionsInvolvingAddress`], in
+    /// circumstances when spentness determination is needed. This feature should only be enabled
+    /// for wallets whose chain-data source can resolve the spend of an individual outpoint
+    /// directly — for example a full node that maintains a spent-outpoint index. It avoids needing
+    /// to retrieve potentially large amounts of transaction history (in the cas of a
+    /// heavily-reused address) just to discover whether one output was spent.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should determine whether
+    /// `outpoint` has been spent on the main chain. Spentness should be taken from an
+    /// authoritative source (e.g. the node's UTXO set); the spend index is used only to identify
+    /// the spending transaction. If the output is spent, the caller should provide the spending
+    /// transaction to [`wallet::decrypt_and_store_transaction`]. If the output is confirmed
+    /// unspent as of some height, the caller should invoke
+    /// [`WalletWrite::notify_output_verified_unspent`] with that height. If the output is known to
+    /// be spent but the spending transaction cannot yet be resolved (e.g. an index is still being
+    /// built — see ZcashFoundation/zebra#10806), the caller should do nothing, so that the request
+    /// is re-issued and retried later.
+    #[cfg(feature = "spend-index")]
+    GetSpendingTx(OutPoint),
 }
 
 impl TransactionDataRequest {
@@ -3304,6 +3331,25 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<(), Self::Error> {
         unimplemented!(
             "WalletWrite::notify_address_checked must be overridden for wallets to use the `transparent-inputs` feature"
+        )
+    }
+
+    /// Notifies the wallet backend that a specific transparent output was confirmed unspent as of
+    /// the given height, in response to a [`TransactionDataRequest::GetSpendingTx`]
+    /// request.
+    ///
+    /// # Arguments
+    /// - `outpoint`: the transparent outpoint whose spend status was checked.
+    /// - `as_of_height`: the maximum height among blocks that were inspected, and through which
+    ///   the outpoint is confirmed to remain unspent.
+    #[cfg(feature = "spend-index")]
+    fn notify_output_verified_unspent(
+        &mut self,
+        _outpoint: OutPoint,
+        _as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        unimplemented!(
+            "WalletWrite::notify_output_verified_unspent must be overridden for wallets to use the `spend-index` feature"
         )
     }
 }

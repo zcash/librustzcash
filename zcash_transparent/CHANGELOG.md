@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `transparent::bundle::OutPoint` now implements `std::hash::Hash`.
+
 ## [0.8.0] - 2026-06-02
 
 ### Changed

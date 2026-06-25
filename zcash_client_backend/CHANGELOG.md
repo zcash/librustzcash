@@ -11,6 +11,14 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- A new `spend-index` feature flag, for consumers whose chain-data source can
+  resolve the spend of an individual transparent output (e.g. a full node with a
+  spent-outpoint index). It gates:
+  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
+    a per-outpoint request to detect the spend of a specific transparent output.
+  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
+    which records that a transparent outpoint was confirmed unspent as of a given
+    height.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
