@@ -1421,12 +1421,8 @@ impl NoteFilter {
     }
 }
 
-/// Controls which transparent outputs are eligible for selection.
-///
-/// This is purely an input-selection control: it determines which transparent
-/// UTXOs a selector is permitted to consider. It does not model or enforce any
-/// consensus rule about coinbase spends, and callers should not treat it as
-/// such.
+/// Controls which transparent outputs are eligible for selection. This is an
+/// input-selection control only; it does not encode any consensus rule.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CoinbaseFilter {
@@ -1443,16 +1439,10 @@ pub enum CoinbaseFilter {
     /// Select only non-coinbase transparent outputs.
     ///
     /// Used for general (non-shielding) transfers, which may produce transparent
-    /// change. The consensus rules require that any transaction *spending* a
-    /// coinbase output send its entire value to shielded outputs, with no
-    /// transparent outputs or change. Rather than reason about that
-    /// transaction-level constraint during construction, general transfers
-    /// conservatively exclude coinbase UTXOs from the candidate set; coinbase
-    /// funds are shielded separately via
+    /// change; coinbase funds must instead be shielded via
     /// [`propose_shielding_coinbase`](crate::data_api::wallet::propose_shielding_coinbase).
-    /// As with [`CoinbaseOnly`](Self::CoinbaseOnly), outputs whose transaction
-    /// index is unknown are treated as non-coinbase (and so are *included* under
-    /// this filter).
+    /// Outputs whose transaction index is unknown are treated as non-coinbase
+    /// and are included.
     NonCoinbaseOnly,
 }
 

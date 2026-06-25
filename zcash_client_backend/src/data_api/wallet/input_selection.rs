@@ -521,13 +521,9 @@ where
                 addr,
                 target_height,
                 confirmations_policy,
-                // We exclude coinbase UTXOs from general-transfer input
-                // selection. A transaction that spends a coinbase output must
-                // send its entire value to shielded outputs (no transparent
-                // outputs or change) per the consensus rules; general transfers
-                // may produce transparent change, so coinbase funds must instead
-                // be shielded via `propose_shielding_coinbase`. (`CoinbaseFilter`
-                // here is a selection filter, not an enforcement of that rule.)
+                // Exclude coinbase UTXOs from general-transfer input selection;
+                // coinbase funds must be shielded first via
+                // `propose_shielding_coinbase`.
                 CoinbaseFilter::NonCoinbaseOnly,
             )
             .map_err(InputSelectorError::DataSource)?;
