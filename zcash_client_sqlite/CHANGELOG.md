@@ -29,6 +29,11 @@ workspace.
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`,
   `zcash_transparent 0.9.0-pre.0`, `zcash_keys 0.15.0-pre.0`,
   `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
+- (behind the new `spend-index` feature) `WalletRead::transaction_data_requests`
+  emits `TransactionDataRequest::GetSpendingTx` for transparent spend
+  detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
+  `TransactionsInvolvingAddress` is still emitted for ephemeral-address discovery,
+  and for spend detection when `spend-index` is disabled.
 
 ## [0.21.1] - 2026-06-19
 
