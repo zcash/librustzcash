@@ -26,13 +26,19 @@ workspace.
 
 ### Changed
 - `zcash_primitives::transaction::builder`:
-  - NU6.3 standard builders use the NU6.3 Orchard bundle protocol when
+  - NU6.3 standard builders use the NU6.3 Orchard pool restrictions when
     constructing V6 transactions.
   - NU6.3 coinbase builders no longer expose Orchard outputs.
 - `TransactionDigest::digest_orchard` now receives `TxVersion`, so digest
   implementations can distinguish Orchard commitments by transaction format.
 - `TransactionDigest::digest_sapling` now receives `TxVersion`, so digest
   implementations can distinguish Sapling commitments by transaction format.
+- Updated the `orchard` dependency to the `feat/ironwood` revision `30c4ea2`,
+  which restricts cross-address transfers to the Ironwood pool (an Orchard v6
+  bundle can no longer set the cross-address flag) and renames the pool selector
+  to `BundlePoolRestrictions`. The v6 bundle (de)serialization helpers
+  `zcash_primitives::transaction::components::orchard::{read_v6_bundle,
+  write_v6_bundle, read_flags}` now take a `BundlePoolRestrictions` argument.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

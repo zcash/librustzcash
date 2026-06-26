@@ -401,11 +401,11 @@ impl<A: Authorization> TransactionData<A> {
     /// including the Ironwood bundle.
     ///
     /// Both the Orchard and Ironwood bundle fields use [`orchard::Bundle`], but
-    /// they are distinct V6 transaction fields with distinct bundle protocols.
+    /// they are distinct V6 transaction fields with distinct pool restrictions.
     /// The `orchard_bundle` argument must contain a bundle constructed for
-    /// [`orchard::BundleProtocol::OrchardPostNu6_3`], while `ironwood_bundle`
+    /// [`orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward`], while `ironwood_bundle`
     /// must contain a bundle constructed for
-    /// [`orchard::BundleProtocol::IronwoodPostNu6_3`]. Supplying a bundle for
+    /// [`orchard::bundle::BundlePoolRestrictions::IronwoodNu6_3Onward`]. Supplying a bundle for
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
@@ -925,9 +925,15 @@ impl Transaction {
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        let orchard_bundle = orchard_serialization::read_v6_bundle(
+            &mut reader,
+            orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+        )?;
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-        let ironwood_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        let ironwood_bundle = orchard_serialization::read_v6_bundle(
+            &mut reader,
+            orchard::bundle::BundlePoolRestrictions::IronwoodNu6_3Onward,
+        )?;
 
         let data = TransactionData {
             version,
@@ -1084,9 +1090,17 @@ impl Transaction {
 
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v6_bundle(
+            self.orchard_bundle.as_ref(),
+            &mut writer,
+            orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+        )?;
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-        orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v6_bundle(
+            self.ironwood_bundle.as_ref(),
+            &mut writer,
+            orchard::bundle::BundlePoolRestrictions::IronwoodNu6_3Onward,
+        )?;
 
         Ok(())
     }
@@ -1293,7 +1307,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },
@@ -1325,7 +1339,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },
@@ -1357,7 +1371,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },

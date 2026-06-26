@@ -247,19 +247,26 @@ impl BuildConfig {
     /// Returns the Orchard builder for this configuration.
     fn orchard_builder(
         &self,
-        protocol: orchard::BundleProtocol,
+        pool_restrictions: orchard::bundle::BundlePoolRestrictions,
     ) -> Option<orchard::builder::Builder> {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor.as_ref().map(|a| {
-                orchard::builder::Builder::new(protocol, orchard::builder::BundleType::DEFAULT, *a)
+                orchard::builder::Builder::new(
+                    pool_restrictions,
+                    orchard::builder::BundleType::DEFAULT,
+                    *a,
+                )
             }),
             BuildConfig::Coinbase { .. }
-                if matches!(protocol, orchard::BundleProtocol::OrchardPostNu6_3) =>
+                if matches!(
+                    pool_restrictions,
+                    orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward
+                ) =>
             {
                 None
             }
             BuildConfig::Coinbase { .. } => Some(orchard::builder::Builder::new(
-                protocol,
+                pool_restrictions,
                 orchard::builder::BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
             )),
@@ -275,6 +282,7 @@ impl BuildConfig {
 fn orchard_action_count(
     builder: &orchard::builder::Builder,
     is_coinbase: bool,
+    pool_restrictions: orchard::bundle::BundlePoolRestrictions,
 ) -> Result<usize, &'static str> {
     let num_spends = builder.spends().len();
     let num_outputs = builder
@@ -289,17 +297,19 @@ fn orchard_action_count(
         orchard::builder::BundleType::DEFAULT
     };
 
-    bundle_type.num_actions(num_spends, num_outputs, builder.protocol())
+    bundle_type.num_actions(num_spends, num_outputs, pool_restrictions)
 }
 
-fn orchard_protocol_for_branch(consensus_branch_id: BranchId) -> orchard::BundleProtocol {
+fn orchard_pool_restrictions_for_branch(
+    consensus_branch_id: BranchId,
+) -> orchard::bundle::BundlePoolRestrictions {
     match consensus_branch_id {
         #[cfg(zcash_unstable = "nu6.3")]
-        BranchId::Nu6_3 => orchard::BundleProtocol::OrchardPostNu6_3,
+        BranchId::Nu6_3 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
         #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => orchard::BundleProtocol::OrchardPostNu6_3,
-        BranchId::Nu6_2 => orchard::BundleProtocol::OrchardPreNu6_3,
-        _ => orchard::BundleProtocol::OrchardPreNu6_2,
+        BranchId::Nu7 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+        BranchId::Nu6_2 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
+        _ => orchard::bundle::BundlePoolRestrictions::OrchardPreNu6_2,
     }
 }
 
@@ -369,6 +379,7 @@ pub struct Builder<P, U> {
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
+    orchard_pool_restrictions: Option<orchard::bundle::BundlePoolRestrictions>,
     _progress_notifier: U,
 }
 
@@ -475,13 +486,14 @@ impl<P: consensus::Parameters> Builder<P, ()> {
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let consensus_branch_id = BranchId::for_height(&params, target_height);
-        let orchard_protocol = orchard_protocol_for_branch(consensus_branch_id);
+        let pool_restrictions = orchard_pool_restrictions_for_branch(consensus_branch_id);
 
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            build_config.orchard_builder(orchard_protocol)
+            build_config.orchard_builder(pool_restrictions)
         } else {
             None
         };
+        let orchard_pool_restrictions = orchard_builder.as_ref().map(|_| pool_restrictions);
 
         let sapling_builder = build_config
             .sapling_builder_config()
@@ -523,6 +535,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
+            orchard_pool_restrictions,
             _progress_notifier: (),
         }
     }
@@ -550,6 +563,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
+            orchard_pool_restrictions: self.orchard_pool_restrictions,
             _progress_notifier,
         }
     }
@@ -741,7 +755,12 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                 self.orchard_builder
                     .as_ref()
                     .map_or(Ok(0), |builder| {
-                        orchard_action_count(builder, self.build_config.is_coinbase())
+                        orchard_action_count(
+                            builder,
+                            self.build_config.is_coinbase(),
+                            self.orchard_pool_restrictions
+                                .expect("orchard builder present implies pool restrictions"),
+                        )
                     })
                     .map_err(FeeError::Bundle)?,
             )
@@ -1250,8 +1269,8 @@ mod tests {
 
         assert_eq!(builder.tx_version, crate::transaction::TxVersion::V6);
         assert_eq!(
-            builder.orchard_builder.as_ref().map(|b| b.protocol()),
-            Some(orchard::BundleProtocol::OrchardPostNu6_3)
+            builder.orchard_pool_restrictions,
+            Some(orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward)
         );
     }
 
@@ -1272,8 +1291,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            builder.orchard_builder.as_ref().map(|b| b.protocol()),
-            Some(orchard::BundleProtocol::OrchardPostNu6_3)
+            builder.orchard_pool_restrictions,
+            Some(orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward)
         );
     }
 
@@ -1312,7 +1331,7 @@ mod tests {
         );
         let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
         let mut builder = orchard::builder::Builder::new(
-            orchard::BundleProtocol::OrchardPostNu6_3,
+            orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
             orchard::builder::BundleType::DEFAULT,
             orchard::Anchor::empty_tree(),
         );
@@ -1327,7 +1346,15 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(super::orchard_action_count(&builder, false).unwrap(), 2);
+        assert_eq!(
+            super::orchard_action_count(
+                &builder,
+                false,
+                orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+            )
+            .unwrap(),
+            2
+        );
     }
 
     // This test only works with the transparent_inputs feature because we have to
@@ -1360,6 +1387,7 @@ mod tests {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
             orchard_builder: None,
+            orchard_pool_restrictions: None,
             _progress_notifier: (),
         };
 

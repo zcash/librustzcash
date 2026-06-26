@@ -412,6 +412,31 @@ fn v5_tx_data_with_sapling_bundle(
     )
 }
 
+/// Clears the cross-address flag on an Orchard bundle (preserving spends/outputs)
+/// so it is representable in a v6 Orchard slot (`OrchardNu6_3Onward`, which
+/// forbids cross-address transfers; cross-address is Ironwood-only).
+#[cfg(all(test, zcash_unstable = "nu6.3"))]
+fn disable_cross_address(
+    bundle: orchard::Bundle<orchard::bundle::Authorized, ZatBalance>,
+) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
+    let byte = u8::from(bundle.flags().spends_enabled())
+        | (u8::from(bundle.flags().outputs_enabled()) << 1);
+    let flags = orchard::bundle::Flags::from_byte(
+        byte,
+        orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+    )
+    .unwrap();
+    orchard::Bundle::try_from_parts(
+        bundle.actions().clone(),
+        flags,
+        *bundle.value_balance(),
+        *bundle.anchor(),
+        bundle.authorization().clone(),
+        orchard::bundle::ProofSizeEnforcement::Strict,
+    )
+    .unwrap()
+}
+
 #[cfg(all(test, zcash_unstable = "nu6.3"))]
 fn v6_tx_with_orchard_bundle(
     orchard_bundle: orchard::Bundle<orchard::bundle::Authorized, ZatBalance>,
@@ -422,7 +447,7 @@ fn v6_tx_with_orchard_bundle(
         1u32.into(),
         None,
         None,
-        Some(orchard_bundle),
+        Some(disable_cross_address(orchard_bundle)),
         None,
     )
     .freeze()
@@ -471,7 +496,7 @@ fn v6_tx_data_with_orchard_bundle(
         1u32.into(),
         None,
         None,
-        Some(orchard_bundle),
+        Some(disable_cross_address(orchard_bundle)),
         None,
     )
 }

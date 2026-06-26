@@ -186,7 +186,7 @@ zip32 = { version = "0.2", default-features = false }
 time-core = "=0.1.2"
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard", rev = "b2af0a11abe00f59c51258d349c2105fe7a16215" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "30c4ea2788375c542bfaa4704a3a772308729321" }
 
 [workspace.metadata.release]
 consolidate-commits = false

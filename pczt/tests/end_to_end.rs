@@ -589,7 +589,7 @@ fn orchard_to_orchard() {
     let value = orchard::value::NoteValue::from_raw(1_000_000);
     let note = {
         let mut orchard_builder = orchard::builder::Builder::new(
-            orchard::BundleProtocol::OrchardPreNu6_3,
+            orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
             orchard::builder::BundleType::DEFAULT,
             orchard::Anchor::empty_tree(),
         );

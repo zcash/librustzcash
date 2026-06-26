@@ -9,7 +9,7 @@ use core::cmp::Ordering;
 use ff::PrimeField;
 use getset::Getters;
 #[cfg(feature = "orchard")]
-use orchard::bundle::BundleFormat;
+use orchard::bundle::BundlePoolRestrictions;
 #[cfg(feature = "orchard")]
 pub(crate) use orchard::note::NoteVersion;
 
@@ -635,7 +635,6 @@ impl Bundle {
                     action.spend.value,
                     action.spend.rho,
                     action.spend.rseed,
-                    note_version,
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
@@ -650,6 +649,7 @@ impl Bundle {
                         })
                         .transpose()?,
                     action.spend.dummy_sk,
+                    note_version,
                     action.spend.proprietary,
                 )?;
 
@@ -662,7 +662,6 @@ impl Bundle {
                     action.output.recipient,
                     action.output.value,
                     action.output.rseed,
-                    note_version,
                     action.output.ock,
                     action
                         .output
@@ -675,6 +674,7 @@ impl Bundle {
                         })
                         .transpose()?,
                     action.output.user_address,
+                    note_version,
                     action.output.proprietary,
                 )?;
 
@@ -685,7 +685,7 @@ impl Bundle {
         orchard::pczt::Bundle::parse(
             actions,
             self.flags,
-            BundleFormat::PreNu6_3,
+            BundlePoolRestrictions::OrchardNu6_2Only,
             self.value_sum,
             self.anchor,
             self.zkproof,
@@ -798,7 +798,7 @@ impl Bundle {
             actions,
             flags: bundle
                 .flags()
-                .to_byte(BundleFormat::PreNu6_3)
+                .to_byte(BundlePoolRestrictions::OrchardNu6_2Only)
                 .expect("Orchard flags must be representable in the v5 transaction format"),
             value_sum,
             anchor: bundle.anchor().to_bytes(),

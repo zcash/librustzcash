@@ -1869,7 +1869,11 @@ where
                     .orchard_bundle()
                     .and_then(|bundle| {
                         bundle
-                            .decrypt_output_with_key(output_index, &orchard_internal_ivk)
+                            .decrypt_output_with_key(
+                                ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+                                output_index,
+                                &orchard_internal_ivk,
+                            )
                             .map(|(note, _, _)| Note::Orchard(note))
                     })
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
