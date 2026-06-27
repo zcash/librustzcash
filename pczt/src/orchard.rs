@@ -348,11 +348,7 @@ pub mod v1 {
             }
 
             Ok(Self {
-                actions: bundle
-                    .actions
-                    .into_iter()
-                    .map(Action::try_from)
-                    .collect::<Result<_, _>>()?,
+                actions: bundle.actions.into_iter().map(Action::from).collect(),
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
                 anchor: bundle.anchor,
@@ -380,16 +376,14 @@ pub mod v1 {
         }
     }
 
-    impl TryFrom<super::Action> for Action {
-        type Error = crate::EncodingError;
-
-        fn try_from(action: super::Action) -> Result<Self, Self::Error> {
-            Ok(Self {
+    impl From<super::Action> for Action {
+        fn from(action: super::Action) -> Self {
+            Self {
                 cv_net: action.cv_net,
-                spend: Spend::try_from(action.spend)?,
-                output: Output::try_from(action.output)?,
+                spend: Spend::from(action.spend),
+                output: Output::from(action.output),
                 rcv: action.rcv,
-            })
+            }
         }
     }
 
@@ -404,11 +398,9 @@ pub mod v1 {
         }
     }
 
-    impl TryFrom<super::Spend> for Spend {
-        type Error = crate::EncodingError;
-
-        fn try_from(spend: super::Spend) -> Result<Self, Self::Error> {
-            Ok(Self {
+    impl From<super::Spend> for Spend {
+        fn from(spend: super::Spend) -> Self {
+            Self {
                 nullifier: spend.nullifier,
                 rk: spend.rk,
                 spend_auth_sig: spend.spend_auth_sig,
@@ -422,7 +414,7 @@ pub mod v1 {
                 zip32_derivation: spend.zip32_derivation,
                 dummy_sk: spend.dummy_sk,
                 proprietary: spend.proprietary,
-            })
+            }
         }
     }
 
@@ -446,11 +438,9 @@ pub mod v1 {
         }
     }
 
-    impl TryFrom<super::Output> for Output {
-        type Error = crate::EncodingError;
-
-        fn try_from(output: super::Output) -> Result<Self, Self::Error> {
-            Ok(Self {
+    impl From<super::Output> for Output {
+        fn from(output: super::Output) -> Self {
+            Self {
                 cmx: output.cmx,
                 ephemeral_key: output.ephemeral_key,
                 enc_ciphertext: output.enc_ciphertext,
@@ -462,7 +452,7 @@ pub mod v1 {
                 zip32_derivation: output.zip32_derivation,
                 user_address: output.user_address,
                 proprietary: output.proprietary,
-            })
+            }
         }
     }
 
