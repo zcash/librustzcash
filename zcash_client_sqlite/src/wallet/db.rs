@@ -237,6 +237,10 @@ pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
 CREATE INDEX idx_addresses_accounts ON addresses (
     account_id ASC
 )"#;
+pub(super) const INDEX_ADDRESSES_CACHED_TRANSPARENT_RECEIVER_ADDRESS: &str = r#"
+CREATE UNIQUE INDEX idx_addresses_cached_transparent_receiver_address ON addresses (
+    cached_transparent_receiver_address ASC
+)"#;
 pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
 CREATE INDEX idx_addresses_indices ON addresses (
     diversifier_index_be ASC
