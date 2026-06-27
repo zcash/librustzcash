@@ -267,12 +267,11 @@ pub struct Output {
 }
 
 /// Types for the v1 Orchard PCZT encoding.
-pub(crate) mod v1 {
+pub mod v1 {
     use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    use getset::Getters;
     use serde::{Deserialize, Serialize};
     use serde_with::serde_as;
 
@@ -281,83 +280,63 @@ pub(crate) mod v1 {
     use super::NoteVersion;
 
     /// PCZT fields that are specific to producing the transaction's Orchard bundle.
-    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
-    pub(crate) struct Bundle {
-        #[getset(get = "pub")]
-        pub(crate) actions: Vec<Action>,
-        #[getset(get = "pub")]
-        pub(crate) flags: u8,
-        #[getset(get = "pub")]
-        pub(crate) value_sum: (u64, bool),
-        #[getset(get = "pub")]
-        pub(crate) anchor: [u8; 32],
-        pub(crate) zkproof: Option<Vec<u8>>,
-        pub(crate) bsk: Option<[u8; 32]>,
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct Bundle {
+        actions: Vec<Action>,
+        flags: u8,
+        value_sum: (u64, bool),
+        anchor: [u8; 32],
+        zkproof: Option<Vec<u8>>,
+        bsk: Option<[u8; 32]>,
     }
 
     /// Information about an Orchard action within a transaction.
-    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
-    pub(crate) struct Action {
-        #[getset(get = "pub")]
-        pub(crate) cv_net: [u8; 32],
-        #[getset(get = "pub")]
-        pub(crate) spend: Spend,
-        #[getset(get = "pub")]
-        pub(crate) output: Output,
-        pub(crate) rcv: Option<[u8; 32]>,
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct Action {
+        cv_net: [u8; 32],
+        spend: Spend,
+        output: Output,
+        rcv: Option<[u8; 32]>,
     }
 
     /// Information about the spend part of an Orchard action.
     #[serde_as]
-    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
-    pub(crate) struct Spend {
-        #[getset(get = "pub")]
-        pub(crate) nullifier: [u8; 32],
-        #[getset(get = "pub")]
-        pub(crate) rk: [u8; 32],
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct Spend {
+        nullifier: [u8; 32],
+        rk: [u8; 32],
         #[serde_as(as = "Option<[_; 64]>")]
-        #[getset(get = "pub")]
-        pub(crate) spend_auth_sig: Option<[u8; 64]>,
+        spend_auth_sig: Option<[u8; 64]>,
         #[serde_as(as = "Option<[_; 43]>")]
-        pub(crate) recipient: Option<[u8; 43]>,
-        pub(crate) value: Option<u64>,
-        pub(crate) rho: Option<[u8; 32]>,
-        pub(crate) rseed: Option<[u8; 32]>,
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rho: Option<[u8; 32]>,
+        rseed: Option<[u8; 32]>,
         #[serde_as(as = "Option<[_; 96]>")]
-        pub(crate) fvk: Option<[u8; 96]>,
-        pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
-        pub(crate) alpha: Option<[u8; 32]>,
-        pub(crate) zip32_derivation: Option<Zip32Derivation>,
-        pub(crate) dummy_sk: Option<[u8; 32]>,
-        #[getset(get = "pub")]
-        pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
+        fvk: Option<[u8; 96]>,
+        witness: Option<(u32, [[u8; 32]; 32])>,
+        alpha: Option<[u8; 32]>,
+        zip32_derivation: Option<Zip32Derivation>,
+        dummy_sk: Option<[u8; 32]>,
+        proprietary: BTreeMap<String, Vec<u8>>,
     }
 
     /// Information about the output part of an Orchard action.
     #[serde_as]
-    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
-    pub(crate) struct Output {
-        #[getset(get = "pub")]
-        pub(crate) cmx: [u8; 32],
-        #[getset(get = "pub")]
-        pub(crate) ephemeral_key: [u8; 32],
-        #[getset(get = "pub")]
-        pub(crate) enc_ciphertext: Vec<u8>,
-        #[getset(get = "pub")]
-        pub(crate) out_ciphertext: Vec<u8>,
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct Output {
+        cmx: [u8; 32],
+        ephemeral_key: [u8; 32],
+        enc_ciphertext: Vec<u8>,
+        out_ciphertext: Vec<u8>,
         #[serde_as(as = "Option<[_; 43]>")]
-        #[getset(get = "pub")]
-        pub(crate) recipient: Option<[u8; 43]>,
-        #[getset(get = "pub")]
-        pub(crate) value: Option<u64>,
-        #[getset(get = "pub")]
-        pub(crate) rseed: Option<[u8; 32]>,
-        pub(crate) ock: Option<[u8; 32]>,
-        pub(crate) zip32_derivation: Option<Zip32Derivation>,
-        #[getset(get = "pub")]
-        pub(crate) user_address: Option<String>,
-        #[getset(get = "pub")]
-        pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rseed: Option<[u8; 32]>,
+        ock: Option<[u8; 32]>,
+        zip32_derivation: Option<Zip32Derivation>,
+        user_address: Option<String>,
+        proprietary: BTreeMap<String, Vec<u8>>,
     }
 
     impl TryFrom<super::Bundle> for Bundle {
