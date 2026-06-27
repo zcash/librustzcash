@@ -34,6 +34,15 @@ workspace.
   detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
   `TransactionsInvolvingAddress` is still emitted for ephemeral-address discovery,
   and for spend detection when `spend-index` is disabled.
+- The database schema now includes a `UNIQUE` index on
+  `addresses.cached_transparent_receiver_address`, making account-by-transparent-address
+  lookups index-backed (previously a full table scan) and enforcing that each transparent
+  receiver belongs to at most one address record. If a pre-existing database already contains
+  duplicate cached transparent receiver addresses, the migration that adds the index resolves
+  them in place: within a single account it keeps a canonical record (preferring an HD-derived
+  record over an imported one), repoints the affected received outputs to it, and deletes the
+  redundant records. A receiver duplicated across more than one account cannot be safely merged
+  and causes the migration to abort.
 
 ## [0.21.1] - 2026-06-19
 
