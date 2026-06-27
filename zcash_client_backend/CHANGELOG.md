@@ -89,6 +89,11 @@ workspace.
   addition to `propose_shielding`.
 - `zcash_client_backend::wallet::WalletTx::new` now takes a `transparent_outputs`
   argument.
+- `zcash_client_backend::fees::StandardFeeRule` tracks the new
+  `ironwood_action_count: usize` argument added to
+  `zcash_primitives::transaction::fees::FeeRule::fee_required`. Code that calls
+  `fee_required` directly or implements the trait must thread through the number
+  of Ironwood actions, passing `0` for transactions without an Ironwood bundle.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`

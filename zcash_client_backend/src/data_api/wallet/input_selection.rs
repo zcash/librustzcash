@@ -890,6 +890,10 @@ where
     #[cfg(feature = "orchard")]
     let use_orchard = orchard_action_count > 0;
 
+    // The wallet does not yet construct Ironwood bundles, so they contribute no
+    // actions to the fee.
+    let ironwood_action_count: usize = 0;
+
     let recipient_address: Address = recipient
         .clone()
         .convert_if_network(params.network_type())?;
@@ -904,6 +908,7 @@ where
                 spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             )
             .map(|fee| (fee, None)),
         Address::Transparent(_) => fee_rule
@@ -915,6 +920,7 @@ where
                 spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             )
             .map(|fee| (fee, None)),
         Address::Unified(addr) => fee_rule
@@ -930,6 +936,7 @@ where
                 spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             )
             .map(|fee| (fee, None)),
         Address::Tex(_) => fee_rule
@@ -941,6 +948,7 @@ where
                 spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             )
             .and_then(|tr0_fee| {
                 let tr1_fee = fee_rule.fee_required(
@@ -948,6 +956,7 @@ where
                     BlockHeight::from(target_height),
                     [InputSize::Known(P2PKH_STANDARD_INPUT_SIZE)],
                     [P2PKH_STANDARD_OUTPUT_SIZE],
+                    0,
                     0,
                     0,
                     0,
@@ -1294,6 +1303,10 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             }
         };
 
+        // The wallet does not yet construct Ironwood bundles, so they contribute
+        // no actions to the fee.
+        let ironwood_action_count = 0;
+
         let fee = fee_rule
             .fee_required(
                 params,
@@ -1305,6 +1318,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 0,
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             )
             // The `InputSelectorError::Change` variant is the only existing
             // carrier capable of holding an arbitrary fee-rule error

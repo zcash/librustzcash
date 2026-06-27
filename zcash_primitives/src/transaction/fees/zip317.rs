@@ -41,8 +41,8 @@ pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
-/// This fee rule supports Orchard, Sapling, and (P2PKH only) transparent inputs.
-/// Returns an error if a coin containing a non-P2PKH script is provided as an input.
+/// This fee rule supports Ironwood, Orchard, Sapling, and (P2PKH only) transparent
+/// inputs. Returns an error if a coin containing a non-P2PKH script is provided as an input.
 ///
 /// This fee rule may slightly overestimate fees in case where the user is attempting
 /// to spend a large number of transparent inputs. This is intentional and is relied
@@ -163,6 +163,7 @@ impl super::FeeRule for FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        ironwood_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         let mut t_in_total_size: usize = 0;
         let mut unknown_p2sh_outpoints = vec![];
@@ -189,9 +190,48 @@ impl super::FeeRule for FeeRule {
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
             ceildiv(t_out_total_size, self.p2pkh_standard_output_size),
         ) + max(sapling_input_count, sapling_output_count)
-            + orchard_action_count;
+            + orchard_action_count
+            + ironwood_action_count;
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::iter;
+
+    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+    use super::{FeeRule, MARGINAL_FEE};
+    use crate::transaction::fees::{FeeRule as _, transparent::InputSize};
+
+    fn fee_for(orchard_action_count: usize, ironwood_action_count: usize) -> Zatoshis {
+        FeeRule::standard()
+            .fee_required(
+                &zcash_protocol::consensus::MAIN_NETWORK,
+                BlockHeight::from_u32(1_000_000),
+                iter::empty::<InputSize>(),
+                iter::empty::<usize>(),
+                0,
+                0,
+                orchard_action_count,
+                ironwood_action_count,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn ironwood_actions_charged_marginal_fee() {
+        // Five Ironwood actions exceed the grace allowance, so each is charged the
+        // marginal fee.
+        assert_eq!(fee_for(0, 5), (MARGINAL_FEE * 5usize).unwrap());
+    }
+
+    #[test]
+    fn ironwood_actions_combine_with_orchard() {
+        // Orchard and Ironwood actions are summed into the logical action count.
+        assert_eq!(fee_for(2, 3), (MARGINAL_FEE * 5usize).unwrap());
     }
 }

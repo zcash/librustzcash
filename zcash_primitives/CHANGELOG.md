@@ -42,6 +42,12 @@ workspace.
   `zcash_primitives::transaction::components::orchard::{read_v5_bundle,
   read_v6_bundle, read_flags}` now take a `BundleVersion` argument, while
   `write_v6_bundle` derives the version from the bundle.
+- `zcash_primitives::transaction::fees::FeeRule::fee_required` now takes an
+  additional `ironwood_action_count: usize` argument following
+  `orchard_action_count`. Implementors and callers must thread through the
+  number of Ironwood actions; pass `0` for transactions without an Ironwood
+  bundle. Under ZIP 317 each Ironwood action is charged one marginal fee, the
+  same as an Orchard action.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

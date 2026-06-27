@@ -330,6 +330,10 @@ where
         }
     };
 
+    // Ironwood bundles are not yet constructed by the wallet, so they contribute
+    // no actions to the fee.
+    let ironwood_action_count = 0;
+
     let transparent_input_sizes = transparent_inputs
         .iter()
         .map(|i| i.serialized_size())
@@ -377,6 +381,7 @@ where
             sapling_input_count,
             sapling_output_count(0)?,
             orchard_action_count(0)?,
+            ironwood_action_count,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
@@ -409,6 +414,7 @@ where
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
+                        ironwood_action_count,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
             );
@@ -448,6 +454,7 @@ where
                         } else {
                             0
                         })?,
+                        ironwood_action_count,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?
             } else {

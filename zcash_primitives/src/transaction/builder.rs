@@ -778,6 +778,9 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                         )
                     })
                     .map_err(FeeError::Bundle)?,
+                // The builder does not yet construct Ironwood bundles, so they
+                // contribute no actions to the fee.
+                0,
             )
             .map_err(FeeError::FeeRule)
     }
