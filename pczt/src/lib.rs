@@ -98,7 +98,7 @@ pub mod v1 {
         global: common::Global,
         transparent: transparent::Bundle,
         sapling: sapling::Bundle,
-        orchard: orchard::Bundle,
+        orchard: orchard::v1::Bundle,
     }
 
     impl Pczt {
@@ -119,7 +119,7 @@ pub mod v1 {
                 global: pczt.global,
                 transparent: pczt.transparent,
                 sapling: pczt.sapling,
-                orchard: pczt.orchard,
+                orchard: orchard::v1::Bundle::try_from(pczt.orchard)?,
             })
         }
     }
@@ -130,7 +130,7 @@ pub mod v1 {
                 global: pczt.global,
                 transparent: pczt.transparent,
                 sapling: pczt.sapling,
-                orchard: pczt.orchard,
+                orchard: pczt.orchard.into(),
             }
         }
     }
@@ -139,7 +139,10 @@ pub mod v1 {
 /// Errors that can occur while serializing a PCZT.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum EncodingError {}
+pub enum EncodingError {
+    /// The v1 PCZT encoding does not support this Orchard note plaintext version.
+    UnsupportedOrchardNoteVersion,
+}
 
 impl Pczt {
     /// Parses a PCZT from its encoding.
