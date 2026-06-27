@@ -455,6 +455,124 @@ where
     );
 }
 
+/// Verifies that `InputSource::get_spendable_transparent_outputs_for_addresses` returns the
+/// spendable outputs for a *set* of addresses in a single call, equivalent to the union of
+/// per-address queries, and honours subset and empty requests.
+pub fn get_spendable_transparent_outputs_for_addresses<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let height_1 = birthday + 12345;
+    st.wallet_mut().update_chain_tip(height_1).unwrap();
+
+    // Obtain three distinct transparent receivers for the account.
+    let mut taddrs = Vec::new();
+    while taddrs.len() < 3 {
+        let (ua, _) = st
+            .wallet_mut()
+            .get_next_available_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("an address should be available within the gap limit");
+        if let Some(taddr) = ua.transparent() {
+            taddrs.push(*taddr);
+        }
+    }
+
+    // Place one distinct UTXO at each address.
+    let value = Zatoshis::const_from_u64(100_000);
+    for (i, taddr) in taddrs.iter().enumerate() {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(value, taddr.script().into()),
+            Some(height_1),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height_1 + 1);
+    let sorted = |mut v: Vec<TransparentAddress>| {
+        v.sort();
+        v
+    };
+
+    // The batched query over all three addresses returns one output per address.
+    let all = st
+        .wallet()
+        .get_spendable_transparent_outputs_for_addresses(
+            &taddrs,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(
+        sorted(all.iter().map(|u| *u.recipient_address()).collect()),
+        sorted(taddrs.clone()),
+    );
+
+    // It is equivalent to the union of per-address queries.
+    let mut per_address = Vec::new();
+    for taddr in &taddrs {
+        per_address.extend(
+            st.wallet()
+                .get_spendable_transparent_outputs(
+                    taddr,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    TransparentOutputFilter::All,
+                )
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        sorted(all.iter().map(|u| *u.recipient_address()).collect()),
+        sorted(per_address.iter().map(|u| *u.recipient_address()).collect()),
+    );
+
+    // A subset request returns only the requested address's output.
+    let subset = st
+        .wallet()
+        .get_spendable_transparent_outputs_for_addresses(
+            &taddrs[..1],
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(subset.len(), 1);
+    assert_eq!(subset[0].recipient_address(), &taddrs[0]);
+
+    // An empty request returns no outputs.
+    assert!(
+        st.wallet()
+            .get_spendable_transparent_outputs_for_addresses(
+                &[],
+                target_height,
+                ConfirmationsPolicy::MIN,
+                TransparentOutputFilter::All,
+            )
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// This test attempts to verify that transparent funds spendability is
 /// accounted for properly given the different minimum confirmations values
 /// that can be set when querying for balances.

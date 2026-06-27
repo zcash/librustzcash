@@ -23,6 +23,12 @@ workspace.
     which records that a transparent outpoint was confirmed unspent as of a given
     height.
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
+  a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable
+  transparent outputs for a set of addresses. It has a default implementation that queries each
+  address individually, so existing implementors are unaffected; data stores may override it to
+  satisfy the request with a single query. Shielding now uses this method, avoiding a per-address
+  database round-trip when gathering inputs from wallets with many transparent addresses.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
