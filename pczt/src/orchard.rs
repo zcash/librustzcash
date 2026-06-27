@@ -9,17 +9,23 @@ use core::cmp::Ordering;
 use ff::PrimeField;
 use getset::Getters;
 #[cfg(feature = "orchard")]
-use orchard::{bundle::BundleFormat, note::NoteVersion};
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
+use orchard::bundle::BundleFormat;
+#[cfg(feature = "orchard")]
+pub(crate) use orchard::note::NoteVersion;
 
 use crate::{
     common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
+#[cfg(not(feature = "orchard"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoteVersion {
+    V2,
+}
+
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, Getters)]
 pub struct Bundle {
     /// The Orchard actions in this bundle.
     ///
@@ -54,6 +60,9 @@ pub struct Bundle {
     #[getset(get = "pub")]
     pub(crate) anchor: [u8; 32],
 
+    /// The note plaintext version for notes in this bundle.
+    pub(crate) note_version: NoteVersion,
+
     /// The Orchard bundle proof.
     ///
     /// This is `None` until it is set by the Prover.
@@ -67,7 +76,7 @@ pub struct Bundle {
 }
 
 /// Information about an Orchard action within a transaction.
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, Getters)]
 pub struct Action {
     //
     // Action effecting data.
@@ -95,8 +104,7 @@ pub struct Action {
 }
 
 /// Information about the spend part of an Orchard action.
-#[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, Getters)]
 pub struct Spend {
     //
     // Spend-specific Action effecting data.
@@ -112,7 +120,6 @@ pub struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
-    #[serde_as(as = "Option<[_; 64]>")]
     #[getset(get = "pub")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
@@ -122,7 +129,6 @@ pub struct Spend {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
-    #[serde_as(as = "Option<[_; 43]>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the input being spent.
@@ -151,7 +157,6 @@ pub struct Spend {
     ///
     /// - This is set by the Updater.
     /// - This is required by the Prover.
-    #[serde_as(as = "Option<[_; 96]>")]
     pub(crate) fvk: Option<[u8; 96]>,
 
     /// A witness from the note to the bundle's anchor.
@@ -185,8 +190,7 @@ pub struct Spend {
 }
 
 /// Information about the output part of an Orchard action.
-#[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, Getters)]
 pub struct Output {
     //
     // Output-specific Action effecting data.
@@ -218,7 +222,6 @@ pub struct Output {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
-    #[serde_as(as = "Option<[_; 43]>")]
     #[getset(get = "pub")]
     pub(crate) recipient: Option<[u8; 43]>,
 
@@ -263,6 +266,246 @@ pub struct Output {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
+/// Types for the v1 Orchard PCZT encoding.
+pub(crate) mod v1 {
+    use alloc::collections::BTreeMap;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use getset::Getters;
+    use serde::{Deserialize, Serialize};
+    use serde_with::serde_as;
+
+    use crate::common::Zip32Derivation;
+
+    use super::NoteVersion;
+
+    /// PCZT fields that are specific to producing the transaction's Orchard bundle.
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub(crate) struct Bundle {
+        #[getset(get = "pub")]
+        pub(crate) actions: Vec<Action>,
+        #[getset(get = "pub")]
+        pub(crate) flags: u8,
+        #[getset(get = "pub")]
+        pub(crate) value_sum: (u64, bool),
+        #[getset(get = "pub")]
+        pub(crate) anchor: [u8; 32],
+        pub(crate) zkproof: Option<Vec<u8>>,
+        pub(crate) bsk: Option<[u8; 32]>,
+    }
+
+    /// Information about an Orchard action within a transaction.
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub(crate) struct Action {
+        #[getset(get = "pub")]
+        pub(crate) cv_net: [u8; 32],
+        #[getset(get = "pub")]
+        pub(crate) spend: Spend,
+        #[getset(get = "pub")]
+        pub(crate) output: Output,
+        pub(crate) rcv: Option<[u8; 32]>,
+    }
+
+    /// Information about the spend part of an Orchard action.
+    #[serde_as]
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub(crate) struct Spend {
+        #[getset(get = "pub")]
+        pub(crate) nullifier: [u8; 32],
+        #[getset(get = "pub")]
+        pub(crate) rk: [u8; 32],
+        #[serde_as(as = "Option<[_; 64]>")]
+        #[getset(get = "pub")]
+        pub(crate) spend_auth_sig: Option<[u8; 64]>,
+        #[serde_as(as = "Option<[_; 43]>")]
+        pub(crate) recipient: Option<[u8; 43]>,
+        pub(crate) value: Option<u64>,
+        pub(crate) rho: Option<[u8; 32]>,
+        pub(crate) rseed: Option<[u8; 32]>,
+        #[serde_as(as = "Option<[_; 96]>")]
+        pub(crate) fvk: Option<[u8; 96]>,
+        pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
+        pub(crate) alpha: Option<[u8; 32]>,
+        pub(crate) zip32_derivation: Option<Zip32Derivation>,
+        pub(crate) dummy_sk: Option<[u8; 32]>,
+        #[getset(get = "pub")]
+        pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
+    }
+
+    /// Information about the output part of an Orchard action.
+    #[serde_as]
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub(crate) struct Output {
+        #[getset(get = "pub")]
+        pub(crate) cmx: [u8; 32],
+        #[getset(get = "pub")]
+        pub(crate) ephemeral_key: [u8; 32],
+        #[getset(get = "pub")]
+        pub(crate) enc_ciphertext: Vec<u8>,
+        #[getset(get = "pub")]
+        pub(crate) out_ciphertext: Vec<u8>,
+        #[serde_as(as = "Option<[_; 43]>")]
+        #[getset(get = "pub")]
+        pub(crate) recipient: Option<[u8; 43]>,
+        #[getset(get = "pub")]
+        pub(crate) value: Option<u64>,
+        #[getset(get = "pub")]
+        pub(crate) rseed: Option<[u8; 32]>,
+        pub(crate) ock: Option<[u8; 32]>,
+        pub(crate) zip32_derivation: Option<Zip32Derivation>,
+        #[getset(get = "pub")]
+        pub(crate) user_address: Option<String>,
+        #[getset(get = "pub")]
+        pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
+    }
+
+    impl TryFrom<super::Bundle> for Bundle {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            if bundle.note_version != NoteVersion::V2 {
+                return Err(crate::EncodingError::UnsupportedOrchardNoteVersion);
+            }
+
+            Ok(Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(Action::try_from)
+                    .collect::<Result<_, _>>()?,
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
+            })
+        }
+    }
+
+    impl From<Bundle> for super::Bundle {
+        fn from(bundle: Bundle) -> Self {
+            Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(super::Action::from)
+                    .collect(),
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                note_version: NoteVersion::V2,
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
+            }
+        }
+    }
+
+    impl TryFrom<super::Action> for Action {
+        type Error = crate::EncodingError;
+
+        fn try_from(action: super::Action) -> Result<Self, Self::Error> {
+            Ok(Self {
+                cv_net: action.cv_net,
+                spend: Spend::try_from(action.spend)?,
+                output: Output::try_from(action.output)?,
+                rcv: action.rcv,
+            })
+        }
+    }
+
+    impl From<Action> for super::Action {
+        fn from(action: Action) -> Self {
+            Self {
+                cv_net: action.cv_net,
+                spend: super::Spend::from(action.spend),
+                output: super::Output::from(action.output),
+                rcv: action.rcv,
+            }
+        }
+    }
+
+    impl TryFrom<super::Spend> for Spend {
+        type Error = crate::EncodingError;
+
+        fn try_from(spend: super::Spend) -> Result<Self, Self::Error> {
+            Ok(Self {
+                nullifier: spend.nullifier,
+                rk: spend.rk,
+                spend_auth_sig: spend.spend_auth_sig,
+                recipient: spend.recipient,
+                value: spend.value,
+                rho: spend.rho,
+                rseed: spend.rseed,
+                fvk: spend.fvk,
+                witness: spend.witness,
+                alpha: spend.alpha,
+                zip32_derivation: spend.zip32_derivation,
+                dummy_sk: spend.dummy_sk,
+                proprietary: spend.proprietary,
+            })
+        }
+    }
+
+    impl From<Spend> for super::Spend {
+        fn from(spend: Spend) -> Self {
+            Self {
+                nullifier: spend.nullifier,
+                rk: spend.rk,
+                spend_auth_sig: spend.spend_auth_sig,
+                recipient: spend.recipient,
+                value: spend.value,
+                rho: spend.rho,
+                rseed: spend.rseed,
+                fvk: spend.fvk,
+                witness: spend.witness,
+                alpha: spend.alpha,
+                zip32_derivation: spend.zip32_derivation,
+                dummy_sk: spend.dummy_sk,
+                proprietary: spend.proprietary,
+            }
+        }
+    }
+
+    impl TryFrom<super::Output> for Output {
+        type Error = crate::EncodingError;
+
+        fn try_from(output: super::Output) -> Result<Self, Self::Error> {
+            Ok(Self {
+                cmx: output.cmx,
+                ephemeral_key: output.ephemeral_key,
+                enc_ciphertext: output.enc_ciphertext,
+                out_ciphertext: output.out_ciphertext,
+                recipient: output.recipient,
+                value: output.value,
+                rseed: output.rseed,
+                ock: output.ock,
+                zip32_derivation: output.zip32_derivation,
+                user_address: output.user_address,
+                proprietary: output.proprietary,
+            })
+        }
+    }
+
+    impl From<Output> for super::Output {
+        fn from(output: Output) -> Self {
+            Self {
+                cmx: output.cmx,
+                ephemeral_key: output.ephemeral_key,
+                enc_ciphertext: output.enc_ciphertext,
+                out_ciphertext: output.out_ciphertext,
+                recipient: output.recipient,
+                value: output.value,
+                rseed: output.rseed,
+                ock: output.ock,
+                zip32_derivation: output.zip32_derivation,
+                user_address: output.user_address,
+                proprietary: output.proprietary,
+            }
+        }
+    }
+}
+
 impl Bundle {
     /// Merges this bundle with another.
     ///
@@ -279,11 +522,12 @@ impl Bundle {
             flags,
             value_sum,
             anchor,
+            note_version,
             zkproof,
             bsk,
         } = other;
 
-        if self.flags != flags {
+        if self.flags != flags || self.note_version != note_version {
             return None;
         }
 
@@ -409,6 +653,7 @@ impl Bundle {
 #[cfg(feature = "orchard")]
 impl Bundle {
     pub(crate) fn into_parsed(self) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        let note_version = self.note_version;
         let actions = self
             .actions
             .into_iter()
@@ -421,7 +666,7 @@ impl Bundle {
                     action.spend.value,
                     action.spend.rho,
                     action.spend.rseed,
-                    NoteVersion::V2,
+                    note_version,
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
@@ -448,7 +693,7 @@ impl Bundle {
                     action.output.recipient,
                     action.output.value,
                     action.output.rseed,
-                    NoteVersion::V2,
+                    note_version,
                     action.output.ock,
                     action
                         .output
@@ -480,6 +725,20 @@ impl Bundle {
     }
 
     pub(crate) fn serialize_from(bundle: orchard::pczt::Bundle) -> Self {
+        let note_version = bundle
+            .actions()
+            .first()
+            .map(|action| *action.spend().note_version())
+            .unwrap_or(NoteVersion::V2);
+
+        assert!(
+            bundle.actions().iter().all(|action| {
+                action.spend().note_version() == &note_version
+                    && action.output().note_version() == &note_version
+            }),
+            "Orchard PCZT bundle must have a single note version"
+        );
+
         let actions = bundle
             .actions()
             .iter()
@@ -574,6 +833,7 @@ impl Bundle {
                 .expect("Orchard flags must be representable in the v5 transaction format"),
             value_sum,
             anchor: bundle.anchor().to_bytes(),
+            note_version,
             zkproof: bundle
                 .zkproof()
                 .as_ref()

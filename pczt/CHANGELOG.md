@@ -13,6 +13,10 @@ workspace.
 ### Changed
 - PCZT version 1 is now treated as a serialization format for the logical
   `pczt::Pczt` type.
+- The Orchard PCZT logical model now tracks the Orchard bundle's note plaintext
+  version separately from the version 1 serialization format.
+- Direct `serde` serialization implementations have been removed from the
+  logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
   `Result<Vec<u8>, pczt::EncodingError>` rather than borrowing `self` and
   returning `Vec<u8>`.
@@ -20,6 +24,9 @@ workspace.
 ### Added
 - `pczt::parse`, a free function for parsing PCZT encodings.
 - `pczt::EncodingError`, for errors that can occur during PCZT encoding.
+- `pczt::EncodingError::UnsupportedOrchardNoteVersion`, returned when an
+  Orchard note plaintext version cannot be represented in the version 1 PCZT
+  encoding.
 - `pczt::v1`, a module providing the version 1 PCZT serialization format via
   `pczt::v1::Pczt`.
 
