@@ -1550,6 +1550,39 @@ pub trait InputSource {
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
         )
     }
+
+    /// Returns the list of spendable transparent outputs received by this wallet at any of the
+    /// given `addresses`, subject to the same spendability conditions as
+    /// [`InputSource::get_spendable_transparent_outputs`].
+    ///
+    /// This is the batched equivalent of calling
+    /// [`InputSource::get_spendable_transparent_outputs`] once per address. It exists so that data
+    /// stores can satisfy a multi-address request with a single query rather than one query per
+    /// address, which is prohibitively expensive for wallets that hold large numbers of transparent
+    /// addresses (as occurs when shielding). The default implementation simply iterates over
+    /// `addresses`; data stores should override it with a batched query where possible.
+    ///
+    /// Each returned output identifies its receiving address via
+    /// [`WalletTransparentOutput::recipient_address`].
+    #[cfg(feature = "transparent-inputs")]
+    fn get_spendable_transparent_outputs_for_addresses(
+        &self,
+        addresses: &[TransparentAddress],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        let mut outputs = Vec::new();
+        for address in addresses {
+            outputs.extend(self.get_spendable_transparent_outputs(
+                address,
+                target_height,
+                confirmations_policy,
+                output_filter,
+            )?);
+        }
+        Ok(outputs)
+    }
 }
 
 /// Read-only operations required for light wallet functions.
