@@ -99,6 +99,8 @@ fn transparent_to_orchard() {
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_anchor: None,
         },
     );
     builder
@@ -263,6 +265,8 @@ fn transparent_p2sh_multisig_to_orchard() {
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_anchor: None,
         },
     );
     builder
@@ -471,6 +475,8 @@ fn sapling_to_orchard() {
         BuildConfig::Standard {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_anchor: None,
         },
     );
     builder
@@ -633,6 +639,8 @@ fn orchard_to_orchard() {
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_anchor: None,
         },
     );
     builder

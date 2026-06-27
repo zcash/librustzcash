@@ -362,6 +362,8 @@ mod tests {
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: None,
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood_anchor: None,
             },
         );
         let mut transparent_signing_set = TransparentSigningSet::new();
