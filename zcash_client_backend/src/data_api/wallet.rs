@@ -1330,6 +1330,8 @@ where
         BuildConfig::Standard {
             sapling_anchor,
             orchard_anchor,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood_anchor: None,
         },
     );
 
