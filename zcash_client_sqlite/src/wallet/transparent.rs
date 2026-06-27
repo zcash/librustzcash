@@ -1256,7 +1256,13 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         TransparentOutputFilter::CoinbaseOnly => 1i32,
     };
 
-    let mut stmt_utxos = conn.prepare(&format!(
+    // This statement is re-run once per source address when shielding, so it is prepared via
+    // `prepare_cached` to avoid recompiling it on each call. The address is matched against
+    // `addresses.cached_transparent_receiver_address` (rather than the denormalized
+    // `transparent_received_outputs.address`) so that the lookup is served by an index on the
+    // `addresses` table and joined to the outputs via `idx_transparent_received_outputs_address`,
+    // instead of scanning the full `transparent_received_outputs` table.
+    let mut stmt_utxos = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
                 accounts.uuid AS account_uuid,
@@ -1267,7 +1273,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
-         WHERE u.address = :address
+         WHERE addresses.cached_transparent_receiver_address = :address
          AND u.value_zat > :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
