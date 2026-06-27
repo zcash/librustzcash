@@ -57,7 +57,7 @@ impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
     type Out = Infallible;
 
     fn bundle_pool_restrictions(&self) -> BundlePoolRestrictions {
-        BundlePoolRestrictions::OrchardNu6_2Only
+        crate::ANY_ORCHARD_POOL_RESTRICTIONS
     }
 
     fn inputs(&self) -> &[Self::In] {

@@ -710,7 +710,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
+                    crate::ANY_ORCHARD_POOL_RESTRICTIONS,
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
@@ -870,7 +870,7 @@ where
             0
         };
         orchard_fees::transactional_action_count(
-            ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
+            crate::ANY_ORCHARD_POOL_RESTRICTIONS,
             spendable_notes.orchard.len(),
             requested_orchard_actions,
         )
@@ -1267,7 +1267,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             PoolType::ORCHARD => {
                 let count = orchard_fees::transactional_action_count(
-                    ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
+                    crate::ANY_ORCHARD_POOL_RESTRICTIONS,
                     0,
                     1,
                 )

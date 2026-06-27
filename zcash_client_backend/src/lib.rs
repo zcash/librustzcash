@@ -82,6 +82,15 @@ pub mod tor;
 
 pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
 
+/// Orchard pool restriction for operations whose result is invariant to it:
+/// note decryption and fee/action-count estimation. Every Orchard pool
+/// restriction yields the same result for these, so this names the otherwise
+/// arbitrary value rather than scattering `BundlePoolRestrictions` literals that
+/// read as load-bearing.
+#[cfg(feature = "orchard")]
+pub(crate) const ANY_ORCHARD_POOL_RESTRICTIONS: ::orchard::bundle::BundlePoolRestrictions =
+    ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only;
+
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {
     pub use zcash_keys::address::*;

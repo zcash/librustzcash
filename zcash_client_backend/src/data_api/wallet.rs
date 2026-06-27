@@ -1870,7 +1870,7 @@ where
                     .and_then(|bundle| {
                         bundle
                             .decrypt_output_with_key(
-                                ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+                                crate::ANY_ORCHARD_POOL_RESTRICTIONS,
                                 output_index,
                                 &orchard_internal_ivk,
                             )
