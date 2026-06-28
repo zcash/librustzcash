@@ -30,9 +30,6 @@ use crate::{
     },
 };
 
-#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-use crate::orchard::Bundle as PcztOrchardBundle;
-
 pub use crate::EffectsOnly;
 use crate::sighash;
 
@@ -42,7 +39,9 @@ pub struct Signer {
     sapling: sapling::pczt::Bundle,
     orchard: orchard::pczt::Bundle,
     #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-    ironwood: PcztOrchardBundle,
+    ironwood: orchard::pczt::Bundle,
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    empty_ironwood: Option<crate::orchard::Bundle>,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
     txid_parts: TxDigests<Blake2bHash>,
@@ -53,6 +52,13 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        let empty_ironwood = pczt
+            .ironwood
+            .actions
+            .is_empty()
+            .then(|| pczt.ironwood.clone());
+
         let ParsedPczt {
             global,
             transparent,
@@ -68,6 +74,8 @@ impl Signer {
             },
             |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
@@ -79,6 +87,8 @@ impl Signer {
             orchard,
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            empty_ironwood,
             tx_data,
             txid_parts,
             shielded_sighash,
@@ -341,13 +351,29 @@ impl Signer {
 
     /// Finishes the Signer role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
-        Pczt {
-            global: self.global,
-            transparent: crate::transparent::Bundle::serialize_from(self.transparent),
-            sapling: crate::sapling::Bundle::serialize_from(self.sapling),
-            orchard: crate::orchard::Bundle::serialize_from(self.orchard),
+        let Self {
+            global,
+            transparent,
+            sapling,
+            orchard,
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-            ironwood: self.ironwood,
+            ironwood,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            empty_ironwood,
+            tx_data: _,
+            txid_parts: _,
+            shielded_sighash: _,
+            secp: _,
+        } = self;
+
+        Pczt {
+            global,
+            transparent: crate::transparent::Bundle::serialize_from(transparent),
+            sapling: crate::sapling::Bundle::serialize_from(sapling),
+            orchard: crate::orchard::Bundle::serialize_from(orchard),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood: empty_ironwood
+                .unwrap_or_else(|| crate::orchard::Bundle::serialize_from(ironwood)),
         }
     }
 }

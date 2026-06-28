@@ -409,12 +409,13 @@ impl<A: Authorization> TransactionData<A> {
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
-    #[cfg(zcash_unstable = "nu6.3")]
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_v6(
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Zatoshis,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, ZatBalance>>,
@@ -425,6 +426,8 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id,
             lock_time,
             expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,

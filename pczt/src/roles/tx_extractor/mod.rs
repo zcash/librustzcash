@@ -15,6 +15,8 @@ use crate::Pczt;
 
 mod orchard;
 pub use self::orchard::OrchardError;
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+pub type IronwoodError = OrchardError;
 
 mod sapling;
 pub use self::sapling::SaplingError;
@@ -89,6 +91,11 @@ impl<'a> TransactionExtractor<'a> {
                 o.extract()
                     .map_err(|e| Error::Orchard(OrchardError::Extract(e)))
             },
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            |i| {
+                i.extract()
+                    .map_err(|e| Error::Ironwood(IronwoodError::Extract(e)))
+            },
         )?;
 
         // The commitment being signed is shared across all shielded inputs.
@@ -114,7 +121,7 @@ impl<'a> TransactionExtractor<'a> {
             },
         )?;
 
-        let tx = tx_data.freeze().expect("v5 tx can't fail here");
+        let tx = tx_data.freeze().expect("txid construction can't fail here");
 
         // Now that we have a supposedly fully-authorized transaction, verify it.
         if let Some(bundle) = tx.sapling_bundle() {
@@ -126,6 +133,11 @@ impl<'a> TransactionExtractor<'a> {
         if let Some(bundle) = tx.orchard_bundle() {
             orchard::verify_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Orchard)?;
+        }
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        if let Some(bundle) = tx.ironwood_bundle() {
+            orchard::verify_ironwood_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
+                .map_err(Error::Ironwood)?;
         }
 
         Ok(tx)
@@ -149,6 +161,8 @@ pub enum Error {
     SaplingRequired,
     SighashMismatch,
     Transparent(TransparentError),
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    Ironwood(IronwoodError),
 }
 
 impl From<crate::ExtractError> for Error {

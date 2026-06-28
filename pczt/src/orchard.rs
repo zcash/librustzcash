@@ -751,7 +751,23 @@ impl Bundle {
 
 #[cfg(feature = "orchard")]
 impl Bundle {
-    pub(crate) fn into_parsed(self) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+    pub(crate) fn into_orchard_parsed(
+        self,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        self.into_parsed_with_version(BundleVersion::orchard_v2())
+    }
+
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    pub(crate) fn into_ironwood_parsed(
+        self,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        self.into_parsed_with_version(BundleVersion::ironwood_v3())
+    }
+
+    fn into_parsed_with_version(
+        self,
+        bundle_version: BundleVersion,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
         let note_version = self.note_version;
         let actions = self
             .actions
@@ -815,8 +831,7 @@ impl Bundle {
         orchard::pczt::Bundle::parse(
             actions,
             self.flags,
-            // PCZT v1 only carries pre-NU6.3 Orchard bundles (V2 note plaintexts, bit 2 reserved).
-            BundleVersion::orchard_v2(),
+            bundle_version,
             self.value_sum,
             self.anchor,
             self.zkproof,
@@ -825,11 +840,7 @@ impl Bundle {
     }
 
     pub(crate) fn serialize_from(bundle: orchard::pczt::Bundle) -> Self {
-        let note_version = bundle
-            .actions()
-            .first()
-            .map(|action| *action.spend().note_version())
-            .unwrap_or(NoteVersion::V2);
+        let note_version = bundle.bundle_version().note_version();
 
         assert!(
             bundle.actions().iter().all(|action| {
