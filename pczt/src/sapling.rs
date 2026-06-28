@@ -17,7 +17,7 @@ use crate::{
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// PCZT fields that are specific to producing the transaction's Sapling bundle (if any).
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
     pub(crate) spends: Vec<Spend>,
@@ -47,7 +47,7 @@ pub struct Bundle {
 
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Spend {
     //
     // SpendDescription effecting data.
@@ -160,7 +160,7 @@ pub struct Spend {
 
 /// Information about a Sapling output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Output {
     //
     // OutputDescription effecting data.

@@ -19,7 +19,6 @@ use crate::{
 };
 
 #[cfg(not(feature = "orchard"))]
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NoteVersion {
     V2,
@@ -27,7 +26,7 @@ pub(crate) enum NoteVersion {
 }
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Bundle {
     /// The Orchard actions in this bundle.
     ///
@@ -77,8 +76,13 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
+/// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
+/// 1). This is the value the Creator sets on a new bundle, and the flag value of
+/// an empty bundle for serialization purposes.
+pub(crate) const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
+
 /// Information about an Orchard action within a transaction.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Action {
     //
     // Action effecting data.
@@ -106,7 +110,7 @@ pub struct Action {
 }
 
 /// Information about the spend part of an Orchard action.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Spend {
     //
     // Spend-specific Action effecting data.
@@ -192,7 +196,7 @@ pub struct Spend {
 }
 
 /// Information about the output part of an Orchard action.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Output {
     //
     // Output-specific Action effecting data.
@@ -562,6 +566,45 @@ pub(crate) mod v2 {
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
             }
+        }
+    }
+
+    /// The canonical empty Orchard bundle reconstructed for omitted v2 bundles.
+    pub(crate) const EMPTY_BUNDLE: super::Bundle = super::Bundle {
+        actions: Vec::new(),
+        flags: super::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+        value_sum: (0, true),
+        anchor: [0; 32],
+        note_version: NoteVersion::V2,
+        zkproof: None,
+        bsk: None,
+    };
+
+    /// Whether `bundle` can be omitted from the v2 encoding.
+    ///
+    /// We check that actions, value sum, anchor, zkproof, and bsk are all
+    /// equal to the empty bundle. We do not check note version or flags, as
+    /// values can be defaulted there.
+    fn is_empty(bundle: &super::Bundle) -> bool {
+        bundle.actions == EMPTY_BUNDLE.actions
+            && bundle.value_sum == EMPTY_BUNDLE.value_sum
+            && bundle.anchor == EMPTY_BUNDLE.anchor
+            && bundle.zkproof == EMPTY_BUNDLE.zkproof
+            && bundle.bsk == EMPTY_BUNDLE.bsk
+    }
+
+    /// Encodes a logical Orchard bundle for the v2 PCZT format, owning the
+    /// decision of whether the bundle can be omitted. An [empty](is_empty) bundle
+    /// serializes to `None` and is dropped from the encoding; any other bundle is
+    /// converted via the [`Bundle`]-producing [`TryFrom`] impl. The reverse
+    /// direction is [`From<Bundle>`] plus [`EMPTY_BUNDLE`] for the omitted case.
+    impl TryFrom<super::Bundle> for Option<Bundle> {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            (!is_empty(&bundle))
+                .then(|| Bundle::try_from(bundle))
+                .transpose()
         }
     }
 }

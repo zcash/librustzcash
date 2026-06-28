@@ -111,7 +111,7 @@ pub mod v1 {
         }
     }
 
-    /// An encoder from the in-memory Pczt type to the type
+    /// Encodes the in-memory [`super::Pczt`] into the v1 serialization type [`Pczt`].
     impl TryFrom<super::Pczt> for Pczt {
         type Error = super::EncodingError;
 
@@ -144,41 +144,33 @@ pub mod v2 {
 
     use crate::{common, orchard, sapling, transparent};
 
-    fn empty_transparent() -> transparent::Bundle {
-        transparent::Bundle {
-            inputs: vec![],
-            outputs: vec![],
-        }
-    }
+    const EMPTY_TRANSPARENT: transparent::Bundle = transparent::Bundle {
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+    };
 
-    fn empty_sapling() -> sapling::Bundle {
-        sapling::Bundle {
-            spends: vec![],
-            outputs: vec![],
-            value_sum: 0,
-            anchor: [0; 32],
-            bsk: None,
-        }
-    }
-
-    fn empty_orchard() -> orchard::Bundle {
-        orchard::Bundle {
-            actions: vec![],
-            flags: 0,
-            value_sum: (0, true),
-            anchor: [0; 32],
-            note_version: orchard::NoteVersion::V2,
-            zkproof: None,
-            bsk: None,
-        }
-    }
+    const EMPTY_SAPLING: sapling::Bundle = sapling::Bundle {
+        spends: Vec::new(),
+        outputs: Vec::new(),
+        value_sum: 0,
+        anchor: [0; 32],
+        bsk: None,
+    };
 
     /// The in-memory type used for derived serialization of the v2 Pczt encoding.
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct Pczt {
         global: common::Global,
+        // This value is set to `None` if the transparent bundle is empty,
+        // meaning inputs and outputs are empty.
         transparent: Option<transparent::Bundle>,
+        // This value is set to `None` if the Sapling bundle is empty,
+        // meaning every field has its empty/default value.
         sapling: Option<sapling::Bundle>,
+        // This value is set to `None` if the Orchard bundle is empty,
+        // meaning actions, value sum, anchor, zkproof, and bsk are all
+        // empty. Flags and note version are not checked, as values can be
+        // defaulted there.
         orchard: Option<orchard::v2::Bundle>,
     }
 
@@ -191,21 +183,17 @@ pub mod v2 {
         }
     }
 
-    /// An encoder from the in-memory Pczt type to the type
+    /// Encodes the in-memory [`super::Pczt`] into the v2 serialization type [`Pczt`],
+    /// omitting empty Transparent, Sapling, and Orchard bundles.
     impl TryFrom<super::Pczt> for Pczt {
         type Error = super::EncodingError;
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
             Ok(Self {
                 global: pczt.global,
-                transparent: (!pczt.transparent.inputs.is_empty()
-                    || !pczt.transparent.outputs.is_empty())
-                .then_some(pczt.transparent),
-                sapling: (!pczt.sapling.spends.is_empty() || !pczt.sapling.outputs.is_empty())
-                    .then_some(pczt.sapling),
-                orchard: (!pczt.orchard.actions.is_empty())
-                    .then(|| orchard::v2::Bundle::try_from(pczt.orchard))
-                    .transpose()?,
+                transparent: (pczt.transparent != EMPTY_TRANSPARENT).then_some(pczt.transparent),
+                sapling: (pczt.sapling != EMPTY_SAPLING).then_some(pczt.sapling),
+                orchard: pczt.orchard.try_into()?,
             })
         }
     }
@@ -214,12 +202,12 @@ pub mod v2 {
         fn from(pczt: Pczt) -> Self {
             Self {
                 global: pczt.global,
-                transparent: pczt.transparent.unwrap_or_else(empty_transparent),
-                sapling: pczt.sapling.unwrap_or_else(empty_sapling),
+                transparent: pczt.transparent.unwrap_or(EMPTY_TRANSPARENT),
+                sapling: pczt.sapling.unwrap_or(EMPTY_SAPLING),
                 orchard: pczt
                     .orchard
                     .map(orchard::Bundle::from)
-                    .unwrap_or_else(empty_orchard),
+                    .unwrap_or(orchard::v2::EMPTY_BUNDLE),
             }
         }
     }
@@ -233,8 +221,10 @@ pub mod v2 {
 
         #[test]
         fn empty_bundles_encode_as_none_and_decode_as_empty() {
+            // Zero anchors: the shielded bundles carry no anchor and no
+            // spends/actions, so they are fully empty and omitted.
             let pczt =
-                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32]).build();
+                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -250,6 +240,38 @@ pub mod v2 {
             assert!(decoded.sapling.outputs.is_empty());
             assert!(decoded.orchard.actions.is_empty());
             assert_eq!(decoded.orchard.note_version, NoteVersion::V2);
+        }
+
+        #[test]
+        fn anchored_bundles_are_preserved() {
+            // A Sapling/Orchard bundle with a non-empty anchor differs from its
+            // empty form, so it must not be omitted even with no spends/actions,
+            // and the anchor must survive the v2 round-trip.
+            let pczt =
+                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32]).build();
+
+            let encoded = Pczt::try_from(pczt).unwrap();
+
+            assert!(encoded.transparent.is_none());
+            assert!(encoded.sapling.is_some());
+            assert!(encoded.orchard.is_some());
+
+            let decoded = crate::parse(&encoded.serialize()).unwrap();
+
+            assert_eq!(decoded.sapling.anchor, [1; 32]);
+            assert_eq!(decoded.orchard.anchor, [2; 32]);
+        }
+
+        #[test]
+        fn orchard_flags_and_note_version_do_not_prevent_omission() {
+            let mut pczt =
+                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
+            pczt.orchard.flags = 0;
+            pczt.orchard.note_version = NoteVersion::V3;
+
+            let encoded = Pczt::try_from(pczt).unwrap();
+
+            assert!(encoded.orchard.is_none());
         }
     }
 }
@@ -286,10 +308,9 @@ impl Pczt {
 
     /// Serializes this PCZT as the latest PCZT version.
     ///
-    /// If you want a specific PCZT version, e.g. v1, use `v1::Pczt::serialize`
-    ///
+    /// To serialize a specific PCZT version, e.g. v1, use [`v1::Pczt::serialize`].
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
-        Ok(v2::Pczt::try_from(self.clone())?.serialize())
+        Ok(v2::Pczt::try_from(self)?.serialize())
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
