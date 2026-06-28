@@ -84,6 +84,9 @@ pub struct Pczt {
     pub(crate) sapling: sapling::Bundle,
     #[getset(get = "pub")]
     pub(crate) orchard: orchard::Bundle,
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    #[getset(get = "pub")]
+    pub(crate) ironwood: orchard::Bundle,
 }
 
 /// Types and operations for the v1 Pczt encoding.
@@ -116,6 +119,11 @@ pub mod v1 {
         type Error = super::EncodingError;
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            if !pczt.ironwood.actions.is_empty() {
+                return Err(super::EncodingError::UnsupportedTxVersion);
+            }
+
             Ok(Self {
                 global: pczt.global,
                 transparent: pczt.transparent,
@@ -132,6 +140,16 @@ pub mod v1 {
                 transparent: pczt.transparent,
                 sapling: pczt.sapling,
                 orchard: pczt.orchard.into(),
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood: orchard::Bundle {
+                    actions: vec![],
+                    flags: 0,
+                    value_sum: (0, true),
+                    anchor: [0; 32],
+                    note_version: orchard::NoteVersion::V3,
+                    zkproof: None,
+                    bsk: None,
+                },
             }
         }
     }
@@ -172,6 +190,8 @@ pub mod v2 {
         // empty. Flags and note version are not checked, as values can be
         // defaulted there.
         orchard: Option<orchard::v2::Bundle>,
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        ironwood: Option<orchard::v2::Bundle>,
     }
 
     impl Pczt {
@@ -194,6 +214,8 @@ pub mod v2 {
                 transparent: (pczt.transparent != EMPTY_TRANSPARENT).then_some(pczt.transparent),
                 sapling: (pczt.sapling != EMPTY_SAPLING).then_some(pczt.sapling),
                 orchard: pczt.orchard.try_into()?,
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood: pczt.ironwood.try_into()?,
             })
         }
     }
@@ -208,6 +230,18 @@ pub mod v2 {
                     .orchard
                     .map(orchard::Bundle::from)
                     .unwrap_or(orchard::v2::EMPTY_BUNDLE),
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood: pczt.ironwood.map(orchard::Bundle::from).unwrap_or_else(|| {
+                    orchard::Bundle {
+                        actions: Vec::new(),
+                        flags: orchard::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                        value_sum: (0, true),
+                        anchor: [0; 32],
+                        note_version: orchard::NoteVersion::V3,
+                        zkproof: None,
+                        bsk: None,
+                    }
+                }),
             }
         }
     }
@@ -231,6 +265,8 @@ pub mod v2 {
             assert!(encoded.transparent.is_none());
             assert!(encoded.sapling.is_none());
             assert!(encoded.orchard.is_none());
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            assert!(encoded.ironwood.is_none());
 
             let decoded = crate::parse(&encoded.serialize()).unwrap();
 
@@ -240,6 +276,11 @@ pub mod v2 {
             assert!(decoded.sapling.outputs.is_empty());
             assert!(decoded.orchard.actions.is_empty());
             assert_eq!(decoded.orchard.note_version, NoteVersion::V2);
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            {
+                assert!(decoded.ironwood.actions.is_empty());
+                assert_eq!(decoded.ironwood.note_version, NoteVersion::V3);
+            }
         }
 
         #[test]
@@ -280,6 +321,9 @@ pub mod v2 {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum EncodingError {
+    /// The requested transaction version cannot be represented in this PCZT
+    /// encoding.
+    UnsupportedTxVersion,
     /// The v1 PCZT encoding does not support this Orchard note plaintext version.
     UnsupportedOrchardNoteVersion,
 }
@@ -350,6 +394,8 @@ impl Pczt {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         } = self;
 
         let transparent = transparent
@@ -394,6 +440,8 @@ impl Pczt {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
             tx_data,
         })
     }
@@ -424,6 +472,8 @@ pub(crate) struct ParsedPczt<A: Authorization> {
     pub(crate) transparent: ::transparent::pczt::Bundle,
     pub(crate) sapling: ::sapling::pczt::Bundle,
     pub(crate) orchard: ::orchard::pczt::Bundle,
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    pub(crate) ironwood: orchard::Bundle,
     pub(crate) tx_data: TransactionData<A>,
 }
 
