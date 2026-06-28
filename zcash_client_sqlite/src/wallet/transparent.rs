@@ -2553,6 +2553,14 @@ mod tests {
     }
 
     #[test]
+    fn shielding_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::shielding_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),

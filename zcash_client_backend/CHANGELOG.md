@@ -29,6 +29,13 @@ workspace.
   address individually, so existing implementors are unaffected; data stores may override it to
   satisfy the request with a single query. Shielding now uses this method, avoiding a per-address
   database round-trip when gathering inputs from wallets with many transparent addresses.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_shielding_block_space_percent`,
+  which configures the maximum fraction of a block's space (as an integer percentage, default 10)
+  that a single shielding transaction's transparent inputs may occupy. When shielding gathers more
+  spendable transparent outputs than fit within this bound, the highest-value outputs are selected
+  first and the remainder are left unspent, to be consolidated by a subsequent shielding
+  transaction. This bounds the size of the shielding transaction for wallets that hold very large
+  numbers of transparent UTXOs.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
