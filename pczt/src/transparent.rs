@@ -19,7 +19,7 @@ use zcash_script::script::Evaluable;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Bundle {
     #[getset(get = "pub")]
     pub(crate) inputs: Vec<Input>,
@@ -29,7 +29,7 @@ pub struct Bundle {
 
 /// Information about a transparent input within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Input {
     //
     // Transparent effecting data.
@@ -140,7 +140,7 @@ pub struct Input {
 
 /// Information about a transparent output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
 pub struct Output {
     //
     // Transparent effecting data.

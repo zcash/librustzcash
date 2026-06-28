@@ -43,6 +43,10 @@ workspace.
   `pczt::v1::Pczt`.
 - PCZT version 2 serialization, which encodes the Orchard note plaintext
   version at the Orchard bundle level.
+- `PartialEq` is now derived for the logical `pczt::transparent::{Bundle, Input,
+  Output}`, `pczt::sapling::{Bundle, Spend, Output}`, and
+  `pczt::orchard::{Bundle, Action, Spend, Output}` types (used to detect empty
+  bundles for v2 serialization).
 
 ## [0.7.0] - 2026-06-02
 

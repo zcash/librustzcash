@@ -10,6 +10,7 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
+    orchard::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
 };
 
 use zcash_protocol::consensus::BranchId;
@@ -19,8 +20,6 @@ use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
     | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
     | FLAG_SHIELDED_MODIFIABLE;
-
-const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
 /// Errors that can occur when creating a PCZT.
 #[derive(Debug)]
@@ -67,7 +66,6 @@ fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::Bu
         _ => BundleVersion::orchard_insecure_v1(),
     }
 }
-
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
