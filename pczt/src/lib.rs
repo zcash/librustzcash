@@ -56,6 +56,7 @@ pub mod transparent;
 
 pub(crate) const MAGIC_BYTES: &[u8] = b"PCZT";
 pub(crate) const PCZT_VERSION_1: u32 = 1;
+pub(crate) const PCZT_VERSION_2: u32 = 2;
 
 /// Parses a PCZT from its encoding.
 pub fn parse(bytes: &[u8]) -> Result<Pczt, ParseError> {
@@ -136,6 +137,123 @@ pub mod v1 {
     }
 }
 
+/// Types and operations for the v2 Pczt encoding.
+pub mod v2 {
+    use alloc::vec::Vec;
+    use serde::{Deserialize, Serialize};
+
+    use crate::{common, orchard, sapling, transparent};
+
+    fn empty_transparent() -> transparent::Bundle {
+        transparent::Bundle {
+            inputs: vec![],
+            outputs: vec![],
+        }
+    }
+
+    fn empty_sapling() -> sapling::Bundle {
+        sapling::Bundle {
+            spends: vec![],
+            outputs: vec![],
+            value_sum: 0,
+            anchor: [0; 32],
+            bsk: None,
+        }
+    }
+
+    fn empty_orchard() -> orchard::Bundle {
+        orchard::Bundle {
+            actions: vec![],
+            flags: 0,
+            value_sum: (0, true),
+            anchor: [0; 32],
+            note_version: orchard::NoteVersion::V2,
+            zkproof: None,
+            bsk: None,
+        }
+    }
+
+    /// The in-memory type used for derived serialization of the v2 Pczt encoding.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct Pczt {
+        global: common::Global,
+        transparent: Option<transparent::Bundle>,
+        sapling: Option<sapling::Bundle>,
+        orchard: Option<orchard::v2::Bundle>,
+    }
+
+    impl Pczt {
+        pub fn serialize(&self) -> Vec<u8> {
+            let mut bytes = vec![];
+            bytes.extend_from_slice(crate::MAGIC_BYTES);
+            bytes.extend_from_slice(&crate::PCZT_VERSION_2.to_le_bytes());
+            postcard::to_extend(&self, bytes).expect("can serialize into memory")
+        }
+    }
+
+    /// An encoder from the in-memory Pczt type to the type
+    impl TryFrom<super::Pczt> for Pczt {
+        type Error = super::EncodingError;
+
+        fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
+            Ok(Self {
+                global: pczt.global,
+                transparent: (!pczt.transparent.inputs.is_empty()
+                    || !pczt.transparent.outputs.is_empty())
+                .then_some(pczt.transparent),
+                sapling: (!pczt.sapling.spends.is_empty() || !pczt.sapling.outputs.is_empty())
+                    .then_some(pczt.sapling),
+                orchard: (!pczt.orchard.actions.is_empty())
+                    .then(|| orchard::v2::Bundle::try_from(pczt.orchard))
+                    .transpose()?,
+            })
+        }
+    }
+
+    impl From<Pczt> for super::Pczt {
+        fn from(pczt: Pczt) -> Self {
+            Self {
+                global: pczt.global,
+                transparent: pczt.transparent.unwrap_or_else(empty_transparent),
+                sapling: pczt.sapling.unwrap_or_else(empty_sapling),
+                orchard: pczt
+                    .orchard
+                    .map(orchard::Bundle::from)
+                    .unwrap_or_else(empty_orchard),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use zcash_protocol::consensus::BranchId;
+
+        use super::Pczt;
+        use crate::{orchard::NoteVersion, roles::creator::Creator};
+
+        #[test]
+        fn empty_bundles_encode_as_none_and_decode_as_empty() {
+            let pczt =
+                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32]).build();
+
+            let encoded = Pczt::try_from(pczt).unwrap();
+
+            assert!(encoded.transparent.is_none());
+            assert!(encoded.sapling.is_none());
+            assert!(encoded.orchard.is_none());
+
+            let decoded = crate::parse(&encoded.serialize()).unwrap();
+
+            assert!(decoded.transparent.inputs.is_empty());
+            assert!(decoded.transparent.outputs.is_empty());
+            assert!(decoded.sapling.spends.is_empty());
+            assert!(decoded.sapling.outputs.is_empty());
+            assert!(decoded.orchard.actions.is_empty());
+            assert_eq!(decoded.orchard.note_version, NoteVersion::V2);
+        }
+    }
+}
+
 /// Errors that can occur while serializing a PCZT.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -159,13 +277,19 @@ impl Pczt {
             PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(&bytes[8..])
                 .map(Pczt::from)
                 .map_err(ParseError::Invalid),
+            PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(&bytes[8..])
+                .map(Pczt::from)
+                .map_err(ParseError::Invalid),
             _ => Err(ParseError::UnknownVersion(version)),
         }
     }
 
-    /// Serializes this PCZT.
+    /// Serializes this PCZT as the latest PCZT version.
+    ///
+    /// If you want a specific PCZT version, e.g. v1, use `v1::Pczt::serialize`
+    ///
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
-        Ok(v1::Pczt::try_from(self.clone())?.serialize())
+        Ok(v2::Pczt::try_from(self.clone())?.serialize())
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
