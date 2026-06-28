@@ -414,12 +414,25 @@ impl orchard_fees::OutputView for OrchardPayment {
     }
 }
 
+/// The Zcash consensus maximum block size, in bytes.
+#[cfg(feature = "transparent-inputs")]
+const MAX_BLOCK_BYTES: usize = 2_000_000;
+
+/// The default maximum fraction of a block's space, as an integer percentage, that a single
+/// shielding transaction's transparent inputs may occupy.
+#[cfg(feature = "transparent-inputs")]
+const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
+
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
 /// This implementation performs input selection using methods available via the
 /// [`InputSource`] interface.
 pub struct GreedyInputSelector<DbT> {
+    /// The maximum fraction of a block's space, as an integer percentage (0–100), that a single
+    /// shielding transaction's transparent inputs may occupy.
+    #[cfg(feature = "transparent-inputs")]
+    shielding_block_space_percent: u32,
     _ds_type: PhantomData<DbT>,
 }
 
@@ -435,9 +448,32 @@ impl<DbT> GreedyInputSelector<DbT> {
     /// [`EphemeralBalance::Output`]: crate::fees::EphemeralBalance::Output
     pub fn new() -> Self {
         GreedyInputSelector {
+            #[cfg(feature = "transparent-inputs")]
+            shielding_block_space_percent: DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT,
             _ds_type: PhantomData,
         }
     }
+
+    /// Sets the maximum fraction of a block's space, as an integer percentage (0–100), that a
+    /// single shielding transaction's transparent inputs may occupy.
+    ///
+    /// When shielding gathers more spendable transparent outputs than will fit within this bound,
+    /// the highest-value outputs are selected first and the remainder are left unspent, to be
+    /// consolidated by a subsequent shielding transaction. Values above 100 are clamped to 100.
+    /// Defaults to 10.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_shielding_block_space_percent(mut self, percent: u32) -> Self {
+        self.shielding_block_space_percent = percent.min(100);
+        self
+    }
+}
+
+/// Returns the maximum number of transparent inputs that a single shielding transaction may
+/// select, given the configured fraction of a block's space (as an integer percentage) that its
+/// inputs may occupy.
+#[cfg(feature = "transparent-inputs")]
+fn shielding_max_inputs(block_space_percent: u32) -> usize {
+    (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
 }
 
 impl<DbT> Default for GreedyInputSelector<DbT> {
@@ -1157,6 +1193,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             target_height,
             confirmations_policy,
             output_filter,
+            shielding_max_inputs(self.shielding_block_space_percent),
         )?;
 
         let wallet_meta = change_strategy
@@ -1216,7 +1253,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         // rather than a more general "shield to address" path; only coinbase
         // outputs are eligible because they have no prior transparent transaction
         // graph that could be exposed to the shielded recipient.
-        let mut transparent_inputs = gather_shielding_inputs::<DbT, FeeRuleT::Error>(
+        // The block-space cap and the caller-supplied `limit` (when present) both bound the number
+        // of transparent inputs; `gather_shielding_inputs` applies the more restrictive of the two,
+        // keeping the highest-value UTXOs first. When `limit` is `Some(0)` this empties the set, and
+        // the subsequent `InsufficientFunds` check fires; this is the documented behavior.
+        let transparent_inputs = gather_shielding_inputs::<DbT, FeeRuleT::Error>(
             wallet_db,
             source_addrs,
             target_height,
@@ -1224,20 +1265,10 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             // as coinbase txs require 100, which will be enforced by note selection.
             ConfirmationsPolicy::MIN,
             TransparentOutputFilter::CoinbaseOnly,
+            limit
+                .unwrap_or(usize::MAX)
+                .min(shielding_max_inputs(self.shielding_block_space_percent)),
         )?;
-
-        // Apply the optional cap on selected UTXOs, keeping the highest-value
-        // UTXOs first (stable tiebreaker by outpoint for determinism). When
-        // `limit` is `Some(0)` this empties the set, and the subsequent
-        // `InsufficientFunds` check fires; this is the documented behavior.
-        if let Some(n) = limit {
-            transparent_inputs.sort_by(|a, b| {
-                b.value()
-                    .cmp(&a.value())
-                    .then_with(|| a.outpoint().cmp(b.outpoint()))
-            });
-            transparent_inputs.truncate(n);
-        }
 
         let destination_pool =
             resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(&to_address, params)?;
@@ -1362,6 +1393,7 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: TransparentOutputFilter,
+    max_inputs: usize,
 ) -> Result<
     Vec<WalletTransparentOutput<()>>,
     InputSelectorError<
@@ -1380,7 +1412,7 @@ where
     // one query per address (including for the many addresses that have no spendable outputs),
     // which is prohibitively expensive for wallets that hold large numbers of transparent
     // addresses.
-    let utxos = wallet_db
+    let mut utxos = wallet_db
         .get_spendable_transparent_outputs_for_addresses(
             source_addrs,
             target_height,
@@ -1388,6 +1420,19 @@ where
             output_filter,
         )
         .map_err(InputSelectorError::DataSource)?;
+
+    // Cap the number of transparent inputs that a single shielding transaction may consume,
+    // keeping the highest-value UTXOs first (stable tiebreaker by outpoint for determinism). UTXOs
+    // beyond the cap are left unspent, to be consolidated by a subsequent shielding transaction.
+    // When `max_inputs` is 0 this empties the set, and the caller's `InsufficientFunds` check
+    // fires. The cap is applied before the linkability check below so that the check reflects the
+    // outputs that will actually be spent.
+    utxos.sort_by(|a, b| {
+        b.value()
+            .cmp(&a.value())
+            .then_with(|| a.outpoint().cmp(b.outpoint()))
+    });
+    utxos.truncate(max_inputs);
 
     // We use `recipient_key_scope()` and `recipient_address()` from the returned outputs to
     // determine the set of input addresses and which of them are ephemeral, rather than querying
@@ -1546,4 +1591,19 @@ where
         None,
         wallet_meta,
     )
+}
+
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod tests {
+    use super::shielding_max_inputs;
+
+    #[test]
+    fn shielding_max_inputs_from_block_space_percent() {
+        // max_inputs = (MAX_BLOCK_BYTES * percent / 100) / P2PKH_STANDARD_INPUT_SIZE
+        //            = (2_000_000 * percent / 100) / 150
+        assert_eq!(shielding_max_inputs(0), 0);
+        assert_eq!(shielding_max_inputs(1), 133); // 20_000 / 150
+        assert_eq!(shielding_max_inputs(10), 1333); // 200_000 / 150
+        assert_eq!(shielding_max_inputs(100), 13333); // 2_000_000 / 150
+    }
 }
