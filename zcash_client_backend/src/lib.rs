@@ -82,11 +82,13 @@ pub mod tor;
 
 pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
 
-/// Orchard pool restriction for operations whose result is invariant to it:
-/// note decryption and fee/action-count estimation. Every Orchard pool
-/// restriction yields the same result for these, so this names the otherwise
-/// arbitrary value rather than scattering `BundlePoolRestrictions` literals that
-/// read as load-bearing.
+/// Orchard pool restriction for call sites that should not select a concrete
+/// Orchard or Ironwood branch-specific policy.
+///
+/// For note decryption, every Orchard pool restriction selects the same V2 note
+/// plaintext domain. For the fee call sites that use this constant, the chosen
+/// value preserves the legacy Orchard action-count policy those paths used before
+/// `BundlePoolRestrictions` replaced `BundleProtocol`.
 #[cfg(feature = "orchard")]
 pub(crate) const ANY_ORCHARD_POOL_RESTRICTIONS: ::orchard::bundle::BundlePoolRestrictions =
     ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only;

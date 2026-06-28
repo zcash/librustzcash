@@ -23,6 +23,13 @@ pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
 pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLED);
 
+/// The Orchard flag-byte grammar used by v5 transaction serialization.
+///
+/// This names the `BundlePoolRestrictions` value that makes Orchard's flag
+/// parser treat bit 2 as reserved. It is a serialization-format selector, not an
+/// assertion that the transaction is being read or written in the NU6.2 epoch.
+const ORCHARD_V5_FLAG_FORMAT: BundlePoolRestrictions = BundlePoolRestrictions::OrchardNu6_2Only;
+
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
     fn map_authorization(&self, a: A) -> B;
@@ -50,14 +57,14 @@ impl MapAuth<Authorized, Authorized> for () {
 fn read_bundle<R: Read>(
     mut reader: R,
     proof_size_enforcement: ProofSizeEnforcement,
-    pool_restrictions: BundlePoolRestrictions,
+    flag_format: BundlePoolRestrictions,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
         Ok(None)
     } else {
-        let flags = read_flags(&mut reader, pool_restrictions)?;
+        let flags = read_flags(&mut reader, flag_format)?;
         let value_balance = Transaction::read_amount(&mut reader)?;
         let anchor = read_anchor(&mut reader)?;
         let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
@@ -99,17 +106,15 @@ fn read_bundle<R: Read>(
 /// height; only the bundle commitment domain varies across upgrades, and that
 /// affects the txid/sighash digests rather than deserialization. Since this is
 /// public API, keeping the signature unchanged also avoids an unnecessary
-/// breaking change. (By contrast, `read_v6_bundle` takes a `pool_restrictions`
-/// argument so the caller selects the Orchard or Ironwood v6 pool.)
+/// breaking change. A v5 transaction always uses `ORCHARD_V5_FLAG_FORMAT` for
+/// the Orchard flag byte. By contrast, `read_v6_bundle` takes a
+/// `pool_restrictions` argument so the caller selects the Orchard or Ironwood v6
+/// slot.
 pub fn read_v5_bundle<R: Read>(
     reader: R,
     proof_size_enforcement: ProofSizeEnforcement,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    read_bundle(
-        reader,
-        proof_size_enforcement,
-        BundlePoolRestrictions::OrchardNu6_2Only,
-    )
+    read_bundle(reader, proof_size_enforcement, ORCHARD_V5_FLAG_FORMAT)
 }
 
 /// Rejects pool restrictions that are not valid for the v6 transaction format,
@@ -217,11 +222,11 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
 
 pub fn read_flags<R: Read>(
     mut reader: R,
-    pool_restrictions: BundlePoolRestrictions,
+    flag_format: BundlePoolRestrictions,
 ) -> io::Result<Flags> {
     let mut byte = [0u8; 1];
     reader.read_exact(&mut byte)?;
-    Flags::from_byte(byte[0], pool_restrictions)
+    Flags::from_byte(byte[0], flag_format)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Orchard flags"))
 }
 
@@ -241,14 +246,14 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
 fn write_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     mut writer: W,
-    pool_restrictions: BundlePoolRestrictions,
+    flag_format: BundlePoolRestrictions,
 ) -> io::Result<()> {
     if let Some(bundle) = &bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
             write_action_without_auth(w, a)
         })?;
 
-        let flags = bundle.flags().to_byte(pool_restrictions).ok_or_else(|| {
+        let flags = bundle.flags().to_byte(flag_format).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Orchard flags cannot be encoded in this transaction format",
@@ -278,11 +283,14 @@ fn write_bundle<W: Write>(
 }
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
+///
+/// V5 serialization always uses `ORCHARD_V5_FLAG_FORMAT` for the Orchard flag
+/// byte, even when the v5 transaction appears after NU6.3 activation.
 pub fn write_v5_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,
 ) -> io::Result<()> {
-    write_bundle(bundle, writer, BundlePoolRestrictions::OrchardNu6_2Only)
+    write_bundle(bundle, writer, ORCHARD_V5_FLAG_FORMAT)
 }
 
 /// Writes an [`orchard::Bundle`] in the v6 transaction format. `pool_restrictions`

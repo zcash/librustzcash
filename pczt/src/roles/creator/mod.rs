@@ -63,7 +63,7 @@ impl Creator {
     #[cfg(feature = "orchard")]
     pub fn with_orchard_flags(mut self, orchard_flags: orchard::bundle::Flags) -> Self {
         self.orchard_flags = orchard_flags
-            .to_byte(orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only)
+            .to_byte(crate::orchard::ANY_ORCHARD_POOL_RESTRICTIONS)
             .expect("Orchard flags must be representable in the v5 transaction format");
         self
     }

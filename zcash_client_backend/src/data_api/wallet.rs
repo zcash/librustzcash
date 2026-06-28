@@ -1868,6 +1868,8 @@ where
                     .transaction()
                     .orchard_bundle()
                     .and_then(|bundle| {
+                        // This is an Orchard bundle, so every Orchard pool
+                        // restriction selects the same V2 note plaintext domain.
                         bundle
                             .decrypt_output_with_key(
                                 crate::ANY_ORCHARD_POOL_RESTRICTIONS,

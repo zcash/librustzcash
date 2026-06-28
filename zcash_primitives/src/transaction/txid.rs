@@ -84,7 +84,7 @@ fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
 /// pre-bump `BundleCommitmentDomain` for a given transaction version. The pool
 /// restriction here is only used for empty-bundle commitments (which hash no
 /// flags); present bundles derive their restriction from their own flags via
-/// [`orchard_pool_restrictions_for_flags`].
+/// [`orchard_flag_format_for_flags`].
 fn orchard_commitment_domain(version: TxVersion) -> (BundlePoolRestrictions, OrchardTxVersion) {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => (
@@ -99,20 +99,19 @@ fn orchard_commitment_domain(version: TxVersion) -> (BundlePoolRestrictions, Orc
     }
 }
 
-/// Selects the Orchard pool restriction used to compute a present bundle's txid
+/// Selects the Orchard flag-byte format used to compute a present bundle's txid
 /// and authorizing commitments from the bundle's own cross-address flag.
 ///
 /// The commitment *format* is chosen by the transaction version (see
-/// [`orchard_commitment_domain`]); the only Orchard pool restriction that affects
-/// the commitment is whether cross-address transfers are enabled. Deriving it from
-/// the bundle's flags keeps the flag byte encodable, so `Flags::to_byte` always
-/// returns `Some` and the `expect(..)` at the call sites is unreachable.
+/// [`orchard_commitment_domain`]). This helper only chooses a value that makes
+/// the bundle flags encodable for Orchard's `Flags::to_byte` API, so the
+/// `expect(..)` at the call sites is unreachable.
 ///
 /// A cross-address-enabled Orchard bundle is rejected by `read_v6_bundle`/
 /// `write_v6_bundle` under `OrchardNu6_3Onward`, so it can never appear in a
 /// serialized transaction; this restriction therefore only diverges from the slot
 /// restriction for in-memory bundles that no node can produce or relay.
-fn orchard_pool_restrictions_for_flags(flags: &orchard::Flags) -> BundlePoolRestrictions {
+fn orchard_flag_format_for_flags(flags: &orchard::Flags) -> BundlePoolRestrictions {
     if flags.cross_address_enabled() {
         BundlePoolRestrictions::OrchardNu6_2Only
     } else {
@@ -378,8 +377,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| {
             let (_, tx_version) = orchard_commitment_domain(version);
-            let pool_restrictions = orchard_pool_restrictions_for_flags(b.flags());
-            b.commitment(pool_restrictions, tx_version)
+            let flag_format = orchard_flag_format_for_flags(b.flags());
+            b.commitment(flag_format, tx_version)
                 .expect("Orchard bundle flags must be representable in their transaction format")
                 .0
         })
@@ -632,8 +631,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
                     .expect("empty Orchard bundle auth commitment is valid for its tx format")
             },
             |b| {
-                let pool_restrictions = orchard_pool_restrictions_for_flags(b.flags());
-                b.authorizing_commitment(pool_restrictions, tx_version)
+                let flag_format = orchard_flag_format_for_flags(b.flags());
+                b.authorizing_commitment(flag_format, tx_version)
                     .expect("Orchard bundle flags must be representable in their tx format")
                     .0
             },

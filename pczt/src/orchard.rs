@@ -24,6 +24,16 @@ pub(crate) enum NoteVersion {
     V2,
 }
 
+/// Orchard pool restriction for PCZT operations whose result only depends on
+/// using an Orchard-equivalent flag format.
+///
+/// PCZT v1 serializes Orchard flags with bits 2..=7 reserved and only supports
+/// V2 Orchard note plaintexts. The selected `BundlePoolRestrictions` value names
+/// that flag format; it is not an NU6.2 network-height assumption.
+#[cfg(feature = "orchard")]
+pub(crate) const ANY_ORCHARD_POOL_RESTRICTIONS: BundlePoolRestrictions =
+    BundlePoolRestrictions::OrchardNu6_2Only;
+
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
 #[derive(Clone, Debug, Getters)]
 pub struct Bundle {
@@ -685,7 +695,7 @@ impl Bundle {
         orchard::pczt::Bundle::parse(
             actions,
             self.flags,
-            BundlePoolRestrictions::OrchardNu6_2Only,
+            ANY_ORCHARD_POOL_RESTRICTIONS,
             self.value_sum,
             self.anchor,
             self.zkproof,
@@ -798,7 +808,7 @@ impl Bundle {
             actions,
             flags: bundle
                 .flags()
-                .to_byte(BundlePoolRestrictions::OrchardNu6_2Only)
+                .to_byte(ANY_ORCHARD_POOL_RESTRICTIONS)
                 .expect("Orchard flags must be representable in the v5 transaction format"),
             value_sum,
             anchor: bundle.anchor().to_bytes(),
