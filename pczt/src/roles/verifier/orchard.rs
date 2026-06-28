@@ -11,6 +11,8 @@ impl super::Verifier {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         } = self.pczt;
 
         let bundle = orchard.into_parsed().map_err(OrchardError::Parse)?;
@@ -23,6 +25,8 @@ impl super::Verifier {
                 transparent,
                 sapling,
                 orchard: crate::orchard::Bundle::serialize_from(bundle),
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood,
             },
         })
     }

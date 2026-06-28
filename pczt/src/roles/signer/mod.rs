@@ -30,6 +30,9 @@ use crate::{
     },
 };
 
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+use crate::orchard::Bundle as PcztOrchardBundle;
+
 pub use crate::EffectsOnly;
 use crate::sighash;
 
@@ -38,6 +41,8 @@ pub struct Signer {
     transparent: transparent::pczt::Bundle,
     sapling: sapling::pczt::Bundle,
     orchard: orchard::pczt::Bundle,
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    ironwood: PcztOrchardBundle,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
     txid_parts: TxDigests<Blake2bHash>,
@@ -53,6 +58,8 @@ impl Signer {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
             tx_data,
         } = pczt.extract_tx_data(
             |t| {
@@ -70,6 +77,8 @@ impl Signer {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
             tx_data,
             txid_parts,
             shielded_sighash,
@@ -337,6 +346,8 @@ impl Signer {
             transparent: crate::transparent::Bundle::serialize_from(self.transparent),
             sapling: crate::sapling::Bundle::serialize_from(self.sapling),
             orchard: crate::orchard::Bundle::serialize_from(self.orchard),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood: self.ironwood,
         }
     }
 }

@@ -10,6 +10,8 @@ impl super::Prover {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         } = self.pczt;
 
         let mut bundle = orchard.into_parsed().map_err(OrchardError::Parser)?;
@@ -24,6 +26,8 @@ impl super::Prover {
                 transparent,
                 sapling,
                 orchard: crate::orchard::Bundle::serialize_from(bundle),
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood,
             },
         })
     }
