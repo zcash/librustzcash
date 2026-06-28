@@ -19,9 +19,11 @@ use crate::{
 };
 
 #[cfg(not(feature = "orchard"))]
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NoteVersion {
     V2,
+    V3,
 }
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
@@ -292,7 +294,7 @@ pub mod v1 {
 
     /// Information about an Orchard action within a transaction.
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Action {
+    pub(crate) struct Action {
         cv_net: [u8; 32],
         spend: Spend,
         output: Output,
@@ -302,7 +304,7 @@ pub mod v1 {
     /// Information about the spend part of an Orchard action.
     #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Spend {
+    pub(crate) struct Spend {
         nullifier: [u8; 32],
         rk: [u8; 32],
         #[serde_as(as = "Option<[_; 64]>")]
@@ -324,7 +326,7 @@ pub mod v1 {
     /// Information about the output part of an Orchard action.
     #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Output {
+    pub(crate) struct Output {
         cmx: [u8; 32],
         ephemeral_key: [u8; 32],
         enc_ciphertext: Vec<u8>,
@@ -470,6 +472,95 @@ pub mod v1 {
                 zip32_derivation: output.zip32_derivation,
                 user_address: output.user_address,
                 proprietary: output.proprietary,
+            }
+        }
+    }
+}
+
+/// Types for the v2 Orchard PCZT encoding.
+pub(crate) mod v2 {
+    use alloc::vec::Vec;
+
+    use getset::Getters;
+    use serde::{Deserialize, Serialize};
+
+    use super::{NoteVersion, v1};
+
+    /// A serializable representation of Orchard note plaintext versions.
+    #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+    enum SerializedNoteVersion {
+        V2,
+        V3,
+    }
+
+    impl From<NoteVersion> for SerializedNoteVersion {
+        fn from(note_version: NoteVersion) -> Self {
+            match note_version {
+                NoteVersion::V2 => Self::V2,
+                NoteVersion::V3 => Self::V3,
+            }
+        }
+    }
+
+    impl From<SerializedNoteVersion> for NoteVersion {
+        fn from(note_version: SerializedNoteVersion) -> Self {
+            match note_version {
+                SerializedNoteVersion::V2 => Self::V2,
+                SerializedNoteVersion::V3 => Self::V3,
+            }
+        }
+    }
+
+    /// PCZT fields that are specific to producing the transaction's Orchard bundle.
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub struct Bundle {
+        #[getset(get = "pub")]
+        pub(crate) actions: Vec<v1::Action>,
+        #[getset(get = "pub")]
+        pub(crate) flags: u8,
+        #[getset(get = "pub")]
+        pub(crate) value_sum: (u64, bool),
+        #[getset(get = "pub")]
+        pub(crate) anchor: [u8; 32],
+        note_version: SerializedNoteVersion,
+        pub(crate) zkproof: Option<Vec<u8>>,
+        pub(crate) bsk: Option<[u8; 32]>,
+    }
+
+    impl TryFrom<super::Bundle> for Bundle {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            Ok(Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(v1::Action::from)
+                    .collect::<Vec<_>>(),
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                note_version: bundle.note_version.into(),
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
+            })
+        }
+    }
+
+    impl From<Bundle> for super::Bundle {
+        fn from(bundle: Bundle) -> Self {
+            Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(super::Action::from)
+                    .collect(),
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                note_version: bundle.note_version.into(),
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
             }
         }
     }

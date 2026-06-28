@@ -23,6 +23,8 @@ workspace.
   `pczt::Pczt` type.
 - The Orchard PCZT logical model now tracks the Orchard bundle's note plaintext
   version separately from the version 1 serialization format.
+- PCZT version 2 serialization now omits empty Transparent, Sapling, and
+  Orchard bundles.
 - Direct `serde` serialization implementations have been removed from the
   logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
@@ -39,6 +41,8 @@ workspace.
   encoding.
 - `pczt::v1`, a module providing the version 1 PCZT serialization format via
   `pczt::v1::Pczt`.
+- PCZT version 2 serialization, which encodes the Orchard note plaintext
+  version at the Orchard bundle level.
 
 ## [0.7.0] - 2026-06-02
 
