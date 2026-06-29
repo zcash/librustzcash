@@ -1360,7 +1360,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2989,8 +2989,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.14.0"
-source = "git+https://github.com/zcash/orchard?rev=30c4ea2788375c542bfaa4704a3a772308729321#30c4ea2788375c542bfaa4704a3a772308729321"
+version = "0.15.0-pre.0"
+source = "git+https://github.com/zcash/orchard?rev=a9b5403cc6bf26b31ff957e1b7368b1216cc30e5#a9b5403cc6bf26b31ff957e1b7368b1216cc30e5"
 dependencies = [
  "aes",
  "bitvec",
@@ -4032,7 +4032,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

@@ -3,15 +3,15 @@
 
 use std::convert::Infallible;
 
-use orchard::{builder::BundleType, bundle::BundlePoolRestrictions};
+use orchard::{builder::BundleType, bundle::BundleVersion};
 use zcash_protocol::value::Zatoshis;
 
 pub(crate) fn transactional_action_count(
-    pool_restrictions: BundlePoolRestrictions,
+    bundle_version: BundleVersion,
     num_spends: usize,
     num_outputs: usize,
 ) -> Result<usize, &'static str> {
-    BundleType::DEFAULT.num_actions(num_spends, num_outputs, pool_restrictions)
+    BundleType::DEFAULT.num_actions(num_spends, num_outputs, bundle_version)
 }
 
 /// A trait that provides a minimized view of Orchard-style bundle configuration
@@ -22,8 +22,8 @@ pub trait BundleView<NoteRef> {
     /// The type of inputs of the bundle.
     type Out: OutputView;
 
-    /// Returns the pool restrictions for the bundle.
-    fn bundle_pool_restrictions(&self) -> BundlePoolRestrictions;
+    /// Returns the bundle version for the bundle.
+    fn bundle_version(&self) -> BundleVersion;
     /// Returns the inputs to the bundle.
     fn inputs(&self) -> &[Self::In];
     /// Returns the outputs of the bundle.
@@ -31,12 +31,12 @@ pub trait BundleView<NoteRef> {
 }
 
 impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
-    for (BundlePoolRestrictions, &'a [In], &'a [Out])
+    for (BundleVersion, &'a [In], &'a [Out])
 {
     type In = In;
     type Out = Out;
 
-    fn bundle_pool_restrictions(&self) -> BundlePoolRestrictions {
+    fn bundle_version(&self) -> BundleVersion {
         self.0
     }
 
@@ -56,8 +56,8 @@ impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
     type In = Infallible;
     type Out = Infallible;
 
-    fn bundle_pool_restrictions(&self) -> BundlePoolRestrictions {
-        crate::ANY_ORCHARD_POOL_RESTRICTIONS
+    fn bundle_version(&self) -> BundleVersion {
+        crate::ANY_ORCHARD_BUNDLE_VERSION
     }
 
     fn inputs(&self) -> &[Self::In] {

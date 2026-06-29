@@ -66,7 +66,7 @@ redjubjub = { version = "0.8", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
-orchard = { version = "0.14", default-features = false }
+orchard = { version = "0.15.0-pre.0", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -186,7 +186,7 @@ zip32 = { version = "0.2", default-features = false }
 time-core = "=0.1.2"
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard", rev = "30c4ea2788375c542bfaa4704a3a772308729321" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "a9b5403cc6bf26b31ff957e1b7368b1216cc30e5" }
 
 [workspace.metadata.release]
 consolidate-commits = false

@@ -6,7 +6,10 @@ use corez::io::Write;
 use blake2b_simd::{Hash as Blake2bHash, Params};
 use ff::PrimeField;
 
-use ::orchard::bundle::{self as orchard, BundlePoolRestrictions, TxVersion as OrchardTxVersion};
+use ::orchard::{
+    ValuePool,
+    bundle::{self as orchard, TxVersion as OrchardTxVersion},
+};
 use ::sapling::bundle::{OutputDescription, SpendDescription};
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
 use zcash_protocol::{
@@ -80,51 +83,24 @@ fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
     }
 }
 
-/// Selects the `(pool restriction, orchard tx version)` pair that reproduces the
-/// pre-bump `BundleCommitmentDomain` for a given transaction version. The pool
-/// restriction here is only used for empty-bundle commitments (which hash no
-/// flags); present bundles derive their restriction from their own flags via
-/// [`orchard_flag_format_for_flags`].
-fn orchard_commitment_domain(version: TxVersion) -> (BundlePoolRestrictions, OrchardTxVersion) {
+/// Selects the `(value pool, orchard tx version)` pair that reproduces the
+/// pre-bump `BundleCommitmentDomain` for a given transaction version. The value
+/// pool here is only used for empty-bundle commitments (which hash no flags);
+/// present bundles compute their commitments from the `BundleVersion` each
+/// bundle carries.
+fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion) {
     match version {
-        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => (
-            BundlePoolRestrictions::OrchardNu6_2Only,
-            OrchardTxVersion::V5,
-        ),
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
+            (ValuePool::Orchard, OrchardTxVersion::V5)
+        }
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-        TxVersion::V6 => (
-            BundlePoolRestrictions::OrchardNu6_3Onward,
-            OrchardTxVersion::V6,
-        ),
-    }
-}
-
-/// Selects the Orchard flag-byte format used to compute a present bundle's txid
-/// and authorizing commitments from the bundle's own cross-address flag.
-///
-/// The commitment *format* is chosen by the transaction version (see
-/// [`orchard_commitment_domain`]). This helper only chooses a value that makes
-/// the bundle flags encodable for Orchard's `Flags::to_byte` API, so the
-/// `expect(..)` at the call sites is unreachable.
-///
-/// A cross-address-enabled Orchard bundle is rejected by `read_v6_bundle`/
-/// `write_v6_bundle` under `OrchardNu6_3Onward`, so it can never appear in a
-/// serialized transaction; this restriction therefore only diverges from the slot
-/// restriction for in-memory bundles that no node can produce or relay.
-fn orchard_flag_format_for_flags(flags: &orchard::Flags) -> BundlePoolRestrictions {
-    if flags.cross_address_enabled() {
-        BundlePoolRestrictions::OrchardNu6_2Only
-    } else {
-        BundlePoolRestrictions::OrchardNu6_3Onward
+        TxVersion::V6 => (ValuePool::Orchard, OrchardTxVersion::V6),
     }
 }
 
 #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-fn ironwood_v6_domain() -> (BundlePoolRestrictions, OrchardTxVersion) {
-    (
-        BundlePoolRestrictions::IronwoodNu6_3Onward,
-        OrchardTxVersion::V6,
-    )
+fn ironwood_v6_domain() -> (ValuePool, OrchardTxVersion) {
+    (ValuePool::Ironwood, OrchardTxVersion::V6)
 }
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
@@ -377,8 +353,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| {
             let (_, tx_version) = orchard_commitment_domain(version);
-            let flag_format = orchard_flag_format_for_flags(b.flags());
-            b.commitment(flag_format, tx_version)
+            b.commitment(tx_version)
                 .expect("Orchard bundle flags must be representable in their transaction format")
                 .0
         })
@@ -390,8 +365,8 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         ironwood_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self::IronwoodDigest {
         ironwood_bundle.map(|b| {
-            let (pool_restrictions, tx_version) = ironwood_v6_domain();
-            b.commitment(pool_restrictions, tx_version)
+            let (_, tx_version) = ironwood_v6_domain();
+            b.commitment(tx_version)
                 .expect("Ironwood bundle flags must be representable")
                 .0
         })
@@ -443,8 +418,8 @@ pub(crate) fn to_hash(
     h.write_all(
         orchard_digest
             .unwrap_or_else(|| {
-                let (pool_restrictions, tx_version) = orchard_commitment_domain(_txversion);
-                orchard::commitments::hash_bundle_txid_empty(pool_restrictions, tx_version)
+                let (value_pool, tx_version) = orchard_commitment_domain(_txversion);
+                orchard::commitments::hash_bundle_txid_empty(value_pool, tx_version)
                     .expect("empty Orchard bundle txid commitment is valid for its tx format")
             })
             .as_bytes(),
@@ -481,8 +456,8 @@ pub(crate) fn to_hash_v6(
     h.write_all(
         orchard_digest
             .unwrap_or_else(|| {
-                let (pool_restrictions, tx_version) = orchard_commitment_domain(TxVersion::V6);
-                orchard::commitments::hash_bundle_txid_empty(pool_restrictions, tx_version)
+                let (value_pool, tx_version) = orchard_commitment_domain(TxVersion::V6);
+                orchard::commitments::hash_bundle_txid_empty(value_pool, tx_version)
                     .expect("empty Orchard bundle txid commitment is valid for its tx format")
             })
             .as_bytes(),
@@ -491,8 +466,8 @@ pub(crate) fn to_hash_v6(
     h.write_all(
         ironwood_digest
             .unwrap_or_else(|| {
-                let (pool_restrictions, tx_version) = ironwood_v6_domain();
-                orchard::commitments::hash_bundle_txid_empty(pool_restrictions, tx_version)
+                let (value_pool, tx_version) = ironwood_v6_domain();
+                orchard::commitments::hash_bundle_txid_empty(value_pool, tx_version)
                     .expect("empty Ironwood bundle txid commitment is valid")
             })
             .as_bytes(),
@@ -624,15 +599,14 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         version: TxVersion,
         orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
     ) -> Self::OrchardDigest {
-        let (pool_restrictions, tx_version) = orchard_commitment_domain(version);
+        let (value_pool, tx_version) = orchard_commitment_domain(version);
         orchard_bundle.map_or_else(
             || {
-                orchard::commitments::hash_bundle_auth_empty(pool_restrictions, tx_version)
+                orchard::commitments::hash_bundle_auth_empty(value_pool, tx_version)
                     .expect("empty Orchard bundle auth commitment is valid for its tx format")
             },
             |b| {
-                let flag_format = orchard_flag_format_for_flags(b.flags());
-                b.authorizing_commitment(flag_format, tx_version)
+                b.authorizing_commitment(tx_version)
                     .expect("Orchard bundle flags must be representable in their tx format")
                     .0
             },
@@ -644,14 +618,14 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         &self,
         ironwood_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
     ) -> Self::IronwoodDigest {
-        let (pool_restrictions, tx_version) = ironwood_v6_domain();
+        let (value_pool, tx_version) = ironwood_v6_domain();
         ironwood_bundle.map_or_else(
             || {
-                orchard::commitments::hash_bundle_auth_empty(pool_restrictions, tx_version)
+                orchard::commitments::hash_bundle_auth_empty(value_pool, tx_version)
                     .expect("empty Ironwood bundle auth commitment is valid")
             },
             |b| {
-                b.authorizing_commitment(pool_restrictions, tx_version)
+                b.authorizing_commitment(tx_version)
                     .expect("Ironwood bundle flags must be representable")
                     .0
             },

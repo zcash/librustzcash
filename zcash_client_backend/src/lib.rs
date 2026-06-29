@@ -82,16 +82,14 @@ pub mod tor;
 
 pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
 
-/// Orchard pool restriction for call sites that should not select a concrete
-/// Orchard or Ironwood branch-specific policy.
+/// Orchard bundle version for fee and change call sites that should not select a concrete
+/// branch-specific policy.
 ///
-/// For note decryption, every Orchard pool restriction selects the same V2 note
-/// plaintext domain. For the fee call sites that use this constant, the chosen
-/// value preserves the legacy Orchard action-count policy those paths used before
-/// `BundlePoolRestrictions` replaced `BundleProtocol`.
+/// These paths only need a bundle version to drive the Orchard action-count policy; the chosen
+/// value preserves the legacy pre-NU6.3 Orchard behavior those paths used historically.
 #[cfg(feature = "orchard")]
-pub(crate) const ANY_ORCHARD_POOL_RESTRICTIONS: ::orchard::bundle::BundlePoolRestrictions =
-    ::orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only;
+pub(crate) const ANY_ORCHARD_BUNDLE_VERSION: ::orchard::bundle::BundleVersion =
+    ::orchard::bundle::BundleVersion::orchard_v1();
 
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {

@@ -29,6 +29,7 @@ pub struct Creator {
     expiry_height: u32,
     coin_type: u32,
     orchard_flags: u8,
+    orchard_note_version: crate::orchard::NoteVersion,
     sapling_anchor: [u8; 32],
     orchard_anchor: [u8; 32],
 }
@@ -50,6 +51,7 @@ impl Creator {
             expiry_height,
             coin_type,
             orchard_flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+            orchard_note_version: crate::orchard::NoteVersion::V2,
             sapling_anchor,
             orchard_anchor,
         }
@@ -60,12 +62,27 @@ impl Creator {
         self
     }
 
+    /// Selects the Orchard bundle version and flags for the PCZT.
+    ///
+    /// The version fixes both the note-plaintext version and the flag-byte format, and the flags
+    /// are encoded under it immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`orchard::bundle::BundleError::UnrepresentableFlags`] if `flags` cannot be encoded
+    /// under `bundle_version` (e.g. cross-address-enabled flags under a post-NU6.3 Orchard
+    /// version).
     #[cfg(feature = "orchard")]
-    pub fn with_orchard_flags(mut self, orchard_flags: orchard::bundle::Flags) -> Self {
-        self.orchard_flags = orchard_flags
-            .to_byte(crate::orchard::ANY_ORCHARD_POOL_RESTRICTIONS)
-            .expect("Orchard flags must be representable in the v5 transaction format");
-        self
+    pub fn with_orchard_bundle_version(
+        mut self,
+        bundle_version: orchard::bundle::BundleVersion,
+        flags: orchard::bundle::Flags,
+    ) -> Result<Self, orchard::bundle::BundleError> {
+        self.orchard_flags = flags
+            .to_byte(bundle_version)
+            .ok_or(orchard::bundle::BundleError::UnrepresentableFlags)?;
+        self.orchard_note_version = bundle_version.note_version();
+        Ok(self)
     }
 
     pub fn build(self) -> Pczt {
@@ -96,7 +113,7 @@ impl Creator {
                 flags: self.orchard_flags,
                 value_sum: (0, true),
                 anchor: self.orchard_anchor,
-                note_version: crate::orchard::NoteVersion::V2,
+                note_version: self.orchard_note_version,
                 zkproof: None,
                 bsk: None,
             },

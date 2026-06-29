@@ -170,13 +170,10 @@ fn v6_empty_orchard_txid_uses_v6_orchard_personalization() {
 #[cfg(all(test, zcash_unstable = "nu6.3"))]
 #[test]
 fn v6_branch_reconstruction_preserves_ironwood_bundle() {
-    use proptest::{strategy::ValueTree, test_runner::TestRunner};
+    use proptest::test_runner::TestRunner;
 
     let mut runner = TestRunner::default();
-    let ironwood_bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
-        .new_tree(&mut runner)
-        .unwrap()
-        .current();
+    let ironwood_bundle = test_ironwood_bundle(&mut runner);
     let tx = TransactionData::from_parts_v6(
         BranchId::Nu6_3,
         0,
@@ -241,10 +238,30 @@ fn test_orchard_bundle(
 ) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
     use proptest::strategy::ValueTree;
 
-    crate::transaction::components::orchard::testing::arb_bundle(1)
+    let bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
         .new_tree(runner)
         .unwrap()
-        .current()
+        .current();
+    crate::transaction::components::orchard::testing::rebuild_with_version(
+        bundle,
+        orchard::bundle::BundleVersion::orchard_v2(),
+    )
+}
+
+#[cfg(all(test, zcash_unstable = "nu6.3"))]
+fn test_ironwood_bundle(
+    runner: &mut proptest::test_runner::TestRunner,
+) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
+    use proptest::strategy::ValueTree;
+
+    let bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
+        .new_tree(runner)
+        .unwrap()
+        .current();
+    crate::transaction::components::orchard::testing::rebuild_with_version(
+        bundle,
+        orchard::bundle::BundleVersion::ironwood_v2(),
+    )
 }
 
 #[cfg(all(test, zcash_unstable = "nu6.3"))]
@@ -258,7 +275,7 @@ fn bundle_with_anchor(
         *bundle.value_balance(),
         anchor,
         bundle.authorization().clone(),
-        orchard::bundle::ProofSizeEnforcement::Strict,
+        bundle.bundle_version(),
     )
     .unwrap()
 }
@@ -413,26 +430,24 @@ fn v5_tx_data_with_sapling_bundle(
 }
 
 /// Clears the cross-address flag on an Orchard bundle (preserving spends/outputs)
-/// so it is representable in a v6 Orchard slot (`OrchardNu6_3Onward`, which
-/// forbids cross-address transfers; cross-address is Ironwood-only).
+/// so it is representable in a v6 Orchard slot ([`orchard::bundle::BundleVersion::orchard_v2`],
+/// which forbids cross-address transfers; cross-address is Ironwood-only).
 #[cfg(all(test, zcash_unstable = "nu6.3"))]
 fn disable_cross_address(
     bundle: orchard::Bundle<orchard::bundle::Authorized, ZatBalance>,
 ) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
     let byte = u8::from(bundle.flags().spends_enabled())
         | (u8::from(bundle.flags().outputs_enabled()) << 1);
-    let flags = orchard::bundle::Flags::from_byte(
-        byte,
-        orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
-    )
-    .unwrap();
+    let flags =
+        orchard::bundle::Flags::from_byte(byte, orchard::bundle::BundleVersion::orchard_v2())
+            .unwrap();
     orchard::Bundle::try_from_parts(
         bundle.actions().clone(),
         flags,
         *bundle.value_balance(),
         *bundle.anchor(),
         bundle.authorization().clone(),
-        orchard::bundle::ProofSizeEnforcement::Strict,
+        orchard::bundle::BundleVersion::orchard_v2(),
     )
     .unwrap()
 }
@@ -571,7 +586,7 @@ fn v6_orchard_anchor_changes_auth_commitment_not_txid_or_sighash() {
 #[test]
 fn v6_ironwood_anchor_changes_auth_commitment_not_txid_or_sighash() {
     let mut runner = proptest::test_runner::TestRunner::default();
-    let bundle = test_orchard_bundle(&mut runner);
+    let bundle = test_ironwood_bundle(&mut runner);
 
     let bundle_a = bundle_with_anchor(&bundle, test_anchor(1));
     let bundle_b = bundle_with_anchor(&bundle, test_anchor(2));

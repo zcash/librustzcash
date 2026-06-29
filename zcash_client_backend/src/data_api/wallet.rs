@@ -1868,14 +1868,8 @@ where
                     .transaction()
                     .orchard_bundle()
                     .and_then(|bundle| {
-                        // This is an Orchard bundle, so every Orchard pool
-                        // restriction selects the same V2 note plaintext domain.
                         bundle
-                            .decrypt_output_with_key(
-                                crate::ANY_ORCHARD_POOL_RESTRICTIONS,
-                                output_index,
-                                &orchard_internal_ivk,
-                            )
+                            .decrypt_output_with_key(output_index, &orchard_internal_ivk)
                             .map(|(note, _, _)| Note::Orchard(note))
                     })
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
