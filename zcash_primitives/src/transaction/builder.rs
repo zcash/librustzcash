@@ -1285,6 +1285,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
                     &mut rng,
                 )
                 .and_then(|b| {
+                    // Ironwood actions use the Orchard bundle type and the same
+                    // Orchard spend authority. The `IronwoodNu6_3Onward` pool
+                    // restrictions select the Ironwood circuit and flag rules;
+                    // `apply_signatures` only signs actions whose `ak` matches
+                    // a supplied spend authorizing key.
                     b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), orchard_saks)
                 })
             })
