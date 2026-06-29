@@ -1,26 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.pczt]]
-version = "0.6.0"
-audited_as = "0.5.1"
-
-[[unpublished.zcash_client_backend]]
-version = "0.22.0"
-audited_as = "0.21.2"
-
-[[unpublished.zcash_client_sqlite]]
-version = "0.20.0"
-audited_as = "0.19.5"
-
-[[unpublished.zcash_keys]]
-version = "0.13.0"
-audited_as = "0.12.0"
-
-[[unpublished.zcash_proofs]]
-version = "0.27.0"
-audited_as = "0.26.1"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -57,8 +37,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.halo2_gadgets]]
-version = "0.4.0"
-when = "2025-12-04"
+version = "0.5.0"
+when = "2026-06-03"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -106,15 +86,15 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.13.0"
-when = "2026-04-22"
+version = "0.14.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.5.1"
-when = "2026-02-27"
+version = "0.7.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -462,25 +442,25 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.11.0"
-when = "2026-04-24"
+version = "0.12.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.21.2"
-when = "2026-03-10"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.23.0"
+when = "2026-06-03"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.19.5"
-when = "2026-03-10"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.21.1"
+when = "2026-06-20"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_encoding]]
 version = "0.4.0"
@@ -488,13 +468,6 @@ when = "2026-04-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
-
-[[publisher.zcash_extensions]]
-version = "0.1.0"
-when = "2024-07-15"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
 
 [[publisher.zcash_history]]
 version = "0.4.0"
@@ -504,29 +477,29 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.12.0"
-when = "2025-10-13"
+version = "0.14.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.27.0"
-when = "2026-04-24"
+version = "0.28.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.26.1"
-when = "2025-10-20"
+version = "0.28.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.8.0"
-when = "2026-04-24"
+version = "0.9.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -546,8 +519,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.7.0"
-when = "2026-04-24"
+version = "0.8.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -560,8 +533,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.7.0"
-when = "2026-04-24"
+version = "0.8.0"
+when = "2026-06-03"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -2499,7 +2472,7 @@ who = "Manish Goregaokar <manishsmail@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
 start = "2019-11-06"
-end = "2026-02-01"
+end = "2027-04-23"
 notes = "All code written or reviewed by Manish"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
@@ -2508,7 +2481,7 @@ who = "Manish Goregaokar <manishsmail@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
 start = "2019-05-15"
-end = "2026-02-01"
+end = "2027-04-23"
 notes = "All code written or reviewed by Manish"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 

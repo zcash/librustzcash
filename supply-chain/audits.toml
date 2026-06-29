@@ -1918,7 +1918,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2022-02-15"
-end = "2025-12-16"
+end = "2027-06-05"
 
 [[trusted.halo2_gadgets]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -2230,7 +2230,7 @@ end = "2026-09-25"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_client_sqlite]]
 criteria = "safe-to-deploy"
@@ -2242,7 +2242,7 @@ end = "2027-02-02"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_encoding]]
 criteria = "safe-to-deploy"
@@ -2261,12 +2261,6 @@ criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-08-19"
 end = "2027-04-24"
-
-[[trusted.zcash_extensions]]
-criteria = "safe-to-deploy"
-user-id = 6289 # Jack Grigg (str4d)
-start = "2020-04-24"
-end = "2025-04-23"
 
 [[trusted.zcash_history]]
 criteria = "safe-to-deploy"
@@ -2290,7 +2284,7 @@ end = "2026-09-25"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2026-05-12"
+end = "2027-06-05"
 
 [[trusted.zcash_note_encryption]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -2350,7 +2344,7 @@ end = "2025-12-13"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-27"
-end = "2026-06-02"
+end = "2027-06-05"
 
 [[trusted.zcash_script]]
 criteria = "safe-to-deploy"

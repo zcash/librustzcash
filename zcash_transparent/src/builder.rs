@@ -888,7 +888,7 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(all(test, feature = "std", feature = "transparent-inputs"))]
 mod tests {
     use std::vec::Vec;
 

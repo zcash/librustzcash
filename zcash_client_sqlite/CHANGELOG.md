@@ -8,7 +8,67 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## Unreleased
+
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
+  new variant that records the shielded pool and the range of block heights
+  being added to the wallet when a note commitment tree error occurs during a
+  `put_blocks` operation. Previously such errors (for example a `shardtree`
+  `InsertionError::Conflict` raised by `insert_frontier`) surfaced as the
+  generic `CommitmentTree` variant, which only reported the conflicting tree
+  node address and not the affected pool or block range.
+- `zcash_client_sqlite::error::SqliteClientError::TruncateCommitmentTree`, a
+  new variant that records the shielded pool and the block height that the
+  wallet was being truncated to when a note commitment tree error occurs
+  during a truncation operation (`truncate_to_height` or
+  `truncate_to_chain_state`). Previously such errors surfaced as the generic
+  `CommitmentTree` variant without the affected pool or target height.
+
+### Changed
+- (behind the new `spend-index` feature) `WalletRead::transaction_data_requests`
+  emits `TransactionDataRequest::GetSpendingTx` for transparent spend
+  detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
+  `TransactionsInvolvingAddress` is still emitted for ephemeral-address discovery,
+  and for spend detection when `spend-index` is disabled.
+
+## [0.21.1] - 2026-06-19
+
+### Fixed
+- Fixed a bug in `WalletDb::delete_account` that caused it to fail with
+  `rusqlite::Error::InvalidParameterName(":address")` when the account being
+  deleted was referenced by a `sent_notes` row via its `to_account_id` column
+  (for example, after an internal transfer to an address belonging to the
+  account being deleted). The `sent_notes` update statement bound a parameter
+  named `:address` while the SQL expected `:to_address`.
+
+## [0.21.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`, `zcash_transparent 0.8.0`, `zip321 0.8.0`, `zcash_keys 0.14.0`, `zcash_primitives 0.28.0`, `zcash_proofs 0.28.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.20.2] - 2026-05-07
+
+### Fixed
+- Scan-progress accounting (`subtree_scan_progress`) no longer counts outputs
+  from blocks whose enclosing scan-queue range has been re-queued for
+  scanning. Previously, a wallet that had scanned blocks and then re-queued
+  the corresponding range (for example as a consequence of adding a new
+  account whose birthday lies within already-scanned territory) would
+  over-report scan progress, because the re-queued blocks remained in the
+  `blocks` table and were still counted as scanned.
+
+## [0.20.1] - 2026-05-06
+
+### Fixed
+- This release fixes a bug in progress estimation that can occur when rewinding
+  to a height prior to any existing wallet birthday as a consequence of adding
+  an account.
 
 ## [0.20.0] - 2026-04-27
 

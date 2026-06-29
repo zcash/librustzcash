@@ -8,6 +8,71 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Added
+- `zcash_primitives::block::Block::from_parts` (behind the `test-dependencies`
+  feature flag).
+
+### Changed
+
+### Removed
+- All support for Transparent Zcash Extensions (TZEs), which was only ever
+  available behind the `--cfg zcash_unstable="zfuture"` development flag and has
+  been determined never to land. This removes the `zfuture` configuration and
+  everything it gated, including:
+  - `zcash_primitives::extensions` (the `transparent` extension traits and
+    types).
+  - `zcash_primitives::transaction::components::tze` and
+    `zcash_primitives::transaction::fees::tze`.
+  - `zcash_primitives::transaction::TxVersion::ZFuture`,
+    `TransactionData::{from_parts_zfuture, tze_bundle}`,
+    `TransactionData::write_tze`, `TransactionDigest::{TzeDigest, digest_tze}`,
+    and `TxDigests`/`TransactionDigest` no longer carry TZE digests.
+  - `zcash_primitives::transaction::builder::Builder::{build_zfuture,
+    get_fee_zfuture}`, the `ExtensionTxBuilder` implementation, and
+    `transaction::builder::Error::TzeBuild`.
+  - `zcash_primitives::transaction::fees::FutureFeeRule` and
+    `fees::FeeRule::fee_required_zfuture`.
+
+### Fixed
+
+## [0.28.0] - 2026-06-02
+
+### Added
+- Support for the NU6.2 consensus branch. The following now handle
+  `zcash_protocol::consensus::BranchId::Nu6_2` (mapped to `TxVersion::V5`):
+  - `zcash_primitives::transaction::TxVersion::suggested_for_branch`
+  - `zcash_primitives::transaction::TxVersion::valid_in_branch`
+
+### Changed
+- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
+  argument.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46).
+
+### Security
+- Deserialization of v5 Orchard bundles now rejects proofs whose length is not
+  the canonical size for the number of actions, preventing a proof padded with
+  arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
+  transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
+  for earlier branches to preserve the ability to parse historical transactions.
+
+## [0.27.1] - 2026-05-14
+
+### Fixed
+- `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`:
+  the implementation for `TransparentInputInfo` now reports the ZIP 317 standard
+  size (`STANDARD_P2PKH` = 150 bytes) for P2PKH inputs, matching what
+  proposal-time fee computation already uses. Previously it reported the exact
+  serialized size (149 bytes), causing builds of transactions with `>= 150`
+  P2PKH inputs to fail with `Error::ChangeRequired` due to fee disagreement
+  across `ceildiv(t_in_total_size, 150)` boundaries.
+
 ## [0.27.0] - 2026-04-23
 
 ### Added

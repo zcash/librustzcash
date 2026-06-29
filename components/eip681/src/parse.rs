@@ -82,7 +82,7 @@ impl Digits {
             total = total
                 .checked_mul(10)
                 .context(OverflowSnafu)?
-                .checked_add(*digit as u64)
+                .checked_add(u64::from(*digit))
                 .context(OverflowSnafu)?;
         }
         Ok(total)
@@ -518,7 +518,7 @@ impl Number {
             .context(IntegerSnafu)?;
         let multiplier = 10i128.checked_pow(exp).context(LargeExponentSnafu {
             expected: u128::MAX.ilog10() as usize,
-            seen: exp as u64,
+            seen: u64::from(exp),
         })?;
         // The exponent must be >= the number of decimal places to yield an integer result.
         let decimal_exp = exp
@@ -535,7 +535,7 @@ impl Number {
         //     (decimal_numerator * 10^(exp - decimal_places))
         // )
         // ```
-        let multiplied_integer = (integer as i128)
+        let multiplied_integer = i128::from(integer)
             .checked_mul(multiplier)
             .with_context(|| OverflowSnafu)?;
         let decimal_multiplier = match decimal_exp {
@@ -543,7 +543,7 @@ impl Number {
             Err(_) if decimal_numerator == 0 => 0,
             Err(e) => return Err(e),
         };
-        let multiplied_decimal = (decimal_numerator as i128)
+        let multiplied_decimal = i128::from(decimal_numerator)
             .checked_mul(decimal_multiplier)
             .with_context(|| OverflowSnafu)?;
         let value = multiplied_integer

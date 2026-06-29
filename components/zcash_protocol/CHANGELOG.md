@@ -10,6 +10,32 @@ workspace.
 
 ## [Unreleased]
 
+### Removed
+- All support for Transparent Zcash Extensions (TZEs), which was only ever
+  available behind the `--cfg zcash_unstable="zfuture"` development flag and has
+  been determined never to land. This removes the `zfuture` configuration and
+  everything it gated, including:
+  - `zcash_protocol::consensus::NetworkUpgrade::ZFuture` and
+    `zcash_protocol::consensus::BranchId::ZFuture`.
+  - `zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID}`.
+  - `zcash_protocol::local_consensus::LocalNetwork::z_future`.
+
+## [0.9.0] - 2026-06-02
+
+### Changed
+- This release sets the NU6.2 network activation height to 
+  3364600 on mainnet and 4052000 on testnet.
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_2` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_2` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_2`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
 ## [0.8.0] - 2026-04-23
 
 ### Added

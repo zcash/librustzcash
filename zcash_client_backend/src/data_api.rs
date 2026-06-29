@@ -65,7 +65,7 @@
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
     io,
@@ -95,7 +95,10 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
-    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
+    data_api::{
+        error::RewindError,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
@@ -1013,84 +1016,6 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     }
 }
 
-/// An unspent transparent output belonging to the wallet, along with derivation key metadata (if
-/// available).
-#[derive(Clone, Debug)]
-#[cfg(feature = "transparent-inputs")]
-pub struct WalletUtxo {
-    wallet_output: WalletTransparentOutput,
-    recipient_key_scope: Option<TransparentKeyScope>,
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl WalletUtxo {
-    /// Constructs a new [`WalletUtxo`] from its constituent parts.
-    pub fn new(
-        wallet_output: WalletTransparentOutput,
-        recipient_key_scope: Option<TransparentKeyScope>,
-    ) -> Self {
-        Self {
-            wallet_output,
-            recipient_key_scope,
-        }
-    }
-
-    /// Returns the [`WalletTransparentOutput`] data for this UTXO.
-    pub fn wallet_output(&self) -> &WalletTransparentOutput {
-        &self.wallet_output
-    }
-
-    /// Consumes this value and returns the [`WalletTransparentOutput`] data for this UTXO.
-    pub fn into_wallet_output(self) -> WalletTransparentOutput {
-        self.wallet_output
-    }
-
-    /// Returns the [`OutPoint`] corresponding to the UTXO.
-    pub fn outpoint(&self) -> &OutPoint {
-        self.wallet_output.outpoint()
-    }
-
-    /// Returns the transaction output itself.
-    pub fn txout(&self) -> &transparent::bundle::TxOut {
-        self.wallet_output.txout()
-    }
-
-    /// Returns the height at which the UTXO was mined, if any.
-    pub fn mined_height(&self) -> Option<BlockHeight> {
-        self.wallet_output.mined_height()
-    }
-
-    /// Returns the wallet address that received the UTXO.
-    pub fn recipient_address(&self) -> &TransparentAddress {
-        self.wallet_output().recipient_address()
-    }
-
-    /// Returns the value of the UTXO
-    pub fn value(&self) -> Zatoshis {
-        self.wallet_output().value()
-    }
-
-    /// Returns the transparent key scope at which this address was derived, if known.
-    ///
-    /// This metadata MUST be returned for any transparent address derived by the wallet;
-    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
-    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
-    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
-        self.recipient_key_scope
-    }
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl zcash_primitives::transaction::fees::transparent::InputView for WalletUtxo {
-    fn outpoint(&self) -> &OutPoint {
-        self.wallet_output.outpoint()
-    }
-
-    fn coin(&self) -> &transparent::bundle::TxOut {
-        self.wallet_output.txout()
-    }
-}
-
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1181,10 +1106,14 @@ pub enum TransactionDataRequest {
     /// transparent address is requested.
     ///
     /// Fully transparent transactions, and transactions that do not contain either shielded inputs
-    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
-    /// scanning; as a consequence, the wallet must actively query to find transactions that spend
-    /// such funds. Ideally we'd be able to query by [`OutPoint`] but this is not currently
-    /// functionality that is supported by the light wallet server.
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of
+    /// out-of-order chain scanning due to race conditions related to advancing the transparent
+    /// address gap limit; as a consequence, the wallet must actively query to find transactions
+    /// that spend such funds. Ideally we'd be able to query by [`OutPoint`] but this is not
+    /// currently functionality that is supported by the light wallet server; for full-node wallets
+    /// or other arrangements that allow privacy-preserving retrieval of individually identifying
+    /// information such as backends that support private information retrieval (PIR) consider
+    /// enabling the `spend-index` feature.
     ///
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by detecting transactions involving the specified address within the provided block
@@ -1195,6 +1124,29 @@ pub enum TransactionDataRequest {
     /// `block_end_height - 1` as the `as_of_height` argument.
     #[cfg(feature = "transparent-inputs")]
     TransactionsInvolvingAddress(TransactionsInvolvingAddress),
+    /// The main-chain transaction that spends of a specific transparent output, or confirmation
+    /// that the output remains unspent, is requested.
+    ///
+    /// When the `spend-index` feature is enabled, `GetSpendingTx` requests will be emitted by the
+    /// backend instead of [`TransactionDataRequest::TransactionsInvolvingAddress`], in
+    /// circumstances when spentness determination is needed. This feature should only be enabled
+    /// for wallets whose chain-data source can resolve the spend of an individual outpoint
+    /// directly — for example a full node that maintains a spent-outpoint index. It avoids needing
+    /// to retrieve potentially large amounts of transaction history (in the cas of a
+    /// heavily-reused address) just to discover whether one output was spent.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should determine whether
+    /// `outpoint` has been spent on the main chain. Spentness should be taken from an
+    /// authoritative source (e.g. the node's UTXO set); the spend index is used only to identify
+    /// the spending transaction. If the output is spent, the caller should provide the spending
+    /// transaction to [`wallet::decrypt_and_store_transaction`]. If the output is confirmed
+    /// unspent as of some height, the caller should invoke
+    /// [`WalletWrite::notify_output_verified_unspent`] with that height. If the output is known to
+    /// be spent but the spending transaction cannot yet be resolved (e.g. an index is still being
+    /// built — see ZcashFoundation/zebra#10806), the caller should do nothing, so that the request
+    /// is re-issued and retried later.
+    #[cfg(feature = "spend-index")]
+    GetSpendingTx(OutPoint),
 }
 
 impl TransactionDataRequest {
@@ -1567,7 +1519,7 @@ pub trait InputSource {
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletUtxo>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -1593,7 +1545,7 @@ pub trait InputSource {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: TransparentOutputFilter,
-    ) -> Result<Vec<WalletUtxo>, Self::Error> {
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -2066,7 +2018,10 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         _outpoint: &OutPoint,
         _spendable_as_of: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<
+        Option<WalletTransparentOutput<<Self as WalletRead>::AccountId>>,
+        <Self as InputSource>::Error,
+    > {
         unimplemented!(
             "WalletTest::get_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"
         )
@@ -2345,23 +2300,23 @@ pub struct ScannedBlockCommitments {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<A> {
+pub struct ScannedBlock<AccountId> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    transactions: Vec<WalletTx<A>>,
+    transactions: Vec<WalletTx<AccountId>>,
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
 }
 
-impl<A> ScannedBlock<A> {
+impl<AccountId> ScannedBlock<AccountId> {
     /// Constructs a new `ScannedBlock`
     pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        transactions: Vec<WalletTx<A>>,
+        transactions: Vec<WalletTx<AccountId>>,
         sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
         #[cfg(feature = "orchard")] orchard: ScannedBundles<
             orchard::tree::MerkleHashOrchard,
@@ -2395,7 +2350,7 @@ impl<A> ScannedBlock<A> {
     }
 
     /// Returns the list of transactions from this block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<A>] {
+    pub fn transactions(&self) -> &[WalletTx<AccountId>] {
         &self.transactions
     }
 
@@ -2516,7 +2471,7 @@ pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
     target_height: TargetHeight,
-    account: AccountId,
+    funding_account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: Zatoshis,
     #[cfg(feature = "transparent-inputs")]
@@ -2530,7 +2485,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// - `tx`: the raw transaction data
     /// - `created`: the system time at which the transaction was created
     /// - `target_height`: the target height that was used in the construction of the transaction
-    /// - `account`: the account that spent funds in creation of the transaction
+    /// - `funding_account`: the account that spent funds in creation of the transaction
     /// - `outputs`: the outputs created by the transaction, including those sent to external
     ///   recipients which may not otherwise be recoverable
     /// - `fee_amount`: the fee value paid by the transaction
@@ -2539,7 +2494,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         tx: &'a Transaction,
         created: time::OffsetDateTime,
         target_height: TargetHeight,
-        account: AccountId,
+        funding_account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: Zatoshis,
         #[cfg(feature = "transparent-inputs")] utxos_spent: &'a [OutPoint],
@@ -2548,7 +2503,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
             tx,
             created,
             target_height,
-            account,
+            funding_account,
             outputs,
             fee_amount,
             #[cfg(feature = "transparent-inputs")]
@@ -2565,8 +2520,8 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         self.created
     }
     /// Returns the id for the account that created the outputs.
-    pub fn account_id(&self) -> &AccountId {
-        &self.account
+    pub fn funding_account(&self) -> &AccountId {
+        &self.funding_account
     }
     /// Returns the outputs of the transaction.
     pub fn outputs(&self) -> &[SentTransactionOutput<AccountId>] {
@@ -3183,7 +3138,7 @@ pub trait WalletWrite: WalletRead {
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
@@ -3241,27 +3196,47 @@ pub trait WalletWrite: WalletRead {
     /// [`truncate_to_height`]: WalletWrite::truncate_to_height
     fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error>;
 
-    /// Rewinds the wallet to at most the given block height, preserving any wallet data which has
-    /// been confirmed beyond the pruning depth.
+    /// Rewinds the wallet to the specified chain state, preserving wallet data which has been
+    /// confirmed beyond the pruning depth, and lowering the birthday height of selected accounts
+    /// to the block following the chain state.
     ///
-    /// In contrast to [`truncate_to_height`], which unconditionally deletes wallet state above
-    /// `max_height` (transaction & note data is retained, but committment trees, blocks, etc are
-    /// removed to the truncation height), this rewinds the scan queue to `max_height` but only
-    /// rewinds blocks, note commitment trees, transactions, transparent UTXO observations, and
-    /// nullifier-map entries as far back as the pruning floor (`chain_tip - (PRUNING_DEPTH - 1)`).
-    /// Data at or below that height is preserved. Because `PRUNING_DEPTH` is a property of chain
-    /// depth, the floor is derived from the wallet's view of the chain tip rather than from
-    /// `MAX(blocks.height)`.
+    /// In contrast to [`truncate_to_chain_state`], which unconditionally removes wallet state
+    /// above `chain_state.block_height()`, this rewinds the scan queue to the target height but
+    /// only rewinds blocks, note commitment trees, transactions, transparent UTXO observations,
+    /// and nullifier-map entries as far back as the implementation's pruning floor; data at or
+    /// below that floor is preserved.
     ///
-    /// The floor is clamped to an actual shard-tree checkpoint at or above the pruning floor so
-    /// that the underlying truncation has a real checkpoint to truncate to under non-contiguous
-    /// scan orders.
+    /// `reset_account_birthdays` selects which accounts (if any) may have their birthday
+    /// metadata lowered as a result of this rewind. The semantics are:
     ///
-    /// Returns the actual scan-queue rewind height (`max_height` clamped to the max scanned height
-    /// when `max_height` is above it).
+    /// - Every account in `reset_account_birthdays` has its birthday metadata updated to
+    ///   `chain_state.block_height() + 1` (with corresponding tree sizes taken from
+    ///   `chain_state`) if and only if the new birthday is less than the account's existing
+    ///   birthday. Existing birthdays are never raised by this method.
+    /// - Accounts that are *not* in `reset_account_birthdays` are never modified, regardless of
+    ///   the rewind target. Note that this only governs per-account birthday metadata:
+    ///   rescanning of blocks that re-enter the scan queue applies to *all* accounts in the
+    ///   wallet, since scanning is performed against all viewing keys.
+    /// - If `reset_account_birthdays` is empty and *every* account in the wallet has a birthday
+    ///   greater than `chain_state.block_height() + 1` (the value to which a reset birthday
+    ///   would be lowered), this method returns [`RewindError::RewindBeyondBirthdays`] and no
+    ///   other state is modified. So long as at least one account in the wallet already has a
+    ///   birthday at or below `chain_state.block_height() + 1`, this error is not returned —
+    ///   such an account already provides the wallet with an anchor at or below the new
+    ///   birthday floor, so no reset is required. The reported map contains every account in
+    ///   the wallet along with its existing birthday height; the caller may re-invoke the
+    ///   method with any subset of those accounts included in `reset_account_birthdays`.
     ///
-    /// [`truncate_to_height`]: WalletWrite::truncate_to_height
-    fn rewind_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
+    /// Implementations may also return an [`Err`] (typically via [`RewindError::DataSource`])
+    /// if `reset_account_birthdays` contains identifiers that do not correspond to accounts in
+    /// the wallet.
+    ///
+    /// [`truncate_to_chain_state`]: WalletWrite::truncate_to_chain_state
+    fn rewind_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+        reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>>;
 
     /// Reserves the next `n` available ephemeral addresses for the given account.
     /// This cannot be undone, so as far as possible, errors associated with transaction
@@ -3356,6 +3331,25 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<(), Self::Error> {
         unimplemented!(
             "WalletWrite::notify_address_checked must be overridden for wallets to use the `transparent-inputs` feature"
+        )
+    }
+
+    /// Notifies the wallet backend that a specific transparent output was confirmed unspent as of
+    /// the given height, in response to a [`TransactionDataRequest::GetSpendingTx`]
+    /// request.
+    ///
+    /// # Arguments
+    /// - `outpoint`: the transparent outpoint whose spend status was checked.
+    /// - `as_of_height`: the maximum height among blocks that were inspected, and through which
+    ///   the outpoint is confirmed to remain unspent.
+    #[cfg(feature = "spend-index")]
+    fn notify_output_verified_unspent(
+        &mut self,
+        _outpoint: OutPoint,
+        _as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        unimplemented!(
+            "WalletWrite::notify_output_verified_unspent must be overridden for wallets to use the `spend-index` feature"
         )
     }
 }
