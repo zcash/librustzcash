@@ -874,10 +874,10 @@ where
             0
         };
         orchard_fees::transactional_action_count(
-            // Preserve the legacy Orchard action-count estimate here. If this
-            // path targets restrictions that disable cross-address transfers,
-            // thread the target-height-selected `BundlePoolRestrictions`
-            // through this call.
+            // Preserve the legacy Orchard action-count estimate here.
+            // FIXME: When this path needs to respect restrictions that disable
+            // cross-address transfers, thread the target-height-selected
+            // `BundlePoolRestrictions` through this call.
             crate::ANY_ORCHARD_POOL_RESTRICTIONS,
             spendable_notes.orchard.len(),
             requested_orchard_actions,
