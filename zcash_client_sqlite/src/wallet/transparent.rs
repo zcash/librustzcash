@@ -1251,81 +1251,20 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: TransparentOutputFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
-    let coinbase_only = match output_filter {
-        TransparentOutputFilter::All => 0i32,
-        TransparentOutputFilter::CoinbaseOnly => 1i32,
-    };
-
-    // This statement is re-run once per source address when shielding, so it is prepared via
-    // `prepare_cached` to avoid recompiling it on each call. The address is matched against
-    // `addresses.cached_transparent_receiver_address` (rather than the denormalized
-    // `transparent_received_outputs.address`) so that the lookup is served by an index on the
-    // `addresses` table and joined to the outputs via `idx_transparent_received_outputs_address`,
-    // instead of scanning the full `transparent_received_outputs` table.
-    let mut stmt_utxos = conn.prepare_cached(&format!(
-        "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, addresses.key_scope,
-                accounts.uuid AS account_uuid,
-                u.transaction_id AS creating_tx_id,
-                addresses.imported_transparent_receiver_script,
-                t.mined_height AS received_height
-         FROM transparent_received_outputs u
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         JOIN accounts ON accounts.id = u.account_id
-         JOIN addresses ON addresses.id = u.address_id
-         WHERE addresses.cached_transparent_receiver_address = :address
-         AND u.value_zat > :min_value
-         AND ({}) -- the transaction is mined or unexpired with minconf 0
-         AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives",
-        tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        excluding_immature_coinbase_outputs("t"),
-    ))?;
-
-    let addr_str = address.encode(params);
-
-    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
-    // is enabled, we set the minimum number of confirmations to zero.
-    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
-        0u32
-    } else {
-        u32::from(confirmations_policy.untrusted())
-    };
-
-    let mut rows = stmt_utxos.query(named_params![
-        ":address": addr_str,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-        ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_only": coinbase_only,
-    ])?;
-
-    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
-    while let Some(row) = rows.next()? {
-        let mut output = to_unspent_transparent_output(conn, row)?;
-
-        // If the address has a redeem script, compute the known input size for fee
-        // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
-            row.get("imported_transparent_receiver_script")?;
-        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes {
-            if let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes)) {
-                if let Some(input_size) =
-                    transparent::builder::p2sh_input_serialized_len(&from_chain)
-                {
-                    output = output.with_known_input_size(input_size);
-                }
-            }
-        }
-
-        utxos.push(output);
-    }
-
-    Ok(utxos)
+    // Defer to the batched query with a singleton address set, so that there is a single query
+    // body to maintain. `transparent_received_outputs.address` is always equal to the
+    // `cached_transparent_receiver_address` of the joined `addresses` row (both are written from
+    // the same recipient address on insert, and the gap-limit migration backfilled this invariant
+    // for pre-existing rows), so matching on the latter for a single address selects the same
+    // outputs as the former.
+    get_spendable_transparent_outputs_for_addresses(
+        conn,
+        params,
+        core::slice::from_ref(address),
+        target_height,
+        confirmations_policy,
+        output_filter,
+    )
 }
 
 /// Returns the list of spendable transparent outputs received by this wallet at any of the
