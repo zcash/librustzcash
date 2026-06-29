@@ -28,8 +28,9 @@ pub(crate) enum NoteVersion {
 /// using an Orchard-equivalent flag format.
 ///
 /// PCZT v1 serializes Orchard flags with bits 2..=7 reserved and only supports
-/// V2 Orchard note plaintexts. The selected `BundlePoolRestrictions` value names
-/// that flag format; it is not an NU6.2 network-height assumption.
+/// Orchard note plaintexts (which always use lead byte 0x02). The selected
+/// `BundlePoolRestrictions` value names that flag format; it is not an NU6.2
+/// network-height assumption.
 #[cfg(feature = "orchard")]
 pub(crate) const ANY_ORCHARD_POOL_RESTRICTIONS: BundlePoolRestrictions =
     BundlePoolRestrictions::OrchardNu6_2Only;
