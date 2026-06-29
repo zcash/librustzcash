@@ -428,7 +428,7 @@ pub mod testing {
     /// Rebuilds an Orchard bundle with the cross-address flag cleared (preserving
     /// its spends/outputs flags) so it is valid under the Orchard v6 pool
     /// restriction `OrchardNu6_3Onward`.
-    fn with_cross_address_disabled(
+    pub(crate) fn with_cross_address_disabled(
         bundle: Bundle<Authorized, ZatBalance>,
     ) -> Bundle<Authorized, ZatBalance> {
         use ::orchard::bundle::{BundlePoolRestrictions, Flags, ProofSizeEnforcement};
