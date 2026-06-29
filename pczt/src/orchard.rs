@@ -518,17 +518,13 @@ pub(crate) mod v2 {
     /// PCZT fields that are specific to producing the transaction's Orchard bundle.
     #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
     pub struct Bundle {
-        #[getset(get = "pub")]
-        pub(crate) actions: Vec<v1::Action>,
-        #[getset(get = "pub")]
-        pub(crate) flags: u8,
-        #[getset(get = "pub")]
-        pub(crate) value_sum: (u64, bool),
-        #[getset(get = "pub")]
-        pub(crate) anchor: [u8; 32],
+        actions: Vec<v1::Action>,
+        flags: u8,
+        value_sum: (u64, bool),
+        anchor: [u8; 32],
         note_version: SerializedNoteVersion,
-        pub(crate) zkproof: Option<Vec<u8>>,
-        pub(crate) bsk: Option<[u8; 32]>,
+        zkproof: Option<Vec<u8>>,
+        bsk: Option<[u8; 32]>,
     }
 
     impl TryFrom<super::Bundle> for Bundle {
