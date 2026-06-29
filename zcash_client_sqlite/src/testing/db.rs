@@ -113,6 +113,14 @@ impl TestDb {
         self.data_file
     }
 
+    /// Returns the path to the on-disk SQLite file backing this database.
+    ///
+    /// This allows an external consumer (for example, a downstream wallet under test) to open
+    /// its own connection to the same funded wallet database.
+    pub fn path(&self) -> &std::path::Path {
+        self.data_file.path()
+    }
+
     /// Dump the schema and contents of the given database table, in
     /// sqlite3 ".dump" format. The name of the table must be a static
     /// string. This assumes that `sqlite3` is on your path and that it
