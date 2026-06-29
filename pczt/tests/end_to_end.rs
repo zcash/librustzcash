@@ -589,10 +589,12 @@ fn orchard_to_orchard() {
     let value = orchard::value::NoteValue::from_raw(1_000_000);
     let note = {
         let mut orchard_builder = orchard::builder::Builder::new(
-            orchard::bundle::BundleVersion::orchard_v1(),
             orchard::builder::BundleType::DEFAULT,
+            orchard::bundle::BundleVersion::orchard_v1(),
+            orchard::bundle::BundleVersion::orchard_v1().default_flags(),
             orchard::Anchor::empty_tree(),
-        );
+        )
+        .unwrap();
         orchard_builder
             .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
             .unwrap();

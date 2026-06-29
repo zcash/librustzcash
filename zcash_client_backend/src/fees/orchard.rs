@@ -11,7 +11,7 @@ pub(crate) fn transactional_action_count(
     num_spends: usize,
     num_outputs: usize,
 ) -> Result<usize, &'static str> {
-    BundleType::DEFAULT.num_actions(num_spends, num_outputs, bundle_version)
+    BundleType::DEFAULT.num_actions(bundle_version.default_flags(), num_spends, num_outputs)
 }
 
 /// A trait that provides a minimized view of Orchard-style bundle configuration

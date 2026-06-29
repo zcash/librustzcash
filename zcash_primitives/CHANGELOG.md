@@ -33,12 +33,15 @@ workspace.
   implementations can distinguish Orchard commitments by transaction format.
 - `TransactionDigest::digest_sapling` now receives `TxVersion`, so digest
   implementations can distinguish Sapling commitments by transaction format.
-- Updated the `orchard` dependency to the `feat/ironwood` revision `30c4ea2`,
-  which restricts cross-address transfers to the Ironwood pool (an Orchard v6
-  bundle can no longer set the cross-address flag) and renames the pool selector
-  to `BundlePoolRestrictions`. The v6 bundle (de)serialization helpers
-  `zcash_primitives::transaction::components::orchard::{read_v6_bundle,
-  write_v6_bundle, read_flags}` now take a `BundlePoolRestrictions` argument.
+- Updated the `orchard` dependency to the `feat/ironwood` revision `cbb6ed1`,
+  which gives every `Bundle` an explicit `BundleVersion` (distinguishing value
+  pool, protocol version, and bundle version) and lifts `Flags` out of
+  `BundleType`. Cross-address transfers are restricted to the Ironwood pool (an
+  Orchard v6 bundle can no longer set the cross-address flag). The bundle
+  (de)serialization helpers
+  `zcash_primitives::transaction::components::orchard::{read_v5_bundle,
+  read_v6_bundle, read_flags}` now take a `BundleVersion` argument, while
+  `write_v6_bundle` derives the version from the bundle.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

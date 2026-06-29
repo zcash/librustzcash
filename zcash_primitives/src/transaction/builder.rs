@@ -252,21 +252,30 @@ impl BuildConfig {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor.as_ref().map(|a| {
                 orchard::builder::Builder::new(
-                    bundle_version,
                     orchard::builder::BundleType::DEFAULT,
+                    bundle_version,
+                    bundle_version.default_flags(),
                     *a,
                 )
+                .expect("the default flags are always representable for a transactional bundle")
             }),
             BuildConfig::Coinbase { .. }
                 if bundle_version == orchard::bundle::BundleVersion::orchard_v2() =>
             {
                 None
             }
-            BuildConfig::Coinbase { .. } => Some(orchard::builder::Builder::new(
-                bundle_version,
-                orchard::builder::BundleType::Coinbase,
-                orchard::Anchor::empty_tree(),
-            )),
+            BuildConfig::Coinbase { .. } => Some(
+                orchard::builder::Builder::new(
+                    orchard::builder::BundleType::Coinbase,
+                    bundle_version,
+                    // Coinbase transactions have `enableSpends = 0`. Every pool for which a
+                    // coinbase Orchard bundle is built (Orchard pre-NU6.3 and Ironwood) permits
+                    // cross-address transfers, so the spends-disabled flag set is representable.
+                    orchard::bundle::Flags::SPENDS_DISABLED,
+                    orchard::Anchor::empty_tree(),
+                )
+                .expect("spends-disabled flags are valid for a non-Orchard coinbase bundle"),
+            ),
         }
     }
 
@@ -288,13 +297,22 @@ fn orchard_action_count(
         .checked_add(builder.changes().len())
         .ok_or("num_outputs + num_changes overflowed")?;
 
-    let bundle_type = if is_coinbase {
-        orchard::builder::BundleType::Coinbase
+    // The flags must match those the builder constructs for each configuration (see
+    // `orchard_builder`). For a `Coinbase` bundle `num_actions` ignores the flags, but supplying
+    // the matching set keeps the two paths consistent.
+    let (bundle_type, flags) = if is_coinbase {
+        (
+            orchard::builder::BundleType::Coinbase,
+            orchard::bundle::Flags::SPENDS_DISABLED,
+        )
     } else {
-        orchard::builder::BundleType::DEFAULT
+        (
+            orchard::builder::BundleType::DEFAULT,
+            bundle_version.default_flags(),
+        )
     };
 
-    bundle_type.num_actions(num_spends, num_outputs, bundle_version)
+    bundle_type.num_actions(flags, num_spends, num_outputs)
 }
 
 fn orchard_bundle_version_for_branch(
@@ -1328,10 +1346,12 @@ mod tests {
         );
         let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
         let mut builder = orchard::builder::Builder::new(
-            orchard::bundle::BundleVersion::orchard_v2(),
             orchard::builder::BundleType::DEFAULT,
+            orchard::bundle::BundleVersion::orchard_v2(),
+            orchard::bundle::BundleVersion::orchard_v2().default_flags(),
             orchard::Anchor::empty_tree(),
-        );
+        )
+        .unwrap();
 
         builder
             .add_change_output(
