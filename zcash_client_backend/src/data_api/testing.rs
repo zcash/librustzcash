@@ -1522,6 +1522,7 @@ pub struct TestBuilder<Cache, DataStoreFactory> {
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
+    seed: Secret<Vec<u8>>,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: Option<GapLimits>,
 }
@@ -1555,6 +1556,7 @@ impl TestBuilder<(), ()> {
             initial_chain_state: None,
             account_birthday: None,
             account_index: None,
+            seed: Secret::new(vec![0u8; 32]),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: None,
         }
@@ -1578,6 +1580,7 @@ impl<A> TestBuilder<(), A> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            seed: self.seed,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         }
@@ -1598,6 +1601,7 @@ impl<A> TestBuilder<A, ()> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            seed: self.seed,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         }
@@ -1615,6 +1619,7 @@ impl<A, B> TestBuilder<A, B> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            seed: self.seed,
             gap_limits: Some(gap_limits),
         }
     }
@@ -1765,6 +1770,16 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     /// # Panics
     ///
     /// - Must not be called twice.
+    /// Sets the seed used to derive the test account, replacing the default all-zeros
+    /// seed.
+    ///
+    /// Use this when a downstream consumer must reproduce the account's keys from a
+    /// BIP 39 mnemonic seed it controls.
+    pub fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
+        self.seed = seed;
+        self
+    }
+
     pub fn set_account_index(mut self, index: zip32::AccountId) -> Self {
         assert!(self.account_index.is_none());
         self.account_index = Some(index);
@@ -1837,7 +1852,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
         };
 
         let test_account = self.account_birthday.map(|birthday| {
-            let seed = Secret::new(vec![0u8; 32]);
+            let seed = self.seed;
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
