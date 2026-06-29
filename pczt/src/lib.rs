@@ -257,8 +257,9 @@ pub mod v2 {
         fn empty_bundles_encode_as_none_and_decode_as_empty() {
             // Zero anchors: the shielded bundles carry no anchor and no
             // spends/actions, so they are fully empty and omitted.
-            let pczt =
-                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
+            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+                .unwrap()
+                .build();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -288,8 +289,9 @@ pub mod v2 {
             // A Sapling/Orchard bundle with a non-empty anchor differs from its
             // empty form, so it must not be omitted even with no spends/actions,
             // and the anchor must survive the v2 round-trip.
-            let pczt =
-                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32]).build();
+            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32])
+                .unwrap()
+                .build();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -305,8 +307,9 @@ pub mod v2 {
 
         #[test]
         fn orchard_flags_and_note_version_do_not_prevent_omission() {
-            let mut pczt =
-                Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
+            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+                .unwrap()
+                .build();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
