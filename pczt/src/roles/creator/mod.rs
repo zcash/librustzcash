@@ -10,6 +10,7 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
+    orchard::{Bundle as OrchardBundle, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED},
 };
 
 use zcash_protocol::consensus::BranchId;
@@ -19,8 +20,6 @@ use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
     | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
     | FLAG_SHIELDED_MODIFIABLE;
-
-const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
 /// Errors that can occur when creating a PCZT.
 #[derive(Debug)]
@@ -67,7 +66,6 @@ fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::Bu
         _ => BundleVersion::orchard_insecure_v1(),
     }
 }
-
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
@@ -169,7 +167,7 @@ impl Creator {
                 anchor: self.sapling_anchor,
                 bsk: None,
             },
-            orchard: crate::orchard::Bundle {
+            orchard: OrchardBundle {
                 actions: vec![],
                 flags: self.orchard_flags,
                 value_sum: (0, true),
@@ -179,6 +177,16 @@ impl Creator {
                 note_version: self.orchard_bundle_version.note_version(),
                 #[cfg(not(feature = "orchard"))]
                 note_version: crate::orchard::NoteVersion::V2,
+                zkproof: None,
+                bsk: None,
+            },
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood: OrchardBundle {
+                actions: vec![],
+                flags: self.orchard_flags,
+                value_sum: (0, true),
+                anchor: self.orchard_anchor,
+                note_version: NoteVersion::V3,
                 zkproof: None,
                 bsk: None,
             },
@@ -252,16 +260,26 @@ impl Creator {
                 }),
             orchard: parts
                 .orchard
-                .map(crate::orchard::Bundle::serialize_from)
-                .unwrap_or_else(|| crate::orchard::Bundle {
+                .map(OrchardBundle::serialize_from)
+                .unwrap_or_else(|| OrchardBundle {
                     actions: vec![],
                     flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
                     value_sum: (0, true),
                     anchor: orchard::Anchor::empty_tree().to_bytes(),
-                    note_version: crate::orchard::NoteVersion::V2,
+                    note_version: NoteVersion::V2,
                     zkproof: None,
                     bsk: None,
                 }),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood: OrchardBundle {
+                actions: vec![],
+                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                value_sum: (0, true),
+                anchor: orchard::Anchor::empty_tree().to_bytes(),
+                note_version: NoteVersion::V3,
+                zkproof: None,
+                bsk: None,
+            },
         })
     }
 }

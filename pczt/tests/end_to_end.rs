@@ -15,7 +15,7 @@ use pczt::{
         signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
         updater::Updater,
     },
-    v1,
+    v1, v2,
 };
 use rand_core::OsRng;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
@@ -44,13 +44,18 @@ fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
 }
 
 fn check_round_trip(pczt: &Pczt) {
-    // The default encoding is the v1 encoding.
-    let v1_encoded = v1::Pczt::try_from(pczt.clone())
+    // The v1 encoding remains available explicitly.
+    v1::Pczt::try_from(pczt.clone())
         .expect("v1 encoding succeeds")
         .serialize();
 
+    // The default encoding is the latest (v2) encoding.
+    let v2_encoded = v2::Pczt::try_from(pczt.clone())
+        .expect("v2 encoding succeeds")
+        .serialize();
+
     let encoded = pczt.clone().serialize().expect("serialization succeeds");
-    assert_eq!(encoded, v1_encoded);
+    assert_eq!(encoded, v2_encoded);
 
     let reencoded = Pczt::parse(&encoded)
         .expect("can parse encoded PCZT")

@@ -48,6 +48,8 @@ impl IoFinalizer {
             transparent,
             mut sapling,
             mut orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
             tx_data,
         } = pczt.extract_tx_data(
             |t| {
@@ -80,6 +82,8 @@ impl IoFinalizer {
             transparent: crate::transparent::Bundle::serialize_from(transparent),
             sapling: crate::sapling::Bundle::serialize_from(sapling),
             orchard: crate::orchard::Bundle::serialize_from(orchard),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         })
     }
 }

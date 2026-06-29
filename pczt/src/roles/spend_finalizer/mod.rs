@@ -21,6 +21,8 @@ impl SpendFinalizer {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         } = self.pczt;
 
         let mut transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
@@ -34,6 +36,8 @@ impl SpendFinalizer {
             transparent: crate::transparent::Bundle::serialize_from(transparent),
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         })
     }
 }

@@ -43,6 +43,8 @@ impl Updater {
             transparent,
             sapling,
             orchard,
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            ironwood,
         } = self.pczt;
 
         f(GlobalUpdater(&mut global));
@@ -53,6 +55,8 @@ impl Updater {
                 transparent,
                 sapling,
                 orchard,
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood,
             },
         }
     }

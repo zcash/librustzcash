@@ -22,10 +22,11 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NoteVersion {
     V2,
+    V3,
 }
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Bundle {
     /// The Orchard actions in this bundle.
     ///
@@ -75,8 +76,13 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
+/// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
+/// 1). This is the value the Creator sets on a new bundle, and the flag value of
+/// an empty bundle for serialization purposes.
+pub(crate) const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
+
 /// Information about an Orchard action within a transaction.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Action {
     //
     // Action effecting data.
@@ -104,7 +110,7 @@ pub struct Action {
 }
 
 /// Information about the spend part of an Orchard action.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Spend {
     //
     // Spend-specific Action effecting data.
@@ -190,7 +196,7 @@ pub struct Spend {
 }
 
 /// Information about the output part of an Orchard action.
-#[derive(Clone, Debug, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Output {
     //
     // Output-specific Action effecting data.
@@ -292,7 +298,7 @@ pub mod v1 {
 
     /// Information about an Orchard action within a transaction.
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Action {
+    pub(crate) struct Action {
         cv_net: [u8; 32],
         spend: Spend,
         output: Output,
@@ -302,7 +308,7 @@ pub mod v1 {
     /// Information about the spend part of an Orchard action.
     #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Spend {
+    pub(crate) struct Spend {
         nullifier: [u8; 32],
         rk: [u8; 32],
         #[serde_as(as = "Option<[_; 64]>")]
@@ -324,7 +330,7 @@ pub mod v1 {
     /// Information about the output part of an Orchard action.
     #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
-    struct Output {
+    pub(crate) struct Output {
         cmx: [u8; 32],
         ephemeral_key: [u8; 32],
         enc_ciphertext: Vec<u8>,
@@ -471,6 +477,130 @@ pub mod v1 {
                 user_address: output.user_address,
                 proprietary: output.proprietary,
             }
+        }
+    }
+}
+
+/// Types for the v2 Orchard PCZT encoding.
+pub(crate) mod v2 {
+    use alloc::vec::Vec;
+
+    use getset::Getters;
+    use serde::{Deserialize, Serialize};
+
+    use super::{NoteVersion, v1};
+
+    /// A serializable representation of Orchard note plaintext versions.
+    #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+    enum SerializedNoteVersion {
+        V2,
+        V3,
+    }
+
+    impl From<NoteVersion> for SerializedNoteVersion {
+        fn from(note_version: NoteVersion) -> Self {
+            match note_version {
+                NoteVersion::V2 => Self::V2,
+                NoteVersion::V3 => Self::V3,
+            }
+        }
+    }
+
+    impl From<SerializedNoteVersion> for NoteVersion {
+        fn from(note_version: SerializedNoteVersion) -> Self {
+            match note_version {
+                SerializedNoteVersion::V2 => Self::V2,
+                SerializedNoteVersion::V3 => Self::V3,
+            }
+        }
+    }
+
+    /// PCZT fields that are specific to producing the transaction's Orchard bundle.
+    #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+    pub struct Bundle {
+        actions: Vec<v1::Action>,
+        flags: u8,
+        value_sum: (u64, bool),
+        anchor: [u8; 32],
+        note_version: SerializedNoteVersion,
+        zkproof: Option<Vec<u8>>,
+        bsk: Option<[u8; 32]>,
+    }
+
+    impl TryFrom<super::Bundle> for Bundle {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            Ok(Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(v1::Action::from)
+                    .collect::<Vec<_>>(),
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                note_version: bundle.note_version.into(),
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
+            })
+        }
+    }
+
+    impl From<Bundle> for super::Bundle {
+        fn from(bundle: Bundle) -> Self {
+            Self {
+                actions: bundle
+                    .actions
+                    .into_iter()
+                    .map(super::Action::from)
+                    .collect(),
+                flags: bundle.flags,
+                value_sum: bundle.value_sum,
+                anchor: bundle.anchor,
+                note_version: bundle.note_version.into(),
+                zkproof: bundle.zkproof,
+                bsk: bundle.bsk,
+            }
+        }
+    }
+
+    /// The canonical empty Orchard bundle reconstructed for omitted v2 bundles.
+    pub(crate) const EMPTY_BUNDLE: super::Bundle = super::Bundle {
+        actions: Vec::new(),
+        flags: super::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+        value_sum: (0, true),
+        anchor: [0; 32],
+        note_version: NoteVersion::V2,
+        zkproof: None,
+        bsk: None,
+    };
+
+    /// Whether `bundle` can be omitted from the v2 encoding.
+    ///
+    /// We check that actions, value sum, anchor, zkproof, and bsk are all
+    /// equal to the empty bundle. We do not check note version or flags, as
+    /// values can be defaulted there.
+    fn is_empty(bundle: &super::Bundle) -> bool {
+        bundle.actions == EMPTY_BUNDLE.actions
+            && bundle.value_sum == EMPTY_BUNDLE.value_sum
+            && bundle.anchor == EMPTY_BUNDLE.anchor
+            && bundle.zkproof == EMPTY_BUNDLE.zkproof
+            && bundle.bsk == EMPTY_BUNDLE.bsk
+    }
+
+    /// Encodes a logical Orchard bundle for the v2 PCZT format, owning the
+    /// decision of whether the bundle can be omitted. An [empty](is_empty) bundle
+    /// serializes to `None` and is dropped from the encoding; any other bundle is
+    /// converted via the [`Bundle`]-producing [`TryFrom`] impl. The reverse
+    /// direction is [`From<Bundle>`] plus [`EMPTY_BUNDLE`] for the omitted case.
+    impl TryFrom<super::Bundle> for Option<Bundle> {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            (!is_empty(&bundle))
+                .then(|| Bundle::try_from(bundle))
+                .transpose()
         }
     }
 }
