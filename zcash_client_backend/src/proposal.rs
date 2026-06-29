@@ -571,35 +571,36 @@ impl<NoteRef> Step<NoteRef> {
 
     /// Returns whether or not this proposal requires interaction with the specified pool.
     pub fn involves(&self, pool_type: PoolType) -> bool {
-        let input_in_this_pool = || match pool_type {
-            PoolType::Transparent => self.is_shielding || !self.transparent_inputs.is_empty(),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                self.shielded_inputs.iter().any(|s_in| {
-                    s_in.notes()
-                        .iter()
-                        .any(|note| matches!(note.note(), Note::Sapling(_)))
-                })
-            }
-            #[cfg(feature = "orchard")]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                self.shielded_inputs.iter().any(|s_in| {
-                    s_in.notes()
-                        .iter()
-                        .any(|note| matches!(note.note(), Note::Orchard(_)))
-                })
-            }
-            #[cfg(not(feature = "orchard"))]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => false,
-        };
-        let output_in_this_pool = || self.payment_pools().values().any(|pool| *pool == pool_type);
-        let change_in_this_pool = || {
-            self.balance
-                .proposed_change()
-                .iter()
-                .any(|c| c.output_pool() == pool_type)
-        };
+        self.input_in_pool(pool_type)
+            || self.output_in_pool(pool_type)
+            || self.change_in_pool(pool_type)
+    }
 
-        input_in_this_pool() || output_in_this_pool() || change_in_this_pool()
+    pub fn input_in_pool(&self, pool_type: PoolType) -> bool {
+        match pool_type {
+            PoolType::Transparent => self.is_shielding() || !self.transparent_inputs().is_empty(),
+            PoolType::SAPLING => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().protocol(), ShieldedProtocol::Sapling))
+            }),
+            PoolType::ORCHARD => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().protocol(), ShieldedProtocol::Orchard))
+            }),
+        }
+    }
+
+    pub fn output_in_pool(&self, pool_type: PoolType) -> bool {
+        self.payment_pools().values().any(|pool| *pool == pool_type)
+    }
+
+    pub fn change_in_pool(&self, pool_type: PoolType) -> bool {
+        self.balance()
+            .proposed_change()
+            .iter()
+            .any(|c| c.output_pool() == pool_type)
     }
 }
 
