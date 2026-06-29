@@ -486,52 +486,6 @@ impl TransparentSpendPolicy {
     }
 }
 
-#[cfg(feature = "transparent-inputs")]
-/// Gathers the account's spendable transparent UTXOs from each of the provided source
-/// addresses, for use as inputs to a general (non-shielding) transfer.
-///
-/// Unlike [`gather_shielding_inputs`], the source addresses here are the account's own
-/// transparent receivers (enumerated by the caller via
-/// [`WalletRead::get_transparent_receivers`]), none of which are ephemeral, so no
-/// ephemeral-linkability check is required.
-///
-/// [`WalletRead::get_transparent_receivers`]: crate::data_api::WalletRead::get_transparent_receivers
-#[allow(clippy::type_complexity)]
-fn gather_account_transparent_inputs<DbT, ChangeErrT>(
-    wallet_db: &DbT,
-    source_addrs: &[TransparentAddress],
-    target_height: TargetHeight,
-    confirmations_policy: ConfirmationsPolicy,
-) -> Result<
-    Vec<WalletTransparentOutput<()>>,
-    InputSelectorError<
-        <DbT as InputSource>::Error,
-        GreedyInputSelectorError,
-        ChangeErrT,
-        DbT::NoteRef,
-    >,
->
-where
-    DbT: InputSource,
-{
-    let mut inputs = vec![];
-    for addr in source_addrs {
-        let utxos = wallet_db
-            .get_spendable_transparent_outputs(
-                addr,
-                target_height,
-                confirmations_policy,
-                // Exclude coinbase UTXOs from general-transfer input selection;
-                // coinbase funds must be shielded first via
-                // `propose_shielding_coinbase`.
-                CoinbaseFilter::NonCoinbaseOnly,
-            )
-            .map_err(InputSelectorError::DataSource)?;
-        inputs.extend(utxos.into_iter().map(|utxo| utxo.redact_account_data()));
-    }
-    Ok(inputs)
-}
-
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
@@ -753,12 +707,22 @@ where
                     t_recvs
                 }
             };
-            gather_account_transparent_inputs(
-                wallet_db,
-                &transparent_addrs,
-                target_height,
-                confirmations_policy,
-            )?
+            // Gather the account's spendable transparent UTXOs for the selected source addresses
+            // in a single batched query. The source addresses are the account's own non-ephemeral
+            // transparent receivers, so no ephemeral-linkability check is required (unlike
+            // `gather_shielding_inputs`). Coinbase UTXOs are excluded from general-transfer input
+            // selection; coinbase funds must be shielded first via `propose_shielding_coinbase`.
+            wallet_db
+                .get_spendable_transparent_outputs_for_addresses(
+                    &transparent_addrs,
+                    target_height,
+                    confirmations_policy,
+                    CoinbaseFilter::NonCoinbaseOnly,
+                )
+                .map_err(InputSelectorError::DataSource)?
+                .into_iter()
+                .map(|utxo| utxo.redact_account_data())
+                .collect::<Vec<_>>()
         };
 
         let mut shielded_inputs = ReceivedNotes::empty();
