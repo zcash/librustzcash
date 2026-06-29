@@ -578,15 +578,40 @@ impl Note {
 
 /// A note that was received by the wallet, along with contextual information about the output that
 /// generated the note and the key that is required to spend it.
+///
+/// # Type Parameters
+/// * `NoteRef` — A backend-specific note identifier that uniquely identifies the note within the
+///   wallet's data store. Examples include [`ReceivedNoteId`] (a tuple of [`ShieldedProtocol`]
+///   and `i64`) in the SQLite backend, or `u32` in test backends.
+/// * `NoteT` — The note data type, such as [`sapling::Note`] or [`Note::Orchard`], representing
+///   the cryptographic note contents.
+///
+/// [`ReceivedNoteId`]: https://docs.rs/zcash_client_sqlite/latest/zcash_client_sqlite/struct.ReceivedNoteId.html
 #[derive(Clone, PartialEq, Eq)]
 pub struct ReceivedNote<NoteRef, NoteT> {
+    /// The storage backend's internal identifier for the note.
     note_id: NoteRef,
+    /// The transaction ID of the transaction that created the note.
     txid: TxId,
+    /// The index of the note within the transaction's shielded outputs, as determined
+    /// by the note's shielded protocol.
     output_index: u16,
+    /// The cryptographic note data.
     note: NoteT,
+    /// The [`Scope`] of the spending key required to make spend authorizing signatures
+    /// for the note.
     spending_key_scope: Scope,
+    /// The position of the note in the note commitment tree.
     note_commitment_tree_position: Position,
+    /// The block height at which the transaction that produced the note was mined,
+    /// or `None` if the transaction is unmined.
     mined_height: Option<BlockHeight>,
+    /// The maximum block height among those at which transparent inputs to the transaction
+    /// that produced the note were created, considering only transparent inputs that belong to the
+    /// same wallet account as the note. This height is used in determining the effective number of
+    /// confirmations for externally-received value. See [`ZIP 315`] for additional information.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315
     max_shielding_input_height: Option<BlockHeight>,
 }
 

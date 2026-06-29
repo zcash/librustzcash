@@ -404,12 +404,23 @@ impl StepOutput {
 /// The inputs to be consumed and outputs to be produced in a proposed transaction.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Step<NoteRef> {
+    /// The ZIP 321 transaction request describing the payments to be made.
     transaction_request: TransactionRequest,
+    /// A map from payment index to the pool type that has been selected
+    /// for the output that will fulfill that payment.
     payment_pools: BTreeMap<usize, PoolType>,
+    /// The transparent inputs that have been selected to fund the transaction.
     transparent_inputs: Vec<WalletTransparentOutput<()>>,
+    /// The shielded inputs that have been selected to fund the transaction.
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+    /// The inputs that should be obtained from the outputs of the transaction
+    /// created to satisfy a previous step of the proposal.
     prior_step_inputs: Vec<StepOutput>,
+    /// The change outputs to be added to the transaction and the fee to be paid.
     balance: TransactionBalance,
+    /// A flag indicating whether or not the proposed transaction
+    /// is exclusively wallet-internal (if it does not involve any external
+    /// recipients).
     is_shielding: bool,
 }
 
