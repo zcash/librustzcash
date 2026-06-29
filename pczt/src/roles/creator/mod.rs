@@ -12,6 +12,7 @@ use crate::{
     },
 };
 
+use zcash_protocol::consensus::BranchId;
 use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 /// Initial flags allowing any modification.
@@ -21,6 +22,52 @@ const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
 
 const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
+/// Errors that can occur when creating a PCZT.
+#[derive(Debug)]
+pub enum Error {
+    /// The consensus branch ID does not correspond to any known network upgrade.
+    UnknownConsensusBranchId,
+    /// The network upgrade for the consensus branch ID predates the v5
+    /// transaction format, so it cannot be used to create a PCZT.
+    UnsupportedConsensusBranchId,
+    /// The requested Orchard flags cannot be represented under the Orchard bundle
+    /// version implied by the consensus branch ID.
+    #[cfg(feature = "orchard")]
+    UnrepresentableOrchardFlags,
+}
+
+/// Returns the network upgrade for `consensus_branch_id`, rejecting unrecognized
+/// branch IDs and any upgrade that predates the v5 transaction format.
+fn consensus_branch_id_for_pczt(consensus_branch_id: u32) -> Result<BranchId, Error> {
+    match BranchId::try_from(consensus_branch_id).map_err(|_| Error::UnknownConsensusBranchId)? {
+        BranchId::Sprout
+        | BranchId::Overwinter
+        | BranchId::Sapling
+        | BranchId::Blossom
+        | BranchId::Heartwood
+        | BranchId::Canopy => Err(Error::UnsupportedConsensusBranchId),
+        branch_id => Ok(branch_id),
+    }
+}
+
+/// Returns the Orchard bundle version used by the Orchard pool of the given
+/// (v5-or-later) network upgrade.
+#[cfg(feature = "orchard")]
+fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::BundleVersion {
+    use orchard::bundle::BundleVersion;
+
+    match branch_id {
+        BranchId::Nu6_2 => BundleVersion::orchard_v2(),
+        #[cfg(zcash_unstable = "nu6.3")]
+        BranchId::Nu6_3 => BundleVersion::orchard_v3(),
+        #[cfg(zcash_unstable = "nu7")]
+        BranchId::Nu7 => BundleVersion::orchard_v3(),
+        // NU5, NU6, and NU6.1 use the original (pre-NU6.2) Orchard pool; pre-NU5
+        // branches are rejected before reaching here.
+        _ => BundleVersion::orchard_insecure_v1(),
+    }
+}
+
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
@@ -29,20 +76,34 @@ pub struct Creator {
     expiry_height: u32,
     coin_type: u32,
     orchard_flags: u8,
-    orchard_note_version: crate::orchard::NoteVersion,
+    #[cfg(feature = "orchard")]
+    orchard_bundle_version: orchard::bundle::BundleVersion,
     sapling_anchor: [u8; 32],
     orchard_anchor: [u8; 32],
 }
 
 impl Creator {
+    /// Creates a new PCZT for the given consensus branch ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownConsensusBranchId`] if `consensus_branch_id` is not
+    /// a recognized branch ID, or [`Error::UnsupportedConsensusBranchId`] if it
+    /// predates the v5 transaction format.
     pub fn new(
         consensus_branch_id: u32,
         expiry_height: u32,
         coin_type: u32,
         sapling_anchor: [u8; 32],
         orchard_anchor: [u8; 32],
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        #[cfg_attr(not(feature = "orchard"), allow(unused_variables))]
+        let branch_id = consensus_branch_id_for_pczt(consensus_branch_id)?;
+
+        #[cfg(feature = "orchard")]
+        let orchard_bundle_version = orchard_bundle_version_for_branch(branch_id);
+
+        Ok(Self {
             // Default to v5 transaction format.
             tx_version: V5_TX_VERSION,
             version_group_id: V5_VERSION_GROUP_ID,
@@ -51,10 +112,11 @@ impl Creator {
             expiry_height,
             coin_type,
             orchard_flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-            orchard_note_version: crate::orchard::NoteVersion::V2,
+            #[cfg(feature = "orchard")]
+            orchard_bundle_version,
             sapling_anchor,
             orchard_anchor,
-        }
+        })
     }
 
     pub fn with_fallback_lock_time(mut self, fallback: u32) -> Self {
@@ -62,26 +124,25 @@ impl Creator {
         self
     }
 
-    /// Selects the Orchard bundle version and flags for the PCZT.
+    /// Sets the Orchard flags for the PCZT.
     ///
-    /// The version fixes both the note-plaintext version and the flag-byte format, and the flags
-    /// are encoded under it immediately.
+    /// The flags are validated against, and encoded under, the Orchard bundle
+    /// version implied by the consensus branch ID passed to [`Creator::new`]
+    /// (which also fixes the note-plaintext version).
     ///
     /// # Errors
     ///
-    /// Returns [`orchard::bundle::BundleError::UnrepresentableFlags`] if `flags` cannot be encoded
-    /// under `bundle_version` (e.g. cross-address-enabled flags under a post-NU6.3 Orchard
-    /// version).
+    /// Returns [`Error::UnrepresentableOrchardFlags`] if `flags` cannot be encoded
+    /// under that bundle version (e.g. cross-address-enabled flags under a
+    /// post-NU6.3 Orchard version).
     #[cfg(feature = "orchard")]
-    pub fn with_orchard_bundle_version(
+    pub fn with_orchard_flags(
         mut self,
-        bundle_version: orchard::bundle::BundleVersion,
-        flags: orchard::bundle::Flags,
-    ) -> Result<Self, orchard::bundle::BundleError> {
-        self.orchard_flags = flags
-            .to_byte(bundle_version)
-            .ok_or(orchard::bundle::BundleError::UnrepresentableFlags)?;
-        self.orchard_note_version = bundle_version.note_version();
+        orchard_flags: orchard::bundle::Flags,
+    ) -> Result<Self, Error> {
+        self.orchard_flags = orchard_flags
+            .to_byte(self.orchard_bundle_version)
+            .ok_or(Error::UnrepresentableOrchardFlags)?;
         Ok(self)
     }
 
@@ -113,7 +174,11 @@ impl Creator {
                 flags: self.orchard_flags,
                 value_sum: (0, true),
                 anchor: self.orchard_anchor,
-                note_version: self.orchard_note_version,
+                // The note-plaintext version is determined by the Orchard bundle version.
+                #[cfg(feature = "orchard")]
+                note_version: self.orchard_bundle_version.note_version(),
+                #[cfg(not(feature = "orchard"))]
+                note_version: crate::orchard::NoteVersion::V2,
                 zkproof: None,
                 bsk: None,
             },
