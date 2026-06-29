@@ -77,7 +77,7 @@ fn read_bundle<R: Read>(
         // `try_from_parts` rejects a proof whose length is not the canonical size for the number
         // of actions, preventing a proof padded with arbitrary data (GHSA-2x4w-pxqw-58v9). Proof
         // size is enforced for every version except the historical pre-NU6.2 Orchard pool
-        // ([`BundleVersion::orchard_insecure_v0`]); see the `bundle_version` chosen by the caller.
+        // ([`BundleVersion::orchard_insecure_v1`]); see the `bundle_version` chosen by the caller.
         orchard::Bundle::try_from_parts(
             actions,
             flags,
@@ -103,8 +103,8 @@ fn read_bundle<R: Read>(
 /// the caller selects the Orchard or Ironwood v6 slot.
 ///
 /// `bundle_version` must be an Orchard-pool version whose flag byte uses the v5 grammar (bit 2
-/// reserved): [`BundleVersion::orchard_insecure_v0`] before NU6.2, [`BundleVersion::orchard_v1`]
-/// at NU6.2, or [`BundleVersion::orchard_v2`] from NU6.3 (a v5 transaction stays valid under
+/// reserved): [`BundleVersion::orchard_insecure_v1`] before NU6.2, [`BundleVersion::orchard_v2`]
+/// at NU6.2, or [`BundleVersion::orchard_v3`] from NU6.3 (a v5 transaction stays valid under
 /// NU6.3+). All three share that grammar, and the version's protocol generation selects whether
 /// the canonical proof size is enforced.
 pub fn read_v5_bundle<R: Read>(
@@ -115,26 +115,26 @@ pub fn read_v5_bundle<R: Read>(
 }
 
 /// Rejects bundle versions that are not valid for the v6 transaction format, which has exactly
-/// two Orchard-bundle slots: the Orchard slot ([`BundleVersion::orchard_v2`]) and the Ironwood
-/// slot ([`BundleVersion::ironwood_v2`]). A pre-NU6.3 version would (de)serialize the flag byte
+/// two Orchard-bundle slots: the Orchard slot ([`BundleVersion::orchard_v3`]) and the Ironwood
+/// slot ([`BundleVersion::ironwood_v3`]). A pre-NU6.3 version would (de)serialize the flag byte
 /// with the wrong cross-address (bit 2) semantics.
 #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
-    if bundle_version == BundleVersion::orchard_v2()
-        || bundle_version == BundleVersion::ironwood_v2()
+    if bundle_version == BundleVersion::orchard_v3()
+        || bundle_version == BundleVersion::ironwood_v3()
     {
         Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "v6 Orchard bundles require orchard_v2 or ironwood_v2",
+            "v6 Orchard bundles require orchard_v3 or ironwood_v3",
         ))
     }
 }
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format. `bundle_version`
-/// selects the pool: [`BundleVersion::orchard_v2`] for the Orchard v6 bundle, or
-/// [`BundleVersion::ironwood_v2`] for the Ironwood bundle (whose flag-byte encoding permits
+/// selects the pool: [`BundleVersion::orchard_v3`] for the Orchard v6 bundle, or
+/// [`BundleVersion::ironwood_v3`] for the Ironwood bundle (whose flag-byte encoding permits
 /// the cross-address bit, unlike the Orchard v6 pool).
 #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 pub fn read_v6_bundle<R: Read>(
@@ -285,7 +285,7 @@ pub fn write_v5_bundle<W: Write>(
 
 /// Writes an [`orchard::Bundle`] in the v6 transaction format. The bundle's own
 /// [`BundleVersion`] selects the pool (and hence the flag-byte grammar): the Orchard slot uses
-/// [`BundleVersion::orchard_v2`], the Ironwood slot [`BundleVersion::ironwood_v2`].
+/// [`BundleVersion::orchard_v3`], the Ironwood slot [`BundleVersion::ironwood_v3`].
 #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
@@ -364,8 +364,8 @@ pub mod testing {
         v: TxVersion,
     ) -> impl Strategy<Value = Option<Bundle<Authorized, ZatBalance>>> {
         if v.has_orchard() {
-            // The Orchard slot uses `orchard_v2()` in a v6 transaction (cross-address forbidden)
-            // and `orchard_v1()` in a v5 transaction; the Ironwood slot is generated separately by
+            // The Orchard slot uses `orchard_v3()` in a v6 transaction (cross-address forbidden)
+            // and `orchard_v2()` in a v5 transaction; the Ironwood slot is generated separately by
             // `arb_ironwood_bundle_for_version`.
             let bundle_version = orchard_bundle_version(v);
             (1usize..100)
@@ -381,7 +381,7 @@ pub mod testing {
     }
 
     /// Generates Ironwood bundles for the v6 transaction format. Unlike the Orchard v6 pool, the
-    /// Ironwood pool ([`BundleVersion::ironwood_v2`]) permits cross-address transfers, so this
+    /// Ironwood pool ([`BundleVersion::ironwood_v3`]) permits cross-address transfers, so this
     /// exercises the Ironwood serialization path the Orchard generator cannot.
     #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub fn arb_ironwood_bundle_for_version(
@@ -392,7 +392,7 @@ pub mod testing {
                 .prop_flat_map(|n| {
                     prop::option::of(
                         arb_bundle(n)
-                            .prop_map(|b| rebuild_with_version(b, BundleVersion::ironwood_v2())),
+                            .prop_map(|b| rebuild_with_version(b, BundleVersion::ironwood_v3())),
                     )
                 })
                 .boxed()
@@ -401,15 +401,15 @@ pub mod testing {
         }
     }
 
-    /// The Orchard-slot [`BundleVersion`] for a transaction version: `orchard_v2()` in v6 (where
-    /// the Orchard pool forbids cross-address transfers), `orchard_v1()` otherwise.
+    /// The Orchard-slot [`BundleVersion`] for a transaction version: `orchard_v3()` in v6 (where
+    /// the Orchard pool forbids cross-address transfers), `orchard_v2()` otherwise.
     fn orchard_bundle_version(v: TxVersion) -> BundleVersion {
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         if matches!(v, TxVersion::V6) {
-            return BundleVersion::orchard_v2();
+            return BundleVersion::orchard_v3();
         }
         let _ = v;
-        BundleVersion::orchard_v1()
+        BundleVersion::orchard_v2()
     }
 
     /// Rebuilds an arbitrary bundle under `bundle_version`, choosing a cross-address flag value
@@ -424,7 +424,7 @@ pub mod testing {
     ) -> Bundle<Authorized, ZatBalance> {
         let mut byte = u8::from(bundle.flags().spends_enabled())
             | (u8::from(bundle.flags().outputs_enabled()) << 1);
-        if bundle_version == BundleVersion::ironwood_v2() {
+        if bundle_version == BundleVersion::ironwood_v3() {
             byte |= 0b100;
         }
         let flags = Flags::from_byte(byte, bundle_version)

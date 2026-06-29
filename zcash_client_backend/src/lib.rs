@@ -89,7 +89,7 @@ pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
 /// value preserves the legacy pre-NU6.3 Orchard behavior those paths used historically.
 #[cfg(feature = "orchard")]
 pub(crate) const ANY_ORCHARD_BUNDLE_VERSION: ::orchard::bundle::BundleVersion =
-    ::orchard::bundle::BundleVersion::orchard_v1();
+    ::orchard::bundle::BundleVersion::orchard_v2();
 
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {

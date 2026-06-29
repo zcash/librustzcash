@@ -590,8 +590,8 @@ fn orchard_to_orchard() {
     let note = {
         let mut orchard_builder = orchard::builder::Builder::new(
             orchard::builder::BundleType::DEFAULT,
-            orchard::bundle::BundleVersion::orchard_v1(),
-            orchard::bundle::BundleVersion::orchard_v1().default_flags(),
+            orchard::bundle::BundleVersion::orchard_v2(),
+            orchard::bundle::BundleVersion::orchard_v2().default_flags(),
             orchard::Anchor::empty_tree(),
         )
         .unwrap();

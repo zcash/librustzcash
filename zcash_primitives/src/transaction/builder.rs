@@ -260,7 +260,7 @@ impl BuildConfig {
                 .expect("the default flags are always representable for a transactional bundle")
             }),
             BuildConfig::Coinbase { .. }
-                if bundle_version == orchard::bundle::BundleVersion::orchard_v2() =>
+                if bundle_version == orchard::bundle::BundleVersion::orchard_v3() =>
             {
                 None
             }
@@ -320,11 +320,11 @@ fn orchard_bundle_version_for_branch(
 ) -> orchard::bundle::BundleVersion {
     match consensus_branch_id {
         #[cfg(zcash_unstable = "nu6.3")]
-        BranchId::Nu6_3 => orchard::bundle::BundleVersion::orchard_v2(),
+        BranchId::Nu6_3 => orchard::bundle::BundleVersion::orchard_v3(),
         #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => orchard::bundle::BundleVersion::orchard_v2(),
-        BranchId::Nu6_2 => orchard::bundle::BundleVersion::orchard_v1(),
-        _ => orchard::bundle::BundleVersion::orchard_insecure_v0(),
+        BranchId::Nu7 => orchard::bundle::BundleVersion::orchard_v3(),
+        BranchId::Nu6_2 => orchard::bundle::BundleVersion::orchard_v2(),
+        _ => orchard::bundle::BundleVersion::orchard_insecure_v1(),
     }
 }
 
@@ -1285,7 +1285,7 @@ mod tests {
         assert_eq!(builder.tx_version, crate::transaction::TxVersion::V6);
         assert_eq!(
             builder.orchard_bundle_version,
-            Some(orchard::bundle::BundleVersion::orchard_v2())
+            Some(orchard::bundle::BundleVersion::orchard_v3())
         );
     }
 
@@ -1307,7 +1307,7 @@ mod tests {
 
         assert_eq!(
             builder.orchard_bundle_version,
-            Some(orchard::bundle::BundleVersion::orchard_v2())
+            Some(orchard::bundle::BundleVersion::orchard_v3())
         );
     }
 
@@ -1347,8 +1347,8 @@ mod tests {
         let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
         let mut builder = orchard::builder::Builder::new(
             orchard::builder::BundleType::DEFAULT,
-            orchard::bundle::BundleVersion::orchard_v2(),
-            orchard::bundle::BundleVersion::orchard_v2().default_flags(),
+            orchard::bundle::BundleVersion::orchard_v3(),
+            orchard::bundle::BundleVersion::orchard_v3().default_flags(),
             orchard::Anchor::empty_tree(),
         )
         .unwrap();
@@ -1367,7 +1367,7 @@ mod tests {
             super::orchard_action_count(
                 &builder,
                 false,
-                orchard::bundle::BundleVersion::orchard_v2(),
+                orchard::bundle::BundleVersion::orchard_v3(),
             )
             .unwrap(),
             2

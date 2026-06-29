@@ -403,9 +403,9 @@ impl<A: Authorization> TransactionData<A> {
     /// Both the Orchard and Ironwood bundle fields use [`orchard::Bundle`], but
     /// they are distinct V6 transaction fields with distinct bundle versions.
     /// The `orchard_bundle` argument must contain a bundle constructed for
-    /// [`orchard::bundle::BundleVersion::orchard_v2`], while `ironwood_bundle`
+    /// [`orchard::bundle::BundleVersion::orchard_v3`], while `ironwood_bundle`
     /// must contain a bundle constructed for
-    /// [`orchard::bundle::BundleVersion::ironwood_v2`]. Supplying a bundle for
+    /// [`orchard::bundle::BundleVersion::ironwood_v3`]. Supplying a bundle for
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
@@ -899,12 +899,12 @@ impl Transaction {
                 | BranchId::Canopy
                 | BranchId::Nu5
                 | BranchId::Nu6
-                | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v0(),
-                BranchId::Nu6_2 => BundleVersion::orchard_v1(),
+                | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
+                BranchId::Nu6_2 => BundleVersion::orchard_v2(),
                 #[cfg(zcash_unstable = "nu6.3")]
-                BranchId::Nu6_3 => BundleVersion::orchard_v2(),
+                BranchId::Nu6_3 => BundleVersion::orchard_v3(),
                 #[cfg(zcash_unstable = "nu7")]
-                BranchId::Nu7 => BundleVersion::orchard_v2(),
+                BranchId::Nu7 => BundleVersion::orchard_v3(),
             },
         )?;
 
@@ -934,12 +934,12 @@ impl Transaction {
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::orchard_v2(),
+            orchard::bundle::BundleVersion::orchard_v3(),
         )?;
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         let ironwood_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::ironwood_v2(),
+            orchard::bundle::BundleVersion::ironwood_v3(),
         )?;
 
         let data = TransactionData {

@@ -244,7 +244,7 @@ fn test_orchard_bundle(
         .current();
     crate::transaction::components::orchard::testing::rebuild_with_version(
         bundle,
-        orchard::bundle::BundleVersion::orchard_v2(),
+        orchard::bundle::BundleVersion::orchard_v3(),
     )
 }
 
@@ -260,7 +260,7 @@ fn test_ironwood_bundle(
         .current();
     crate::transaction::components::orchard::testing::rebuild_with_version(
         bundle,
-        orchard::bundle::BundleVersion::ironwood_v2(),
+        orchard::bundle::BundleVersion::ironwood_v3(),
     )
 }
 
@@ -430,7 +430,7 @@ fn v5_tx_data_with_sapling_bundle(
 }
 
 /// Clears the cross-address flag on an Orchard bundle (preserving spends/outputs)
-/// so it is representable in a v6 Orchard slot ([`orchard::bundle::BundleVersion::orchard_v2`],
+/// so it is representable in a v6 Orchard slot ([`orchard::bundle::BundleVersion::orchard_v3`],
 /// which forbids cross-address transfers; cross-address is Ironwood-only).
 #[cfg(all(test, zcash_unstable = "nu6.3"))]
 fn disable_cross_address(
@@ -439,7 +439,7 @@ fn disable_cross_address(
     let byte = u8::from(bundle.flags().spends_enabled())
         | (u8::from(bundle.flags().outputs_enabled()) << 1);
     let flags =
-        orchard::bundle::Flags::from_byte(byte, orchard::bundle::BundleVersion::orchard_v2())
+        orchard::bundle::Flags::from_byte(byte, orchard::bundle::BundleVersion::orchard_v3())
             .unwrap();
     orchard::Bundle::try_from_parts(
         bundle.actions().clone(),
@@ -447,7 +447,7 @@ fn disable_cross_address(
         *bundle.value_balance(),
         *bundle.anchor(),
         bundle.authorization().clone(),
-        orchard::bundle::BundleVersion::orchard_v2(),
+        orchard::bundle::BundleVersion::orchard_v3(),
     )
     .unwrap()
 }

@@ -686,7 +686,7 @@ impl Bundle {
             actions,
             self.flags,
             // PCZT v1 only carries pre-NU6.3 Orchard bundles (V2 note plaintexts, bit 2 reserved).
-            BundleVersion::orchard_v1(),
+            BundleVersion::orchard_v2(),
             self.value_sum,
             self.anchor,
             self.zkproof,
