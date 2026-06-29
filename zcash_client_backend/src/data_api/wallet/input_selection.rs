@@ -711,7 +711,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 #[cfg(feature = "orchard")]
                 &(
                     // Preserve the legacy Orchard action-count estimate here.
-                    // If this path targets restrictions that disable
+                    // FIXME: When this path targets restrictions that disable
                     // cross-address transfers, thread the target-height-selected
                     // `BundlePoolRestrictions` through this call.
                     crate::ANY_ORCHARD_POOL_RESTRICTIONS,
