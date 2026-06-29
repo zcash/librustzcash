@@ -89,8 +89,12 @@ rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true
 
+# Optional, enabled by the `test-dependencies` feature to expose `testing` downstream.
+ambassador = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+tempfile = { version = "3.5.0", optional = true }
+
 [dev-dependencies]
-ambassador.workspace = true
 assert_matches.workspace = true
 bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
@@ -99,10 +103,8 @@ pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
-rand_chacha.workspace = true
 rand_core.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
-tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
@@ -125,6 +127,9 @@ orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
+    "dep:ambassador",
+    "dep:rand_chacha",
+    "dep:tempfile",
     "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",

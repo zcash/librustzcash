@@ -152,8 +152,10 @@ pub mod error;
 pub mod util;
 pub mod wallet;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "test-dependencies"))]
+/// Test-only utilities for exercising this crate's wallet backend, exposed under the
+/// `test-dependencies` feature for use by downstream integration tests.
+pub mod testing;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than

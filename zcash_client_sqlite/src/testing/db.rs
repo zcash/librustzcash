@@ -72,7 +72,10 @@ pub(crate) fn test_rng() -> ChaChaRng {
 #[delegate(WalletTest, target = "wallet_db")]
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
-pub(crate) struct TestDb {
+/// A [`WalletDb`] test data store backed by a temporary SQLite file.
+///
+/// [`WalletDb`]: crate::WalletDb
+pub struct TestDb {
     wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
     data_file: NamedTempFile,
 }
@@ -174,7 +177,10 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
 }
 
 #[derive(Default)]
-pub(crate) struct TestDbFactory {
+/// A [`DataStoreFactory`] that builds [`TestDb`] instances for tests.
+///
+/// [`DataStoreFactory`]: zcash_client_backend::data_api::testing::DataStoreFactory
+pub struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
 }
 

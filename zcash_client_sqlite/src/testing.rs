@@ -22,16 +22,22 @@ use {
     tempfile::TempDir,
 };
 
-pub(crate) mod db;
+/// An in-memory/temporary-file [`WalletDb`] data store and factory for tests.
+///
+/// [`WalletDb`]: crate::WalletDb
+pub mod db;
+#[cfg(test)]
 pub(crate) mod pool;
 
-pub(crate) struct BlockCache {
+/// A [`TestCache`] backed by a temporary-file compact-block database.
+pub struct BlockCache {
     _cache_file: NamedTempFile,
     db_cache: BlockDb,
 }
 
 impl BlockCache {
-    pub(crate) fn new() -> Self {
+    /// Creates an empty block cache backed by a fresh temporary file.
+    pub fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
@@ -43,7 +49,8 @@ impl BlockCache {
     }
 }
 
-pub(crate) struct BlockCacheInsertionResult {
+/// The result of inserting blocks into a [`BlockCache`].
+pub struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
     #[allow(dead_code)]
     note_commitments: NoteCommitments,
