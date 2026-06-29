@@ -21,7 +21,7 @@ use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
-use orchard::bundle::ProofSizeEnforcement;
+use orchard::bundle::BundleVersion;
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -401,11 +401,11 @@ impl<A: Authorization> TransactionData<A> {
     /// including the Ironwood bundle.
     ///
     /// Both the Orchard and Ironwood bundle fields use [`orchard::Bundle`], but
-    /// they are distinct V6 transaction fields with distinct bundle protocols.
+    /// they are distinct V6 transaction fields with distinct bundle versions.
     /// The `orchard_bundle` argument must contain a bundle constructed for
-    /// [`orchard::BundleProtocol::OrchardPostNu6_3`], while `ironwood_bundle`
+    /// [`orchard::bundle::BundleVersion::orchard_v3`], while `ironwood_bundle`
     /// must contain a bundle constructed for
-    /// [`orchard::BundleProtocol::IronwoodPostNu6_3`]. Supplying a bundle for
+    /// [`orchard::bundle::BundleVersion::ironwood_v3`]. Supplying a bundle for
     /// the wrong field is invalid and can be rejected by later serialization or
     /// commitment construction because the bundle flags and domains are protocol
     /// specific.
@@ -883,6 +883,13 @@ impl Transaction {
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(
             &mut reader,
+            // The v5 Orchard flag byte is the same in every epoch (bit 2 reserved), so the txid is
+            // unaffected by this choice, but the `BundleVersion` fixes the bundle's cross-address
+            // semantics and circuit generation, which do follow the consensus epoch:
+            //   * pre-NU6.2: historical insecure circuit, cross-address enabled, proof size not
+            //     enforced;
+            //   * NU6.2: fixed circuit, cross-address enabled;
+            //   * NU6.3 onward: post-NU6.3 circuit, cross-address disabled (consensus-mandated).
             match consensus_branch_id {
                 BranchId::Sprout
                 | BranchId::Overwinter
@@ -892,12 +899,12 @@ impl Transaction {
                 | BranchId::Canopy
                 | BranchId::Nu5
                 | BranchId::Nu6
-                | BranchId::Nu6_1 => ProofSizeEnforcement::Unenforced,
-                BranchId::Nu6_2 => ProofSizeEnforcement::Strict,
+                | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
+                BranchId::Nu6_2 => BundleVersion::orchard_v2(),
                 #[cfg(zcash_unstable = "nu6.3")]
-                BranchId::Nu6_3 => ProofSizeEnforcement::Strict,
+                BranchId::Nu6_3 => BundleVersion::orchard_v3(),
                 #[cfg(zcash_unstable = "nu7")]
-                BranchId::Nu7 => ProofSizeEnforcement::Strict,
+                BranchId::Nu7 => BundleVersion::orchard_v3(),
             },
         )?;
 
@@ -925,9 +932,15 @@ impl Transaction {
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        let orchard_bundle = orchard_serialization::read_v6_bundle(
+            &mut reader,
+            orchard::bundle::BundleVersion::orchard_v3(),
+        )?;
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-        let ironwood_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        let ironwood_bundle = orchard_serialization::read_v6_bundle(
+            &mut reader,
+            orchard::bundle::BundleVersion::ironwood_v3(),
+        )?;
 
         let data = TransactionData {
             version,
@@ -1293,7 +1306,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },
@@ -1325,7 +1338,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },
@@ -1357,7 +1370,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_bundle_for_version(version).boxed()
+                orchard::arb_ironwood_bundle_for_version(version).boxed()
             } else {
                 Just(None).boxed()
             },

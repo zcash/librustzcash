@@ -313,7 +313,7 @@ where
     #[cfg(feature = "orchard")]
     let orchard_action_count = |change_count| {
         orchard_fees::transactional_action_count(
-            orchard.bundle_protocol(),
+            orchard.bundle_version(),
             orchard.inputs().len(),
             orchard.outputs().len() + change_count,
         )
@@ -692,7 +692,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             #[cfg(feature = "orchard")]
             let o_action_count = orchard_fees::transactional_action_count(
-                orchard.bundle_protocol(),
+                orchard.bundle_version(),
                 o_req_inputs + _o_extra,
                 o_outputs_len + change.orchard,
             )

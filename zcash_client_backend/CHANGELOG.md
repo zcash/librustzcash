@@ -11,6 +11,9 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
+  the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
+  used to compute the Orchard action count.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the

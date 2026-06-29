@@ -710,7 +710,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    ::orchard::BundleProtocol::OrchardPreNu6_3,
+                    // Preserve the legacy Orchard action-count estimate here.
+                    // If this path targets restrictions that disable
+                    // cross-address transfers, thread the target-height-selected
+                    // `BundleVersion` through this call.
+                    crate::ANY_ORCHARD_BUNDLE_VERSION,
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
@@ -870,7 +874,11 @@ where
             0
         };
         orchard_fees::transactional_action_count(
-            ::orchard::BundleProtocol::OrchardPreNu6_3,
+            // Preserve the legacy Orchard action-count estimate here. If this
+            // path targets restrictions that disable cross-address transfers,
+            // thread the target-height-selected `BundleVersion`
+            // through this call.
+            crate::ANY_ORCHARD_BUNDLE_VERSION,
             spendable_notes.orchard.len(),
             requested_orchard_actions,
         )
@@ -1267,7 +1275,10 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             PoolType::ORCHARD => {
                 let count = orchard_fees::transactional_action_count(
-                    ::orchard::BundleProtocol::OrchardPreNu6_3,
+                    // With no Orchard spends and one requested output, the
+                    // padded action count is independent of the Orchard pool
+                    // restriction.
+                    crate::ANY_ORCHARD_BUNDLE_VERSION,
                     0,
                     1,
                 )

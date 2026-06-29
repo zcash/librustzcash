@@ -11,6 +11,14 @@ workspace.
 ## [0.8.0] - PLANNED
 
 ### Changed
+- `pczt::roles::creator::Creator::new` is now fallible, returning
+  `Result<Self, pczt::roles::creator::Error>`; it rejects unrecognized consensus
+  branch IDs and upgrades that predate the v5 transaction format.
+- `pczt::roles::creator::Creator::with_orchard_flags` is now fallible, returning
+  `Result<Self, pczt::roles::creator::Error>`. The Orchard bundle version (and
+  hence the note-plaintext version and flag-byte encoding) is now derived from the
+  consensus branch ID passed to `Creator::new` rather than supplied by the caller,
+  and the flags are validated against it.
 - PCZT version 1 is now treated as a serialization format for the logical
   `pczt::Pczt` type.
 - The Orchard PCZT logical model now tracks the Orchard bundle's note plaintext
@@ -22,6 +30,8 @@ workspace.
   returning `Vec<u8>`.
 
 ### Added
+- `pczt::roles::creator::Error`, the error type returned by the now-fallible
+  `Creator` methods.
 - `pczt::parse`, a free function for parsing PCZT encodings.
 - `pczt::EncodingError`, for errors that can occur during PCZT encoding.
 - `pczt::EncodingError::UnsupportedOrchardNoteVersion`, returned when an
