@@ -462,7 +462,7 @@ impl<A: Authorization> TransactionData<A> {
                         |b| {
                             let value_balance = match b {
                                 zcash_tachyon::TachyonBundle::Stamped(s) => s.value_balance,
-                                zcash_tachyon::TachyonBundle::Stripped(s) => s.value_balance,
+                                zcash_tachyon::TachyonBundle::Adjunct(s) => s.value_balance,
                             };
                             ZatBalance::try_from(value_balance).map_err(|_| BalanceError::Overflow)
                         },
