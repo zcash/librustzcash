@@ -609,6 +609,24 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         )
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn get_spendable_transparent_outputs_for_addresses(
+        &self,
+        addresses: &[TransparentAddress],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: TransparentOutputFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        wallet::transparent::get_spendable_transparent_outputs_for_addresses(
+            self.conn.borrow(),
+            &self.params,
+            addresses,
+            target_height,
+            confirmations_policy,
+            output_filter,
+        )
+    }
+
     /// Returns metadata for the spendable notes in the wallet.
     fn get_account_metadata(
         &self,

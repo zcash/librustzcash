@@ -1251,17 +1251,52 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: TransparentOutputFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // Defer to the batched query with a singleton address set, so that there is a single query
+    // body to maintain. `transparent_received_outputs.address` is always equal to the
+    // `cached_transparent_receiver_address` of the joined `addresses` row (both are written from
+    // the same recipient address on insert, and the gap-limit migration backfilled this invariant
+    // for pre-existing rows), so matching on the latter for a single address selects the same
+    // outputs as the former.
+    get_spendable_transparent_outputs_for_addresses(
+        conn,
+        params,
+        core::slice::from_ref(address),
+        target_height,
+        confirmations_policy,
+        output_filter,
+    )
+}
+
+/// Returns the list of spendable transparent outputs received by this wallet at any of the
+/// given `addresses`, under the same spendability conditions as
+/// [`get_spendable_transparent_outputs`].
+///
+/// This is the batched equivalent of [`get_spendable_transparent_outputs`]: it issues a single
+/// query over the entire set of provided addresses rather than one query per address, which avoids
+/// a per-address database round-trip (and, for each empty address, a wasted query) when shielding
+/// from a wallet that holds large numbers of transparent addresses. Each returned output
+/// identifies its receiving address, so a caller that needs to group results by address can do so
+/// from the returned values.
+///
+/// The query body mirrors that of [`get_spendable_transparent_outputs`], differing only in that
+/// the receiving address is matched against a set via `rarray` rather than a single value.
+pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    addresses: &[TransparentAddress],
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: TransparentOutputFilter,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    if addresses.is_empty() {
+        return Ok(vec![]);
+    }
+
     let coinbase_only = match output_filter {
         TransparentOutputFilter::All => 0i32,
         TransparentOutputFilter::CoinbaseOnly => 1i32,
     };
 
-    // This statement is re-run once per source address when shielding, so it is prepared via
-    // `prepare_cached` to avoid recompiling it on each call. The address is matched against
-    // `addresses.cached_transparent_receiver_address` (rather than the denormalized
-    // `transparent_received_outputs.address`) so that the lookup is served by an index on the
-    // `addresses` table and joined to the outputs via `idx_transparent_received_outputs_address`,
-    // instead of scanning the full `transparent_received_outputs` table.
     let mut stmt_utxos = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
@@ -1273,20 +1308,19 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
-         WHERE addresses.cached_transparent_receiver_address = :address
+         WHERE addresses.cached_transparent_receiver_address IN rarray(:addresses)
          AND u.value_zat > :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
          AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives",
+         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives
+         ORDER BY addresses.cached_transparent_receiver_address, u.output_index",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         excluding_immature_coinbase_outputs("t"),
     ))?;
-
-    let addr_str = address.encode(params);
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
@@ -1296,8 +1330,14 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
+    let address_values: Vec<Value> = addresses
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
     let mut rows = stmt_utxos.query(named_params![
-        ":address": addr_str,
+        ":addresses": &addresses_ptr,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
@@ -2502,6 +2542,13 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::shielding_many_transparent_utxos(
             TestDbFactory::default(),
             BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn get_spendable_transparent_outputs_for_addresses() {
+        zcash_client_backend::data_api::testing::transparent::get_spendable_transparent_outputs_for_addresses(
+            TestDbFactory::default(),
         );
     }
 
