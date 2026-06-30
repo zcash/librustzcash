@@ -7320,7 +7320,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.9.0"
+version = "0.10.0-pre.0"
 dependencies = [
  "corez",
  "document-features",

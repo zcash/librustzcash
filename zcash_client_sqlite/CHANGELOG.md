@@ -25,6 +25,9 @@ workspace.
   `truncate_to_chain_state`). Previously such errors surfaced as the generic
   `CommitmentTree` variant without the affected pool or target height.
 
+### Changed
+- Migrated to `zcash_protocol 0.10.0-pre.0`.
+
 ## [0.21.1] - 2026-06-19
 
 ### Fixed

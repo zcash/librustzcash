@@ -14,11 +14,8 @@ This release sets the NU6.3 activation height to 4134000 on testnet.
 Mainnet activation will be set in the 0.10.0 final release.
 
 ### Added
-- `zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID}`. The v6
-  version group ID is provisional until the Ironwood / NU6.3 value is chosen.
-- `zcash_protocol::consensus::{NetworkUpgrade::Nu6_3, BranchId::Nu6_3}`. The
-  NU6.3 consensus branch ID is provisional until the Ironwood / NU6.3 value is
-  chosen.
+- `zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID}`
+- `zcash_protocol::consensus::{NetworkUpgrade::Nu6_3, BranchId::Nu6_3}`
 - `zcash_protocol::local_consensus::LocalNetwork::nu6_3`.
 
 ### Removed
