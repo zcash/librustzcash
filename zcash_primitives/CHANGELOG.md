@@ -44,6 +44,7 @@ workspace.
     height.
 
 ### Changed
+- Migrated to `zcash_protocol 0.10.0-pre.0`.
 - `zcash_primitives::transaction::builder`:
   - NU6.3 standard builders use the NU6.3 Orchard pool restrictions when
     constructing V6 transactions.
