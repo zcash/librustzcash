@@ -621,6 +621,8 @@ where
         cb.chain_metadata = Some(compact_formats::ChainMetadata {
             sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
             orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
+            // The test framework does not generate Ironwood notes.
+            ironwood_commitment_tree_size: 0,
         });
 
         let res = self.cache_block(&prior_cached_block, cb);
@@ -2566,6 +2568,8 @@ fn fake_compact_block_from_compact_tx(
             + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
         orchard_commitment_tree_size: initial_orchard_tree_size
             + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+        // The test framework does not generate Ironwood notes.
+        ironwood_commitment_tree_size: 0,
     });
     cb
 }
