@@ -115,7 +115,11 @@ impl<V: Version> Tree<V> {
         result
     }
 
-    fn get_peaks(&self, root: EntryLink, target: &mut Vec<EntryLink>) -> Result<(), Error> {
+    pub(crate) fn get_peaks(
+        &self,
+        root: EntryLink,
+        target: &mut Vec<EntryLink>,
+    ) -> Result<(), Error> {
         let (left_child_link, right_child_link) = {
             let root = self.resolve_link(root)?;
             if root.node.complete() {
