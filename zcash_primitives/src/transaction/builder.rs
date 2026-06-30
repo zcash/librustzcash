@@ -725,6 +725,11 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     /// For non-coinbase transactions, setting this to `BlockHeight::from(0)`
     /// disables transaction expiry. Coinbase builders reject overridden expiry
     /// heights that do not match the target block height.
+    ///
+    /// Disabling expiry by setting the height to `BlockHeight::from(0)` is not
+    /// recommended: non-expiring transactions are not yet well tested
+    /// end-to-end and may surface edge cases elsewhere in the stack. Callers
+    /// should avoid a zero expiry height unless they specifically need it.
     pub fn with_expiry_height(mut self, expiry_height: BlockHeight) -> Self {
         self.expiry_height = expiry_height;
         self
