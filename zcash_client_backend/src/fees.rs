@@ -577,6 +577,10 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
+        // The Ironwood bundle view. V6 transactions carry a separate Ironwood
+        // bundle (distinct from `orchard`), with its own action count; pass an
+        // empty view when nothing targets the Ironwood pool.
+        #[cfg(feature = "orchard")] ironwood: &impl orchard::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
