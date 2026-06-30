@@ -17,7 +17,9 @@ impl super::Updater {
             ironwood,
         } = self.pczt;
 
-        let mut bundle = orchard.into_parsed().map_err(OrchardError::Parser)?;
+        let mut bundle = orchard
+            .into_orchard_parsed()
+            .map_err(OrchardError::Parser)?;
 
         bundle.update_with(f).map_err(OrchardError::Updater)?;
 

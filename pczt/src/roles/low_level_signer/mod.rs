@@ -12,6 +12,29 @@ impl Signer {
         Self { pczt }
     }
 
+    #[cfg(all(
+        feature = "orchard",
+        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+    ))]
+    pub fn sign_ironwood_with<E, F>(self, f: F) -> Result<Self, E>
+    where
+        E: From<orchard::pczt::ParseError>,
+        F: FnOnce(&Pczt, &mut orchard::pczt::Bundle, &mut u8) -> Result<(), E>,
+    {
+        let mut pczt = self.pczt;
+
+        let mut tx_modifiable = pczt.global.tx_modifiable;
+
+        let mut bundle = pczt.ironwood.clone().into_ironwood_parsed()?;
+
+        f(&pczt, &mut bundle, &mut tx_modifiable)?;
+
+        pczt.global.tx_modifiable = tx_modifiable;
+        pczt.ironwood = crate::orchard::Bundle::serialize_from(bundle);
+
+        Ok(Self { pczt })
+    }
+
     /// Exposes the capability to sign the Orchard spends.
     #[cfg(feature = "orchard")]
     pub fn sign_orchard_with<E, F>(self, f: F) -> Result<Self, E>
@@ -23,7 +46,7 @@ impl Signer {
 
         let mut tx_modifiable = pczt.global.tx_modifiable;
 
-        let mut bundle = pczt.orchard.clone().into_parsed()?;
+        let mut bundle = pczt.orchard.clone().into_orchard_parsed()?;
 
         f(&pczt, &mut bundle, &mut tx_modifiable)?;
 

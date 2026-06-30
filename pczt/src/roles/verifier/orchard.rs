@@ -15,7 +15,7 @@ impl super::Verifier {
             ironwood,
         } = self.pczt;
 
-        let bundle = orchard.into_parsed().map_err(OrchardError::Parse)?;
+        let bundle = orchard.into_orchard_parsed().map_err(OrchardError::Parse)?;
 
         f(&bundle)?;
 

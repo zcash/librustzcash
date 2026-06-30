@@ -14,8 +14,23 @@ pub(super) fn verify_bundle(
     if let Some(vk) = orchard_vk {
         verify_bundle_with_key(bundle, vk, sighash)
     } else {
-        // PCZT extraction produces new transactions, which use the NU6.2 (fixed) circuit.
+        // PCZT extraction produces new Orchard bundles using the NU6.2 fixed
+        // circuit.
         let vk = VerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
+        verify_bundle_with_key(bundle, &vk, sighash)
+    }
+}
+
+#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+pub(super) fn verify_ironwood_bundle(
+    bundle: &Bundle<Authorized, ZatBalance>,
+    orchard_vk: Option<&VerifyingKey>,
+    sighash: [u8; 32],
+) -> Result<(), OrchardError> {
+    if let Some(vk) = orchard_vk {
+        verify_bundle_with_key(bundle, vk, sighash)
+    } else {
+        let vk = VerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
         verify_bundle_with_key(bundle, &vk, sighash)
     }
 }

@@ -48,6 +48,9 @@ workspace.
   number of Ironwood actions; pass `0` for transactions without an Ironwood
   bundle. Under ZIP 317 each Ironwood action is charged one marginal fee, the
   same as an Orchard action.
+- `TransactionData::from_parts_v6` is now also available behind
+  `zcash_unstable = "nu7"`, and includes the ZIP 233 amount argument when the
+  `zip-233` feature is enabled.
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever

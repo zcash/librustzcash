@@ -29,10 +29,15 @@ impl IoFinalizer {
     pub fn finalize_io(self) -> Result<Pczt, Error> {
         let Self { pczt } = self;
 
+        let has_orchard_actions = !pczt.orchard.actions.is_empty();
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        let has_ironwood_actions = !pczt.ironwood.actions.is_empty();
+        #[cfg(not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")))]
+        let has_ironwood_actions = false;
         let has_shielded_spends =
-            !(pczt.sapling.spends.is_empty() && pczt.orchard.actions.is_empty());
+            !(pczt.sapling.spends.is_empty() && !has_orchard_actions && !has_ironwood_actions);
         let has_shielded_outputs =
-            !(pczt.sapling.outputs.is_empty() && pczt.orchard.actions.is_empty());
+            !(pczt.sapling.outputs.is_empty() && !has_orchard_actions && !has_ironwood_actions);
 
         // We can't build a transaction that has no spends or outputs.
         // However, we don't attempt to reject an entirely dummy transaction.
@@ -49,7 +54,7 @@ impl IoFinalizer {
             mut sapling,
             mut orchard,
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-            ironwood,
+            mut ironwood,
             tx_data,
         } = pczt.extract_tx_data(
             |t| {
@@ -58,6 +63,8 @@ impl IoFinalizer {
             },
             |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
 
         // After shielded IO finalization, the transaction effects cannot be modified
@@ -76,6 +83,10 @@ impl IoFinalizer {
         orchard
             .finalize_io(shielded_sighash, OsRng)
             .map_err(Error::OrchardFinalize)?;
+        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+        ironwood
+            .finalize_io(shielded_sighash, OsRng)
+            .map_err(Error::IronwoodFinalize)?;
 
         Ok(Pczt {
             global,
@@ -83,7 +94,7 @@ impl IoFinalizer {
             sapling: crate::sapling::Bundle::serialize_from(sapling),
             orchard: crate::orchard::Bundle::serialize_from(orchard),
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-            ironwood,
+            ironwood: crate::orchard::Bundle::serialize_from(ironwood),
         })
     }
 }
@@ -94,6 +105,8 @@ pub enum Error {
     Extract(crate::ExtractError),
     NoOutputs,
     NoSpends,
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    IronwoodFinalize(orchard::pczt::IoFinalizerError),
     OrchardFinalize(orchard::pczt::IoFinalizerError),
     SaplingFinalize(sapling::pczt::IoFinalizerError),
 }

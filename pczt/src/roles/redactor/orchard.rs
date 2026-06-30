@@ -9,6 +9,15 @@ impl super::Redactor {
         f(OrchardRedactor(&mut self.pczt.orchard));
         self
     }
+
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    pub fn redact_ironwood_with<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(OrchardRedactor<'_>),
+    {
+        f(OrchardRedactor(&mut self.pczt.ironwood));
+        self
+    }
 }
 
 /// A Redactor for the Orchard bundle.

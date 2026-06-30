@@ -41,6 +41,12 @@ impl Prover {
         !self.pczt.orchard().actions().is_empty() && self.pczt.orchard().zkproof.is_none()
     }
 
+    /// Returns `true` if this PCZT contains Ironwood Actions but no Ironwood proof.
+    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+    pub fn requires_ironwood_proof(&self) -> bool {
+        !self.pczt.ironwood().actions().is_empty() && self.pczt.ironwood().zkproof.is_none()
+    }
+
     /// Finishes the Prover role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
         self.pczt
