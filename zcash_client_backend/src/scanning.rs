@@ -987,6 +987,8 @@ pub mod testing {
                         + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
                     orchard_commitment_tree_size: initial_orchard_tree_size
                         + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+                    // The test framework does not generate Ironwood notes.
+                    ironwood_commitment_tree_size: 0,
                 }
             });
 

@@ -14,9 +14,9 @@ pub struct BlockId {
 /// Both BlockIDs must be heights; specification by hash is not yet supported.
 ///
 /// If no pool types are specified, the server should default to the legacy
-/// behavior of returning only data relevant to the shielded (Sapling and
-/// Orchard) pools; otherwise, the server should prune `CompactBlock`s returned
-/// to include only data relevant to the requested pool types. Clients MUST
+/// behavior of returning only data relevant to the shielded (Sapling, Orchard,
+/// and Ironwood) pools; otherwise, the server should prune `CompactBlock`s
+/// returned to include only data relevant to the requested pool types. Clients MUST
 /// verify that the version of the server they are connected to are capable
 /// of returning pruned and/or transparent data before setting `poolTypes`
 /// to a non-empty value.
@@ -208,7 +208,7 @@ pub struct GetMempoolTxRequest {
     /// The server must prune `CompactTx`s returned to include only data
     /// relevant to the requested pool types. If no pool types are specified,
     /// the server should default to the legacy behavior of returning only data
-    /// relevant to the shielded (Sapling and Orchard) pools.
+    /// relevant to the shielded (Sapling, Orchard, and Ironwood) pools.
     #[prost(enumeration = "PoolType", repeated, tag = "3")]
     pub pool_types: ::prost::alloc::vec::Vec<i32>,
 }
@@ -233,6 +233,9 @@ pub struct TreeState {
     /// orchard commitment tree state
     #[prost(string, tag = "6")]
     pub orchard_tree: ::prost::alloc::string::String,
+    /// ironwood commitment tree state
+    #[prost(string, tag = "7")]
+    pub ironwood_tree: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetSubtreeRootsArg {
@@ -298,6 +301,7 @@ pub enum PoolType {
     Transparent = 1,
     Sapling = 2,
     Orchard = 3,
+    Ironwood = 4,
 }
 impl PoolType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -310,6 +314,7 @@ impl PoolType {
             Self::Transparent => "TRANSPARENT",
             Self::Sapling => "SAPLING",
             Self::Orchard => "ORCHARD",
+            Self::Ironwood => "IRONWOOD",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -319,6 +324,7 @@ impl PoolType {
             "TRANSPARENT" => Some(Self::Transparent),
             "SAPLING" => Some(Self::Sapling),
             "ORCHARD" => Some(Self::Orchard),
+            "IRONWOOD" => Some(Self::Ironwood),
             _ => None,
         }
     }
@@ -328,6 +334,7 @@ impl PoolType {
 pub enum ShieldedProtocol {
     Sapling = 0,
     Orchard = 1,
+    Ironwood = 2,
 }
 impl ShieldedProtocol {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -338,6 +345,7 @@ impl ShieldedProtocol {
         match self {
             Self::Sapling => "sapling",
             Self::Orchard => "orchard",
+            Self::Ironwood => "ironwood",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -345,6 +353,7 @@ impl ShieldedProtocol {
         match value {
             "sapling" => Some(Self::Sapling),
             "orchard" => Some(Self::Orchard),
+            "ironwood" => Some(Self::Ironwood),
             _ => None,
         }
     }
@@ -462,9 +471,9 @@ pub mod compact_tx_streamer_client {
         /// The returned `CompactBlock` includes transaction data for all value
         /// pools, including transparent inputs (`vin`) and outputs (`vout`). This
         /// differs from `GetBlockRange`, which supports filtering by pool type and
-        /// defaults to returning only shielded (Sapling and Orchard) data. Clients
-        /// that require only data for specific pools should use `GetBlockRange`
-        /// with the appropriate `poolTypes` set.
+        /// defaults to returning only shielded (Sapling, Orchard, and Ironwood)
+        /// data. Clients that require only data for specific pools should use
+        /// `GetBlockRange` with the appropriate `poolTypes` set.
         ///
         /// Note: the single null-outpoint input for coinbase transactions is
         /// omitted from the `vin` field of the corresponding `CompactTx`. See the
@@ -499,9 +508,10 @@ pub mod compact_tx_streamer_client {
             self.inner.unary(req, path, codec).await
         }
         /// Return a compact block containing only nullifier information for the
-        /// shielded pools (Sapling spend nullifiers and Orchard action nullifiers).
-        /// Transparent transaction data, Sapling outputs, full Orchard action data,
-        /// and commitment tree sizes are not included.
+        /// shielded pools (Sapling spend nullifiers, Orchard action nullifiers, and
+        /// Ironwood action nullifiers). Transparent transaction data, Sapling
+        /// outputs, full Orchard/Ironwood action data, and commitment tree sizes are
+        /// not included.
         ///
         /// Note: this method is deprecated; use `GetBlockRange` with the
         /// appropriate `poolTypes` instead.
@@ -573,9 +583,10 @@ pub mod compact_tx_streamer_client {
         }
         /// Return a stream of compact blocks for the specified range, where each
         /// block contains only nullifier information for the shielded pools
-        /// (Sapling spend nullifiers and Orchard action nullifiers). Transparent
-        /// transaction data, Sapling outputs, full Orchard action data, and
-        /// commitment tree sizes are not included. Implementations MUST ignore any
+        /// (Sapling spend nullifiers, Orchard action nullifiers, and Ironwood action
+        /// nullifiers). Transparent transaction data, Sapling outputs, full
+        /// Orchard/Ironwood action data, and commitment tree sizes are not included.
+        /// Implementations MUST ignore any
         /// `PoolType::TRANSPARENT` member of the `poolTypes` field of the request.
         ///
         /// Note: this method is deprecated; use `GetBlockRange` with the
@@ -913,7 +924,7 @@ pub mod compact_tx_streamer_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns a stream of information about roots of subtrees of the note commitment tree
-        /// for the specified shielded protocol (Sapling or Orchard).
+        /// for the specified shielded protocol (Sapling, Orchard, or Ironwood).
         pub async fn get_subtree_roots(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSubtreeRootsArg>,
