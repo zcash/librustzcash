@@ -8,7 +8,10 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.10.0-pre.0] - 2026-06-30
+
+This release sets the NU6.3 activation height to 4134000 on testnet.
+Mainnet activation will be set in the 0.10.0 final release.
 
 ### Added
 - `zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID}`. The v6
