@@ -55,7 +55,7 @@ workspace.
 
 ### Changed
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
-  `zcash_address 0.13.0-pre.0`.
+  `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
