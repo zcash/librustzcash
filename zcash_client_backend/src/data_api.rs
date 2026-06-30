@@ -3371,6 +3371,47 @@ pub trait WalletCommitmentTrees {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
+
+    /// Releases all retained ("anchor") checkpoints with height strictly less than `max_height`
+    /// from the wallet's note commitment trees, allowing them to be pruned normally.
+    ///
+    /// Anchor checkpoints are established during scanning (and may be created directly via
+    /// [`ShardTree::ensure_retained`]); they are otherwise exempt from automatic pruning of excess
+    /// checkpoints. This releases the retention of those that have aged below `max_height` in both
+    /// the Sapling and (when the `orchard` feature is enabled) Orchard trees.
+    fn remove_retained_checkpoints_below(
+        &mut self,
+        max_height: BlockHeight,
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        self.with_sapling_tree_mut(|tree| {
+            for height in tree
+                .store()
+                .retained_checkpoints()
+                .map_err(ShardTreeError::Storage)?
+            {
+                if height < max_height {
+                    tree.remove_retained_checkpoint(&height)?;
+                }
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })?;
+
+        #[cfg(feature = "orchard")]
+        self.with_orchard_tree_mut(|tree| {
+            for height in tree
+                .store()
+                .retained_checkpoints()
+                .map_err(ShardTreeError::Storage)?
+            {
+                if height < max_height {
+                    tree.remove_retained_checkpoint(&height)?;
+                }
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
