@@ -1922,7 +1922,7 @@ end = "2027-06-05"
 
 [[trusted.halo2_gadgets]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-05-10"
 end = "2025-04-22"
 
@@ -1946,13 +1946,13 @@ end = "2026-12-05"
 
 [[trusted.halo2_proofs]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-05-10"
 end = "2025-04-22"
 
 [[trusted.incrementalmerkletree]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2021-06-24"
 end = "2025-04-22"
 
@@ -1982,6 +1982,12 @@ end = "2025-12-16"
 
 [[trusted.orchard]]
 criteria = "safe-to-deploy"
+user-id = 1244 # Sean Bowe (ebfull)
+start = "2022-10-19"
+end = "2027-06-30"
+
+[[trusted.orchard]]
+criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-01-07"
 end = "2026-12-05"
@@ -1994,7 +2000,7 @@ end = "2027-04-17"
 
 [[trusted.orchard]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2204,7 +2210,7 @@ end = "2025-07-19"
 
 [[trusted.zcash_address]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2246,7 +2252,7 @@ end = "2027-06-05"
 
 [[trusted.zcash_encoding]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2022-10-19"
 end = "2025-04-22"
 
@@ -2264,7 +2270,7 @@ end = "2027-04-24"
 
 [[trusted.zcash_history]]
 criteria = "safe-to-deploy"
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2020-03-04"
 end = "2025-04-22"
 
@@ -2306,7 +2312,7 @@ end = "2026-10-24"
 
 [[trusted.zcash_primitives]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 1244
+user-id = 1244 # Sean Bowe (ebfull)
 start = "2019-10-08"
 end = "2025-04-22"
 
