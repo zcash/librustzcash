@@ -707,11 +707,17 @@ mod tests {
             )
             .unwrap();
 
-        assert!(
-            with_ironwood.fee_required() > without_ironwood.fee_required(),
-            "Ironwood bundle outputs must add to the fee: {:?} vs {:?}",
-            with_ironwood.fee_required(),
+        // ZIP 317 floors each shielded bundle that is used at 2 actions. Without
+        // an Ironwood bundle: sapling (2) + orchard (2 outputs) = 4 actions; with
+        // an Ironwood output: + ironwood (2) = 6 actions. At 5000 zat/action that
+        // is 20000 vs 30000.
+        assert_eq!(
             without_ironwood.fee_required(),
+            Zatoshis::const_from_u64(20000)
+        );
+        assert_eq!(
+            with_ironwood.fee_required(),
+            Zatoshis::const_from_u64(30000)
         );
     }
 
@@ -780,13 +786,14 @@ mod tests {
                 .fee_required()
         };
 
+        // Change in Orchard: sapling (2) + orchard (1 payment + 1 change = 2) +
+        // ironwood (2 payments = 2) = 6 actions = 30000. Routing the change into
+        // Ironwood: orchard (1 payment = 2) + ironwood (2 payments + 1 change = 3)
+        // = 7 actions = 35000.
         let change_in_orchard = fee_for(false);
         let change_in_ironwood = fee_for(true);
-        assert!(
-            change_in_ironwood > change_in_orchard,
-            "routing Orchard-pool change into the Ironwood bundle should change the \
-             fee: {change_in_ironwood:?} (ironwood) vs {change_in_orchard:?} (orchard)",
-        );
+        assert_eq!(change_in_orchard, Zatoshis::const_from_u64(30000));
+        assert_eq!(change_in_ironwood, Zatoshis::const_from_u64(35000));
     }
 
     #[test]

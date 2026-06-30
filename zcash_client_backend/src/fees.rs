@@ -564,7 +564,10 @@ pub trait ChangeStrategy {
     ///   Ironwood pool.
     /// - `orchard_change_to_ironwood`: whether Orchard-pool change should be counted
     ///   in the Ironwood bundle, mirroring how the builder routes Orchard-pool
-    ///   outputs into a separate Ironwood bundle when Ironwood is active.
+    ///   outputs into a separate Ironwood bundle when Ironwood is active. This is a
+    ///   single boolean rather than a richer type because it simply carries the
+    ///   builder's already-computed routing decision, so the proposal and the built
+    ///   transaction stay in lock-step.
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
