@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.85.1.
-- Migrated to `zcash_primitives 0.28.0`.
+- Migrated to `zcash_primitives 0.29.0-pre.0`.
 
 ### Fixed
 - Updated to crate versions that fix an Orchard soundness vulnerability

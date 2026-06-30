@@ -11,7 +11,8 @@ workspace.
 ## [0.8.0] - PLANNED
 
 ### Changed
-- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`.
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
+  `zcash_primitives 0.29.0-pre.0`.
 - `pczt::roles::creator::Creator::new` is now fallible, returning
   `Result<Self, pczt::roles::creator::Error>`; it rejects unrecognized consensus
   branch IDs and upgrades that predate the v5 transaction format.
