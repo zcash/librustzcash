@@ -666,6 +666,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             &sapling::EmptyBundleView,
                             #[cfg(feature = "orchard")]
                             &orchard_fees::EmptyBundleView,
+                            #[cfg(feature = "orchard")]
+                            &orchard_fees::EmptyBundleView,
                             Some(EphemeralBalance::Input(Zatoshis::ZERO)),
                             &wallet_meta,
                         ) {
@@ -685,6 +687,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                         &tr1_transparent_outputs,
                         &sapling::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        &orchard_fees::EmptyBundleView,
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
                         Some(EphemeralBalance::Input(tr1_required_input_value)),
@@ -718,6 +722,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
+                // TODO: when the wallet selects Ironwood notes or routes outputs
+                // to the Ironwood pool, pass them here so the Ironwood bundle's
+                // action count is included in the fee. Empty for now.
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
                 ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
@@ -1573,6 +1582,8 @@ where
         transparent_inputs,
         &[] as &[TxOut],
         &sapling::EmptyBundleView,
+        #[cfg(feature = "orchard")]
+        &orchard_fees::EmptyBundleView,
         #[cfg(feature = "orchard")]
         &orchard_fees::EmptyBundleView,
         None,
