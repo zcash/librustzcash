@@ -621,6 +621,80 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_outputs_are_charged_actions() {
+        // V6 transactions carry a separate Ironwood bundle, so a populated
+        // Ironwood view must contribute its own actions to the fee rather than
+        // being treated as zero. Compare two otherwise-identical balances that
+        // differ only by the presence of an Ironwood output.
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Orchard,
+            DustOutputPolicy::default(),
+        );
+
+        let height = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu5)
+            .unwrap()
+            .into();
+        let sapling_inputs = [TestSaplingInput {
+            note_id: 0,
+            value: Zatoshis::const_from_u64(100000),
+        }];
+        let orchard_outputs = [OrchardPayment::new(Zatoshis::const_from_u64(30000))];
+        let sapling_view = (
+            sapling::builder::BundleType::DEFAULT,
+            &sapling_inputs[..],
+            &[] as &[Infallible],
+        );
+        let orchard_view = (
+            crate::ANY_ORCHARD_BUNDLE_VERSION,
+            &[] as &[Infallible],
+            &orchard_outputs[..],
+        );
+
+        let without_ironwood = change_strategy
+            .compute_balance(
+                &Network::TestNetwork,
+                height,
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &sapling_view,
+                &orchard_view,
+                &orchard_fees::EmptyBundleView,
+                None,
+                &(),
+            )
+            .unwrap();
+
+        let with_ironwood = change_strategy
+            .compute_balance(
+                &Network::TestNetwork,
+                height,
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &sapling_view,
+                &orchard_view,
+                &(
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                    &[] as &[Infallible],
+                    &orchard_outputs[..],
+                ),
+                None,
+                &(),
+            )
+            .unwrap();
+
+        assert!(
+            with_ironwood.fee_required() > without_ironwood.fee_required(),
+            "Ironwood bundle outputs must add to the fee: {:?} vs {:?}",
+            with_ironwood.fee_required(),
+            without_ironwood.fee_required(),
+        );
+    }
+
+    #[test]
     fn change_with_transparent_payments_implicitly_allowing_zero_change() {
         change_with_transparent_payments(DustOutputPolicy::default())
     }
