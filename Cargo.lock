@@ -7360,7 +7360,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.8.0"
+version = "0.9.0-pre.0"
 dependencies = [
  "bip32",
  "bs58",
