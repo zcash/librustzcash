@@ -1661,12 +1661,21 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
+        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
+        // retention interval are retained as durable anchors. The activation height is `None`
+        // (and so anchor retention is inactive) on networks that do not yet have an assigned
+        // NU6.3 activation height.
+        let anchor_retention_height = self
+            .params
+            .activation_height(consensus::NetworkUpgrade::Nu6_3);
+
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
             #[cfg(feature = "transparent-inputs")]
             self.gap_limits,
             from_state,
             blocks,
+            anchor_retention_height,
         )
         .map_err(SqliteClientError::from)
     }
