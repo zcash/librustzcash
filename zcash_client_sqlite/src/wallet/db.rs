@@ -777,6 +777,15 @@ CREATE TABLE sapling_tree_checkpoint_marks_removed (
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
 )";
 
+/// Stores the identifiers of Sapling [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE sapling_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
 /// Stores the shards of a [`ShardTree`] for the Orchard commitment tree.
 ///
 /// This is identical to [`TABLE_SAPLING_TREE_SHARDS`]; see its documentation for details.
@@ -829,6 +838,18 @@ CREATE TABLE orchard_tree_checkpoint_marks_removed (
     FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
     ON DELETE CASCADE,
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+)";
+
+/// Stores the identifiers of Orchard [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// This is identical to [`TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS`]; see its documentation for
+/// details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE orchard_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
 )";
 
 //
