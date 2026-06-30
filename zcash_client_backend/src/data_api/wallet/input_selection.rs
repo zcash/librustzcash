@@ -666,6 +666,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             &sapling::EmptyBundleView,
                             #[cfg(feature = "orchard")]
                             &orchard_fees::EmptyBundleView,
+                            #[cfg(feature = "orchard")]
+                            &orchard_fees::EmptyBundleView,
+                            #[cfg(feature = "orchard")]
+                            false,
                             Some(EphemeralBalance::Input(Zatoshis::ZERO)),
                             &wallet_meta,
                         ) {
@@ -687,6 +691,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         &sapling::EmptyBundleView,
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        &orchard_fees::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        false,
                         Some(EphemeralBalance::Input(tr1_required_input_value)),
                         &wallet_meta,
                     )?;
@@ -695,6 +703,56 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     (Some(tr1_required_input_value), Some(tr1_balance))
                 }
             };
+
+            // When the builder will route Orchard-pool outputs into a separate
+            // Ironwood bundle, mirror that split here so the proposal's per-bundle
+            // action counts (and hence the fee) match the transaction that gets
+            // built. We reuse the builder's own routing predicate so the proposal
+            // and build paths cannot drift.
+            #[cfg(all(
+                feature = "orchard",
+                any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
+            ))]
+            let orchard_outputs_are_ironwood = super::orchard_outputs_to_ironwood(
+                params,
+                target_height,
+                #[cfg(feature = "unstable")]
+                proposed_version,
+            );
+            #[cfg(all(
+                feature = "orchard",
+                not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))
+            ))]
+            let orchard_outputs_are_ironwood = false;
+
+            // The Orchard bundle keeps the Orchard spends; its outputs move to the
+            // Ironwood bundle when routing is active. Ironwood has no spends yet
+            // (the wallet does not select Ironwood notes until note detection lands),
+            // so `&orchard_inputs[..0]` is an empty slice of the correct type.
+            #[cfg(feature = "orchard")]
+            let orchard_view = (
+                // TODO: thread the target-height-selected Orchard `BundleVersion`
+                // here rather than this placeholder, which only approximates the
+                // Orchard action count for paths that restrict cross-address
+                // transfers.
+                crate::ANY_ORCHARD_BUNDLE_VERSION,
+                &orchard_inputs[..],
+                if orchard_outputs_are_ironwood {
+                    &orchard_outputs[..0]
+                } else {
+                    &orchard_outputs[..]
+                },
+            );
+            #[cfg(feature = "orchard")]
+            let ironwood_view = (
+                ::orchard::bundle::BundleVersion::ironwood_v3(),
+                &orchard_inputs[..0],
+                if orchard_outputs_are_ironwood {
+                    &orchard_outputs[..]
+                } else {
+                    &orchard_outputs[..0]
+                },
+            );
 
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
@@ -709,15 +767,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &sapling_outputs[..],
                 ),
                 #[cfg(feature = "orchard")]
-                &(
-                    // Preserve the legacy Orchard action-count estimate here.
-                    // If this path targets restrictions that disable
-                    // cross-address transfers, thread the target-height-selected
-                    // `BundleVersion` through this call.
-                    crate::ANY_ORCHARD_BUNDLE_VERSION,
-                    &orchard_inputs[..],
-                    &orchard_outputs[..],
-                ),
+                &orchard_view,
+                #[cfg(feature = "orchard")]
+                &ironwood_view,
+                #[cfg(feature = "orchard")]
+                orchard_outputs_are_ironwood,
                 ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
@@ -1575,6 +1629,10 @@ where
         &sapling::EmptyBundleView,
         #[cfg(feature = "orchard")]
         &orchard_fees::EmptyBundleView,
+        #[cfg(feature = "orchard")]
+        &orchard_fees::EmptyBundleView,
+        #[cfg(feature = "orchard")]
+        false,
         None,
         wallet_meta,
     )
