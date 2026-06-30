@@ -1260,12 +1260,32 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .transpose()
             .map_err(Error::SaplingBuild)?;
 
+        // Orchard and Ironwood actions share the post-NU6.3 circuit, so a single
+        // proving key serves both proofs when a V6 transaction carries both
+        // bundles. Build it once, from whichever bundle is present; their circuit
+        // versions agree whenever both are present.
+        let orchard_proving_key = {
+            let circuit_version = unauthed_tx
+                .orchard_bundle
+                .as_ref()
+                .map(|b| b.circuit_version());
+            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+            let circuit_version = circuit_version.or_else(|| {
+                unauthed_tx
+                    .ironwood_bundle
+                    .as_ref()
+                    .map(|b| b.circuit_version())
+            });
+            circuit_version.map(orchard::circuit::ProvingKey::build)
+        };
+
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                let circuit_version = b.circuit_version();
                 b.create_proof(
-                    &orchard::circuit::ProvingKey::build(circuit_version),
+                    orchard_proving_key
+                        .as_ref()
+                        .expect("proving key is built when an Orchard bundle is present"),
                     &mut rng,
                 )
                 .and_then(|b| {
@@ -1279,9 +1299,10 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
         let ironwood_bundle = unauthed_tx
             .ironwood_bundle
             .map(|b| {
-                let circuit_version = b.circuit_version();
                 b.create_proof(
-                    &orchard::circuit::ProvingKey::build(circuit_version),
+                    orchard_proving_key
+                        .as_ref()
+                        .expect("proving key is built when an Ironwood bundle is present"),
                     &mut rng,
                 )
                 .and_then(|b| {
