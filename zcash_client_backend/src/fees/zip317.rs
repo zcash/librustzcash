@@ -126,6 +126,7 @@ where
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -152,6 +153,8 @@ where
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            #[cfg(feature = "orchard")]
+            orchard_change_to_ironwood,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -239,6 +242,7 @@ where
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -264,6 +268,8 @@ where
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            #[cfg(feature = "orchard")]
+            orchard_change_to_ironwood,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -330,6 +336,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -378,6 +386,8 @@ mod tests {
                     &orchard_fees::EmptyBundleView,
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
+                    #[cfg(feature = "orchard")]
+                    false,
                     None,
                     &AccountMeta::new(Some(PoolMeta::new(existing_notes, total)), None),
                 )
@@ -431,6 +441,8 @@ mod tests {
                 &orchard_fees::EmptyBundleView,
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                false,
                 None,
                 &AccountMeta::new(
                     Some(PoolMeta::new(0, Zatoshis::ZERO)),
@@ -474,6 +486,8 @@ mod tests {
                 &orchard_fees::EmptyBundleView,
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                false,
                 None,
                 // after excluding the inputs we're spending, we have no notes in the wallet
                 &AccountMeta::new(
@@ -512,6 +526,8 @@ mod tests {
                 &orchard_fees::EmptyBundleView,
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                false,
                 None,
                 // after excluding the inputs we're spending, we have no notes in the wallet
                 &AccountMeta::new(
@@ -558,6 +574,8 @@ mod tests {
                 &orchard_fees::EmptyBundleView,
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
+                #[cfg(feature = "orchard")]
+                false,
                 None,
                 // after excluding the inputs we're spending, we have no notes in the wallet
                 &AccountMeta::new(
@@ -608,6 +626,7 @@ mod tests {
                 &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
             ),
             &orchard_fees::EmptyBundleView,
+            false,
             None,
             &(),
         );
@@ -663,6 +682,7 @@ mod tests {
                 &sapling_view,
                 &orchard_view,
                 &orchard_fees::EmptyBundleView,
+                false,
                 None,
                 &(),
             )
@@ -681,6 +701,7 @@ mod tests {
                     &[] as &[Infallible],
                     &orchard_outputs[..],
                 ),
+                false,
                 None,
                 &(),
             )
@@ -691,6 +712,80 @@ mod tests {
             "Ironwood bundle outputs must add to the fee: {:?} vs {:?}",
             with_ironwood.fee_required(),
             without_ironwood.fee_required(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_change_routes_to_ironwood_bundle() {
+        // With `orchard_change_to_ironwood` set (the builder routes Orchard-pool
+        // outputs into a separate Ironwood bundle when Ironwood is active), the
+        // Orchard-pool change output must be counted in the Ironwood bundle, not the
+        // Orchard bundle — matching where the builder places it. This exercises the
+        // change-routing path directly: an Orchard payment forces the change to the
+        // Orchard pool, and two Ironwood payments make the Ironwood bundle large
+        // enough that moving the change into it raises its action count, so routing
+        // the change has an observable effect on the fee.
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Orchard,
+            DustOutputPolicy::default(),
+        );
+
+        let height = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu5)
+            .unwrap()
+            .into();
+        let sapling_inputs = [TestSaplingInput {
+            note_id: 0,
+            value: Zatoshis::const_from_u64(100000),
+        }];
+        let orchard_outputs = [OrchardPayment::new(Zatoshis::const_from_u64(10000))];
+        let ironwood_outputs = [
+            OrchardPayment::new(Zatoshis::const_from_u64(10000)),
+            OrchardPayment::new(Zatoshis::const_from_u64(10000)),
+        ];
+        let sapling_view = (
+            sapling::builder::BundleType::DEFAULT,
+            &sapling_inputs[..],
+            &[] as &[Infallible],
+        );
+        let orchard_view = (
+            crate::ANY_ORCHARD_BUNDLE_VERSION,
+            &[] as &[Infallible],
+            &orchard_outputs[..],
+        );
+        let ironwood_view = (
+            ::orchard::bundle::BundleVersion::ironwood_v3(),
+            &[] as &[Infallible],
+            &ironwood_outputs[..],
+        );
+
+        let fee_for = |orchard_change_to_ironwood: bool| {
+            change_strategy
+                .compute_balance(
+                    &Network::TestNetwork,
+                    height,
+                    &[] as &[TestTransparentInput],
+                    &[] as &[TxOut],
+                    &sapling_view,
+                    &orchard_view,
+                    &ironwood_view,
+                    orchard_change_to_ironwood,
+                    None,
+                    &(),
+                )
+                .unwrap()
+                .fee_required()
+        };
+
+        let change_in_orchard = fee_for(false);
+        let change_in_ironwood = fee_for(true);
+        assert!(
+            change_in_ironwood > change_in_orchard,
+            "routing Orchard-pool change into the Ironwood bundle should change the \
+             fee: {change_in_ironwood:?} (ironwood) vs {change_in_orchard:?} (orchard)",
         );
     }
 
@@ -739,6 +834,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -787,6 +884,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -835,6 +934,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -889,6 +990,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -952,6 +1055,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -1005,6 +1110,8 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
