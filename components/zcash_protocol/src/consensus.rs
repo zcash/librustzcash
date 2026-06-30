@@ -526,7 +526,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu6 => Some(BlockHeight(2_976_000)),
             NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_536_500)),
             NetworkUpgrade::Nu6_2 => Some(BlockHeight(4_052_000)),
-            NetworkUpgrade::Nu6_3 => None,
+            NetworkUpgrade::Nu6_3 => Some(BlockHeight(4_134_000)),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
         }
@@ -749,9 +749,7 @@ impl TryFrom<u32> for BranchId {
             0xc8e7_1055 => Ok(BranchId::Nu6),
             0x4dec_4df0 => Ok(BranchId::Nu6_1),
             0x5437_f330 => Ok(BranchId::Nu6_2),
-            // TODO: Replace this placeholder once the Ironwood / NU6.3 consensus branch ID is chosen.
-            #[cfg(not(zcash_unstable = "nu7"))]
-            0xffff_ffff => Ok(BranchId::Nu6_3),
+            0x37a5_165b => Ok(BranchId::Nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             0xffff_ffff => Ok(BranchId::Nu7),
             _ => Err("Unknown consensus branch ID"),
@@ -772,8 +770,7 @@ impl From<BranchId> for u32 {
             BranchId::Nu6 => 0xc8e7_1055,
             BranchId::Nu6_1 => 0x4dec_4df0,
             BranchId::Nu6_2 => 0x5437_f330,
-            // TODO: Replace this placeholder once the Ironwood / NU6.3 consensus branch ID is chosen.
-            BranchId::Nu6_3 => 0xffff_ffff,
+            BranchId::Nu6_3 => 0x37a5_165b,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => 0xffff_ffff,
         }
