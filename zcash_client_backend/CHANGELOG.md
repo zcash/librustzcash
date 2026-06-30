@@ -98,11 +98,13 @@ workspace.
   heights at or beyond NU6.3 activation now count one action per Orchard spend
   or output, matching the post-NU6.3 transaction builder.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` now takes an
-  additional `ironwood` bundle view (behind the `orchard` feature flag),
-  alongside the existing `orchard` view. A V6 transaction carries a separate
-  Ironwood bundle that is charged its own actions, so the built-in change
-  strategies populate this view from the same routing decision the transaction
-  builder uses. Pass an empty view when nothing targets the Ironwood pool.
+  additional `ironwood` bundle view and an `orchard_change_to_ironwood` flag
+  (behind the `orchard` feature flag), alongside the existing `orchard` view. A
+  V6 transaction carries a separate Ironwood bundle that is charged its own
+  actions, so the built-in change strategies populate the view — and route the
+  Orchard-pool change output into the Ironwood bundle when the builder will —
+  from the same routing decision the transaction builder uses. Pass an empty
+  view and `false` when nothing targets the Ironwood pool.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
   routes Orchard-recipient spends and outputs through the Ironwood transaction
   builder when Ironwood is active, unless an explicit legacy V5 transaction is

@@ -704,6 +704,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             &orchard_fees::EmptyBundleView,
                             #[cfg(feature = "orchard")]
                             &orchard_fees::EmptyBundleView,
+                            #[cfg(feature = "orchard")]
+                            false,
                             Some(EphemeralBalance::Input(Zatoshis::ZERO)),
                             &wallet_meta,
                         ) {
@@ -727,6 +729,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         &orchard_fees::EmptyBundleView,
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        false,
                         Some(EphemeralBalance::Input(tr1_required_input_value)),
                         &wallet_meta,
                     )?;
@@ -763,6 +767,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // so `&orchard_inputs[..0]` is an empty slice of the correct type.
             #[cfg(feature = "orchard")]
             let orchard_view = (
+                // TODO: thread the target-height-selected Orchard `BundleVersion`
+                // here rather than this placeholder, which only approximates the
+                // Orchard action count for paths that restrict cross-address
+                // transfers.
                 crate::ANY_ORCHARD_BUNDLE_VERSION,
                 &orchard_inputs[..],
                 if orchard_outputs_are_ironwood {
@@ -798,6 +806,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &orchard_view,
                 #[cfg(feature = "orchard")]
                 &ironwood_view,
+                #[cfg(feature = "orchard")]
+                orchard_outputs_are_ironwood,
                 ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
@@ -1675,6 +1685,8 @@ where
         &orchard_fees::EmptyBundleView,
         #[cfg(feature = "orchard")]
         &orchard_fees::EmptyBundleView,
+        #[cfg(feature = "orchard")]
+        false,
         None,
         wallet_meta,
     )
