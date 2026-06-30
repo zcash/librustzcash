@@ -86,11 +86,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.14.0"
-when = "2026-06-03"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.15.0-pre.1"
+when = "2026-06-30"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
 
 [[publisher.pczt]]
 version = "0.7.0"
