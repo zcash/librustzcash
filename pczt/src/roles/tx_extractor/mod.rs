@@ -15,7 +15,6 @@ use crate::Pczt;
 
 mod orchard;
 pub use self::orchard::OrchardError;
-#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 pub type IronwoodError = OrchardError;
 
 mod sapling;
@@ -91,7 +90,6 @@ impl<'a> TransactionExtractor<'a> {
                 o.extract()
                     .map_err(|e| Error::Orchard(OrchardError::Extract(e)))
             },
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             |i| {
                 i.extract()
                     .map_err(|e| Error::Ironwood(IronwoodError::Extract(e)))
@@ -134,7 +132,6 @@ impl<'a> TransactionExtractor<'a> {
             orchard::verify_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Orchard)?;
         }
-        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         if let Some(bundle) = tx.ironwood_bundle() {
             orchard::verify_ironwood_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Ironwood)?;
@@ -161,7 +158,6 @@ pub enum Error {
     SaplingRequired,
     SighashMismatch,
     Transparent(TransparentError),
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     Ironwood(IronwoodError),
 }
 

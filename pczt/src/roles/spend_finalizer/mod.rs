@@ -21,7 +21,6 @@ impl SpendFinalizer {
             transparent,
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
         } = self.pczt;
 
@@ -36,7 +35,6 @@ impl SpendFinalizer {
             transparent: crate::transparent::Bundle::serialize_from(transparent),
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
         })
     }

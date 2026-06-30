@@ -38,9 +38,7 @@ pub struct Signer {
     transparent: transparent::pczt::Bundle,
     sapling: sapling::pczt::Bundle,
     orchard: orchard::pczt::Bundle,
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     ironwood: orchard::pczt::Bundle,
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     empty_ironwood: Option<crate::orchard::Bundle>,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
@@ -52,7 +50,6 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
-        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         let empty_ironwood = pczt
             .ironwood
             .actions
@@ -64,7 +61,6 @@ impl Signer {
             transparent,
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
             tx_data,
         } = pczt.extract_tx_data(
@@ -74,7 +70,6 @@ impl Signer {
             },
             |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
         let txid_parts = tx_data.digest(TxIdDigester);
@@ -85,9 +80,7 @@ impl Signer {
             transparent,
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             empty_ironwood,
             tx_data,
             txid_parts,
@@ -356,9 +349,7 @@ impl Signer {
             transparent,
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             empty_ironwood,
             tx_data: _,
             txid_parts: _,
@@ -371,7 +362,6 @@ impl Signer {
             transparent: crate::transparent::Bundle::serialize_from(transparent),
             sapling: crate::sapling::Bundle::serialize_from(sapling),
             orchard: crate::orchard::Bundle::serialize_from(orchard),
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood: empty_ironwood
                 .unwrap_or_else(|| crate::orchard::Bundle::serialize_from(ironwood)),
         }

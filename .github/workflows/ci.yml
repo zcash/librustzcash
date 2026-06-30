@@ -46,9 +46,6 @@ jobs:
             all-pools: true
           - state: all-features
             all-features: true
-          - state: NU6.3
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu6.3"'
           - state: NU7
             all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
@@ -113,9 +110,6 @@ jobs:
             all-pools: true
           - state: all-features
             all-features: true
-          - state: NU6.3
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu6.3"'
           - state: NU7
             all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
@@ -182,9 +176,6 @@ jobs:
             orchard-pool: true
           - state: all-features
             all-features: true
-          - state: NU6.3
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu6.3"'
           - state: NU7
             all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'

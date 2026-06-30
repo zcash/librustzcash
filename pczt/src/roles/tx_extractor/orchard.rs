@@ -21,7 +21,6 @@ pub(super) fn verify_bundle(
     }
 }
 
-#[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
 pub(super) fn verify_ironwood_bundle(
     bundle: &Bundle<Authorized, ZatBalance>,
     orchard_vk: Option<&VerifyingKey>,

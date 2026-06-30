@@ -57,7 +57,6 @@ fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::Bu
 
     match branch_id {
         BranchId::Nu6_2 => BundleVersion::orchard_v2(),
-        #[cfg(zcash_unstable = "nu6.3")]
         BranchId::Nu6_3 => BundleVersion::orchard_v3(),
         #[cfg(zcash_unstable = "nu7")]
         BranchId::Nu7 => BundleVersion::orchard_v3(),
@@ -180,7 +179,6 @@ impl Creator {
                 zkproof: None,
                 bsk: None,
             },
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood: OrchardBundle {
                 actions: vec![],
                 flags: self.orchard_flags,
@@ -207,7 +205,6 @@ impl Creator {
 
         use crate::common::FLAG_HAS_SIGHASH_SINGLE;
 
-        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         use zcash_protocol::constants::V6_TX_VERSION;
 
         let tx_version = match parts.version {
@@ -215,7 +212,6 @@ impl Creator {
             | zcash_primitives::transaction::TxVersion::V3 => None,
             zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
             zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
         }?;
 
@@ -270,7 +266,6 @@ impl Creator {
                     zkproof: None,
                     bsk: None,
                 }),
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood: OrchardBundle {
                 actions: vec![],
                 flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,

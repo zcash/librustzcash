@@ -25,8 +25,7 @@ workspace.
     implementations that commit to Ironwood bundles.
 - `zcash_primitives::transaction::builder::Builder::add_orchard_change_output`,
   for constructing wallet-controlled Orchard change outputs.
-- `zcash_primitives::transaction::builder` Ironwood support (behind the
-  `--cfg zcash_unstable="nu6.3"` or `--cfg zcash_unstable="nu7"` flag):
+- `zcash_primitives::transaction::builder` Ironwood support:
   - `BuildConfig::Standard::ironwood_anchor`, the anchor used to construct the
     Ironwood bundle.
   - `Builder::{add_ironwood_spend, add_ironwood_output}`, which build the

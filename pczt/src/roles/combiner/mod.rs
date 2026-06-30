@@ -45,7 +45,6 @@ fn merge(lhs: Pczt, rhs: Pczt) -> Result<Pczt, Error> {
         .orchard
         .merge(rhs.orchard, &lhs.global, &rhs.global)
         .ok_or(Error::DataMismatch)?;
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     let ironwood = lhs
         .ironwood
         .merge(rhs.ironwood, &lhs.global, &rhs.global)
@@ -59,7 +58,6 @@ fn merge(lhs: Pczt, rhs: Pczt) -> Result<Pczt, Error> {
         transparent,
         sapling,
         orchard,
-        #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
         ironwood,
     })
 }

@@ -12,10 +12,7 @@ impl Signer {
         Self { pczt }
     }
 
-    #[cfg(all(
-        feature = "orchard",
-        any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
-    ))]
+    #[cfg(feature = "orchard")]
     pub fn sign_ironwood_with<E, F>(self, f: F) -> Result<Self, E>
     where
         E: From<orchard::pczt::ParseError>,

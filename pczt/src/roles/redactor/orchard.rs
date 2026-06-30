@@ -10,7 +10,6 @@ impl super::Redactor {
         self
     }
 
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub fn redact_ironwood_with<F>(mut self, f: F) -> Self
     where
         F: FnOnce(OrchardRedactor<'_>),

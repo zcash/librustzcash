@@ -757,7 +757,6 @@ impl Bundle {
         self.into_parsed_with_version(BundleVersion::orchard_v2())
     }
 
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
     pub(crate) fn into_ironwood_parsed(
         self,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {

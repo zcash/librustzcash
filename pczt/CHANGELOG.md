@@ -47,10 +47,8 @@ workspace.
   Output}`, `pczt::sapling::{Bundle, Spend, Output}`, and
   `pczt::orchard::{Bundle, Action, Spend, Output}` types (used to detect empty
   bundles for v2 serialization).
-- The logical `pczt::Pczt` type now includes an Ironwood bundle behind
-  `zcash_unstable = "nu6.3"` and `zcash_unstable = "nu7"`.
-- Ironwood PCZT role support behind `zcash_unstable = "nu6.3"` and
-  `zcash_unstable = "nu7"`.
+- The logical `pczt::Pczt` type now includes an Ironwood bundle.
+- Ironwood PCZT role support.
 
 ## [0.7.0] - 2026-06-02
 

@@ -13,7 +13,6 @@ impl super::Updater {
             transparent,
             sapling,
             orchard,
-            #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
             ironwood,
         } = self.pczt;
 
@@ -27,7 +26,6 @@ impl super::Updater {
                 transparent,
                 sapling: crate::sapling::Bundle::serialize_from(bundle),
                 orchard,
-                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
                 ironwood,
             },
         })
