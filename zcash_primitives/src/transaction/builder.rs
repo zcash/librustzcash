@@ -1260,23 +1260,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .transpose()
             .map_err(Error::SaplingBuild)?;
 
-        // Orchard and Ironwood actions share the post-NU6.3 circuit, so a single
-        // proving key serves both proofs when a V6 transaction carries both
-        // bundles. Build it once, from whichever bundle is present; their circuit
-        // versions agree whenever both are present.
+        // The Orchard and Ironwood circuit version is fixed by the transaction's
+        // consensus branch (both pools share the post-NU6.3 circuit), so derive it
+        // once from the branch rather than from a bundle. Only build the key when
+        // an Orchard or Ironwood bundle is actually present.
         let orchard_proving_key = {
-            let circuit_version = unauthed_tx
-                .orchard_bundle
-                .as_ref()
-                .map(|b| b.circuit_version());
+            let build_proving_key = unauthed_tx.orchard_bundle.is_some();
             #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-            let circuit_version = circuit_version.or_else(|| {
-                unauthed_tx
-                    .ironwood_bundle
-                    .as_ref()
-                    .map(|b| b.circuit_version())
-            });
-            circuit_version.map(orchard::circuit::ProvingKey::build)
+            let build_proving_key = build_proving_key || unauthed_tx.ironwood_bundle.is_some();
+            build_proving_key.then(|| {
+                orchard::circuit::ProvingKey::build(
+                    orchard_bundle_version_for_branch(unauthed_tx.consensus_branch_id)
+                        .circuit_version(),
+                )
+            })
         };
 
         let orchard_bundle = unauthed_tx
