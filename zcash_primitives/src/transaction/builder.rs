@@ -746,6 +746,33 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(Error::OrchardRecipient)
     }
 
+    /// Adds a wallet-controlled Orchard change output to the transaction.
+    ///
+    /// Returns [`Error::OrchardBuilderNotAvailable`] if this builder is not
+    /// configured with an Orchard bundle builder. Returns
+    /// [`Error::OrchardRecipient`] if the Orchard builder rejects the recipient
+    /// or cannot construct the output.
+    pub fn add_orchard_change_output<FE>(
+        &mut self,
+        fvk: orchard::keys::FullViewingKey,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: Zatoshis,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .as_mut()
+            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .add_change_output(
+                fvk,
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value.into()),
+                memo.into_bytes(),
+            )
+            .map_err(Error::OrchardRecipient)
+    }
+
     /// Adds an Ironwood note to be spent in this bundle.
     ///
     /// The note must use [`orchard::note::NoteVersion::V3`], the Ironwood
@@ -991,7 +1018,10 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(FeeError::Bundle)?;
 
         #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-        let orchard_actions = orchard_actions + ironwood_actions;
+        let orchard_plus_ironwood_actions = orchard_actions + ironwood_actions;
+
+        #[cfg(not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")))]
+        let orchard_plus_ironwood_actions = orchard_actions;
 
         fee_rule
             .fee_required(
@@ -1011,7 +1041,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                             .num_outputs(sapling_spends, builder.outputs().len())
                             .map_err(FeeError::Bundle)
                     })?,
-                orchard_actions,
+                orchard_plus_ironwood_actions,
             )
             .map_err(FeeError::FeeRule)
     }
@@ -1930,29 +1960,57 @@ mod tests {
         feature = "circuits",
         any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
     ))]
-    fn orchard_action_count_includes_change_outputs() {
-        let fvk = orchard::keys::FullViewingKey::from(
-            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
-        );
-        let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+    fn orchard_action_count_uses_cross_address_disabled_count() {
+        let spend_sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
+        let spend_fvk = orchard::keys::FullViewingKey::from(&spend_sk);
+        let spend_recipient = spend_fvk.address_at(0u32, orchard::keys::Scope::External);
+        let rho = orchard::note::Rho::from_bytes(&[1; 32]).unwrap();
+        let rseed = (0u8..=255)
+            .find_map(|b| orchard::note::RandomSeed::from_bytes([b; 32], &rho).into_option())
+            .expect("at least one test rseed is valid");
+        let note = orchard::Note::from_parts(
+            spend_recipient,
+            orchard::value::NoteValue::from_raw(10_000),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        )
+        .unwrap();
+        let leaf = orchard::tree::MerkleHashOrchard::from_cmx(&note.commitment().into());
+        let mut tree = CommitmentTree::<orchard::tree::MerkleHashOrchard, 32>::empty();
+        tree.append(leaf).unwrap();
+        let witness = IncrementalWitness::from_tree(tree).unwrap();
+        let anchor = witness.root().into();
+        let merkle_path = witness.path().unwrap().into();
+
         let mut builder = orchard::builder::Builder::new(
             orchard::builder::BundleType::DEFAULT,
             orchard::bundle::BundleVersion::orchard_v3(),
             orchard::bundle::BundleVersion::orchard_v3().default_flags(),
-            orchard::Anchor::empty_tree(),
+            anchor,
         )
         .unwrap();
 
-        builder
-            .add_change_output(
-                fvk,
-                None,
-                recipient,
-                orchard::value::NoteValue::from_raw(5_000),
-                [0u8; 512],
-            )
-            .unwrap();
+        builder.add_spend(spend_fvk, note, merkle_path).unwrap();
 
+        for seed in [[8u8; 32], [9u8; 32]] {
+            let change_fvk = orchard::keys::FullViewingKey::from(
+                &orchard::keys::SpendingKey::from_bytes(seed).unwrap(),
+            );
+            let recipient = change_fvk.address_at(0u32, orchard::keys::Scope::Internal);
+            builder
+                .add_change_output(
+                    change_fvk,
+                    None,
+                    recipient,
+                    orchard::value::NoteValue::from_raw(1_000),
+                    [0u8; 512],
+                )
+                .unwrap();
+        }
+
+        assert_eq!(builder.spends().len(), 1);
+        assert_eq!(builder.changes().len(), 2);
         assert_eq!(
             super::orchard_action_count(
                 &builder,
@@ -1960,7 +2018,42 @@ mod tests {
                 orchard::bundle::BundleVersion::orchard_v3(),
             )
             .unwrap(),
-            2
+            3
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn add_orchard_change_output_records_change() {
+        let target_height = TEST_NETWORK.activation_height(NetworkUpgrade::Nu5).unwrap();
+        let mut builder = Builder::new(
+            TEST_NETWORK,
+            target_height,
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+                #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
+                ironwood_anchor: None,
+            },
+        );
+        let fvk = orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
+        );
+        let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+
+        builder
+            .add_orchard_change_output::<Infallible>(
+                fvk,
+                None,
+                recipient,
+                Zatoshis::const_from_u64(5_000),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            builder.orchard_builder.as_ref().map(|b| b.changes().len()),
+            Some(1)
         );
     }
 
