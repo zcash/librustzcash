@@ -46,6 +46,7 @@ impl FeeRule for StandardFeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        ironwood_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         #[allow(deprecated)]
         match self {
@@ -57,6 +58,7 @@ impl FeeRule for StandardFeeRule {
                 sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             ),
         }
     }
