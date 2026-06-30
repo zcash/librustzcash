@@ -54,7 +54,8 @@ workspace.
     Tokio-based batch decryption engine for full blocks and transactions.
 
 ### Changed
-- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`.
+- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
+  `zcash_address 0.13.0-pre.0`.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
