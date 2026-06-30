@@ -827,31 +827,6 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             .map_err(Error::IronwoodRecipient)
     }
 
-    /// Adds a wallet-controlled Ironwood change output to the transaction.
-    ///
-    /// This uses [`orchard::note::NoteVersion::V3`].
-    #[cfg(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))]
-    pub fn add_ironwood_change_output<FE>(
-        &mut self,
-        fvk: orchard::keys::FullViewingKey,
-        ovk: Option<orchard::keys::OutgoingViewingKey>,
-        recipient: orchard::Address,
-        value: Zatoshis,
-        memo: MemoBytes,
-    ) -> Result<(), Error<FE>> {
-        self.ironwood_builder
-            .as_mut()
-            .ok_or(Error::IronwoodBuilderNotAvailable)?
-            .add_change_output(
-                fvk,
-                ovk,
-                recipient,
-                orchard::value::NoteValue::from_raw(value.into()),
-                memo.into_bytes(),
-            )
-            .map_err(Error::IronwoodRecipient)
-    }
-
     /// Adds a Sapling note to be spent in this transaction.
     ///
     /// Returns an error if the given Merkle path does not have the same anchor as the
@@ -1791,35 +1766,6 @@ mod tests {
             res.pczt_parts.consensus_branch_id,
             zcash_protocol::consensus::BranchId::Nu6_3
         );
-    }
-
-    #[test]
-    #[cfg(all(feature = "circuits", zcash_unstable = "nu6.3"))]
-    fn ironwood_change_marks_ironwood_in_use() {
-        let mut builder = Builder::new(
-            nu6_3_test_network(),
-            10u32.into(),
-            BuildConfig::Standard {
-                sapling_anchor: None,
-                orchard_anchor: None,
-                ironwood_anchor: Some(orchard::Anchor::empty_tree()),
-            },
-        );
-        let fvk = orchard::keys::FullViewingKey::from(
-            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
-        );
-        let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
-        builder
-            .add_ironwood_change_output::<crate::transaction::fees::zip317::FeeRule>(
-                fvk,
-                None,
-                recipient,
-                Zatoshis::const_from_u64(10_000),
-                MemoBytes::empty(),
-            )
-            .unwrap();
-
-        assert!(builder.ironwood_in_use());
     }
 
     #[test]

@@ -29,9 +29,9 @@ workspace.
   `--cfg zcash_unstable="nu6.3"` or `--cfg zcash_unstable="nu7"` flag):
   - `BuildConfig::Standard::ironwood_anchor`, the anchor used to construct the
     Ironwood bundle.
-  - `Builder::{add_ironwood_spend, add_ironwood_output,
-    add_ironwood_change_output}`, which build the Ironwood bundle alongside the
-    Orchard bundle and require `orchard::note::NoteVersion::V3` notes.
+  - `Builder::{add_ironwood_spend, add_ironwood_output}`, which build the
+    Ironwood bundle alongside the Orchard bundle and require
+    `orchard::note::NoteVersion::V3` notes.
   - `BuildResult::ironwood_meta` and `PcztParts::ironwood`/`PcztResult::ironwood_meta`,
     exposing the Ironwood bundle and its build metadata.
   - `Error::{IronwoodBuild, IronwoodSpend, IronwoodSpendUnsupportedNoteVersion,
