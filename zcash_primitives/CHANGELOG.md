@@ -36,6 +36,13 @@ workspace.
     exposing the Ironwood bundle and its build metadata.
   - `Error::{IronwoodBuild, IronwoodSpend, IronwoodSpendUnsupportedNoteVersion,
     IronwoodRecipient, IronwoodBuilderNotAvailable}`.
+- `zcash_primitives::transaction::builder`:
+  - `Builder::with_expiry_height`, for overriding the expiry height of the
+    transaction under construction. For non-coinbase transactions, setting this
+    to `BlockHeight::from(0)` disables transaction expiry.
+  - `Error::CoinbaseExpiryHeightMismatch`, returned when a coinbase builder's
+    expiry height is overridden to a value that does not match its target block
+    height.
 
 ### Changed
 - `zcash_primitives::transaction::builder`:
