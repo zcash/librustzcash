@@ -1047,23 +1047,6 @@ pub(crate) fn remove_retained_checkpoint(
     Ok(())
 }
 
-/// Removes all retained checkpoints having a height strictly less than `max_height`.
-pub(crate) fn remove_retained_checkpoints_below(
-    conn: &rusqlite::Transaction<'_>,
-    table_prefix: &'static str,
-    max_height: BlockHeight,
-) -> Result<(), Error> {
-    conn.prepare_cached(&format!(
-        "DELETE FROM {table_prefix}_tree_retained_checkpoints
-         WHERE checkpoint_id < :max_height"
-    ))
-    .map_err(Error::Query)?
-    .execute(named_params![":max_height": u32::from(max_height)])
-    .map_err(Error::Query)?;
-
-    Ok(())
-}
-
 pub(crate) fn retained_checkpoints(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
@@ -1591,6 +1574,44 @@ mod tests {
     #[test]
     fn sapling_retained_checkpoints() {
         check_retained_checkpoints(new_tree::<SaplingPoolTester>(10));
+    }
+
+    #[test]
+    fn remove_retained_checkpoints_below() {
+        use std::collections::BTreeSet;
+
+        use shardtree::{error::ShardTreeError, store::ShardStore};
+        use zcash_client_backend::data_api::WalletCommitmentTrees;
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+        WalletMigrator::new().init_or_migrate(&mut db).unwrap();
+
+        db.with_sapling_tree_mut(|tree| {
+            for h in [100u32, 200, 300] {
+                tree.ensure_retained(BlockHeight::from(h))?;
+            }
+            Ok::<_, ShardTreeError<_>>(())
+        })
+        .unwrap();
+
+        db.remove_retained_checkpoints_below(BlockHeight::from(250))
+            .unwrap();
+
+        let remaining = db
+            .with_sapling_tree_mut(|tree| {
+                tree.store()
+                    .retained_checkpoints()
+                    .map_err(ShardTreeError::Storage)
+            })
+            .unwrap();
+        assert_eq!(remaining, BTreeSet::from([BlockHeight::from(300)]));
     }
 
     #[test]

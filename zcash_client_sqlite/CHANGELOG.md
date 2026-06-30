@@ -40,6 +40,12 @@ workspace.
   Ironwood note commitment tree subtrees when Ironwood notes are detected,
   mirroring the existing Sapling and Orchard behavior. The extension activates at
   NU6.3.
+- A new database migration adds `sapling_tree_retained_checkpoints` and
+  `orchard_tree_retained_checkpoints` tables that back explicit retention of
+  note commitment tree checkpoints as durable "anchors". `SqliteShardStore`
+  now implements the `shardtree` retained-checkpoint store methods, and once
+  the NU6.3 activation height is reached scanning retains roughly four anchors
+  per day (see the `zcash_client_backend` changelog).
 - `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
   new variant that records the shielded pool and the range of block heights
   being added to the wallet when a note commitment tree error occurs during a
