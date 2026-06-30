@@ -37,6 +37,7 @@ mod standalone_p2sh;
 mod support_legacy_sqlite;
 mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
+mod tree_retained_checkpoints;
 mod tx_observation_height;
 mod tx_retrieval_queue;
 mod tx_retrieval_queue_expiry;
@@ -231,6 +232,7 @@ pub(super) fn all_migrations<
         Box::new(witness_stabilized_notes::Migration {
             params: params.clone(),
         }),
+        Box::new(tree_retained_checkpoints::Migration),
     ]
 }
 

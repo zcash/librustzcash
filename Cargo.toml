@@ -187,6 +187,11 @@ time-core = "=0.1.2"
 
 [patch.crates-io]
 orchard = { git = "https://github.com/zcash/orchard", rev = "2f322a220d2750c3fa752132f51594b8358f653f" }
+# TEMPORARY: explicit checkpoint retention (ensure_retained / retained_checkpoints).
+# Tracks zcash/incrementalmerkletree#184; revert to a published shardtree release once merged.
+shardtree = { git = "https://github.com/nuttycom/incrementalmerkletree", rev = "a07b3527c175abf3ceed7fbaee11aaf29e596808" }
+incrementalmerkletree = { git = "https://github.com/nuttycom/incrementalmerkletree", rev = "a07b3527c175abf3ceed7fbaee11aaf29e596808" }
+incrementalmerkletree-testing = { git = "https://github.com/nuttycom/incrementalmerkletree", rev = "a07b3527c175abf3ceed7fbaee11aaf29e596808" }
 
 [workspace.metadata.release]
 consolidate-commits = false

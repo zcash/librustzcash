@@ -1360,7 +1360,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1614,7 +1614,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2331,8 +2331,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "incrementalmerkletree"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30821f91f0fa8660edca547918dc59812893b497d07c1144f326f07fdd94aba9"
+source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=a07b3527c175abf3ceed7fbaee11aaf29e596808#a07b3527c175abf3ceed7fbaee11aaf29e596808"
 dependencies = [
  "either",
  "proptest",
@@ -2343,8 +2342,7 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree-testing"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad20fb6cf815e76ce9b9eca74f347740ab99059fe4b5e4a002403d0441a02983"
+source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=a07b3527c175abf3ceed7fbaee11aaf29e596808#a07b3527c175abf3ceed7fbaee11aaf29e596808"
 dependencies = [
  "incrementalmerkletree",
  "proptest",
@@ -4032,7 +4030,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4477,8 +4475,7 @@ dependencies = [
 [[package]]
 name = "shardtree"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "359e552886ae54d1642091645980d83f7db465fd9b5b0248e3680713c1773388"
+source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=a07b3527c175abf3ceed7fbaee11aaf29e596808#a07b3527c175abf3ceed7fbaee11aaf29e596808"
 dependencies = [
  "assert_matches",
  "bitflags 2.9.0",

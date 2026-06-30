@@ -233,6 +233,24 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         remove_checkpoint(self.conn, self.table_prefix, *checkpoint_id)
     }
 
+    fn add_retained_checkpoint(
+        &mut self,
+        checkpoint_id: Self::CheckpointId,
+    ) -> Result<(), Self::Error> {
+        add_retained_checkpoint(self.conn, self.table_prefix, checkpoint_id)
+    }
+
+    fn remove_retained_checkpoint(
+        &mut self,
+        checkpoint_id: &Self::CheckpointId,
+    ) -> Result<(), Self::Error> {
+        remove_retained_checkpoint(self.conn, self.table_prefix, *checkpoint_id)
+    }
+
+    fn retained_checkpoints(&self) -> Result<BTreeSet<Self::CheckpointId>, Self::Error> {
+        retained_checkpoints(self.conn, self.table_prefix)
+    }
+
     fn truncate_checkpoints_retaining(
         &mut self,
         checkpoint_id: &Self::CheckpointId,
@@ -357,6 +375,28 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         let tx = self.conn.transaction().map_err(Error::Query)?;
         remove_checkpoint(&tx, self.table_prefix, *checkpoint_id)?;
         tx.commit().map_err(Error::Query)
+    }
+
+    fn add_retained_checkpoint(
+        &mut self,
+        checkpoint_id: Self::CheckpointId,
+    ) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction().map_err(Error::Query)?;
+        add_retained_checkpoint(&tx, self.table_prefix, checkpoint_id)?;
+        tx.commit().map_err(Error::Query)
+    }
+
+    fn remove_retained_checkpoint(
+        &mut self,
+        checkpoint_id: &Self::CheckpointId,
+    ) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction().map_err(Error::Query)?;
+        remove_retained_checkpoint(&tx, self.table_prefix, *checkpoint_id)?;
+        tx.commit().map_err(Error::Query)
+    }
+
+    fn retained_checkpoints(&self) -> Result<BTreeSet<Self::CheckpointId>, Self::Error> {
+        retained_checkpoints(&self.conn, self.table_prefix)
     }
 
     fn truncate_checkpoints_retaining(
@@ -975,6 +1015,54 @@ pub(crate) fn remove_checkpoint(
     Ok(())
 }
 
+pub(crate) fn add_retained_checkpoint(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+    checkpoint_id: BlockHeight,
+) -> Result<(), Error> {
+    conn.prepare_cached(&format!(
+        "INSERT OR IGNORE INTO {table_prefix}_tree_retained_checkpoints (checkpoint_id)
+         VALUES (:checkpoint_id)"
+    ))
+    .map_err(Error::Query)?
+    .execute(named_params![":checkpoint_id": u32::from(checkpoint_id)])
+    .map_err(Error::Query)?;
+
+    Ok(())
+}
+
+pub(crate) fn remove_retained_checkpoint(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+    checkpoint_id: BlockHeight,
+) -> Result<(), Error> {
+    conn.prepare_cached(&format!(
+        "DELETE FROM {table_prefix}_tree_retained_checkpoints
+         WHERE checkpoint_id = :checkpoint_id"
+    ))
+    .map_err(Error::Query)?
+    .execute(named_params![":checkpoint_id": u32::from(checkpoint_id)])
+    .map_err(Error::Query)?;
+
+    Ok(())
+}
+
+pub(crate) fn retained_checkpoints(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+) -> Result<BTreeSet<BlockHeight>, Error> {
+    let mut stmt = conn
+        .prepare_cached(&format!(
+            "SELECT checkpoint_id FROM {table_prefix}_tree_retained_checkpoints"
+        ))
+        .map_err(Error::Query)?;
+    let rows = stmt.query([]).map_err(Error::Query)?;
+
+    rows.mapped(|row| row.get::<_, u32>(0).map(BlockHeight::from))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(Error::Query)
+}
+
 pub(crate) fn truncate_checkpoints_retaining(
     conn: &rusqlite::Transaction<'_>,
     table_prefix: &'static str,
@@ -1374,6 +1462,33 @@ mod tests {
         ShardTree::new(store, m)
     }
 
+    fn check_retained_checkpoints(
+        mut tree: ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3>,
+    ) {
+        use shardtree::store::ShardStore;
+        use std::collections::BTreeSet;
+
+        let h1 = BlockHeight::from(100);
+        let h2 = BlockHeight::from(200);
+
+        assert!(tree.store().retained_checkpoints().unwrap().is_empty());
+
+        tree.ensure_retained(h1).unwrap();
+        tree.ensure_retained(h2).unwrap();
+        // Retaining an already-retained checkpoint is idempotent.
+        tree.ensure_retained(h1).unwrap();
+        assert_eq!(
+            tree.store().retained_checkpoints().unwrap(),
+            BTreeSet::from([h1, h2])
+        );
+
+        tree.remove_retained_checkpoint(&h1).unwrap();
+        assert_eq!(
+            tree.store().retained_checkpoints().unwrap(),
+            BTreeSet::from([h2])
+        );
+    }
+
     #[cfg(feature = "orchard")]
     mod orchard {
         use super::new_tree;
@@ -1428,11 +1543,59 @@ mod tests {
         fn put_shard_roots() {
             super::put_shard_roots::<OrchardPoolTester>()
         }
+
+        #[test]
+        fn retained_checkpoints() {
+            super::check_retained_checkpoints(super::new_tree::<OrchardPoolTester>(10));
+        }
     }
 
     #[test]
     fn sapling_append() {
         check_append(new_tree::<SaplingPoolTester>);
+    }
+
+    #[test]
+    fn sapling_retained_checkpoints() {
+        check_retained_checkpoints(new_tree::<SaplingPoolTester>(10));
+    }
+
+    #[test]
+    fn remove_retained_checkpoints_below() {
+        use std::collections::BTreeSet;
+
+        use shardtree::{error::ShardTreeError, store::ShardStore};
+        use zcash_client_backend::data_api::WalletCommitmentTrees;
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+        WalletMigrator::new().init_or_migrate(&mut db).unwrap();
+
+        db.with_sapling_tree_mut(|tree| {
+            for h in [100u32, 200, 300] {
+                tree.ensure_retained(BlockHeight::from(h))?;
+            }
+            Ok::<_, ShardTreeError<_>>(())
+        })
+        .unwrap();
+
+        db.remove_retained_checkpoints_below(BlockHeight::from(250))
+            .unwrap();
+
+        let remaining = db
+            .with_sapling_tree_mut(|tree| {
+                tree.store()
+                    .retained_checkpoints()
+                    .map_err(ShardTreeError::Storage)
+            })
+            .unwrap();
+        assert_eq!(remaining, BTreeSet::from([BlockHeight::from(300)]));
     }
 
     #[test]
