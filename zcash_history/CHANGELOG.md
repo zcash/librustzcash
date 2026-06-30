@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0-pre.0] - 2026-06-30
 ### Changed
 - MSRV is now 1.85.1.
 - `zcash_history::MAX_NODE_DATA_SIZE` is now 317 bytes and the derived
