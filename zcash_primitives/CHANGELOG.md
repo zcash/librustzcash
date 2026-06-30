@@ -23,6 +23,19 @@ workspace.
   - `TxDigests::ironwood_digest`, for carrying the Ironwood bundle digest.
   - `TransactionDigest::{IronwoodDigest, digest_ironwood}`, for digest
     implementations that commit to Ironwood bundles.
+- `zcash_primitives::transaction::builder::Builder::add_orchard_change_output`,
+  for constructing wallet-controlled Orchard change outputs.
+- `zcash_primitives::transaction::builder` Ironwood support (behind the
+  `--cfg zcash_unstable="nu6.3"` or `--cfg zcash_unstable="nu7"` flag):
+  - `BuildConfig::Standard::ironwood_anchor`, the anchor used to construct the
+    Ironwood bundle.
+  - `Builder::{add_ironwood_spend, add_ironwood_output}`, which build the
+    Ironwood bundle alongside the Orchard bundle and require
+    `orchard::note::NoteVersion::V3` notes.
+  - `BuildResult::ironwood_meta` and `PcztParts::ironwood`/`PcztResult::ironwood_meta`,
+    exposing the Ironwood bundle and its build metadata.
+  - `Error::{IronwoodBuild, IronwoodSpend, IronwoodSpendUnsupportedNoteVersion,
+    IronwoodRecipient, IronwoodBuilderNotAvailable}`.
 
 ### Changed
 - `zcash_primitives::transaction::builder`:
