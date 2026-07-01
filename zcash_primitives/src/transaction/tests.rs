@@ -1,23 +1,34 @@
 use proptest::prelude::*;
 
+// Imports used by the feature-independent consensus tests (parsing, txid, round-trip).
 #[cfg(test)]
+use {crate::transaction::Transaction, alloc::vec::Vec, zcash_protocol::consensus::BranchId};
+
+// Imports used by the tests that build typed Sapling/Orchard bundles and compute signature
+// hashes, which require both protocol features.
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 use {
     crate::transaction::{
-        Authorization, Transaction, TransactionData, TxDigests, TxIn, sighash::SignableInput,
+        Authorization, TransactionData, TxDigests, TxIn, sighash::SignableInput,
         sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, testing::arb_tx, transparent,
         txid::TxIdDigester,
     },
     ::transparent::{
         address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
     },
-    alloc::vec::Vec,
     blake2b_simd::Hash as Blake2bHash,
     core::ops::Deref,
-    zcash_protocol::{consensus::BranchId, value::Zatoshis},
+    zcash_protocol::value::Zatoshis,
     zcash_script::script,
 };
 
-#[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
+#[cfg(all(
+    test,
+    zcash_unstable = "nu7",
+    feature = "zip-233",
+    feature = "sapling",
+    feature = "orchard"
+))]
 use super::sighash_v6::v6_signature_hash;
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -37,7 +48,52 @@ fn tx_read_write() {
     assert_eq!(&data[..], &encoded[..]);
 }
 
-#[cfg(test)]
+/// Consensus oracle that runs irrespective of the `sapling`/`orchard` features: every ZIP 244
+/// test vector must parse, produce the expected consensus txid and authorizing-data digest,
+/// and re-serialize byte-identically. When the protocol features are disabled this exercises
+/// the opaque-byte-representation parse/serialize/digest paths.
+#[test]
+fn zip_0244_txid_auth_and_roundtrip() {
+    for tv in self::data::zip_0244::make_test_vectors() {
+        let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
+
+        assert_eq!(tx.txid().as_ref(), &tv.txid);
+        assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
+
+        let mut encoded = Vec::with_capacity(tv.tx.len());
+        tx.write(&mut encoded).unwrap();
+        assert_eq!(&tv.tx[..], &encoded[..]);
+    }
+}
+
+/// Feature-independent v3/v4 transaction round-trip oracle, covering the v4 Sapling
+/// parse/serialize path that the (v5-only) ZIP 244 oracle does not. The ZIP 243 vectors carry
+/// v4 Sapling spends and outputs, so with the `sapling` feature disabled this exercises the
+/// opaque-byte representation of a v4 Sapling bundle. A v4 txid is the double-SHA256 of the
+/// re-serialized transaction, so byte-identical round-tripping is the consensus property under
+/// test.
+#[test]
+fn zip_0143_zip_0243_roundtrip() {
+    fn check(tx_bytes: &[u8], branch_id: BranchId) {
+        let tx = Transaction::read(tx_bytes, branch_id).unwrap();
+        let mut encoded = Vec::with_capacity(tx_bytes.len());
+        tx.write(&mut encoded).unwrap();
+        assert_eq!(tx_bytes, &encoded[..]);
+    }
+
+    let mut count = 0;
+    for tv in self::data::zip_0143::make_test_vectors() {
+        check(&tv.tx[..], tv.consensus_branch_id);
+        count += 1;
+    }
+    for tv in self::data::zip_0243::make_test_vectors() {
+        check(&tv.tx[..], tv.consensus_branch_id);
+        count += 1;
+    }
+    assert!(count > 0);
+}
+
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let mut txn_bytes = vec![];
     tx.write(&mut txn_bytes).unwrap();
@@ -63,7 +119,12 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 
 proptest! {
     #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
+    #[cfg(all(
+        feature = "expensive-tests",
+        not(feature = "no-expensive-tests"),
+        feature = "sapling",
+        feature = "orchard"
+    ))]
     fn tx_serialization_roundtrip_sprout(tx in arb_tx(BranchId::Sprout)) {
         check_roundtrip(tx)?;
     }
@@ -71,7 +132,12 @@ proptest! {
 
 proptest! {
     #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
+    #[cfg(all(
+        feature = "expensive-tests",
+        not(feature = "no-expensive-tests"),
+        feature = "sapling",
+        feature = "orchard"
+    ))]
     fn tx_serialization_roundtrip_overwinter(tx in arb_tx(BranchId::Overwinter)) {
         check_roundtrip(tx)?;
     }
@@ -79,7 +145,12 @@ proptest! {
 
 proptest! {
     #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
+    #[cfg(all(
+        feature = "expensive-tests",
+        not(feature = "no-expensive-tests"),
+        feature = "sapling",
+        feature = "orchard"
+    ))]
     fn tx_serialization_roundtrip_sapling(tx in arb_tx(BranchId::Sapling)) {
         check_roundtrip(tx)?;
     }
@@ -87,7 +158,12 @@ proptest! {
 
 proptest! {
     #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
+    #[cfg(all(
+        feature = "expensive-tests",
+        not(feature = "no-expensive-tests"),
+        feature = "sapling",
+        feature = "orchard"
+    ))]
     fn tx_serialization_roundtrip_blossom(tx in arb_tx(BranchId::Blossom)) {
         check_roundtrip(tx)?;
     }
@@ -95,7 +171,12 @@ proptest! {
 
 proptest! {
     #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
+    #[cfg(all(
+        feature = "expensive-tests",
+        not(feature = "no-expensive-tests"),
+        feature = "sapling",
+        feature = "orchard"
+    ))]
     fn tx_serialization_roundtrip_heartwood(tx in arb_tx(BranchId::Heartwood)) {
         check_roundtrip(tx)?;
     }
@@ -104,6 +185,7 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
     fn tx_serialization_roundtrip_canopy(tx in arb_tx(BranchId::Canopy)) {
         check_roundtrip(tx)?;
     }
@@ -112,6 +194,7 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
     fn tx_serialization_roundtrip_nu5(tx in arb_tx(BranchId::Nu5)) {
         check_roundtrip(tx)?;
     }
@@ -121,11 +204,13 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
     fn tx_serialization_roundtrip_nu7(tx in arb_tx(BranchId::Nu7)) {
         check_roundtrip(tx)?;
     }
 }
 
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 #[test]
 fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
@@ -152,6 +237,7 @@ fn zip_0143() {
     }
 }
 
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 #[test]
 fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
@@ -178,19 +264,19 @@ fn zip_0243() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 #[derive(Debug)]
 struct TestTransparentAuth {
     input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 impl transparent::Authorization for TestTransparentAuth {
     type ScriptSig = Script;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 impl TransparentAuthorizingContext for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         self.input_amounts.clone()
@@ -201,16 +287,17 @@ impl TransparentAuthorizingContext for TestTransparentAuth {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 struct TestUnauthorized;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sapling", feature = "orchard"))]
 impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
 
+#[cfg(all(feature = "sapling", feature = "orchard"))]
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
@@ -362,7 +449,12 @@ fn zip_0244() {
     }
 }
 
-#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+#[cfg(all(
+    zcash_unstable = "nu7",
+    feature = "zip-233",
+    feature = "sapling",
+    feature = "orchard"
+))]
 #[test]
 fn zip_0233() {
     fn to_test_txdata(

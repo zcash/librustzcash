@@ -348,6 +348,26 @@ pub(crate) fn read_v4_components<R: Read>(
     }
 }
 
+/// Assembles a v4 Sapling bundle from its parsed components and (separately-read) binding
+/// signature, returning `None` when there is no bundle.
+pub(crate) fn build_v4_bundle(
+    value_balance: ZatBalance,
+    shielded_spends: Vec<SpendDescription<Authorized>>,
+    shielded_outputs: Vec<OutputDescription<GrothProofBytes>>,
+    binding_sig: Option<[u8; 64]>,
+) -> Option<Bundle<Authorized, ZatBalance>> {
+    binding_sig.and_then(|binding_sig| {
+        Bundle::from_parts(
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            Authorized {
+                binding_sig: redjubjub::Signature::from(binding_sig),
+            },
+        )
+    })
+}
+
 /// Writes the Sapling components of a v4 transaction.
 #[cfg(feature = "temporary-zcashd")]
 pub fn temporary_zcashd_write_v4_components<W: Write>(

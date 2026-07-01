@@ -1,12 +1,13 @@
 use blake2b_simd::Hash as Blake2bHash;
 
-use super::{
-    Authorization, TransactionData, TxDigests, TxVersion, sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
-};
+#[cfg(feature = "sapling")]
+use super::{Authorization, TransactionData, TxDigests};
+#[cfg(feature = "sapling")]
+use super::{TxVersion, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash};
+#[cfg(feature = "sapling")]
 use ::sapling::bundle::GrothProofBytes;
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(feature = "sapling", zcash_unstable = "nu7"))]
 use super::sighash_v6::v6_signature_hash;
 
 pub enum SignableInput<'a> {
@@ -35,6 +36,13 @@ impl AsRef<[u8; 32]> for SignatureHash {
 /// the full data of the transaction, the input being signed, and the
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
+///
+/// This requires the `sapling` feature, as it dispatches to the v4 signature hash which reads
+/// the typed Sapling bundle. For v5+ transactions, [`v5_signature_hash`] can be called
+/// directly without the `sapling` feature.
+///
+/// [`v5_signature_hash`]: crate::transaction::sighash_v5::v5_signature_hash
+#[cfg(feature = "sapling")]
 pub fn signature_hash<
     TA: ::transparent::sighash::TransparentAuthorizingContext,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
