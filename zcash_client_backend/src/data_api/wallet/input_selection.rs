@@ -39,7 +39,7 @@ use super::ConfirmationsPolicy;
 use {
     crate::{
         data_api::CoinbaseFilter,
-        fees::ChangeValue,
+        fees::{ChangeValue, StandardFeeRule},
         proposal::{Step, StepOutput, StepOutputIndex},
     },
     std::collections::BTreeSet,
@@ -691,10 +691,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 Vec::new()
             } else {
                 // Compute the initial bound for the value-bounded transparent gather: the
-                // total payment amount. We don't (yet) include a fee headroom in the
-                // initial bound because the SQLite gather's `estimated_additional_fees`
-                // parameter is currently informational; the loop re-gathers on
-                // `InsufficientFunds` if the bound was too low.
+                // total payment amount. The gather itself reserves value for the marginal
+                // fee cost of the gathered inputs (estimated via `StandardFeeRule::Zip317`,
+                // regardless of the caller's actual change strategy fee rule); if that
+                // estimate turns out to be insufficient, the loop re-gathers on
+                // `InsufficientFunds`.
                 //
                 // A `TransactionRequest` may have payments with no fixed amount (e.g. for
                 // `propose_send_max`); in that case we fall back to `TargetValue::AllFunds`
@@ -733,8 +734,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         confirmations_policy,
                         CoinbaseFilter::NonCoinbaseOnly,
                         target_value,
-                        // TODO: thread a fee headroom here once the SQLite gather uses it.
-                        None,
+                        &StandardFeeRule::Zip317,
                     )
                     .map_err(InputSelectorError::DataSource)?
                     .into_iter()
@@ -994,7 +994,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                     confirmations_policy,
                                     CoinbaseFilter::NonCoinbaseOnly,
                                     TargetValue::AtLeast(required),
-                                    None,
+                                    &StandardFeeRule::Zip317,
                                 )
                                 .map_err(InputSelectorError::DataSource)?
                                 .into_iter()

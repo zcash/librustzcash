@@ -106,6 +106,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::fees::StandardFeeRule,
     crate::wallet::TransparentAddressMetadata,
     getset::{CopyGetters, Getters},
     std::time::SystemTime,
@@ -1594,26 +1595,34 @@ pub trait InputSource {
         Ok(outputs)
     }
 
-    /// Returns the spendable transparent outputs received by `account` whose total value is at
-    /// least `target_value + estimated_additional_fees` (when `estimated_additional_fees` is
-    /// provided) or at least `target_value` (when it is `None`).
+    /// Returns the spendable transparent outputs received by `account` whose total post-fee
+    /// value (sum of values minus the cumulative marginal fee cost of the gathered inputs
+    /// themselves, per `fee_rule`) is at least `target_value`.
     ///
     /// The gather is intended to scale to wallets with large numbers of transparent addresses and
     /// UTXOs: it returns a value-bounded subset rather than every spendable output, so the
     /// selector does not need to materialize the wallet's full UTXO set. Data stores should
     /// implement this with a single query that orders eligible UTXOs by descending value and
-    /// truncates once the cumulative value hits the bound.
+    /// accumulates them, recomputing the cumulative fee via `fee_rule` at each step, stopping
+    /// once the post-fee cumulative value meets the bound. This produces a tighter result than a
+    /// static value bound, without requiring a separate round trip to correct an under-estimated
+    /// headroom.
     ///
-    /// `estimated_additional_fees` is a headroom added to `target_value` to reserve value for
-    /// the marginal fee cost of the gathered transparent inputs themselves; it is typically an
-    /// upper bound (e.g. `n × marginal_fee` for some conservative maximum `n`). It does not need
-    /// to be exact: an under-estimate will surface as an `InsufficientFunds` error from the
-    /// change strategy in the caller's input-selection loop, which the caller can use to
-    /// re-invoke this method with a corrected bound.
+    /// `fee_rule` is fixed to [`StandardFeeRule`] (rather than being generic over the caller's
+    /// actual [`ChangeStrategy`]) so that implementations of this method do not need to be
+    /// generic over an arbitrary fee rule type. This is a heuristic bound only: the transaction's
+    /// real fee is still computed by the caller's actual change strategy, and if this gather's
+    /// estimate turns out to be insufficient, the caller's input-selection loop will surface an
+    /// `InsufficientFunds` error and can re-invoke this method with a corrected `target_value`.
+    ///
+    /// For `TargetValue::AllFunds`, no bound is applied and the gather returns every eligible
+    /// output.
     ///
     /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
     /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
     /// general (non-shielding) input selection in `propose_transaction`.
+    ///
+    /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
     #[cfg(feature = "transparent-inputs")]
     fn select_spendable_transparent_outputs(
         &self,
@@ -1622,7 +1631,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         target_value: TargetValue,
-        estimated_additional_fees: Option<Zatoshis>,
+        fee_rule: &StandardFeeRule,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
@@ -1630,7 +1639,7 @@ pub trait InputSource {
             confirmations_policy,
             output_filter,
             target_value,
-            estimated_additional_fees,
+            fee_rule,
         );
         unimplemented!(
             "InputSource::select_spendable_transparent_outputs must be overridden for \
