@@ -241,6 +241,13 @@ pub enum SqliteClientError {
     /// imported to a different account.
     #[cfg(feature = "transparent-key-import")]
     StandaloneImportConflict(Uuid),
+
+    /// An error returned by a [`FeeRule`] during transparent input selection. The underlying
+    /// error is boxed so the storage layer does not need to know every fee rule's error type.
+    ///
+    /// [`FeeRule`]: zcash_primitives::transaction::fees::FeeRule
+    #[cfg(feature = "transparent-inputs")]
+    FeeRuleError(Box<dyn error::Error + Send + Sync>),
 }
 
 impl error::Error for SqliteClientError {
@@ -253,6 +260,8 @@ impl error::Error for SqliteClientError {
             SqliteClientError::AddressGeneration(e) => Some(e),
             #[cfg(feature = "orchard")]
             SqliteClientError::HistoricalFrontierInvalid(e) => Some(e),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::FeeRuleError(e) => Some(&**e),
             _ => None,
         }
     }
@@ -431,6 +440,8 @@ impl fmt::Display for SqliteClientError {
                     "The given standalone transparent address is already managed by account {uuid}"
                 )
             }
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::FeeRuleError(e) => write!(f, "Fee rule error: {e}"),
         }
     }
 }
@@ -493,6 +504,29 @@ impl From<BalanceError> for SqliteClientError {
 impl From<AddressGenerationError> for SqliteClientError {
     fn from(e: AddressGenerationError) -> Self {
         SqliteClientError::AddressGeneration(e)
+    }
+}
+
+/// `zip317::FeeError` does not implement `std::error::Error`, so we wrap it in order to box
+/// it as the payload of [`SqliteClientError::FeeRuleError`].
+#[cfg(feature = "transparent-inputs")]
+#[derive(Debug)]
+struct FeeErrorWrapper(zcash_primitives::transaction::fees::zip317::FeeError);
+
+#[cfg(feature = "transparent-inputs")]
+impl fmt::Display for FeeErrorWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl error::Error for FeeErrorWrapper {}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<zcash_primitives::transaction::fees::zip317::FeeError> for SqliteClientError {
+    fn from(e: zcash_primitives::transaction::fees::zip317::FeeError) -> Self {
+        SqliteClientError::FeeRuleError(Box::new(FeeErrorWrapper(e)))
     }
 }
 

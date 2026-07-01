@@ -257,6 +257,10 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::HistoricalWitnessUnavailable { .. } => {
             unreachable!("we do not generate historical witnesses in migrations")
         }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::FeeRuleError(_) => {
+            unreachable!("we don't use fee rules in migrations")
+        }
     }
 }
 

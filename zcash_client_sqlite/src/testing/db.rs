@@ -26,6 +26,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
         *,
     },
+    fees::StandardFeeRule,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
@@ -38,7 +39,6 @@ use zcash_primitives::{
 };
 use zcash_protocol::{
     ShieldedProtocol, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
-    value::Zatoshis,
 };
 use zip32::DiversifierIndex;
 

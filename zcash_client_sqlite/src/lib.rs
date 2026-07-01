@@ -85,7 +85,6 @@ use zcash_protocol::{
     ShieldedProtocol,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
-    value::Zatoshis,
 };
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
@@ -121,6 +120,7 @@ use {
             CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
             ll::wallet::generate_transparent_gap_addresses,
         },
+        fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
     zcash_keys::{
@@ -636,7 +636,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         target_value: TargetValue,
-        estimated_additional_fees: Option<Zatoshis>,
+        fee_rule: &StandardFeeRule,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -646,7 +646,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             target_value,
-            estimated_additional_fees,
+            fee_rule,
         )
     }
 

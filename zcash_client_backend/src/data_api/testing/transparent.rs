@@ -2140,21 +2140,25 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             TargetValue::AtLeast(target),
-            None,
+            &StandardFeeRule::Zip317,
         )
         .expect("value-bounded gather should succeed");
 
-    // The gather should return enough UTXOs to cover the target, not all 50.
-    // Each UTXO is 10_000 zats; a 30_000-zat target requires at most 3 UTXOs, and
-    // since they're all equal value the gather stops as soon as it hits 30_000.
+    // The gather should return enough UTXOs to cover the target post-fee, not all 50.
+    // Each UTXO is 10_000 zats. Under ZIP 317, `k` P2PKH inputs cost
+    // `5_000 * max(2, k)` zats in marginal fee, so the post-fee value of the first `k`
+    // gathered UTXOs is `10_000 * k - 5_000 * max(2, k)`. This first reaches the
+    // 30_000-zat target at `k = 6` (60_000 - 30_000 = 30_000), one more than the 5
+    // UTXOs (50_000 - 25_000 = 25_000) that would still fall short.
     assert!(
         !bound.is_empty(),
         "value-bounded gather should return at least one UTXO",
     );
     assert_eq!(
         bound.len(),
-        3,
-        "value-bounded gather should return exactly 3 UTXOs (10_000 zats each) to cover 30_000 zats",
+        6,
+        "value-bounded gather should return exactly 6 UTXOs (10_000 zats each) to cover \
+         30_000 zats net of the ZIP 317 marginal fee for 6 P2PKH inputs",
     );
     assert!(
         bound.len() < n_dust,
@@ -2182,7 +2186,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
-            None,
+            &StandardFeeRule::Zip317,
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);
