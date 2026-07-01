@@ -924,7 +924,7 @@ pub mod compact_tx_streamer_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns a stream of information about roots of subtrees of the note commitment tree
-        /// for the specified shielded protocol (Sapling, Orchard, or Ironwood).
+        /// for the specified shielded pool (Sapling, Orchard, or Ironwood).
         pub async fn get_subtree_roots(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSubtreeRootsArg>,

@@ -153,12 +153,12 @@ impl Authorization for Unbound {
 #[derive(Debug)]
 pub enum Error {
     Extract(crate::ExtractError),
+    Ironwood(IronwoodError),
     Orchard(OrchardError),
     Sapling(SaplingError),
     SaplingRequired,
     SighashMismatch,
     Transparent(TransparentError),
-    Ironwood(IronwoodError),
 }
 
 impl From<crate::ExtractError> for Error {

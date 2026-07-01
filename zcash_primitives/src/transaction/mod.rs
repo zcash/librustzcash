@@ -73,7 +73,7 @@ pub enum TxVersion {
     /// It is specified in [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding)
     /// and [ZIP 225](https://zips.z.cash/zip-0225).
     V5,
-    /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
+    /// Transaction version 6, specified in [ZIP 229](https://zips.z.cash/zip-0229).
     V6,
 }
 

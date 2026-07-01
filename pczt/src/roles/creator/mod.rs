@@ -29,8 +29,8 @@ pub enum Error {
     /// The network upgrade for the consensus branch ID predates the v5
     /// transaction format, so it cannot be used to create a PCZT.
     UnsupportedConsensusBranchId,
-    /// The requested Orchard flags cannot be represented under the Orchard bundle
-    /// version implied by the consensus branch ID.
+    /// The requested Orchard-protocol flags cannot be represented under the
+    /// Orchard or Ironwood bundle version implied by the consensus branch ID.
     #[cfg(feature = "orchard")]
     UnrepresentableOrchardFlags,
 }
@@ -56,13 +56,21 @@ fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::Bu
     use orchard::bundle::BundleVersion;
 
     match branch_id {
+        // NU5, NU6, and NU6.1 use the original (pre-NU6.2) Orchard pool; pre-NU5
+        // branches are rejected before reaching here.
+        BranchId::Sprout
+        | BranchId::Overwinter
+        | BranchId::Sapling
+        | BranchId::Blossom
+        | BranchId::Heartwood
+        | BranchId::Canopy
+        | BranchId::Nu5
+        | BranchId::Nu6
+        | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
         BranchId::Nu6_2 => BundleVersion::orchard_v2(),
         BranchId::Nu6_3 => BundleVersion::orchard_v3(),
         #[cfg(zcash_unstable = "nu7")]
         BranchId::Nu7 => BundleVersion::orchard_v3(),
-        // NU5, NU6, and NU6.1 use the original (pre-NU6.2) Orchard pool; pre-NU5
-        // branches are rejected before reaching here.
-        _ => BundleVersion::orchard_insecure_v1(),
     }
 }
 pub struct Creator {
@@ -131,7 +139,8 @@ impl Creator {
     ///
     /// Returns [`Error::UnrepresentableOrchardFlags`] if `flags` cannot be encoded
     /// under that bundle version (e.g. cross-address-enabled flags under a
-    /// post-NU6.3 Orchard version).
+    /// post-NU6.3 Orchard version, or cross-address-disabled flags under a pre-NU6.3
+    /// Orchard version).
     #[cfg(feature = "orchard")]
     pub fn with_orchard_flags(
         mut self,

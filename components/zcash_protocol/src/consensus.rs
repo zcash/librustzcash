@@ -722,9 +722,6 @@ pub enum BranchId {
     /// The consensus rules deployed by [`NetworkUpgrade::Nu6_2`].
     Nu6_2,
     /// The consensus rules to be deployed by [`NetworkUpgrade::Nu6_3`].
-    ///
-    /// This variant currently uses a placeholder branch ID until the Ironwood /
-    /// NU6.3 consensus branch ID is chosen.
     Nu6_3,
     /// The consensus rules to be deployed by [`NetworkUpgrade::Nu7`].
     #[cfg(zcash_unstable = "nu7")]
@@ -847,10 +844,7 @@ impl BranchId {
                 .map(|lower| (lower, params.activation_height(NetworkUpgrade::Nu6_2))),
             BranchId::Nu6_2 => params
                 .activation_height(NetworkUpgrade::Nu6_2)
-                .map(|lower| {
-                    let upper = params.activation_height(NetworkUpgrade::Nu6_3);
-                    (lower, upper)
-                }),
+                .map(|lower| (lower, params.activation_height(NetworkUpgrade::Nu6_3))),
             BranchId::Nu6_3 => params
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .map(|lower| (lower, None)),

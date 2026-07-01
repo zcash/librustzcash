@@ -36,7 +36,7 @@ pub const V5_TX_VERSION: u32 = 5;
 /// The version group ID for Zcash v5 transactions.
 pub const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
-/// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
+/// Transaction version 6, specified in [ZIP 229](https://zips.z.cash/zip-0229).
 pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
 pub const V6_VERSION_GROUP_ID: u32 = 0xD884B698;
