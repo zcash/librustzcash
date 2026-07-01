@@ -16,6 +16,7 @@ workspace.
 - `zcash_primitives::transaction`:
   - `TxVersion::V6`, the NU6.3 transaction format supporting Transparent,
     Sapling, Orchard, and Ironwood bundles.
+  - `TxVersion::has_ironwood`
   - `TransactionData::from_parts_v6`, for constructing v6 transactions with
     separate Orchard and Ironwood bundles.
   - `TransactionData::ironwood_bundle`, for accessing the Ironwood bundle on a
@@ -71,6 +72,14 @@ workspace.
 - `TransactionData::from_parts_v6` is now also available behind
   `zcash_unstable = "nu7"`, and includes the ZIP 233 amount argument when the
   `zip-233` feature is enabled.
+- `TransactionData::{map_bundles, try_map_bundles}`: the `f_orchard` argument
+  is now `FnMut` instead of `FnOnce`, and is applied to the Ironwood bundle in
+  addition to the Orchard bundle. Callers whose `f_orchard` closures capture by
+  move, or that must not apply to the Ironwood bundle, must be updated.
+- `TransactionDigest::combine` now takes an additional `ironwood_digest`
+  argument.
+- The `TransactionDigest::HeaderDigest` associated type of
+  `BlockTxCommitmentDigester` is now `(TxVersion, BranchId)` (was `BranchId`).
 
 ### Removed
 - All support for Transparent Zcash Extensions (TZEs), which was only ever
@@ -90,6 +99,7 @@ workspace.
     `transaction::builder::Error::TzeBuild`.
   - `zcash_primitives::transaction::fees::FutureFeeRule` and
     `fees::FeeRule::fee_required_zfuture`.
+- `zcash_primitives::transaction::builder::BuildConfig::orchard_builder_config`
 
 ### Fixed
 - V6 transaction IDs and authorizing commitments now use the v6 Sapling,

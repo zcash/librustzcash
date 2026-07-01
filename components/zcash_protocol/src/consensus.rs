@@ -847,7 +847,13 @@ impl BranchId {
                 .map(|lower| (lower, params.activation_height(NetworkUpgrade::Nu6_3))),
             BranchId::Nu6_3 => params
                 .activation_height(NetworkUpgrade::Nu6_3)
-                .map(|lower| (lower, None)),
+                .map(|lower| {
+                    #[cfg(zcash_unstable = "nu7")]
+                    let upper = params.activation_height(NetworkUpgrade::Nu7);
+                    #[cfg(not(zcash_unstable = "nu7"))]
+                    let upper = None;
+                    (lower, upper)
+                }),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => params
                 .activation_height(NetworkUpgrade::Nu7)

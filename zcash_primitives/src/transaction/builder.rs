@@ -544,10 +544,9 @@ impl<P, U> Builder<P, U> {
 
         let orchard_available = version.has_orchard() && self.consensus_branch_id.has_orchard();
         if !orchard_available
-            && self
-                .orchard_builder
-                .as_ref()
-                .is_some_and(|b| !b.spends().is_empty() || !b.outputs().is_empty())
+            && self.orchard_builder.as_ref().is_some_and(|b| {
+                !b.spends().is_empty() || !b.outputs().is_empty() || !b.changes().is_empty()
+            })
         {
             return Err(Error::TargetIncompatible(
                 self.consensus_branch_id,
