@@ -576,6 +576,11 @@ impl<NoteRef> Step<NoteRef> {
             || self.change_in_pool(pool_type)
     }
 
+    /// Returns whether or not this step spends any inputs from the given pool.
+    ///
+    /// For a shielded pool this is true when a note of that protocol is spent; for
+    /// [`PoolType::Transparent`] it is true when the step is a shielding step or has any
+    /// transparent inputs.
     pub fn input_in_pool(&self, pool_type: PoolType) -> bool {
         match pool_type {
             PoolType::Transparent => self.is_shielding() || !self.transparent_inputs().is_empty(),
@@ -592,10 +597,14 @@ impl<NoteRef> Step<NoteRef> {
         }
     }
 
+    /// Returns whether or not this step directs any payment output to the given pool.
+    ///
+    /// This does not consider change outputs; use [`Step::change_in_pool`] for those.
     pub fn output_in_pool(&self, pool_type: PoolType) -> bool {
         self.payment_pools().values().any(|pool| *pool == pool_type)
     }
 
+    /// Returns whether or not this step directs any change output to the given pool.
     pub fn change_in_pool(&self, pool_type: PoolType) -> bool {
         self.balance()
             .proposed_change()
