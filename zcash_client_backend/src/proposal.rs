@@ -576,6 +576,11 @@ impl<NoteRef> Step<NoteRef> {
             || self.change_in_pool(pool_type)
     }
 
+    /// Returns whether or not this step spends any inputs from the given pool.
+    ///
+    /// For a shielded pool this is true when a note of that protocol is spent; for
+    /// [`PoolType::Transparent`] it is true when the step is a shielding step or has any
+    /// transparent inputs.
     pub fn input_in_pool(&self, pool_type: PoolType) -> bool {
         match pool_type {
             PoolType::Transparent => self.is_shielding() || !self.transparent_inputs().is_empty(),
@@ -592,15 +597,72 @@ impl<NoteRef> Step<NoteRef> {
         }
     }
 
+    /// Returns whether or not this step directs any payment output to the given pool.
+    ///
+    /// This does not consider change outputs; use [`Step::change_in_pool`] for those.
     pub fn output_in_pool(&self, pool_type: PoolType) -> bool {
         self.payment_pools().values().any(|pool| *pool == pool_type)
     }
 
+    /// Returns whether or not this step directs any change output to the given pool.
     pub fn change_in_pool(&self, pool_type: PoolType) -> bool {
         self.balance()
             .proposed_change()
             .iter()
             .any(|c| c.output_pool() == pool_type)
+    }
+
+    /// Returns the number of inputs to this step that belong to the given pool.
+    ///
+    /// For a shielded pool this is the number of spent notes of that protocol; for
+    /// [`PoolType::Transparent`] it is the number of transparent inputs.
+    pub fn input_count_in_pool(&self, pool_type: PoolType) -> usize {
+        match pool_type {
+            PoolType::Transparent => self.transparent_inputs().len(),
+            PoolType::SAPLING => self
+                .shielded_inputs()
+                .iter()
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().protocol() == ShieldedProtocol::Sapling)
+                .count(),
+            PoolType::ORCHARD => self
+                .shielded_inputs()
+                .iter()
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().protocol() == ShieldedProtocol::Orchard)
+                .count(),
+        }
+    }
+
+    /// Returns the number of payment outputs of this step that are directed to the given pool.
+    ///
+    /// This does not include change outputs; use [`Step::change_count_in_pool`] for those.
+    pub fn output_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.payment_pools()
+            .values()
+            .filter(|pool| **pool == pool_type)
+            .count()
+    }
+
+    /// Returns the number of change outputs of this step that are directed to the given pool.
+    pub fn change_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.balance()
+            .proposed_change()
+            .iter()
+            .filter(|c| c.output_pool() == pool_type)
+            .count()
+    }
+
+    /// Returns the number of Orchard actions required by this step.
+    ///
+    /// Each Orchard action can carry both a spend and an output, so the number of actions is
+    /// the greater of the number of Orchard note spends and the number of Orchard outputs
+    /// (payments plus change) in this step.
+    pub fn orchard_action_count(&self) -> usize {
+        let spends = self.input_count_in_pool(PoolType::ORCHARD);
+        let outputs = self.output_count_in_pool(PoolType::ORCHARD)
+            + self.change_count_in_pool(PoolType::ORCHARD);
+        spends.max(outputs)
     }
 }
 
