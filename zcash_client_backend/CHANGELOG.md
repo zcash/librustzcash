@@ -11,6 +11,14 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::proposal::Step` methods for counting the inputs and
+  outputs of a proposal step by pool, paralleling the existing
+  `input_in_pool`/`output_in_pool`/`change_in_pool` predicates:
+  - `input_count_in_pool`
+  - `output_count_in_pool`
+  - `change_count_in_pool`
+  - `orchard_action_count`, the number of Orchard actions a step requires
+    (the greater of its Orchard spends and its Orchard outputs plus change).
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
