@@ -8,6 +8,17 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Added
+- `zcash_primitives::transaction::components::orchard::orchard_bundle_version_for_branch`
+
+### Changed
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  the consensus branch ID under which the transaction was constructed instead of
+  an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived
+  from the branch ID via `orchard_bundle_version_for_branch`.
+
 ## [0.29.0-pre.0] - 2026-06-30
 
 ### Added

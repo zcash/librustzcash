@@ -78,11 +78,11 @@ fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
     }
 }
 
-/// Selects the `(value pool, orchard tx version)` pair that reproduces the
-/// pre-bump `BundleCommitmentDomain` for a given transaction version. The value
-/// pool here is only used for empty-bundle commitments (which hash no flags);
-/// present bundles compute their commitments from the `BundleVersion` each
-/// bundle carries.
+/// Selects the `(value pool, orchard tx version)` pair identifying the
+/// `BundleCommitmentDomain` used for Orchard-slot commitments in the given
+/// transaction version. The value pool here is only used for empty-bundle
+/// commitments (which hash no flags); present bundles compute their commitments
+/// from the `BundleVersion` each bundle carries.
 fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion) {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
@@ -142,7 +142,7 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
 ///
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
 /// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
-/// * \[(cv, anchor, rk)*\] for pre-v6 transactions, personalized with
+/// * \[(cv, anchor, rk)*\] for v5 transactions (v4 is not handled here), personalized with
 ///   ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 /// * \[(cv, rk)*\] for v6 transactions, personalized with
 ///   ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION

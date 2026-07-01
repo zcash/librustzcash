@@ -19,6 +19,7 @@ use zcash_script::opcode::PushValue;
 
 use crate::transaction::{
     Transaction, TxVersion,
+    components::orchard::orchard_bundle_version_for_branch,
     fees::{
         FeeRule,
         transparent::{InputView, OutputView},
@@ -305,8 +306,8 @@ impl BuildConfig {
                 orchard::builder::Builder::new(
                     orchard::builder::BundleType::Coinbase,
                     bundle_version,
-                    // Coinbase transactions have `enableSpends = 0`. Every pool for which a
-                    // coinbase Orchard bundle is built (Orchard pre-NU6.3 and Ironwood) permits
+                    // Coinbase transactions have `enableSpends = 0`. Every protocol version
+                    // for which a coinbase Orchard-pool bundle can be built (pre-NU6.3) permits
                     // cross-address transfers, so the spends-disabled flag set is representable.
                     orchard::bundle::Flags::SPENDS_DISABLED,
                     orchard::Anchor::empty_tree(),
@@ -377,18 +378,6 @@ fn orchard_action_count(
     };
 
     bundle_type.num_actions(flags, num_spends, num_outputs)
-}
-
-fn orchard_bundle_version_for_branch(
-    consensus_branch_id: BranchId,
-) -> orchard::bundle::BundleVersion {
-    match consensus_branch_id {
-        BranchId::Nu6_3 => orchard::bundle::BundleVersion::orchard_v3(),
-        #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => orchard::bundle::BundleVersion::orchard_v3(),
-        BranchId::Nu6_2 => orchard::bundle::BundleVersion::orchard_v2(),
-        _ => orchard::bundle::BundleVersion::orchard_insecure_v1(),
-    }
 }
 
 /// The result of a transaction build operation, which includes the resulting transaction along
@@ -512,6 +501,14 @@ impl<P, U> Builder<P, U> {
             .map_or_else(|| &[][..], |b| b.outputs())
     }
 
+    /// Returns `true` if any Orchard spend, output, or change output has been
+    /// added to this builder (i.e. the transaction will carry an Orchard bundle).
+    fn orchard_in_use(&self) -> bool {
+        self.orchard_builder.as_ref().is_some_and(|b| {
+            !b.spends().is_empty() || !b.outputs().is_empty() || !b.changes().is_empty()
+        })
+    }
+
     /// Returns `true` if any Ironwood spend, output, or change output has been
     /// added to this builder (i.e. the transaction will carry an Ironwood bundle).
     fn ironwood_in_use(&self) -> bool {
@@ -543,11 +540,7 @@ impl<P, U> Builder<P, U> {
         }
 
         let orchard_available = version.has_orchard() && self.consensus_branch_id.has_orchard();
-        if !orchard_available
-            && self.orchard_builder.as_ref().is_some_and(|b| {
-                !b.spends().is_empty() || !b.outputs().is_empty() || !b.changes().is_empty()
-            })
-        {
+        if !orchard_available && self.orchard_in_use() {
             return Err(Error::TargetIncompatible(
                 self.consensus_branch_id,
                 version,
@@ -703,7 +696,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
     ///
     /// Disabling expiry by setting the height to `BlockHeight::from(0)` is not
     /// recommended: non-expiring transactions are not yet well tested
-    /// end-to-end and may surface edge cases elsewhere in the stack. Callers
+    /// end-to-end and are known to cause bugs elsewhere in the stack. Callers
     /// should avoid a zero expiry height unless they specifically need it.
     pub fn with_expiry_height(mut self, expiry_height: BlockHeight) -> Self {
         self.expiry_height = expiry_height;
@@ -1581,8 +1574,8 @@ mod tests {
             nu6: Some(BlockHeight::from_u32(7)),
             nu6_1: Some(BlockHeight::from_u32(8)),
             nu6_2: Some(BlockHeight::from_u32(9)),
-            nu6_3: None,
-            nu7: Some(BlockHeight::from_u32(10)),
+            nu6_3: Some(BlockHeight::from_u32(10)),
+            nu7: Some(BlockHeight::from_u32(11)),
         }
     }
 
@@ -1646,7 +1639,7 @@ mod tests {
     fn nu7_coinbase_builder_does_not_expose_orchard() {
         let builder = Builder::new(
             nu7_test_network(),
-            zcash_protocol::consensus::BlockHeight::from_u32(10),
+            zcash_protocol::consensus::BlockHeight::from_u32(11),
             BuildConfig::Coinbase { miner_data: None },
         );
 
@@ -1876,6 +1869,25 @@ mod tests {
         let merkle_path = orchard::tree::MerklePath::from_parts(0, [zero; 32]);
 
         (fvk, note, merkle_path)
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn note_commitment_and_nullifier_depend_on_note_version() {
+        let (fvk, v2_note, _) = ironwood_note_with_version(orchard::note::NoteVersion::V2);
+        let (_, v3_note, _) = ironwood_note_with_version(orchard::note::NoteVersion::V3);
+
+        // The notes share every field except the note plaintext version (lead byte
+        // 0x02 vs 0x03), which must domain-separate both the commitment and the
+        // nullifier.
+        assert_ne!(
+            orchard::note::ExtractedNoteCommitment::from(v2_note.commitment()).to_bytes(),
+            orchard::note::ExtractedNoteCommitment::from(v3_note.commitment()).to_bytes(),
+        );
+        assert_ne!(
+            v2_note.nullifier(&fvk).to_bytes(),
+            v3_note.nullifier(&fvk).to_bytes(),
+        );
     }
 
     #[test]

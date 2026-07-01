@@ -15,7 +15,7 @@ use orchard::{
     value::ValueCommitment,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_protocol::value::ZatBalance;
+use zcash_protocol::{consensus::BranchId, value::ZatBalance};
 
 use crate::transaction::Transaction;
 
@@ -91,27 +91,50 @@ fn read_bundle<R: Read>(
     }
 }
 
+/// Returns the Orchard-pool [`BundleVersion`] in effect for the given consensus branch.
+///
+/// The v5 Orchard flag byte is the same in every epoch (bit 2 reserved), so serialization
+/// is unaffected by this choice, but the `BundleVersion` fixes the bundle's cross-address
+/// semantics and circuit generation, which do follow the consensus epoch:
+///   * pre-NU6.2: historical insecure circuit, cross-address enabled, proof size not
+///     enforced;
+///   * NU6.2: fixed circuit, cross-address enabled;
+///   * NU6.3 onward: post-NU6.3 circuit, cross-address disabled (consensus-mandated).
+pub fn orchard_bundle_version_for_branch(consensus_branch_id: BranchId) -> BundleVersion {
+    match consensus_branch_id {
+        BranchId::Sprout
+        | BranchId::Overwinter
+        | BranchId::Sapling
+        | BranchId::Blossom
+        | BranchId::Heartwood
+        | BranchId::Canopy
+        | BranchId::Nu5
+        | BranchId::Nu6
+        | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
+        BranchId::Nu6_2 => BundleVersion::orchard_v2(),
+        BranchId::Nu6_3 => BundleVersion::orchard_v3(),
+        #[cfg(zcash_unstable = "nu7")]
+        BranchId::Nu7 => BundleVersion::orchard_v3(),
+    }
+}
+
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 ///
-/// This deliberately does not take the consensus branch ID to determine the
-/// format to read. Although NU6.3 does not disable v5 transactions, the Orchard
-/// action flags and wire serialization are identical before and after the
-/// upgrade, so a v5 bundle deserializes the same way regardless of activation
-/// height; only the bundle commitment domain varies across upgrades, and that
-/// affects the txid/sighash digests rather than deserialization. Since this is
-/// public API. By contrast, `read_v6_bundle` takes a `bundle_version` argument so
-/// the caller selects the Orchard or Ironwood v6 slot.
-///
-/// `bundle_version` must be an Orchard-pool version whose flag byte uses the v5 grammar (bit 2
-/// reserved): [`BundleVersion::orchard_insecure_v1`] before NU6.2, [`BundleVersion::orchard_v2`]
-/// at NU6.2, or [`BundleVersion::orchard_v3`] from NU6.3 (a v5 transaction stays valid under
-/// NU6.3+). All three share that grammar, and the version's protocol generation selects whether
-/// the canonical proof size is enforced.
+/// The v5 Orchard wire serialization is identical in every epoch (flag bit 2 is
+/// reserved), but the returned bundle's [`BundleVersion`] — which fixes its
+/// cross-address semantics and circuit generation — follows the consensus epoch
+/// identified by `consensus_branch_id` (see
+/// [`orchard_bundle_version_for_branch`]). By contrast, `read_v6_bundle` takes a
+/// `bundle_version` argument so the caller selects the Orchard or Ironwood v6
+/// slot.
 pub fn read_v5_bundle<R: Read>(
     reader: R,
-    bundle_version: BundleVersion,
+    consensus_branch_id: BranchId,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    read_bundle(reader, bundle_version)
+    read_bundle(
+        reader,
+        orchard_bundle_version_for_branch(consensus_branch_id),
+    )
 }
 
 /// Rejects bundle versions that are not valid for the v6 transaction format, which has exactly
