@@ -41,8 +41,15 @@ workspace.
   duplicate cached transparent receiver addresses, the migration that adds the index resolves
   them in place: within a single account it keeps a canonical record (preferring an HD-derived
   record over an imported one), repoints the affected received outputs to it, and deletes the
-  redundant records. A receiver duplicated across more than one account cannot be safely merged
+  redundant records, preserving the earliest recorded `exposed_at_height` among the merged
+  records. A receiver duplicated across more than one account cannot be safely merged
   and causes the migration to abort.
+
+### Fixed
+- Deriving a transparent address that was previously imported as a standalone receiver now
+  upgrades the existing address record in place to its derived form, instead of failing on the
+  transparent-receiver uniqueness invariant added in this release. Funds received at such an
+  address become spendable once the account derives it.
 
 ## [0.21.1] - 2026-06-19
 

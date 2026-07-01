@@ -104,6 +104,21 @@ impl RusqliteMigration for Migration {
                 )));
             }
 
+            // Carry the earliest observed exposure across the merged records onto the canonical
+            // one, so that upgrading an imported receiver to its derived form does not discard an
+            // earlier exposure height recorded against the imported record. Run this before
+            // deleting the redundant rows, while the whole group is still present.
+            transaction.execute(
+                "UPDATE addresses
+                 SET exposed_at_height = (
+                     SELECT MIN(exposed_at_height)
+                     FROM addresses
+                     WHERE cached_transparent_receiver_address = :addr
+                 )
+                 WHERE id = :canonical",
+                named_params! { ":addr": addr, ":canonical": canonical_id },
+            )?;
+
             for (dup_id, _) in group.iter().skip(1) {
                 for table in [
                     "transparent_received_outputs",
@@ -349,6 +364,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(imported_count, 0);
+    }
+
+    /// When repairing a duplicate, the surviving canonical record keeps the earliest
+    /// `exposed_at_height` observed across the merged records.
+    #[test]
+    fn repair_carries_min_exposed_at_height() {
+        let network = Network::TestNetwork;
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+
+        WalletMigrator::new()
+            .with_seed(Secret::new(vec![0xab; 32]))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
+
+        let account_id = insert_account(&db_data.conn, 0, [0xAA; 16]);
+
+        // Derived (canonical) record exposed at height 200.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO addresses (account_id, key_scope, diversifier_index_be, address,
+                 transparent_child_index, cached_transparent_receiver_address, receiver_flags,
+                 exposed_at_height)
+                 VALUES (?1, 0, X'00000000000000000000000000', 'addr_derived', 0, 't_exp', 5, 200)",
+                [account_id],
+            )
+            .unwrap();
+        let derived_id = db_data.conn.last_insert_rowid();
+
+        // Imported record exposed earlier, at height 100.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO addresses (account_id, key_scope, address,
+                 cached_transparent_receiver_address, imported_transparent_receiver_pubkey,
+                 receiver_flags, exposed_at_height)
+                 VALUES (?1, -1, 'addr_imported', 't_exp',
+                 X'020000000000000000000000000000000000000000000000000000000000000001', 5, 100)",
+                [account_id],
+            )
+            .unwrap();
+
+        WalletMigrator::new()
+            .with_seed(Secret::new(vec![0xab; 32]))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
+
+        // The canonical (derived) record now carries the earliest exposure.
+        let exposed: Option<i64> = db_data
+            .conn
+            .query_row(
+                "SELECT exposed_at_height FROM addresses WHERE id = ?1",
+                [derived_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(exposed, Some(100));
     }
 
     /// A transparent receiver duplicated across more than one account cannot be safely merged, so
