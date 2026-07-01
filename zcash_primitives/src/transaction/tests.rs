@@ -1122,6 +1122,8 @@ fn zip_0244() {
 
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 #[test]
+#[ignore = "The ZIP 233 test vectors were generated using the placeholder v6 version group ID \
+            and must be regenerated now that `V6_VERSION_GROUP_ID` has been finalized."]
 fn zip_0233() {
     fn to_test_txdata(
         tv: &self::data::zip_0233::TestVector,
