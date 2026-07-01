@@ -22,7 +22,7 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -1393,6 +1393,80 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     Ok(utxos)
 }
 
+/// Returns the spendable transparent outputs received by the given `account` whose total value
+/// is at least `target_value + estimated_additional_fees` (when `estimated_additional_fees` is
+/// `Some`) or at least `target_value` (when it is `None`).
+///
+/// The query is a single SQL statement that orders eligible UTXOs by descending value (using
+/// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
+/// values until the bound is met. This bounds the work done in SQLite to the prefix of the
+/// table that can possibly satisfy the request, rather than materializing the wallet's full
+/// UTXO set as the unbounded gather did.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    _params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: CoinbaseFilter,
+    target_value: TargetValue,
+    estimated_additional_fees: Option<Zatoshis>,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // Compute the target the gather must reach. `TargetValue::AllFunds` returns all eligible
+    // outputs; the only way to bound that is with a finite `estimated_additional_fees`, which
+    // is typically not provided for `AllFunds` requests. In that case the gather degenerates
+    // to the old unbounded behavior, which is the correct semantics for a "send everything"
+    // request.
+    let target_zat: Option<u64> = match target_value {
+        TargetValue::AtLeast(z) => {
+            let base = u64::from(z);
+            let headroom = estimated_additional_fees.map(u64::from).unwrap_or(0);
+            base.checked_add(headroom)
+        }
+        TargetValue::AllFunds(_) => None,
+    };
+
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "accounts.uuid = :account_uuid",
+        "u.value_zat DESC, u.output_index",
+    ))?;
+
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
+    let mut rows = stmt_utxos.query(named_params![
+        ":account_uuid": account.0,
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE),
+        ":coinbase_filter": coinbase_filter,
+    ])?;
+
+    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
+    let mut accumulated: u64 = 0;
+    while let Some(row) = rows.next()? {
+        let output = to_unspent_transparent_output(conn, row)?;
+        // If we have a target bound, stop once the accumulated value reaches it.
+        if let Some(target) = target_zat {
+            if accumulated >= target {
+                break;
+            }
+        }
+        accumulated = accumulated.saturating_add(u64::from(output.value()));
+        utxos.push(output);
+    }
+
+    Ok(utxos)
+}
+
 /// Returns a mapping from each transparent receiver associated with the specified account
 /// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
 /// at a block height less than or equal to `summary_height`.
@@ -2604,6 +2678,14 @@ mod tests {
     #[test]
     fn propose_t2t_from_addresses() {
         zcash_client_backend::data_api::testing::transparent::propose_t2t_from_addresses(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn value_bounded_transparent_gather() {
+        zcash_client_backend::data_api::testing::transparent::value_bounded_transparent_gather(
             TestDbFactory::default(),
             BlockCache::new(),
         );
