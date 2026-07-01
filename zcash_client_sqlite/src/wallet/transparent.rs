@@ -22,7 +22,7 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
@@ -1229,6 +1229,56 @@ pub(crate) fn get_wallet_transparent_output(
     result
 }
 
+/// Builds the SQL query body shared by `get_spendable_transparent_outputs[_for_addresses]`
+/// and `select_spendable_transparent_outputs`.
+///
+/// The query body is parameterized over the address-predicate SQL fragment and the
+/// `ORDER BY` fragment, so callers can match on a single address, a set of addresses, or
+/// an account; and can order by address+index (per-address determinism) or by value
+/// descending (value-bounded selection).
+fn spendable_transparent_outputs_query(address_predicate_sql: &str, order_by_sql: &str) -> String {
+    format!(
+        "SELECT t.txid, u.output_index, u.script,
+                u.value_zat, addresses.key_scope,
+                accounts.uuid AS account_uuid,
+                u.transaction_id AS creating_tx_id,
+                addresses.imported_transparent_receiver_script,
+                t.mined_height AS received_height
+         FROM transparent_received_outputs u
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN accounts ON accounts.id = u.account_id
+         JOIN addresses ON addresses.id = u.address_id
+         WHERE {address_predicate_sql}
+         AND u.value_zat > :min_value
+         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the output is unspent
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+         AND ({}) -- exclude immature coinbase outputs
+         AND (
+             :coinbase_filter == 0
+             OR (:coinbase_filter == 1 AND IFNULL(t.tx_index, 1) == 0)
+             OR (:coinbase_filter == 2 AND IFNULL(t.tx_index, 1) != 0)
+         ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
+           -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
+           -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
+         ORDER BY {order_by_sql}",
+        tx_unexpired_condition_minconf_0("t"),
+        spent_utxos_clause(),
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        excluding_immature_coinbase_outputs("t"),
+    )
+}
+
+/// Encodes the common `CoinbaseFilter` encoding used by the transparent-output SQL queries:
+/// 0 = all transparent outputs, 1 = coinbase outputs only, 2 = non-coinbase outputs only.
+fn coinbase_filter_encoding(output_filter: CoinbaseFilter) -> i32 {
+    match output_filter {
+        CoinbaseFilter::AllTransparentOutputs => 0i32,
+        CoinbaseFilter::CoinbaseOnly => 1i32,
+        CoinbaseFilter::NonCoinbaseOnly => 2i32,
+    }
+}
+
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
@@ -1292,43 +1342,11 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         return Ok(vec![]);
     }
 
-    // Encoding of the coinbase filter as understood by the SQL query below:
-    // 0 = all transparent outputs, 1 = coinbase outputs only, 2 = non-coinbase outputs only.
-    let coinbase_filter = match output_filter {
-        CoinbaseFilter::AllTransparentOutputs => 0i32,
-        CoinbaseFilter::CoinbaseOnly => 1i32,
-        CoinbaseFilter::NonCoinbaseOnly => 2i32,
-    };
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
 
-    let mut stmt_utxos = conn.prepare_cached(&format!(
-        "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, addresses.key_scope,
-                accounts.uuid AS account_uuid,
-                u.transaction_id AS creating_tx_id,
-                addresses.imported_transparent_receiver_script,
-                t.mined_height AS received_height
-         FROM transparent_received_outputs u
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         JOIN accounts ON accounts.id = u.account_id
-         JOIN addresses ON addresses.id = u.address_id
-         WHERE addresses.cached_transparent_receiver_address IN rarray(:addresses)
-         AND u.value_zat > :min_value
-         AND ({}) -- the transaction is mined or unexpired with minconf 0
-         AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs
-         AND (
-             :coinbase_filter == 0
-             OR (:coinbase_filter == 1 AND IFNULL(t.tx_index, 1) == 0)
-             OR (:coinbase_filter == 2 AND IFNULL(t.tx_index, 1) != 0)
-         ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
-           -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
-           -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
-         ORDER BY addresses.cached_transparent_receiver_address, u.output_index",
-        tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        excluding_immature_coinbase_outputs("t"),
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "addresses.cached_transparent_receiver_address IN rarray(:addresses)",
+        "addresses.cached_transparent_receiver_address, u.output_index",
     ))?;
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
@@ -1356,12 +1374,11 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
         let mut output = to_unspent_transparent_output(conn, row)?;
-
         // If the address has a redeem script, compute the known input size for fee
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
-            row.get("imported_transparent_receiver_script")?;
-        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes {
+        if let Ok(Some(rs_bytes)) =
+            row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+        {
             if let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes)) {
                 if let Some(input_size) =
                     transparent::builder::p2sh_input_serialized_len(&from_chain)
@@ -1370,7 +1387,80 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
                 }
             }
         }
+        utxos.push(output);
+    }
 
+    Ok(utxos)
+}
+
+/// Returns the spendable transparent outputs received by the given `account` whose total value
+/// is at least `target_value + estimated_additional_fees` (when `estimated_additional_fees` is
+/// `Some`) or at least `target_value` (when it is `None`).
+///
+/// The query is a single SQL statement that orders eligible UTXOs by descending value (using
+/// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
+/// values until the bound is met. This bounds the work done in SQLite to the prefix of the
+/// table that can possibly satisfy the request, rather than materializing the wallet's full
+/// UTXO set as the unbounded gather did.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    _params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: CoinbaseFilter,
+    target_value: TargetValue,
+    estimated_additional_fees: Option<Zatoshis>,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // Compute the target the gather must reach. `TargetValue::AllFunds` returns all eligible
+    // outputs; the only way to bound that is with a finite `estimated_additional_fees`, which
+    // is typically not provided for `AllFunds` requests. In that case the gather degenerates
+    // to the old unbounded behavior, which is the correct semantics for a "send everything"
+    // request.
+    let target_zat: Option<u64> = match target_value {
+        TargetValue::AtLeast(z) => {
+            let base = u64::from(z);
+            let headroom = estimated_additional_fees.map(u64::from).unwrap_or(0);
+            base.checked_add(headroom)
+        }
+        TargetValue::AllFunds(_) => None,
+    };
+
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "accounts.uuid = :account_uuid",
+        "u.value_zat DESC, u.output_index",
+    ))?;
+
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
+    let mut rows = stmt_utxos.query(named_params![
+        ":account_uuid": account.0,
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE),
+        ":coinbase_filter": coinbase_filter,
+    ])?;
+
+    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
+    let mut accumulated: u64 = 0;
+    while let Some(row) = rows.next()? {
+        let output = to_unspent_transparent_output(conn, row)?;
+        // If we have a target bound, stop once the accumulated value reaches it.
+        if let Some(target) = target_zat {
+            if accumulated >= target {
+                break;
+            }
+        }
+        accumulated = accumulated.saturating_add(u64::from(output.value()));
         utxos.push(output);
     }
 
@@ -2588,6 +2678,14 @@ mod tests {
     #[test]
     fn propose_t2t_from_addresses() {
         zcash_client_backend::data_api::testing::transparent::propose_t2t_from_addresses(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn value_bounded_transparent_gather() {
+        zcash_client_backend::data_api::testing::transparent::value_bounded_transparent_gather(
             TestDbFactory::default(),
             BlockCache::new(),
         );

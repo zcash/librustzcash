@@ -38,6 +38,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::{
     ShieldedProtocol, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    value::Zatoshis,
 };
 use zip32::DiversifierIndex;
 

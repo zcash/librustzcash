@@ -13,6 +13,7 @@ mod add_account_uuids;
 mod add_transaction_trust_marker;
 mod add_transaction_views;
 mod add_transparent_receiver_address_index;
+mod add_transparent_value_index;
 mod add_utxo_account;
 mod addresses_table;
 mod ensure_default_transparent_address;
@@ -139,6 +140,8 @@ pub(super) fn all_migrations<
     //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
     //                                                    /          \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
+    //                                                                       \
+    //                                                                        add_transparent_value_index
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -233,6 +236,7 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(add_transparent_receiver_address_index::Migration),
+        Box::new(add_transparent_value_index::Migration),
     ]
 }
 
