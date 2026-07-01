@@ -721,6 +721,25 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
     key_scope: TransparentKeyScope,
     address_list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
 ) -> Result<(), SqliteClientError> {
+    // If the address being derived was previously imported as a standalone (`Foreign`)
+    // receiver, upgrade that row in place to its derived form rather than inserting a second row
+    // for the same transparent receiver (which the UNIQUE index on
+    // `cached_transparent_receiver_address` forbids). The row `id` is preserved, so any UTXOs,
+    // exposure, and spend-search state already attached to the imported receiver carry over and
+    // become spendable.
+    //
+    // The lookup below reads only columns present at every schema version at which
+    // `store_address_range` runs, so it is safe when this function is called from a migration.
+    // The upgrade `UPDATE` clears the `imported_transparent_receiver_*` columns, so it is only
+    // ever prepared and executed when a `Foreign` row exists — which cannot occur before those
+    // columns have been added.
+    let mut stmt_lookup_foreign = conn.prepare_cached(
+        "SELECT id FROM addresses
+         WHERE account_id = :account_id
+           AND cached_transparent_receiver_address = :transparent_address
+           AND key_scope = :foreign_scope",
+    )?;
+
     // exposed_at_height is initially NULL
     let mut stmt_insert_address = conn.prepare_cached(
         "INSERT INTO addresses (
@@ -743,15 +762,55 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
             .convert::<ReceiverFlags>()
             .expect("address is valid");
 
-        stmt_insert_address.execute(named_params![
-            ":account_id": account_id.0,
-            ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
-            ":key_scope": KeyScope::try_from(key_scope)?.encode(),
-            ":address": zcash_address.encode(),
-            ":transparent_child_index": transparent_child_index.index(),
-            ":transparent_address": transparent_address.encode(params),
-            ":receiver_flags": receiver_flags.bits()
-        ])?;
+        let derived_scope = KeyScope::try_from(key_scope)?.encode();
+        let diversifier_index_be = encode_diversifier_index_be(transparent_child_index.into());
+        let transparent_address_enc = transparent_address.encode(params);
+        let address_enc = zcash_address.encode();
+        let child_index = transparent_child_index.index();
+        let flags = receiver_flags.bits();
+
+        let foreign_id: Option<i64> = stmt_lookup_foreign
+            .query_row(
+                named_params![
+                    ":account_id": account_id.0,
+                    ":transparent_address": transparent_address_enc,
+                    ":foreign_scope": KeyScope::Foreign.encode(),
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(foreign_id) = foreign_id {
+            conn.execute(
+                "UPDATE addresses
+                 SET key_scope = :key_scope,
+                     diversifier_index_be = :diversifier_index_be,
+                     address = :address,
+                     transparent_child_index = :transparent_child_index,
+                     receiver_flags = :receiver_flags,
+                     imported_transparent_receiver_pubkey = NULL,
+                     imported_transparent_receiver_script = NULL
+                 WHERE id = :id",
+                named_params![
+                    ":key_scope": derived_scope,
+                    ":diversifier_index_be": diversifier_index_be,
+                    ":address": address_enc,
+                    ":transparent_child_index": child_index,
+                    ":receiver_flags": flags,
+                    ":id": foreign_id,
+                ],
+            )?;
+        } else {
+            stmt_insert_address.execute(named_params![
+                ":account_id": account_id.0,
+                ":diversifier_index_be": diversifier_index_be,
+                ":key_scope": derived_scope,
+                ":address": address_enc,
+                ":transparent_child_index": child_index,
+                ":transparent_address": transparent_address_enc,
+                ":receiver_flags": flags,
+            ])?;
+        }
     }
     Ok(())
 }
@@ -2670,6 +2729,115 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the
+    /// existing row in place — same `id`, derived scope, import columns cleared — rather than
+    /// inserting a duplicate row for the same transparent receiver, and any UTXO already
+    /// attached to the imported row carries over.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_upgrades_imported_receiver() {
+        use rusqlite::named_params;
+        use transparent::address::TransparentAddress;
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+
+        use crate::wallet::encoding::KeyScope;
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // An address we pretend was imported standalone and is also derivable at child index 100
+        // (beyond the default external gap of 10, so no real derived row occupies that index).
+        let taddr = TransparentAddress::PublicKeyHash([0x11; 20]);
+        let taddr_enc = taddr.encode(&network);
+        let child_index = NonHardenedChildIndex::from_index(100).unwrap();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        // A standalone (`Foreign`) row for the receiver, exposed at height 55.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+             VALUES (:account_id, :foreign, :address, :taddr,
+                  X'020000000000000000000000000000000000000000000000000000000000000001', 1, 55)",
+            named_params! {
+                ":account_id": account_id.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        // A UTXO attached to the imported row.
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height) VALUES (1, X'00', 1)",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO transparent_received_outputs
+                 (transaction_id, output_index, account_id, address, script, value_zat, address_id)
+             VALUES (1, 0, :account_id, :taddr, X'00', 100000, :addr_id)",
+            named_params! { ":account_id": account_id.0, ":taddr": &taddr_enc, ":addr_id": foreign_id },
+        )
+        .unwrap();
+
+        // Derive the same address at child index 7 via the gap-generation storage entry point.
+        super::store_address_range(
+            &tx,
+            &network,
+            account_id,
+            TransparentKeyScope::EXTERNAL,
+            vec![(Address::from(taddr), taddr, child_index)],
+        )
+        .unwrap();
+
+        // Exactly one row remains for the receiver: the upgraded former-import row.
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, key_scope, transparent_child_index,
+                        imported_transparent_receiver_pubkey IS NULL
+                 FROM addresses WHERE cached_transparent_receiver_address = :taddr",
+            )
+            .unwrap();
+        let rows: Vec<(i64, i64, Option<u32>, bool)> = stmt
+            .query_map(named_params! { ":taddr": &taddr_enc }, |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+
+        assert_eq!(rows.len(), 1);
+        let (id, key_scope, child, pubkey_is_null) = rows[0];
+        assert_eq!(id, foreign_id, "upgraded in place, same id");
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert_eq!(child, Some(100));
+        assert!(pubkey_is_null, "standalone-import column cleared");
+
+        // The UTXO still references the (now-derived) row.
+        let utxo_addr_id: i64 = tx
+            .query_row(
+                "SELECT address_id FROM transparent_received_outputs
+                 WHERE transaction_id = 1 AND output_index = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(utxo_addr_id, foreign_id);
+
+        tx.commit().unwrap();
     }
 
     /// Smoke test that the `spend-index` feature's SQL is valid: `transaction_data_requests`
