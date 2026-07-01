@@ -40,6 +40,19 @@ workspace.
   record over an imported one), repoints the affected received outputs to it, and deletes the
   redundant records. A receiver duplicated across more than one account cannot be safely merged
   and causes the migration to abort.
+- The `InputSource::select_spendable_transparent_outputs` implementation
+  (behind the `transparent-inputs` feature flag) now takes a
+  `fee_rule: &StandardFeeRule` parameter in place of the previous
+  `estimated_additional_fees: Option<Zatoshis>` static headroom. The gather
+  loop recomputes the cumulative ZIP 317 marginal fee cost of the transparent
+  inputs examined so far at each step (maintaining a running total of input
+  sizes, so the fee recomputation remains O(1) per candidate UTXO), and stops
+  once the post-fee accumulated value meets the requested `TargetValue`. This
+  removes the need for callers to guess a fee headroom up front, and avoids
+  the previously-common second round trip to correct an under-estimated one.
+- `zcash_client_sqlite::error::SqliteClientError::FeeRuleError`, a new variant
+  (behind the `transparent-inputs` feature flag) that wraps an error produced
+  by a `FeeRule` during transparent input selection.
 
 ## [0.21.1] - 2026-06-19
 

@@ -96,8 +96,14 @@ workspace.
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`:
   when the `TransparentSpendPolicy` requires gathering spendable transparent
   UTXOs for the account, the gather is now bounded by the requested
-  `TargetValue` (via the new `InputSource::select_spendable_transparent_outputs`)
+  `TargetValue`, net of the estimated ZIP 317 marginal fee cost of the gathered
+  inputs themselves (via the new `InputSource::select_spendable_transparent_outputs`)
   rather than materializing every spendable UTXO for every account address.
+  This fee estimate always uses `StandardFeeRule::Zip317`, regardless of the
+  `ChangeStrategy::FeeRule` actually configured for the proposal; it is a
+  heuristic bound only; the real fee is still computed by the caller's actual
+  change strategy, and the loop re-gathers on `InsufficientFunds` if the
+  estimate was too low.
 - `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
   and accessor have been renamed to `funding_account`, to disambiguate from
   the recipient-account terminology now used by `WalletTransparentOutput`.
@@ -180,9 +186,14 @@ workspace.
   - `InputSource::select_spendable_transparent_outputs` method (behind
     `transparent-inputs`), a value-bounded counterpart to
     `InputSource::get_spendable_transparent_outputs[_for_addresses]`. The selector
-    uses this to bound the set of transparent inputs by total value (rather than
-    by count) so that wallets with large numbers of transparent UTXOs no longer
-    fall over when building a general transfer.
+    uses this to bound the set of transparent inputs by post-fee value (rather
+    than by count) so that wallets with large numbers of transparent UTXOs no
+    longer fall over when building a general transfer. The method takes a
+    `fee_rule: &StandardFeeRule` argument; implementations are expected to
+    recompute the cumulative marginal fee cost of the gathered inputs as they
+    accumulate (per ZIP 317), so that the returned set covers the requested
+    value net of its own gather's fee cost, rather than requiring a subsequent
+    re-gather to correct an under-estimated static headroom.
   - `wallet::ConfirmationsPolicyError`
 - `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:
