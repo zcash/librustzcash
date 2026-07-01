@@ -141,6 +141,11 @@ workspace.
     - The result types of `InputSource::get_unspent_transparent_output` and
       `InputSource::get_unspent_transparent_outputs` have each changed; these
       have reverted to returning `WalletTransparentOutput`.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`:
+  when the `TransparentSpendPolicy` requires gathering spendable transparent
+  UTXOs for the account, the gather is now bounded by the requested
+  `TargetValue` (via the new `InputSource::select_spendable_transparent_outputs`)
+  rather than materializing every spendable UTXO for every account address.
 - `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
   and accessor have been renamed to `funding_account`, to disambiguate from
   the recipient-account terminology now used by `WalletTransparentOutput`.
@@ -229,6 +234,12 @@ workspace.
     consensus rule; `NonCoinbaseOnly` exists so that general (non-shielding)
     transfers can exclude coinbase UTXOs from input selection (coinbase funds
     are shielded separately via `propose_shielding_coinbase`).
+  - `InputSource::select_spendable_transparent_outputs` method (behind
+    `transparent-inputs`), a value-bounded counterpart to
+    `InputSource::get_spendable_transparent_outputs[_for_addresses]`. The selector
+    uses this to bound the set of transparent inputs by total value (rather than
+    by count) so that wallets with large numbers of transparent UTXOs no longer
+    fall over when building a general transfer.
   - `wallet::ConfirmationsPolicyError`
 - `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:

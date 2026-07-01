@@ -25,7 +25,7 @@ use zip321::TransactionRequest;
 
 use crate::{
     data_api::{
-        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue, WalletRead,
+        InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
         wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
@@ -545,11 +545,7 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
-impl<DbT> InputSelector for GreedyInputSelector<DbT>
-where
-    DbT: WalletRead
-        + InputSource<Error = <DbT as WalletRead>::Error, AccountId = <DbT as WalletRead>::AccountId>,
-{
+impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
 
@@ -687,42 +683,64 @@ where
 
         #[cfg(not(feature = "transparent-inputs"))]
         let transparent_inputs = vec![];
+        let mut amount_at_transparent_gather = Zatoshis::ZERO;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent_inputs = {
-            let transparent_addrs = match spend_policy {
-                TransparentSpendPolicy::ShieldedOnly => {
-                    // No transparent addresses required
-                    vec![]
+            // For `ShieldedOnly`, we don't need any transparent inputs; skip the gather entirely.
+            if matches!(spend_policy, TransparentSpendPolicy::ShieldedOnly) {
+                Vec::new()
+            } else {
+                // Compute the initial bound for the value-bounded transparent gather: the
+                // total payment amount. We don't (yet) include a fee headroom in the
+                // initial bound because the SQLite gather's `estimated_additional_fees`
+                // parameter is currently informational; the loop re-gathers on
+                // `InsufficientFunds` if the bound was too low.
+                //
+                // A `TransactionRequest` may have payments with no fixed amount (e.g. for
+                // `propose_send_max`); in that case we fall back to `TargetValue::AllFunds`
+                // so the gather returns everything.
+                let max_money = Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY);
+                let mut total_opt: Option<Zatoshis> = Some(Zatoshis::ZERO);
+                for payment in transaction_request.payments().values() {
+                    let Some(payment_amount) = payment.amount() else {
+                        total_opt = None;
+                        break;
+                    };
+                    if let Some(t) = total_opt {
+                        match t + payment_amount {
+                            Some(sum) => total_opt = Some(sum),
+                            None => {
+                                return Err(InputSelectorError::InsufficientFunds {
+                                    available: Zatoshis::ZERO,
+                                    required: max_money,
+                                });
+                            }
+                        }
+                    }
                 }
-                TransparentSpendPolicy::AnyAccountTaddr => {
-                    // return _all_ the known, non-ephemeral transparent receivers
-                    let t_recvs = wallet_db
-                        .get_transparent_receivers(account, true, true)
-                        .map_err(InputSelectorError::DataSource)?;
-                    t_recvs.into_keys().collect()
-                }
-                TransparentSpendPolicy::FromAddresses(set) => {
-                    let mut t_recvs = vec![set.head];
-                    t_recvs.extend(set.tail.iter());
-                    t_recvs
-                }
-            };
-            // Gather the account's spendable transparent UTXOs for the selected source addresses
-            // in a single batched query. The source addresses are the account's own non-ephemeral
-            // transparent receivers, so no ephemeral-linkability check is required (unlike
-            // `gather_shielding_inputs`). Coinbase UTXOs are excluded from general-transfer input
-            // selection; coinbase funds must be shielded first via `propose_shielding_coinbase`.
-            wallet_db
-                .get_spendable_transparent_outputs_for_addresses(
-                    &transparent_addrs,
-                    target_height,
-                    confirmations_policy,
-                    CoinbaseFilter::NonCoinbaseOnly,
-                )
-                .map_err(InputSelectorError::DataSource)?
-                .into_iter()
-                .map(|utxo| utxo.redact_account_data())
-                .collect::<Vec<_>>()
+                let (target_value, amount_at_gather) = match total_opt {
+                    Some(z) => (TargetValue::AtLeast(z), z),
+                    None => (
+                        TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+                        Zatoshis::ZERO,
+                    ),
+                };
+                amount_at_transparent_gather = amount_at_gather;
+                wallet_db
+                    .select_spendable_transparent_outputs(
+                        account,
+                        target_height,
+                        confirmations_policy,
+                        CoinbaseFilter::NonCoinbaseOnly,
+                        target_value,
+                        // TODO: thread a fee headroom here once the SQLite gather uses it.
+                        None,
+                    )
+                    .map_err(InputSelectorError::DataSource)?
+                    .into_iter()
+                    .map(|utxo| utxo.redact_account_data())
+                    .collect::<Vec<_>>()
+            }
         };
 
         let mut shielded_inputs = ReceivedNotes::empty();
@@ -959,6 +977,32 @@ where
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
+                    // The initial transparent-input gather was bounded by the payouts
+                    // alone, but `required` includes the fee. If the bound was too
+                    // low, re-gather transparents with the corrected value as a
+                    // defensive fallback. The common case (fee estimate was close) is
+                    // a no-op.
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        if !matches!(spend_policy, TransparentSpendPolicy::ShieldedOnly)
+                            && required > amount_at_transparent_gather
+                        {
+                            transparent_inputs = wallet_db
+                                .select_spendable_transparent_outputs(
+                                    account,
+                                    target_height,
+                                    confirmations_policy,
+                                    CoinbaseFilter::NonCoinbaseOnly,
+                                    TargetValue::AtLeast(required),
+                                    None,
+                                )
+                                .map_err(InputSelectorError::DataSource)?
+                                .into_iter()
+                                .map(|utxo| utxo.redact_account_data())
+                                .collect::<Vec<_>>();
+                            amount_at_transparent_gather = required;
+                        }
+                    }
                 }
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }

@@ -85,6 +85,7 @@ use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
+    value::Zatoshis,
 };
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
@@ -625,6 +626,28 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        target_value: TargetValue,
+        estimated_additional_fees: Option<Zatoshis>,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        wallet::transparent::select_spendable_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            target_value,
+            estimated_additional_fees,
         )
     }
 

@@ -137,6 +137,13 @@ workspace.
   transactions (identified by `tx_index = 0`); when set to `NonCoinbaseOnly`,
   it restricts results to outputs that are not from coinbase transactions.
   Outputs with an unknown `tx_index` are treated as non-coinbase.
+- Added an implementation of `InputSource::select_spendable_transparent_outputs`
+  (behind the `transparent-inputs` feature flag). The query orders eligible
+  outputs by descending value and stops as soon as the requested `TargetValue`
+  is met, so a wallet with many small transparent UTXOs does not have to
+  materialize the full UTXO set to build a small transfer. A new
+  `idx_transparent_received_outputs_value_zat` index (added by a new migration)
+  backs the value-descending ordering.
 - Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`

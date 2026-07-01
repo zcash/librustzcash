@@ -25,8 +25,8 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, CoinbaseFilter, InputSource as _, WalletRead as _, WalletTest as _,
-        WalletWrite,
+        Account as _, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode, TargetValue,
+        WalletRead as _, WalletTest as _, WalletWrite,
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
@@ -2067,4 +2067,121 @@ where
         !selected.contains(&&other_outpoint),
         "an unnamed address's UTXO must not be selected",
     );
+}
+
+/// Verifies that the value-bounded `select_spendable_transparent_outputs` gather returns
+/// only enough UTXOs to cover the requested `TargetValue`, rather than every spendable
+/// output held by the account. This is the behavior that prevents wallets with large
+/// numbers of small transparent UTXOs (e.g. recovered `zcashd` imports) from falling over
+/// when a small transfer is requested.
+pub fn value_bounded_transparent_gather<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with many small dust UTXOs. Each is well above the marginal fee
+    // (1_000 zats) so it's spendable, but tiny relative to the total. A naive "return
+    // everything" gather would load all of these into memory; the value-bounded gather
+    // should only return enough to cover the request.
+    let dust_value = Zatoshis::const_from_u64(10_000);
+    let n_dust = 50;
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..n_dust {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(dust_value, taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Request 30_000 zats — 3x a single dust UTXO, but a small fraction of the total.
+    let target = Zatoshis::const_from_u64(30_000);
+    let target_height = TargetHeight::from(height + 1);
+
+    let bound = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            TargetValue::AtLeast(target),
+            None,
+        )
+        .expect("value-bounded gather should succeed");
+
+    // The gather should return enough UTXOs to cover the target, not all 50.
+    // Each UTXO is 10_000 zats; a 30_000-zat target requires at most 3 UTXOs, and
+    // since they're all equal value the gather stops as soon as it hits 30_000.
+    assert!(
+        !bound.is_empty(),
+        "value-bounded gather should return at least one UTXO",
+    );
+    assert_eq!(
+        bound.len(),
+        3,
+        "value-bounded gather should return exactly 3 UTXOs (10_000 zats each) to cover 30_000 zats",
+    );
+    assert!(
+        bound.len() < n_dust,
+        "value-bounded gather should not return all {n_dust} UTXOs (returned {})",
+        bound.len(),
+    );
+    // The summed value should meet the target.
+    let total: Zatoshis = bound
+        .iter()
+        .map(|u| u.value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+    assert!(
+        total >= target,
+        "value-bounded gather should cover the target (got {}, want >= {})",
+        u64::from(total),
+        u64::from(target),
+    );
+
+    // AllFunds should return all eligible UTXOs.
+    let all = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+            None,
+        )
+        .expect("AllFunds gather should succeed");
+    assert_eq!(all.len(), n_dust);
 }

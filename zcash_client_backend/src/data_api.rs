@@ -1593,6 +1593,50 @@ pub trait InputSource {
         }
         Ok(outputs)
     }
+
+    /// Returns the spendable transparent outputs received by `account` whose total value is at
+    /// least `target_value + estimated_additional_fees` (when `estimated_additional_fees` is
+    /// provided) or at least `target_value` (when it is `None`).
+    ///
+    /// The gather is intended to scale to wallets with large numbers of transparent addresses and
+    /// UTXOs: it returns a value-bounded subset rather than every spendable output, so the
+    /// selector does not need to materialize the wallet's full UTXO set. Data stores should
+    /// implement this with a single query that orders eligible UTXOs by descending value and
+    /// truncates once the cumulative value hits the bound.
+    ///
+    /// `estimated_additional_fees` is a headroom added to `target_value` to reserve value for
+    /// the marginal fee cost of the gathered transparent inputs themselves; it is typically an
+    /// upper bound (e.g. `n × marginal_fee` for some conservative maximum `n`). It does not need
+    /// to be exact: an under-estimate will surface as an `InsufficientFunds` error from the
+    /// change strategy in the caller's input-selection loop, which the caller can use to
+    /// re-invoke this method with a corrected bound.
+    ///
+    /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
+    /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
+    /// general (non-shielding) input selection in `propose_transaction`.
+    #[cfg(feature = "transparent-inputs")]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        target_value: TargetValue,
+        estimated_additional_fees: Option<Zatoshis>,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        let _ = (
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            target_value,
+            estimated_additional_fees,
+        );
+        unimplemented!(
+            "InputSource::select_spendable_transparent_outputs must be overridden for \
+             wallets to use the value-bounded transparent input gather in propose_transaction"
+        )
+    }
 }
 
 /// Read-only operations required for light wallet functions.
