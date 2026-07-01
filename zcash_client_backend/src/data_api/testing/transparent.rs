@@ -455,6 +455,221 @@ where
     );
 }
 
+/// Verifies that `InputSource::get_spendable_transparent_outputs_for_addresses` returns the
+/// spendable outputs for a *set* of addresses in a single call, equivalent to the union of
+/// per-address queries, and honours subset and empty requests.
+pub fn get_spendable_transparent_outputs_for_addresses<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let height_1 = birthday + 12345;
+    st.wallet_mut().update_chain_tip(height_1).unwrap();
+
+    // Obtain three distinct transparent receivers for the account.
+    let mut taddrs = Vec::new();
+    while taddrs.len() < 3 {
+        let (ua, _) = st
+            .wallet_mut()
+            .get_next_available_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("an address should be available within the gap limit");
+        if let Some(taddr) = ua.transparent() {
+            taddrs.push(*taddr);
+        }
+    }
+
+    // Place one distinct UTXO at each address.
+    let value = Zatoshis::const_from_u64(100_000);
+    for (i, taddr) in taddrs.iter().enumerate() {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(value, taddr.script().into()),
+            Some(height_1),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let target_height = TargetHeight::from(height_1 + 1);
+    let sorted = |mut v: Vec<TransparentAddress>| {
+        v.sort();
+        v
+    };
+
+    // The batched query over all three addresses returns one output per address.
+    let all = st
+        .wallet()
+        .get_spendable_transparent_outputs_for_addresses(
+            &taddrs,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(
+        sorted(all.iter().map(|u| *u.recipient_address()).collect()),
+        sorted(taddrs.clone()),
+    );
+
+    // It is equivalent to the union of per-address queries.
+    let mut per_address = Vec::new();
+    for taddr in &taddrs {
+        per_address.extend(
+            st.wallet()
+                .get_spendable_transparent_outputs(
+                    taddr,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    TransparentOutputFilter::All,
+                )
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        sorted(all.iter().map(|u| *u.recipient_address()).collect()),
+        sorted(per_address.iter().map(|u| *u.recipient_address()).collect()),
+    );
+
+    // A subset request returns only the requested address's output.
+    let subset = st
+        .wallet()
+        .get_spendable_transparent_outputs_for_addresses(
+            &taddrs[..1],
+            target_height,
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .unwrap();
+    assert_eq!(subset.len(), 1);
+    assert_eq!(subset[0].recipient_address(), &taddrs[0]);
+
+    // An empty request returns no outputs.
+    assert!(
+        st.wallet()
+            .get_spendable_transparent_outputs_for_addresses(
+                &[],
+                target_height,
+                ConfirmationsPolicy::MIN,
+                TransparentOutputFilter::All,
+            )
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Verifies that a shielding proposal caps the number of transparent inputs in a single
+/// transaction to the selector's configured fraction of block space, selecting the highest-value
+/// UTXOs first and leaving the remainder unspent.
+pub fn shielding_transparent_input_cap<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    // At 1% of block space the cap is (2_000_000 * 1 / 100) / 150 = 133 inputs.
+    const BLOCK_SPACE_PERCENT: u32 = 1;
+    const CAP: usize = 133;
+    const NUM_UTXOS: usize = CAP + 7; // 140; the 7 smallest must be dropped.
+    const BASE: u64 = 100_000;
+    const STEP: u64 = 1_000;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Initialize the wallet with chain data that has no shielded notes for us.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Add `NUM_UTXOS` distinct-value P2PKH UTXOs at the same transparent address, so that
+    // largest-first selection is unambiguous.
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..NUM_UTXOS {
+        let value = Zatoshis::const_from_u64(BASE + (i as u64) * STEP);
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(value, taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Propose shielding with a 1%-of-block-space input cap.
+    let input_selector =
+        GreedyInputSelector::new().with_shielding_block_space_percent(BLOCK_SPACE_PERCENT);
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+    let proposal = st
+        .propose_shielding(
+            &input_selector,
+            &change_strategy,
+            Zatoshis::const_from_u64(BASE),
+            &[*taddr],
+            account.id(),
+            ConfirmationsPolicy::MIN,
+            TransparentOutputFilter::All,
+        )
+        .expect("shielding proposal should succeed");
+
+    let inputs = proposal.steps().first().transparent_inputs();
+    assert_eq!(
+        inputs.len(),
+        CAP,
+        "the number of transparent inputs should be capped",
+    );
+
+    // The selected inputs must be the `CAP` highest-value UTXOs: the `NUM_UTXOS - CAP` smallest
+    // are dropped, so the smallest selected value is `BASE + (NUM_UTXOS - CAP) * STEP`.
+    let min_selected = inputs.iter().map(|u| u.value()).min().unwrap();
+    assert_eq!(
+        min_selected,
+        Zatoshis::const_from_u64(BASE + ((NUM_UTXOS - CAP) as u64) * STEP),
+        "the lowest-value UTXOs should be the ones left unspent",
+    );
+}
+
 /// This test attempts to verify that transparent funds spendability is
 /// accounted for properly given the different minimum confirmations values
 /// that can be set when querying for balances.

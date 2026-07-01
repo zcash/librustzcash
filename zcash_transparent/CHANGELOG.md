@@ -13,6 +13,9 @@ workspace.
 ### Changed
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`.
 
+### Added
+- `transparent::bundle::OutPoint` now implements `std::hash::Hash`.
+
 ## [0.8.0] - 2026-06-02
 
 ### Changed

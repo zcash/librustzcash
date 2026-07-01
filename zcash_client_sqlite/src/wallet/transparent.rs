@@ -40,7 +40,9 @@ use zcash_keys::{
         transparent::gap_limits::{GapLimits, generate_address_list},
     },
 };
-use zcash_primitives::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
+#[cfg(not(feature = "spend-index"))]
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::fees::zip317;
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
@@ -1249,12 +1251,53 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: TransparentOutputFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // Defer to the batched query with a singleton address set, so that there is a single query
+    // body to maintain. `transparent_received_outputs.address` is always equal to the
+    // `cached_transparent_receiver_address` of the joined `addresses` row (both are written from
+    // the same recipient address on insert, and the gap-limit migration backfilled this invariant
+    // for pre-existing rows), so matching on the latter for a single address selects the same
+    // outputs as the former.
+    get_spendable_transparent_outputs_for_addresses(
+        conn,
+        params,
+        core::slice::from_ref(address),
+        target_height,
+        confirmations_policy,
+        output_filter,
+    )
+}
+
+/// Returns the list of spendable transparent outputs received by this wallet at any of the
+/// given `addresses`, under the same spendability conditions as
+/// [`get_spendable_transparent_outputs`].
+///
+/// This is the batched equivalent of [`get_spendable_transparent_outputs`]: it issues a single
+/// query over the entire set of provided addresses rather than one query per address, which avoids
+/// a per-address database round-trip (and, for each empty address, a wasted query) when shielding
+/// from a wallet that holds large numbers of transparent addresses. Each returned output
+/// identifies its receiving address, so a caller that needs to group results by address can do so
+/// from the returned values.
+///
+/// The query body mirrors that of [`get_spendable_transparent_outputs`], differing only in that
+/// the receiving address is matched against a set via `rarray` rather than a single value.
+pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    addresses: &[TransparentAddress],
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: TransparentOutputFilter,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    if addresses.is_empty() {
+        return Ok(vec![]);
+    }
+
     let coinbase_only = match output_filter {
         TransparentOutputFilter::All => 0i32,
         TransparentOutputFilter::CoinbaseOnly => 1i32,
     };
 
-    let mut stmt_utxos = conn.prepare(&format!(
+    let mut stmt_utxos = conn.prepare_cached(&format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
                 accounts.uuid AS account_uuid,
@@ -1265,20 +1308,19 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN accounts ON accounts.id = u.account_id
          JOIN addresses ON addresses.id = u.address_id
-         WHERE u.address = :address
+         WHERE addresses.cached_transparent_receiver_address IN rarray(:addresses)
          AND u.value_zat > :min_value
          AND ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
          AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives",
+         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives
+         ORDER BY addresses.cached_transparent_receiver_address, u.output_index",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         excluding_immature_coinbase_outputs("t"),
     ))?;
-
-    let addr_str = address.encode(params);
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
@@ -1288,8 +1330,14 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
+    let address_values: Vec<Value> = addresses
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
     let mut rows = stmt_utxos.query(named_params![
-        ":address": addr_str,
+        ":addresses": &addresses_ptr,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
@@ -1648,6 +1696,47 @@ pub(crate) fn update_observed_unspent_heights<P: consensus::Parameters>(
     Ok(())
 }
 
+/// Sets the max observed unspent height for the unspent transparent output identified by the given
+/// outpoint to at least the given height (will not cause the height to decrease). Used to record
+/// the result of a [`TransactionDataRequest::GetSpendingTx`] check that found the
+/// output unspent.
+///
+/// [`TransactionDataRequest::GetSpendingTx`]: zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx
+#[cfg(feature = "spend-index")]
+pub(crate) fn update_observed_unspent_height_for_outpoint(
+    conn: &rusqlite::Transaction,
+    outpoint: &OutPoint,
+    checked_at: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    let checked_at = std::cmp::min(checked_at, chain_tip_height);
+
+    let mut stmt = conn.prepare(
+        "UPDATE transparent_received_outputs AS tro
+         SET max_observed_unspent_height = CASE
+            WHEN max_observed_unspent_height IS NULL THEN :checked_at
+            WHEN max_observed_unspent_height < :checked_at THEN :checked_at
+            ELSE max_observed_unspent_height
+         END
+         FROM transactions t
+         WHERE tro.transaction_id = t.id_tx
+         AND t.txid = :txid
+         AND tro.output_index = :output_index
+         AND tro.id NOT IN (
+             SELECT transparent_received_output_id
+             FROM transparent_received_output_spends
+         )",
+    )?;
+
+    stmt.execute(named_params![
+        ":txid": outpoint.hash(),
+        ":output_index": outpoint.n(),
+        ":checked_at": u32::from(checked_at)
+    ])?;
+
+    Ok(())
+}
+
 /// Adds the given received UTXO to the datastore.
 pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -1820,58 +1909,101 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         chain_tip_height
     );
 
-    // Create transaction data requests that can find spends of our received UTXOs. Ideally (at
-    // least so long as address-based transaction data requests are required at all) these requests
-    // would not be served by address-based lookups, but instead by querying for the spends of the
-    // associated outpoints directly.
-    let mut spend_requests_stmt = conn.prepare_cached(
-        "SELECT
-            ssq.address,
-            COALESCE(tro.max_observed_unspent_height + 1, t.mined_height) AS block_range_start
-         FROM transparent_spend_search_queue ssq
-         JOIN transactions t ON t.id_tx = ssq.transaction_id
-         JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
-         JOIN addresses ON addresses.id = tro.address_id
-         LEFT OUTER JOIN transparent_received_output_spends tros
-            ON tros.transparent_received_output_id = tro.id
-         WHERE tros.transaction_id IS NULL
-         AND addresses.key_scope != :ephemeral_key_scope
-         AND (
-             tro.max_observed_unspent_height IS NULL
-             OR tro.max_observed_unspent_height < :chain_tip_height
-         )
-         AND (
-             block_range_start IS NOT NULL
-             OR t.expiry_height > :chain_tip_height
-         )",
-    )?;
+    // Create transaction data requests that can find spends of our received UTXOs.
+    //
+    // With the `spend-index` feature, the chain-data source can resolve the spend of an
+    // individual outpoint directly, so we request spends per-outpoint. Otherwise we fall back to
+    // address-based requests (which, so long as address-based transaction data requests are
+    // required at all, are served by address-based lookups rather than by querying the spends of
+    // the associated outpoints directly).
+    #[cfg(feature = "spend-index")]
+    let spend_search_requests = {
+        // Per-outpoint spend resolution is privacy-preserving (it does not correlate the
+        // wallet's addresses to an untrusted server), so unlike the address-based path below
+        // there is no need to exclude ephemeral-address outpoints here.
+        let mut spend_requests_stmt = conn.prepare_cached(
+            "SELECT t.txid, ssq.output_index
+             FROM transparent_spend_search_queue ssq
+             JOIN transactions t ON t.id_tx = ssq.transaction_id
+             JOIN transparent_received_outputs tro
+                ON tro.transaction_id = ssq.transaction_id AND tro.output_index = ssq.output_index
+             LEFT OUTER JOIN transparent_received_output_spends tros
+                ON tros.transparent_received_output_id = tro.id
+             WHERE tros.transaction_id IS NULL
+             AND (
+                 tro.max_observed_unspent_height IS NULL
+                 OR tro.max_observed_unspent_height < :chain_tip_height
+             )",
+        )?;
 
-    let spend_search_rows = spend_requests_stmt.query_and_then(
-        named_params! {
-            ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
-            ":chain_tip_height": u32::from(chain_tip_height)
-        },
-        |row| {
-            let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
-            // If the transaction that creates this UTXO is unmined, then this must be a mempool
-            // transaction so we default to the chain tip for block_range_start
-            let block_range_start = row
-                .get::<_, Option<u32>>(1)?
-                .map(BlockHeight::from)
-                .unwrap_or(chain_tip_height);
-            let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
-            Ok::<TransactionDataRequest, SqliteClientError>(
-                TransactionDataRequest::transactions_involving_address(
-                    address,
-                    block_range_start,
-                    Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
-                    None,
-                    TransactionStatusFilter::Mined,
-                    OutputStatusFilter::All,
-                ),
-            )
-        },
-    )?;
+        spend_requests_stmt
+            .query_and_then(
+                named_params! {
+                    ":chain_tip_height": u32::from(chain_tip_height)
+                },
+                |row| {
+                    let outpoint = OutPoint::new(row.get::<_, [u8; 32]>(0)?, row.get::<_, u32>(1)?);
+                    Ok::<TransactionDataRequest, SqliteClientError>(
+                        TransactionDataRequest::GetSpendingTx(outpoint),
+                    )
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    #[cfg(not(feature = "spend-index"))]
+    let spend_search_requests = {
+        let mut spend_requests_stmt = conn.prepare_cached(
+            "SELECT
+                ssq.address,
+                COALESCE(tro.max_observed_unspent_height + 1, t.mined_height) AS block_range_start
+             FROM transparent_spend_search_queue ssq
+             JOIN transactions t ON t.id_tx = ssq.transaction_id
+             JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
+             JOIN addresses ON addresses.id = tro.address_id
+             LEFT OUTER JOIN transparent_received_output_spends tros
+                ON tros.transparent_received_output_id = tro.id
+             WHERE tros.transaction_id IS NULL
+             AND addresses.key_scope != :ephemeral_key_scope
+             AND (
+                 tro.max_observed_unspent_height IS NULL
+                 OR tro.max_observed_unspent_height < :chain_tip_height
+             )
+             AND (
+                 block_range_start IS NOT NULL
+                 OR t.expiry_height > :chain_tip_height
+             )",
+        )?;
+
+        spend_requests_stmt
+            .query_and_then(
+                named_params! {
+                    ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
+                    ":chain_tip_height": u32::from(chain_tip_height)
+                },
+                |row| {
+                    let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
+                    // If the transaction that creates this UTXO is unmined, then this must be a
+                    // mempool transaction so we default to the chain tip for block_range_start
+                    let block_range_start = row
+                        .get::<_, Option<u32>>(1)?
+                        .map(BlockHeight::from)
+                        .unwrap_or(chain_tip_height);
+                    let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+                    Ok::<TransactionDataRequest, SqliteClientError>(
+                        TransactionDataRequest::transactions_involving_address(
+                            address,
+                            block_range_start,
+                            Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
+                            None,
+                            TransactionStatusFilter::Mined,
+                            OutputStatusFilter::All,
+                        ),
+                    )
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+    };
 
     // Query for transactions that "return" funds to an ephemeral address. By including a block
     // range start equal to the mined height of the transaction, we make it harder to distinguish
@@ -1930,9 +2062,11 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         },
     )?;
 
-    spend_search_rows
-        .chain(ephemeral_check_rows)
-        .collect::<Result<Vec<_>, _>>()
+    let mut requests = spend_search_requests;
+    for request in ephemeral_check_rows {
+        requests.push(request?);
+    }
+    Ok(requests)
 }
 
 pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
@@ -2412,6 +2546,21 @@ mod tests {
     }
 
     #[test]
+    fn get_spendable_transparent_outputs_for_addresses() {
+        zcash_client_backend::data_api::testing::transparent::get_spendable_transparent_outputs_for_addresses(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn shielding_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::shielding_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),
@@ -2426,6 +2575,39 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// Smoke test that the `spend-index` feature's SQL is valid: `transaction_data_requests`
+    /// runs its per-outpoint spend-search query, and `update_observed_unspent_height_for_outpoint`
+    /// runs its `UPDATE ... FROM`. Exercised on a minimal wallet so the queries execute (failing
+    /// the test on any SQL error) without needing a populated spend-search queue.
+    #[test]
+    #[cfg(feature = "spend-index")]
+    fn spend_index_queries_are_valid_sql() {
+        use transparent::bundle::OutPoint;
+        use zcash_client_backend::data_api::WalletRead;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let chain_tip = st.test_account().unwrap().birthday().height() + 100;
+        st.wallet_mut().update_chain_tip(chain_tip).unwrap();
+
+        // Exercises the `spend-index` SELECT in `transaction_data_requests`.
+        st.wallet().transaction_data_requests().unwrap();
+
+        // Exercises the `spend-index` `UPDATE ... FROM` in
+        // `update_observed_unspent_height_for_outpoint` (the outpoint matches no rows).
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        super::update_observed_unspent_height_for_outpoint(
+            &tx,
+            &OutPoint::new([1u8; 32], 0),
+            chain_tip,
+        )
+        .unwrap();
+        tx.commit().unwrap();
     }
 
     #[test]

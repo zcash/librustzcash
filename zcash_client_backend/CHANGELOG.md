@@ -15,6 +15,19 @@ workspace.
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
+  a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable
+  transparent outputs for a set of addresses. It has a default implementation that queries each
+  address individually, so existing implementors are unaffected; data stores may override it to
+  satisfy the request with a single query. Shielding now uses this method, avoiding a per-address
+  database round-trip when gathering inputs from wallets with many transparent addresses.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_shielding_block_space_percent`,
+  which configures the maximum fraction of a block's space (as an integer percentage, default 10)
+  that a single shielding transaction's transparent inputs may occupy. When shielding gathers more
+  spendable transparent outputs than fit within this bound, the highest-value outputs are selected
+  first and the remainder are left unspent, to be consolidated by a subsequent shielding
+  transaction. This bounds the size of the shielding transaction for wallets that hold very large
+  numbers of transparent UTXOs.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
@@ -52,6 +65,22 @@ workspace.
 - `zcash_client_backend::sync`:
   - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
     Tokio-based batch decryption engine for full blocks and transactions.
+- `zcash_client_backend::proposal::Step` methods for counting the inputs and
+  outputs of a proposal step by pool, paralleling the existing
+  `input_in_pool`/`output_in_pool`/`change_in_pool` predicates:
+  - `input_count_in_pool`
+  - `output_count_in_pool`
+  - `change_count_in_pool`
+  - `orchard_action_count`, the number of Orchard actions a step requires
+    (the greater of its Orchard spends and its Orchard outputs plus change).
+- A new `spend-index` feature flag, for consumers whose chain-data source can
+  resolve the spend of an individual transparent output (e.g. a full node with a
+  spent-outpoint index). It gates:
+  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
+    a per-outpoint request to detect the spend of a specific transparent output.
+  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
+    which records that a transparent outpoint was confirmed unspent as of a given
+    height.
 
 ### Changed
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
@@ -98,6 +127,10 @@ workspace.
   `zcash_primitives::transaction::fees::FeeRule::fee_required`. Code that calls
   `fee_required` directly or implements the trait must thread through the number
   of Ironwood actions, passing `0` for transactions without an Ironwood bundle.
+- During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
+  unspendable data outputs and skipped silently, instead of being logged as
+  unsupported script kinds. Other unrecognized transparent script kinds continue to
+  be logged.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`
