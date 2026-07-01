@@ -117,9 +117,10 @@ use {
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
-            TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
+            CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
             ll::wallet::generate_transparent_gap_addresses,
         },
+        fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
     zcash_keys::{
@@ -597,7 +598,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -615,7 +616,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         addresses: &[TransparentAddress],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs_for_addresses(
             self.conn.borrow(),
@@ -624,6 +625,28 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        target_value: TargetValue,
+        fee_rule: &StandardFeeRule,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        wallet::transparent::select_spendable_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            target_value,
+            fee_rule,
         )
     }
 

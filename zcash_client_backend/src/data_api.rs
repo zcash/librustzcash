@@ -106,6 +106,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::fees::StandardFeeRule,
     crate::wallet::TransparentAddressMetadata,
     getset::{CopyGetters, Getters},
     std::time::SystemTime,
@@ -1420,13 +1421,14 @@ impl NoteFilter {
     }
 }
 
-/// Controls which transparent outputs are eligible for selection.
+/// Controls which transparent outputs are eligible for selection. This is an
+/// input-selection control only; it does not encode any consensus rule.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TransparentOutputFilter {
+pub enum CoinbaseFilter {
     /// Select all spendable transparent outputs.
     #[default]
-    All,
+    AllTransparentOutputs,
     /// Select only coinbase transparent outputs.
     ///
     /// Coinbase transactions are identified by having `tx_index == 0` within
@@ -1434,6 +1436,14 @@ pub enum TransparentOutputFilter {
     /// unknown are conservatively treated as non-coinbase and will be excluded
     /// when this filter is active.
     CoinbaseOnly,
+    /// Select only non-coinbase transparent outputs.
+    ///
+    /// Used for general (non-shielding) transfers, which may produce transparent
+    /// change; coinbase funds must instead be shielded via
+    /// [`propose_shielding_coinbase`](crate::data_api::wallet::propose_shielding_coinbase).
+    /// Outputs whose transaction index is unknown are treated as non-coinbase
+    /// and are included.
+    NonCoinbaseOnly,
 }
 
 /// A trait representing the capability to query a data store for unspent transaction outputs
@@ -1533,7 +1543,7 @@ pub trait InputSource {
     ///   `target_height` (also taking into consideration the coinbase maturity rule).
     ///
     /// The `output_filter` parameter controls which transparent outputs are eligible. When set
-    /// to [`TransparentOutputFilter::CoinbaseOnly`], only outputs from coinbase transactions
+    /// to [`CoinbaseFilter::CoinbaseOnly`], only outputs from coinbase transactions
     /// should be returned.
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
@@ -1544,7 +1554,7 @@ pub trait InputSource {
         _address: &TransparentAddress,
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
-        _output_filter: TransparentOutputFilter,
+        _output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1570,7 +1580,7 @@ pub trait InputSource {
         addresses: &[TransparentAddress],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
@@ -1582,6 +1592,58 @@ pub trait InputSource {
             )?);
         }
         Ok(outputs)
+    }
+
+    /// Returns the spendable transparent outputs received by `account` whose total post-fee
+    /// value (sum of values minus the cumulative marginal fee cost of the gathered inputs
+    /// themselves, per `fee_rule`) is at least `target_value`.
+    ///
+    /// The gather is intended to scale to wallets with large numbers of transparent addresses and
+    /// UTXOs: it returns a value-bounded subset rather than every spendable output, so the
+    /// selector does not need to materialize the wallet's full UTXO set. Data stores should
+    /// implement this with a single query that orders eligible UTXOs by descending value and
+    /// accumulates them, recomputing the cumulative fee via `fee_rule` at each step, stopping
+    /// once the post-fee cumulative value meets the bound. This produces a tighter result than a
+    /// static value bound, without requiring a separate round trip to correct an under-estimated
+    /// headroom.
+    ///
+    /// `fee_rule` is fixed to [`StandardFeeRule`] (rather than being generic over the caller's
+    /// actual [`ChangeStrategy`]) so that implementations of this method do not need to be
+    /// generic over an arbitrary fee rule type. This is a heuristic bound only: the transaction's
+    /// real fee is still computed by the caller's actual change strategy, and if this gather's
+    /// estimate turns out to be insufficient, the caller's input-selection loop will surface an
+    /// `InsufficientFunds` error and can re-invoke this method with a corrected `target_value`.
+    ///
+    /// For `TargetValue::AllFunds`, no bound is applied and the gather returns every eligible
+    /// output.
+    ///
+    /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
+    /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
+    /// general (non-shielding) input selection in `propose_transaction`.
+    ///
+    /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
+    #[cfg(feature = "transparent-inputs")]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        target_value: TargetValue,
+        fee_rule: &StandardFeeRule,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        let _ = (
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            target_value,
+            fee_rule,
+        );
+        unimplemented!(
+            "InputSource::select_spendable_transparent_outputs must be overridden for \
+             wallets to use the value-bounded transparent input gather in propose_transaction"
+        )
     }
 }
 

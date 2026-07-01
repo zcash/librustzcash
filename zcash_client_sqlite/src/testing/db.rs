@@ -26,6 +26,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
         *,
     },
+    fees::StandardFeeRule,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{

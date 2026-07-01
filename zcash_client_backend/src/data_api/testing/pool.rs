@@ -1,6 +1,6 @@
 use std::{
     cmp::Eq,
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     convert::Infallible,
     hash::Hash,
     num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -61,7 +61,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{TransactionDataRequest, TransparentOutputFilter},
+        data_api::{CoinbaseFilter, TransactionDataRequest},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::WalletTransparentOutput,
@@ -6324,7 +6324,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             &[to],
             dest_account_id,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     let result1 = st
@@ -6505,7 +6505,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 &t_addr,
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
-                TransparentOutputFilter::All,
+                CoinbaseFilter::AllTransparentOutputs,
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -6528,7 +6528,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert!(
@@ -6549,15 +6549,16 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
 }
 
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-/// Tests that `TransparentOutputFilter::CoinbaseOnly` excludes non-coinbase outputs from
-/// UTXO selection and shielding proposals, and that `CoinbaseOnly` still allows proposing
-/// shielding when only coinbase UTXOs are available.
+/// Tests that `CoinbaseFilter::CoinbaseOnly` excludes non-coinbase outputs and
+/// `CoinbaseFilter::NonCoinbaseOnly` excludes coinbase outputs from UTXO selection and
+/// shielding proposals, and that `CoinbaseOnly` still allows proposing shielding when only
+/// coinbase UTXOs are available.
 pub fn coinbase_only_filtering<T: ShieldedPoolTester, Dsf>(ds_factory: Dsf, cache: impl TestCache)
 where
     Dsf: DataStoreFactory,
@@ -6578,6 +6579,8 @@ where
         None,
     );
     let coinbase_tx = coinbase_build_result.transaction();
+    // The coinbase transaction has a single transparent output at index 0.
+    let coinbase_outpoint = OutPoint::new(coinbase_tx.txid().into(), 0);
     let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
     st.scan_cached_blocks(h, 1);
     let params = *st.network();
@@ -6587,8 +6590,9 @@ where
     // Inserted via put_received_transparent_utxo, which sets tx_index = NULL.
     // NULL tx_index is treated as non-coinbase by the filter.
     let non_coinbase_value = Zatoshis::const_from_u64(60000);
+    let non_coinbase_outpoint = OutPoint::fake();
     let utxo = WalletTransparentOutput::from_parts(
-        OutPoint::fake(),
+        non_coinbase_outpoint.clone(),
         TxOut::new(non_coinbase_value, t_addr.script().into()),
         Some(h),
         Some(account),
@@ -6604,20 +6608,20 @@ where
     st.add_empty_blocks(100);
     let target_height = TargetHeight::from(h + 101);
 
-    // 4. TransparentOutputFilter::All returns both UTXOs
+    // 4. CoinbaseFilter::All returns both UTXOs
     let all_utxos = st
         .wallet()
         .get_spendable_transparent_outputs(
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(
         all_utxos.len(),
         2,
-        "Expected both coinbase and non-coinbase UTXOs with TransparentOutputFilter::All"
+        "Expected both coinbase and non-coinbase UTXOs with CoinbaseFilter::AllTransparentOutputs"
     );
     let all_utxos_value = all_utxos
         .iter()
@@ -6629,22 +6633,43 @@ where
         "Unexpected total UTXO value when querying for all transparent transactions"
     );
 
-    // 5. TransparentOutputFilter::CoinbaseOnly returns only the coinbase UTXO
+    // 5. CoinbaseFilter::CoinbaseOnly returns only the coinbase UTXO
     let coinbase_utxos = st
         .wallet()
         .get_spendable_transparent_outputs(
             &t_addr,
             target_height,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::CoinbaseOnly,
+            CoinbaseFilter::CoinbaseOnly,
         )
         .unwrap();
     assert_eq!(
         coinbase_utxos.len(),
         1,
-        "Expected only the coinbase UTXO with TransparentOutputFilter::CoinbaseOnly"
+        "Expected only the coinbase UTXO with CoinbaseFilter::CoinbaseOnly"
     );
     assert_eq!(coinbase_utxos[0].value(), coinbase_value);
+    assert_eq!(coinbase_utxos[0].outpoint(), &coinbase_outpoint);
+
+    // 5b. CoinbaseFilter::NonCoinbaseOnly returns only the non-coinbase UTXO.
+    // The non-coinbase UTXO was inserted with tx_index = NULL, which the filter treats as
+    // non-coinbase, so it must be included here.
+    let non_coinbase_utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &t_addr,
+            target_height,
+            ConfirmationsPolicy::default(),
+            CoinbaseFilter::NonCoinbaseOnly,
+        )
+        .unwrap();
+    assert_eq!(
+        non_coinbase_utxos.len(),
+        1,
+        "Expected only the non-coinbase UTXO with CoinbaseFilter::NonCoinbaseOnly"
+    );
+    assert_eq!(non_coinbase_utxos[0].value(), non_coinbase_value);
+    assert_eq!(non_coinbase_utxos[0].outpoint(), &non_coinbase_outpoint);
 
     // 6. propose_shielding with CoinbaseOnly includes only the coinbase input
     let proposal = st
@@ -6655,7 +6680,7 @@ where
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::CoinbaseOnly,
+            CoinbaseFilter::CoinbaseOnly,
         )
         .unwrap();
     let coinbase_inputs = proposal.steps().first().transparent_inputs();
@@ -6665,6 +6690,28 @@ where
         "CoinbaseOnly proposal should contain exactly one transparent input"
     );
     assert_eq!(coinbase_inputs[0].value(), coinbase_value);
+    assert_eq!(coinbase_inputs[0].outpoint(), &coinbase_outpoint);
+
+    // 6b. propose_shielding with NonCoinbaseOnly includes only the non-coinbase input
+    let proposal_non_coinbase = st
+        .propose_shielding(
+            &GreedyInputSelector::new(),
+            &single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL),
+            Zatoshis::from_u64(10000).unwrap(),
+            &[t_addr],
+            account,
+            ConfirmationsPolicy::default(),
+            CoinbaseFilter::NonCoinbaseOnly,
+        )
+        .unwrap();
+    let non_coinbase_inputs = proposal_non_coinbase.steps().first().transparent_inputs();
+    assert_eq!(
+        non_coinbase_inputs.len(),
+        1,
+        "NonCoinbaseOnly proposal should contain exactly one transparent input"
+    );
+    assert_eq!(non_coinbase_inputs[0].value(), non_coinbase_value);
+    assert_eq!(non_coinbase_inputs[0].outpoint(), &non_coinbase_outpoint);
 
     // 7. propose_shielding with All includes both inputs
     let proposal_all = st
@@ -6675,7 +6722,7 @@ where
             &[t_addr],
             account,
             ConfirmationsPolicy::default(),
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     let all_inputs = proposal_all.steps().first().transparent_inputs();
@@ -6683,6 +6730,16 @@ where
         all_inputs.len(),
         2,
         "All proposal should contain both transparent inputs"
+    );
+    // Input ordering is not guaranteed, so compare the set of outpoints.
+    let all_outpoints = all_inputs
+        .iter()
+        .map(|input| input.outpoint().clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        all_outpoints,
+        BTreeSet::from([coinbase_outpoint, non_coinbase_outpoint]),
+        "All proposal should contain both the coinbase and non-coinbase outpoints"
     );
 }
 
