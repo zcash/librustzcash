@@ -11,6 +11,8 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::data_api::NoteCommitmentTree`
+- `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
@@ -83,6 +85,9 @@ workspace.
     height.
 
 ### Changed
+- `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
+  an optional accessor that wallet backends can override to provide Ironwood
+  anchors and witnesses to the transaction builder.
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
   `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
@@ -92,6 +97,13 @@ workspace.
   of unconditionally using the legacy (pre-NU6.3) policy. Proposals targeting
   heights at or beyond NU6.3 activation now count one action per Orchard spend
   or output, matching the post-NU6.3 transaction builder.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  routes Orchard-recipient spends and outputs through the Ironwood transaction
+  builder when Ironwood is active, unless an explicit legacy V5 transaction is
+  requested.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` continues
+  to use legacy Orchard routing for Orchard-recipient proposals until PCZT has
+  Ironwood role support.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
