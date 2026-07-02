@@ -22,6 +22,25 @@ workspace.
   (behind the `transparent-inputs` feature flag): a minimal non-empty
   `BTreeSet` wrapper used by `TransparentSpendPolicy::FromAddresses` to hold
   the explicit set of transparent addresses to spend from.
+- `zcash_client_backend::data_api::CoinbaseFilter::NonCoinbaseOnly` (behind
+  `transparent-inputs`): a selection control (not an encoding of any
+  consensus rule) that excludes coinbase UTXOs from input selection, so that
+  general (non-shielding) transfers do not spend them; coinbase funds are
+  shielded separately via `propose_shielding_coinbase`.
+- `zcash_client_backend::data_api::InputSource::select_spendable_transparent_outputs`
+  method (behind `transparent-inputs`), a value-bounded counterpart to
+  `InputSource::get_spendable_transparent_outputs[_for_addresses]`, used by
+  `GreedyInputSelector::propose_transaction` when the `TransparentSpendPolicy`
+  requires gathering the account's transparent UTXOs. Implementations order
+  eligible outputs by descending value and accumulate them, recomputing the
+  cumulative marginal fee cost of the gathered inputs (per the supplied
+  `fee_rule: &StandardFeeRule` argument) at each step, so that the returned
+  set covers the requested post-fee value without needing to materialize
+  every spendable UTXO for the account. This fee estimate always uses
+  `StandardFeeRule::Zip317`, independent of the `ChangeStrategy::FeeRule`
+  actually configured for the proposal; it is a heuristic bound only, and
+  `GreedyInputSelector` re-gathers with a corrected `TargetValue` if the
+  caller's actual change strategy reports `InsufficientFunds`.
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
@@ -93,17 +112,6 @@ workspace.
     - The result types of `InputSource::get_unspent_transparent_output` and
       `InputSource::get_unspent_transparent_outputs` have each changed; these
       have reverted to returning `WalletTransparentOutput`.
-- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::propose_transaction`:
-  when the `TransparentSpendPolicy` requires gathering spendable transparent
-  UTXOs for the account, the gather is now bounded by the requested
-  `TargetValue`, net of the estimated ZIP 317 marginal fee cost of the gathered
-  inputs themselves (via the new `InputSource::select_spendable_transparent_outputs`)
-  rather than materializing every spendable UTXO for every account address.
-  This fee estimate always uses `StandardFeeRule::Zip317`, regardless of the
-  `ChangeStrategy::FeeRule` actually configured for the proposal; it is a
-  heuristic bound only; the real fee is still computed by the caller's actual
-  change strategy, and the loop re-gathers on `InsufficientFunds` if the
-  estimate was too low.
 - `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
   and accessor have been renamed to `funding_account`, to disambiguate from
   the recipient-account terminology now used by `WalletTransparentOutput`.
@@ -178,22 +186,7 @@ workspace.
   - `impl From<zcash_client_backend::proposal::ProposalError> for wallet::input_selection::InputSelectorError<...>`
   - `TransparentOutputFilter` enum (behind `transparent-inputs` feature flag),
     allowing callers to control which transparent outputs are eligible for
-    selection. Its variants are `AllTransparentOutputs`, `CoinbaseOnly`, and
-    `NonCoinbaseOnly`. This is a selection control, not an encoding of any
-    consensus rule; `NonCoinbaseOnly` exists so that general (non-shielding)
-    transfers can exclude coinbase UTXOs from input selection (coinbase funds
-    are shielded separately via `propose_shielding_coinbase`).
-  - `InputSource::select_spendable_transparent_outputs` method (behind
-    `transparent-inputs`), a value-bounded counterpart to
-    `InputSource::get_spendable_transparent_outputs[_for_addresses]`. The selector
-    uses this to bound the set of transparent inputs by post-fee value (rather
-    than by count) so that wallets with large numbers of transparent UTXOs no
-    longer fall over when building a general transfer. The method takes a
-    `fee_rule: &StandardFeeRule` argument; implementations are expected to
-    recompute the cumulative marginal fee cost of the gathered inputs as they
-    accumulate (per ZIP 317), so that the returned set covers the requested
-    value net of its own gather's fee cost, rather than requiring a subsequent
-    re-gather to correct an under-estimated static headroom.
+    selection (e.g., coinbase-only filtering).
   - `wallet::ConfirmationsPolicyError`
 - `zcash_client_backend::proto::CompactFormatError`
 - `zcash_client_backend::proto::compact_formats`:
