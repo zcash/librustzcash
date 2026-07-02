@@ -3,7 +3,7 @@ use std::{collections::HashSet, rc::Rc};
 use incrementalmerkletree::Position;
 use orchard::{
     keys::Diversifier,
-    note::{Note, Nullifier, RandomSeed, Rho},
+    note::{Note, NoteVersion, Nullifier, RandomSeed, Rho},
 };
 use rusqlite::{Connection, Row, named_params, types::Value};
 
@@ -65,6 +65,13 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
         })
     }?;
 
+    let note_version = {
+        let code: i64 = row.get("note_version")?;
+        parse_note_version(code).ok_or_else(|| {
+            SqliteClientError::CorruptedData(format!("Unrecognized note version code {code}"))
+        })
+    }?;
+
     let note_commitment_tree_position = Position::from(
         u64::try_from(row.get::<_, i64>("commitment_tree_position")?).map_err(|_| {
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
@@ -110,7 +117,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
                 orchard::value::NoteValue::from_raw(note_value),
                 rho,
                 rseed,
-                orchard::note::NoteVersion::V2,
+                note_version,
             ))
             .ok_or_else(|| SqliteClientError::CorruptedData("Invalid Orchard note.".to_string()))?;
 
@@ -203,7 +210,8 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT
              rn.id AS id, t.txid, rn.action_index,
-             rn.diversifier, rn.value, rn.rho, rn.rseed, rn.commitment_tree_position,
+             rn.diversifier, rn.value, rn.rho, rn.rseed, rn.note_version,
+             rn.commitment_tree_position,
              accounts.ufvk AS ufvk, rn.recipient_key_scope,
              t.mined_height,
              NULL AS max_shielding_input_height
@@ -290,6 +298,25 @@ pub(crate) fn select_unspent_note_meta(
     )
 }
 
+/// Encodes a note plaintext version for storage in the `note_version` column of a received-notes
+/// table. The encoding matches the note plaintext lead byte signaling the version.
+pub(crate) fn note_version_code(version: NoteVersion) -> i64 {
+    match version {
+        NoteVersion::V2 => 2,
+        NoteVersion::V3 => 3,
+    }
+}
+
+/// Decodes a note plaintext version from its `note_version` column encoding, returning `None` if
+/// the code is not a recognized version.
+pub(crate) fn parse_note_version(code: i64) -> Option<NoteVersion> {
+    match code {
+        2 => Some(NoteVersion::V2),
+        3 => Some(NoteVersion::V3),
+        _ => None,
+    }
+}
+
 /// Records the specified shielded output as having been received.
 ///
 /// This implementation relies on the facts that:
@@ -315,13 +342,13 @@ pub(crate) fn put_received_note<
             transaction_id, action_index, account_id, address_id,
             diversifier, value, rho, rseed, memo, nf,
             is_change, commitment_tree_position,
-            recipient_key_scope
+            recipient_key_scope, note_version
         )
         VALUES (
             :transaction_id, :action_index, :account_id, :address_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
             :is_change, :commitment_tree_position,
-            :recipient_key_scope
+            :recipient_key_scope, :note_version
         )
         ON CONFLICT (transaction_id, action_index) DO UPDATE
         SET account_id = :account_id,
@@ -334,7 +361,8 @@ pub(crate) fn put_received_note<
             memo = IFNULL(:memo, memo),
             is_change = MAX(:is_change, is_change),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
-            recipient_key_scope = :recipient_key_scope
+            recipient_key_scope = :recipient_key_scope,
+            note_version = :note_version
         RETURNING orchard_received_notes.id",
     )?;
 
@@ -356,6 +384,7 @@ pub(crate) fn put_received_note<
         ":is_change": output.is_change(),
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
         ":recipient_key_scope": output.recipient_key_scope().map(|s| KeyScope::from(s).encode()),
+        ":note_version": note_version_code(output.note().version()),
     ];
 
     let received_note_id = stmt_upsert_received_note

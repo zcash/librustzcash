@@ -450,6 +450,10 @@ CREATE INDEX idx_sapling_received_note_spends_transaction_id ON sapling_received
 /// - `address_id`: a foreign key to the address that this note was sent to; null in the
 ///   case that the note was sent to an internally-scoped address (we never store addresses
 ///   containing internal Orchard receivers in the `addresses` table).
+/// - `note_version`: the version of the note plaintext from which this note was obtained,
+///   matching the note plaintext lead byte. The Orchard note encryption domain accepts only
+///   version 2 note plaintexts, so this is always 2; the version is recorded rather than
+///   assumed because it determines how the note commitment trapdoor is derived from `rseed`.
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTES: &str = r#"
 CREATE TABLE "orchard_received_notes" (
     id INTEGER PRIMARY KEY,
@@ -470,6 +474,7 @@ CREATE TABLE "orchard_received_notes" (
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    note_version INTEGER NOT NULL DEFAULT 2,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
