@@ -78,11 +78,11 @@ fn sapling_auth_includes_anchor(version: TxVersion) -> bool {
     }
 }
 
-/// Selects the `(value pool, orchard tx version)` pair that reproduces the
-/// pre-bump `BundleCommitmentDomain` for a given transaction version. The value
-/// pool here is only used for empty-bundle commitments (which hash no flags);
-/// present bundles compute their commitments from the `BundleVersion` each
-/// bundle carries.
+/// Selects the `(value pool, orchard tx version)` pair identifying the
+/// `BundleCommitmentDomain` used for Orchard-slot commitments in the given
+/// transaction version. The value pool here is only used for empty-bundle
+/// commitments (which hash no flags); present bundles compute their commitments
+/// from the `BundleVersion` each bundle carries.
 fn orchard_commitment_domain(version: TxVersion) -> (ValuePool, OrchardTxVersion) {
     match version {
         TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
@@ -138,11 +138,12 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
     h.finalize()
 }
 
-/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
+/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest);
+/// the v6 variant is specified in [ZIP 229](https://zips.z.cash/zip-0229).
 ///
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
 /// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
-/// * \[(cv, anchor, rk)*\] for pre-v6 transactions, personalized with
+/// * \[(cv, anchor, rk)*\] for v5 transactions (v4 is not handled here), personalized with
 ///   ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 /// * \[(cv, rk)*\] for v6 transactions, personalized with
 ///   ZCASH_SAPLING_SPENDS_V6_NONCOMPACT_HASH_PERSONALIZATION
@@ -263,7 +264,9 @@ pub(crate) fn hash_transparent_txid_data(
     h.finalize()
 }
 
-/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
+/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest);
+/// for v6 transactions the Sapling digest follows
+/// [ZIP 229](https://zips.z.cash/zip-0229).
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     version: TxVersion,
     bundle: &sapling::Bundle<A, ZatBalance>,
@@ -504,8 +507,9 @@ pub fn to_txid(
 pub struct BlockTxCommitmentDigester;
 
 impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
-    /// We use the header digest to pass the transaction ID into
-    /// where it needs to be used for personalization string construction.
+    /// We use the header digest to pass the transaction version and consensus
+    /// branch ID into where they need to be used for personalization string
+    /// construction.
     type HeaderDigest = (TxVersion, BranchId);
     type TransparentDigest = Blake2bHash;
     type SaplingDigest = Blake2bHash;

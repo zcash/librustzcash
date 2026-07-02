@@ -49,30 +49,9 @@ fn consensus_branch_id_for_pczt(consensus_branch_id: u32) -> Result<BranchId, Er
     }
 }
 
-/// Returns the Orchard bundle version used by the Orchard pool of the given
-/// (v5-or-later) network upgrade.
 #[cfg(feature = "orchard")]
-fn orchard_bundle_version_for_branch(branch_id: BranchId) -> orchard::bundle::BundleVersion {
-    use orchard::bundle::BundleVersion;
+use crate::orchard::orchard_bundle_version_for_revision;
 
-    match branch_id {
-        // NU5, NU6, and NU6.1 use the original (pre-NU6.2) Orchard pool; pre-NU5
-        // branches are rejected before reaching here.
-        BranchId::Sprout
-        | BranchId::Overwinter
-        | BranchId::Sapling
-        | BranchId::Blossom
-        | BranchId::Heartwood
-        | BranchId::Canopy
-        | BranchId::Nu5
-        | BranchId::Nu6
-        | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
-        BranchId::Nu6_2 => BundleVersion::orchard_v2(),
-        BranchId::Nu6_3 => BundleVersion::orchard_v3(),
-        #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => BundleVersion::orchard_v3(),
-    }
-}
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
@@ -106,7 +85,10 @@ impl Creator {
         let branch_id = consensus_branch_id_for_pczt(consensus_branch_id)?;
 
         #[cfg(feature = "orchard")]
-        let orchard_bundle_version = orchard_bundle_version_for_branch(branch_id);
+        let orchard_bundle_version = branch_id
+            .orchard_protocol_revision()
+            .map(orchard_bundle_version_for_revision)
+            .expect("`consensus_branch_id_for_pczt` rejects branches that predate NU5");
 
         Ok(Self {
             // Default to v5 transaction format.

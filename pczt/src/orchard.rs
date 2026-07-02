@@ -749,21 +749,43 @@ impl Bundle {
     }
 }
 
+/// Returns the Orchard-pool [`BundleVersion`] corresponding to the given Orchard
+/// protocol revision.
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_bundle_version_for_revision(
+    revision: zcash_protocol::consensus::OrchardProtocolRevision,
+) -> BundleVersion {
+    use zcash_protocol::consensus::OrchardProtocolRevision;
+
+    match revision {
+        OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
+        OrchardProtocolRevision::V2 => BundleVersion::orchard_v2(),
+        OrchardProtocolRevision::V3 => BundleVersion::orchard_v3(),
+    }
+}
+
+/// Returns the Orchard-pool [`BundleVersion`] implied by the given PCZT global data,
+/// or `None` if the PCZT's consensus branch ID is unrecognized or predates NU5 (under
+/// which the Orchard protocol is not supported).
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<BundleVersion> {
+    use zcash_protocol::consensus::BranchId;
+
+    BranchId::try_from(global.consensus_branch_id)
+        .ok()?
+        .orchard_protocol_revision()
+        .map(orchard_bundle_version_for_revision)
+}
+
 #[cfg(feature = "orchard")]
 impl Bundle {
-    pub(crate) fn into_orchard_parsed(
-        self,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        self.into_parsed_with_version(BundleVersion::orchard_v2())
-    }
-
     pub(crate) fn into_ironwood_parsed(
         self,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
         self.into_parsed_with_version(BundleVersion::ironwood_v3())
     }
 
-    fn into_parsed_with_version(
+    pub(crate) fn into_parsed_with_version(
         self,
         bundle_version: BundleVersion,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {

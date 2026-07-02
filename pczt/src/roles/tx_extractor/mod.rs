@@ -133,7 +133,7 @@ impl<'a> TransactionExtractor<'a> {
                 .map_err(Error::Orchard)?;
         }
         if let Some(bundle) = tx.ironwood_bundle() {
-            orchard::verify_ironwood_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
+            orchard::verify_bundle(bundle, orchard_vk, *shielded_sighash.as_ref())
                 .map_err(Error::Ironwood)?;
         }
 

@@ -17,7 +17,10 @@ impl super::Updater {
         } = self.pczt;
 
         let mut bundle = orchard
-            .into_orchard_parsed()
+            .into_parsed_with_version(
+                crate::orchard::orchard_bundle_version(&global)
+                    .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
+            )
             .map_err(OrchardError::Parser)?;
 
         bundle.update_with(f).map_err(OrchardError::Updater)?;
@@ -38,5 +41,8 @@ impl super::Updater {
 #[derive(Debug)]
 pub enum OrchardError {
     Parser(ParseError),
+    /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
+    /// the Orchard protocol is not supported).
+    UnsupportedConsensusBranchId,
     Updater(UpdaterError),
 }

@@ -20,7 +20,6 @@ use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
-use orchard::bundle::BundleVersion;
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -174,7 +173,10 @@ impl TxVersion {
 
     /// Returns `true` if this transaction version supports the Ironwood protocol.
     pub fn has_ironwood(&self) -> bool {
-        matches!(self, TxVersion::V6)
+        match self {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
+            TxVersion::V6 => true,
+        }
     }
 
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
@@ -853,31 +855,8 @@ impl Transaction {
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v5_bundle(
-            &mut reader,
-            // The v5 Orchard flag byte is the same in every epoch (bit 2 reserved), so the txid is
-            // unaffected by this choice, but the `BundleVersion` fixes the bundle's cross-address
-            // semantics and circuit generation, which do follow the consensus epoch:
-            //   * pre-NU6.2: historical insecure circuit, cross-address enabled, proof size not
-            //     enforced;
-            //   * NU6.2: fixed circuit, cross-address enabled;
-            //   * NU6.3 onward: post-NU6.3 circuit, cross-address disabled (consensus-mandated).
-            match consensus_branch_id {
-                BranchId::Sprout
-                | BranchId::Overwinter
-                | BranchId::Sapling
-                | BranchId::Blossom
-                | BranchId::Heartwood
-                | BranchId::Canopy
-                | BranchId::Nu5
-                | BranchId::Nu6
-                | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
-                BranchId::Nu6_2 => BundleVersion::orchard_v2(),
-                BranchId::Nu6_3 => BundleVersion::orchard_v3(),
-                #[cfg(zcash_unstable = "nu7")]
-                BranchId::Nu7 => BundleVersion::orchard_v3(),
-            },
-        )?;
+        let orchard_bundle =
+            orchard_serialization::read_v5_bundle(&mut reader, consensus_branch_id)?;
 
         let data = TransactionData {
             version,
@@ -903,11 +882,13 @@ impl Transaction {
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::orchard_v3(),
+            header_fragment.consensus_branch_id,
+            orchard::ValuePool::Orchard,
         )?;
         let ironwood_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::ironwood_v3(),
+            header_fragment.consensus_branch_id,
+            orchard::ValuePool::Ironwood,
         )?;
 
         let data = TransactionData {
@@ -1237,11 +1218,7 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
-            ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_ironwood_bundle_for_version(version).boxed()
-            } else {
-                Just(None).boxed()
-            },
+            ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
             TransactionData {
@@ -1269,11 +1246,7 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
-            ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_ironwood_bundle_for_version(version).boxed()
-            } else {
-                Just(None).boxed()
-            },
+            ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
             TransactionData {
@@ -1301,11 +1274,7 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
-            ironwood_bundle in if version.has_ironwood() {
-                orchard::arb_ironwood_bundle_for_version(version).boxed()
-            } else {
-                Just(None).boxed()
-            },
+            ironwood_bundle in orchard::arb_ironwood_bundle_for_version(version),
             version in Just(version),
         ) -> TransactionData<Authorized> {
             TransactionData {

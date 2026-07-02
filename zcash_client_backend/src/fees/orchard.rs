@@ -57,7 +57,10 @@ impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
     type Out = Infallible;
 
     fn bundle_version(&self) -> BundleVersion {
-        crate::ANY_ORCHARD_BUNDLE_VERSION
+        // An empty bundle contains no spends or outputs, and therefore produces
+        // zero actions under every bundle version's action-count policy, so the
+        // version returned here cannot affect fee calculation.
+        BundleVersion::orchard_v2()
     }
 
     fn inputs(&self) -> &[Self::In] {
