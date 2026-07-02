@@ -14,7 +14,7 @@ use transparent::{address::TransparentAddress, bundle::OutPoint};
 use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
 };
@@ -137,7 +137,7 @@ pub enum PutBlocksError<SE, TE> {
     /// the wallet when the error occurred.
     ShardTreeForBlockRange {
         /// The shielded pool whose note commitment tree was being updated when the error occurred.
-        pool: ShieldedProtocol,
+        pool: ShieldedPool,
         /// The range of block heights that were being added to the wallet when the error
         /// occurred.
         block_range: Range<BlockHeight>,
@@ -374,19 +374,16 @@ where
             .map_err(PutBlocksError::Storage)?;
 
         note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-            let iter = wtx.sapling_outputs().iter().map(|out| {
-                (
-                    ShieldedProtocol::Sapling,
-                    out.note_commitment_tree_position(),
-                )
-            });
+            let iter = wtx
+                .sapling_outputs()
+                .iter()
+                .map(|out| (ShieldedPool::Sapling, out.note_commitment_tree_position()));
             #[cfg(feature = "orchard")]
-            let iter = iter.chain(wtx.orchard_outputs().iter().map(|out| {
-                (
-                    ShieldedProtocol::Orchard,
-                    out.note_commitment_tree_position(),
-                )
-            }));
+            let iter = iter.chain(
+                wtx.orchard_outputs()
+                    .iter()
+                    .map(|out| (ShieldedPool::Orchard, out.note_commitment_tree_position())),
+            );
 
             iter
         }));
@@ -494,7 +491,7 @@ where
                     &mut missing_checkpoints,
                 )
                 .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
-                    pool: ShieldedProtocol::Sapling,
+                    pool: ShieldedPool::Sapling,
                     block_range: from_state.block_height()..(last_scanned_height + 1),
                     error,
                 })
@@ -516,7 +513,7 @@ where
                     &mut missing_checkpoints,
                 )
                 .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
-                    pool: ShieldedProtocol::Orchard,
+                    pool: ShieldedPool::Orchard,
                     block_range: from_state.block_height()..(last_scanned_height + 1),
                     error,
                 })

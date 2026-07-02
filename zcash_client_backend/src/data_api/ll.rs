@@ -20,7 +20,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId,
+    PoolType, ShieldedPool, TxId,
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -580,7 +580,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
-        wallet_note_positions: &[(ShieldedProtocol, Position)],
+        wallet_note_positions: &[(ShieldedPool, Position)],
     ) -> Result<(), Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]

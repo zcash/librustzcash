@@ -82,7 +82,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
 };
@@ -241,7 +241,7 @@ impl ConditionallySelectable for AccountRef {
 
 /// An opaque type for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
+pub struct ReceivedNoteId(pub(crate) ShieldedPool, pub(crate) i64);
 
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -466,12 +466,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_spendable_note(
         &self,
         txid: &TxId,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         match protocol {
-            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+            ShieldedPool::Sapling => wallet::sapling::get_spendable_sapling_note(
                 self.conn.borrow(),
                 &self.params,
                 txid,
@@ -479,7 +479,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 target_height,
             )
             .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
-            ShieldedProtocol::Orchard => {
+            ShieldedPool::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
                     self.conn.borrow(),
@@ -500,13 +500,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         account: Self::AccountId,
         target_value: TargetValue,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedProtocol::Sapling) {
+            if sources.contains(&ShieldedPool::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -520,7 +520,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedProtocol::Orchard) {
+            if sources.contains(&ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -539,12 +539,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedProtocol::Sapling) {
+            if sources.contains(&ShieldedPool::Sapling) {
                 wallet::common::select_unspent_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -552,7 +552,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     ConfirmationsPolicy::MIN,
                     exclude,
-                    ShieldedProtocol::Sapling,
+                    ShieldedPool::Sapling,
                     wallet::sapling::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
@@ -560,7 +560,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedProtocol::Orchard) {
+            if sources.contains(&ShieldedPool::Orchard) {
                 wallet::common::select_unspent_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -568,7 +568,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     ConfirmationsPolicy::MIN,
                     exclude,
-                    ShieldedProtocol::Orchard,
+                    ShieldedPool::Orchard,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
@@ -637,7 +637,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             target_height,
             account_id,
             selector,
@@ -647,7 +647,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             target_height,
             account_id,
             selector,
@@ -1024,7 +1024,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     fn get_sent_note_ids(
         &self,
         txid: &TxId,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
         use crate::wallet::encoding::pool_code;
 
@@ -1120,7 +1120,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
     fn get_checkpoint_history(
         &self,
-        protocol: &ShieldedProtocol,
+        protocol: &ShieldedPool,
     ) -> Result<
         Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
@@ -1146,7 +1146,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
     fn get_notes(
         &self,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
         let (target_height, _) = self
             .get_target_and_anchor_heights(NonZeroU32::MIN)?
@@ -1932,7 +1932,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::sapling::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedProtocol::Sapling, nf)
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Sapling, nf)
     }
 
     #[cfg(feature = "orchard")]
@@ -1940,11 +1940,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(
-            self.conn.borrow(),
-            ShieldedProtocol::Orchard,
-            &nf.to_bytes(),
-        )
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2064,12 +2060,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         block_height: BlockHeight,
         nfs: &[(TxIndex, TxId, Vec<::sapling::Nullifier>)],
     ) -> Result<(), Self::Error> {
-        wallet::insert_nullifier_map(
-            self.conn.borrow(),
-            block_height,
-            ShieldedProtocol::Sapling,
-            nfs,
-        )
+        wallet::insert_nullifier_map(self.conn.borrow(), block_height, ShieldedPool::Sapling, nfs)
     }
 
     #[cfg(feature = "orchard")]
@@ -2110,7 +2101,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::insert_nullifier_map(
             self.conn.borrow(),
             block_height,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             &nfs.iter()
                 .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
                 .collect::<Vec<_>>(),
@@ -2236,7 +2227,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
-        wallet_note_positions: &[(ShieldedProtocol, Position)],
+        wallet_note_positions: &[(ShieldedPool, Position)],
     ) -> Result<(), Self::Error> {
         wallet::scanning::scan_complete(
             self.conn.borrow(),

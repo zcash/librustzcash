@@ -83,7 +83,7 @@ use zcash_keys::{
 };
 use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId,
+    PoolType, ShieldedPool, TxId,
     consensus::{self, BlockHeight, TxIndex},
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
@@ -1283,10 +1283,10 @@ impl AccountMeta {
     }
 
     /// Returns the number of unspent notes in the wallet for the given shielded protocol.
-    pub fn note_count(&self, protocol: ShieldedProtocol) -> Option<usize> {
+    pub fn note_count(&self, protocol: ShieldedPool) -> Option<usize> {
         match protocol {
-            ShieldedProtocol::Sapling => self.sapling_note_count(),
-            ShieldedProtocol::Orchard => self.orchard_note_count(),
+            ShieldedPool::Sapling => self.sapling_note_count(),
+            ShieldedPool::Orchard => self.orchard_note_count(),
         }
     }
 
@@ -1464,7 +1464,7 @@ pub trait InputSource {
     fn get_spendable_note(
         &self,
         txid: &TxId,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
@@ -1476,7 +1476,7 @@ pub trait InputSource {
         &self,
         account: Self::AccountId,
         target_value: TargetValue,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
@@ -1487,7 +1487,7 @@ pub trait InputSource {
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
@@ -2016,7 +2016,7 @@ pub trait WalletTest: InputSource + WalletRead {
     fn get_sent_note_ids(
         &self,
         _txid: &TxId,
-        _protocol: ShieldedProtocol,
+        _protocol: ShieldedPool,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error>;
 
     /// Returns the outputs for a transaction sent by the wallet.
@@ -2029,7 +2029,7 @@ pub trait WalletTest: InputSource + WalletRead {
     #[allow(clippy::type_complexity)]
     fn get_checkpoint_history(
         &self,
-        protocol: &ShieldedProtocol,
+        protocol: &ShieldedPool,
     ) -> Result<
         Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
@@ -2063,7 +2063,7 @@ pub trait WalletTest: InputSource + WalletRead {
     /// Returns all the notes that have been received by the wallet.
     fn get_notes(
         &self,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
 
     /// Returns a vector of ephemeral transparent addresses associated with the given

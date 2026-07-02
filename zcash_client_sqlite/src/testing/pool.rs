@@ -356,7 +356,7 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
         WalletWrite, chain::ChainState, testing::AddressType, testing::pool::dsl::TestDsl,
     };
     #[cfg(feature = "orchard")]
-    use zcash_protocol::ShieldedProtocol;
+    use zcash_protocol::ShieldedPool;
     use zcash_protocol::{
         consensus::{NetworkUpgrade, Parameters},
         value::Zatoshis,
@@ -431,13 +431,13 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
     // Claim wallet A's captured height/hash, but substitute wallet B's frontier for pool `T`.
     #[cfg(feature = "orchard")]
     let bad_chain_state = match T::SHIELDED_PROTOCOL {
-        ShieldedProtocol::Sapling => ChainState::new(
+        ShieldedPool::Sapling => ChainState::new(
             capture_height,
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
         ),
-        ShieldedProtocol::Orchard => ChainState::new(
+        ShieldedPool::Orchard => ChainState::new(
             capture_height,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),
@@ -480,7 +480,7 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
         testing::pool::dsl::TestDsl,
     };
     #[cfg(feature = "orchard")]
-    use zcash_protocol::ShieldedProtocol;
+    use zcash_protocol::ShieldedPool;
     use zcash_protocol::{
         consensus::{NetworkUpgrade, Parameters},
         value::Zatoshis,
@@ -552,13 +552,13 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
     // B's frontier for pool `T`.
     #[cfg(feature = "orchard")]
     let bad_from_state = match T::SHIELDED_PROTOCOL {
-        ShieldedProtocol::Sapling => ChainState::new(
+        ShieldedPool::Sapling => ChainState::new(
             from_height - 1,
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
         ),
-        ShieldedProtocol::Orchard => ChainState::new(
+        ShieldedPool::Orchard => ChainState::new(
             from_height - 1,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),

@@ -13,7 +13,7 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -472,7 +472,7 @@ pub enum ScanError {
     EncodingInvalid {
         at_height: BlockHeight,
         txid: TxId,
-        pool_type: ShieldedProtocol,
+        pool_type: ShieldedPool,
         index: usize,
     },
 
@@ -490,7 +490,7 @@ pub enum ScanError {
     /// The note commitment tree size for the given protocol at the proposed new block is not equal
     /// to the size at the previous block plus the count of this block's outputs.
     TreeSizeMismatch {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
         given: u32,
         computed: u32,
@@ -500,7 +500,7 @@ pub enum ScanError {
     /// [`CompactBlock`] being scanned, making it impossible to construct the nullifier for a
     /// detected note.
     TreeSizeUnknown {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 
@@ -508,14 +508,14 @@ pub enum ScanError {
     /// that is invalidated by the data in the block itself. This may be caused by the presence
     /// of default values in the chain metadata.
     TreeSizeInvalid {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 
     /// The size of the note commitment tree for the given protocol would exceed the
     /// `u32` range as a result of applying the outputs in the block being scanned.
     TreeSizeOverflow {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 }

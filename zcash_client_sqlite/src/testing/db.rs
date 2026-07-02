@@ -37,7 +37,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
+    ShieldedPool, consensus, consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo,
 };
 use zip32::DiversifierIndex;
 

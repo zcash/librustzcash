@@ -75,7 +75,7 @@ use zcash_primitives::transaction::{
     fees::FeeRule,
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -707,7 +707,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     amount: Zatoshis,
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
@@ -769,7 +769,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_from_account: <DbT as InputSource>::AccountId,
-    spend_pools: &[ShieldedProtocol],
+    spend_pools: &[ShieldedPool],
     fee_rule: &FeeRuleT,
     recipient: ZcashAddress,
     memo: Option<MemoBytes>,
@@ -1236,7 +1236,7 @@ where
     }
 
     let (sapling_anchor, sapling_inputs) = if proposal_step
-        .involves(PoolType::Shielded(ShieldedProtocol::Sapling))
+        .involves(PoolType::Shielded(ShieldedPool::Sapling))
     {
         proposal_step.shielded_inputs().map_or_else(
             || Ok((Some(sapling::Anchor::empty_tree()), vec![])),
@@ -1280,7 +1280,7 @@ where
 
     #[cfg(feature = "orchard")]
     let (orchard_anchor, orchard_inputs) = if proposal_step
-        .involves(PoolType::Shielded(ShieldedProtocol::Orchard))
+        .involves(PoolType::Shielded(ShieldedPool::Orchard))
     {
         proposal_step.shielded_inputs().map_or_else(
             || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
@@ -1609,15 +1609,15 @@ where
         {
             Address::Unified(ua) => match output_pool {
                 #[cfg(not(feature = "orchard"))]
-                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                PoolType::Shielded(ShieldedPool::Orchard) => {
                     return Err(Error::ProposalNotSupported);
                 }
                 #[cfg(feature = "orchard")]
-                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                PoolType::Shielded(ShieldedPool::Orchard) => {
                     let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
                     add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
                 }
-                PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                PoolType::Shielded(ShieldedPool::Sapling) => {
                     let to = *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction");
                     add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
                 }
@@ -1653,7 +1653,7 @@ where
             .map_or_else(MemoBytes::empty, |m| m.clone());
         let output_pool = change_value.output_pool();
         match output_pool {
-            PoolType::Shielded(ShieldedProtocol::Sapling) => {
+            PoolType::Shielded(ShieldedPool::Sapling) => {
                 builder.add_sapling_output(
                     internal_ovk.map(|k| k.into()),
                     ufvk.sapling()
@@ -1672,7 +1672,7 @@ where
                     Some(memo),
                 ))
             }
-            PoolType::Shielded(ShieldedProtocol::Orchard) => {
+            PoolType::Shielded(ShieldedPool::Orchard) => {
                 #[cfg(not(feature = "orchard"))]
                 return Err(Error::UnsupportedChangeType(output_pool));
 
@@ -2479,7 +2479,7 @@ where
         domain: D,
         note: D::Note,
         output: &O,
-        output_pool: ShieldedProtocol,
+        output_pool: ShieldedPool,
         output_index: usize,
         pczt_recipient: PcztRecipient<AccountId>,
         external_address: Option<ZcashAddress>,
@@ -2540,7 +2540,7 @@ where
                             domain,
                             note,
                             action,
-                            ShieldedProtocol::Orchard,
+                            ShieldedPool::Orchard,
                             output_index,
                             pczt_recipient,
                             external_address,
@@ -2571,7 +2571,7 @@ where
                             domain,
                             note,
                             action,
-                            ShieldedProtocol::Sapling,
+                            ShieldedPool::Sapling,
                             output_index,
                             pczt_recipient,
                             external_address,

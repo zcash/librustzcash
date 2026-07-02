@@ -8,7 +8,7 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{FeeRule, transparent, zip317 as prim_zip317};
 use zcash_protocol::{
-    ShieldedProtocol, consensus,
+    ShieldedPool, consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -65,7 +65,7 @@ impl Zip317FeeRule for StandardFeeRule {
 pub struct SingleOutputChangeStrategy<R, I> {
     fee_rule: R,
     change_memo: Option<MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     meta_source: PhantomData<I>,
 }
@@ -79,7 +79,7 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
     pub fn new(
         fee_rule: R,
         change_memo: Option<MemoBytes>,
-        fallback_change_pool: ShieldedProtocol,
+        fallback_change_pool: ShieldedPool,
         dust_output_policy: DustOutputPolicy,
     ) -> Self {
         Self {
@@ -160,7 +160,7 @@ where
 pub struct MultiOutputChangeStrategy<R, I> {
     fee_rule: R,
     change_memo: Option<MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     split_policy: SplitPolicy,
     meta_source: PhantomData<I>,
@@ -181,7 +181,7 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
     pub fn new(
         fee_rule: R,
         change_memo: Option<MemoBytes>,
-        fallback_change_pool: ShieldedProtocol,
+        fallback_change_pool: ShieldedPool,
         dust_output_policy: DustOutputPolicy,
         split_policy: SplitPolicy,
     ) -> Self {
@@ -271,7 +271,7 @@ mod tests {
     use ::transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
     use zcash_protocol::{
-        ShieldedProtocol,
+        ShieldedPool,
         consensus::{Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
     };
@@ -299,7 +299,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
@@ -339,7 +339,7 @@ mod tests {
         let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
             SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(5).unwrap(),
@@ -563,7 +563,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             DustOutputPolicy::default(),
         );
 
@@ -609,7 +609,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             DustOutputPolicy::default(),
         );
 
@@ -663,7 +663,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             dust_output_policy,
         );
 
@@ -710,7 +710,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
@@ -756,7 +756,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
@@ -802,7 +802,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::new(
                 DustAction::AllowDustChange,
                 Some(Zatoshis::const_from_u64(1000)),
@@ -862,7 +862,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             dust_output_policy,
         );
 
@@ -911,7 +911,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
