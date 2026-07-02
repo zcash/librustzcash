@@ -1893,7 +1893,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 
@@ -1931,7 +1931,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 
@@ -2054,7 +2054,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 
@@ -2181,7 +2181,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 
