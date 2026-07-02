@@ -38,7 +38,7 @@ use {
     common::{Global, determine_lock_time},
     zcash_primitives::transaction::{Authorization, TransactionData, TxVersion},
     zcash_protocol::{
-        consensus::BranchId,
+        consensus::{BranchId, OrchardProtocolRevision},
         constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
     },
 };
@@ -124,7 +124,16 @@ pub mod v1 {
         type Error = super::EncodingError;
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
-            if !pczt.ironwood.actions.is_empty() {
+            // The v1 format predates the v6 transaction format; a parser of the v1
+            // encoding could parse a v6 PCZT but never extract a transaction from it.
+            if pczt.global.tx_version == zcash_protocol::constants::V6_TX_VERSION {
+                return Err(super::EncodingError::UnsupportedTxVersion);
+            }
+
+            // The v1 format cannot represent an Ironwood bundle in any state other
+            // than the canonical empty one; a parser of the v1 encoding will
+            // reconstruct exactly that value.
+            if pczt.ironwood != orchard::EMPTY_IRONWOOD {
                 return Err(super::EncodingError::UnsupportedTxVersion);
             }
 
@@ -144,16 +153,39 @@ pub mod v1 {
                 transparent: pczt.transparent,
                 sapling: pczt.sapling,
                 orchard: pczt.orchard.into(),
-                ironwood: orchard::Bundle {
-                    actions: vec![],
-                    flags: 0,
-                    value_sum: (0, true),
-                    anchor: [0; 32],
-                    note_version: orchard::NoteVersion::V3,
-                    zkproof: None,
-                    bsk: None,
-                },
+                ironwood: orchard::EMPTY_IRONWOOD,
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use zcash_protocol::consensus::BranchId;
+
+        use crate::roles::creator::Creator;
+
+        #[test]
+        fn v1_refuses_v6_pczts_and_non_canonical_ironwood_bundles() {
+            // A v6 tx cannot be encoded as a v1 PCZT, even when its Ironwood bundle is
+            // canonically empty.
+            let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
+                .unwrap()
+                .build();
+            assert!(matches!(
+                super::Pczt::try_from(pczt),
+                Err(crate::EncodingError::UnsupportedTxVersion)
+            ));
+
+            // A v5 tx carrying non-canonical Ironwood bundle data cannot be encoded
+            // as a v1 PCZT, because the data would be dropped.
+            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+                .unwrap()
+                .build();
+            pczt.ironwood.bsk = Some([1; 32]);
+            assert!(matches!(
+                super::Pczt::try_from(pczt),
+                Err(crate::EncodingError::UnsupportedTxVersion)
+            ));
         }
     }
 }
@@ -164,19 +196,6 @@ pub mod v2 {
     use serde::{Deserialize, Serialize};
 
     use crate::{common, orchard, sapling, transparent};
-
-    const EMPTY_TRANSPARENT: transparent::Bundle = transparent::Bundle {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-    };
-
-    const EMPTY_SAPLING: sapling::Bundle = sapling::Bundle {
-        spends: Vec::new(),
-        outputs: Vec::new(),
-        value_sum: 0,
-        anchor: [0; 32],
-        bsk: None,
-    };
 
     /// The in-memory type used for derived serialization of the v2 Pczt encoding.
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -213,10 +232,11 @@ pub mod v2 {
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
             Ok(Self {
                 global: pczt.global,
-                transparent: (pczt.transparent != EMPTY_TRANSPARENT).then_some(pczt.transparent),
-                sapling: (pczt.sapling != EMPTY_SAPLING).then_some(pczt.sapling),
-                orchard: pczt.orchard.try_into()?,
-                ironwood: pczt.ironwood.try_into()?,
+                transparent: (pczt.transparent != transparent::EMPTY_BUNDLE)
+                    .then_some(pczt.transparent),
+                sapling: (pczt.sapling != sapling::EMPTY_BUNDLE).then_some(pczt.sapling),
+                orchard: orchard::v2::encode(pczt.orchard, &orchard::EMPTY_ORCHARD)?,
+                ironwood: orchard::v2::encode(pczt.ironwood, &orchard::EMPTY_IRONWOOD)?,
             })
         }
     }
@@ -225,23 +245,16 @@ pub mod v2 {
         fn from(pczt: Pczt) -> Self {
             Self {
                 global: pczt.global,
-                transparent: pczt.transparent.unwrap_or(EMPTY_TRANSPARENT),
-                sapling: pczt.sapling.unwrap_or(EMPTY_SAPLING),
+                transparent: pczt.transparent.unwrap_or(transparent::EMPTY_BUNDLE),
+                sapling: pczt.sapling.unwrap_or(sapling::EMPTY_BUNDLE),
                 orchard: pczt
                     .orchard
                     .map(orchard::Bundle::from)
-                    .unwrap_or(orchard::v2::EMPTY_BUNDLE),
-                ironwood: pczt.ironwood.map(orchard::Bundle::from).unwrap_or_else(|| {
-                    orchard::Bundle {
-                        actions: Vec::new(),
-                        flags: orchard::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-                        value_sum: (0, true),
-                        anchor: [0; 32],
-                        note_version: orchard::NoteVersion::V3,
-                        zkproof: None,
-                        bsk: None,
-                    }
-                }),
+                    .unwrap_or(orchard::EMPTY_ORCHARD),
+                ironwood: pczt
+                    .ironwood
+                    .map(orchard::Bundle::from)
+                    .unwrap_or(orchard::EMPTY_IRONWOOD),
             }
         }
     }
@@ -304,16 +317,22 @@ pub mod v2 {
         }
 
         #[test]
-        fn orchard_flags_and_note_version_do_not_prevent_omission() {
+        fn non_canonical_orchard_flags_and_note_version_prevent_omission() {
             let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
                 .unwrap()
                 .build();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
-            let encoded = Pczt::try_from(pczt).unwrap();
+            // A bundle whose flags or note version differ from the canonical empty
+            // bundle is not omitted, so that those fields round-trip losslessly.
+            let encoded = Pczt::try_from(pczt.clone()).unwrap();
+            assert!(encoded.orchard.is_some());
 
-            assert!(encoded.orchard.is_none());
+            let decoded = crate::Pczt::from(encoded);
+            assert_eq!(decoded.orchard, pczt.orchard);
+            assert_eq!(decoded.orchard.flags, 0);
+            assert_eq!(decoded.orchard.note_version, NoteVersion::V3);
         }
     }
 }
@@ -406,23 +425,11 @@ impl Pczt {
 
         let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
             .map_err(|_| ExtractError::UnknownConsensusBranchId)?;
-        let orchard_bundle_version = consensus_branch_id
+        let orchard_protocol_revision = consensus_branch_id
             .orchard_protocol_revision()
-            .map(crate::orchard::orchard_bundle_version_for_revision)
             // The v5 and v6 transaction formats do not exist prior to NU5, so no
             // transaction could be extracted under such a branch in any case.
             .ok_or(ExtractError::UnsupportedConsensusBranchId)?;
-
-        let transparent = transparent
-            .into_parsed()
-            .map_err(ExtractError::TransparentParse)?;
-        let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
-        let orchard = orchard
-            .into_parsed_with_version(orchard_bundle_version)
-            .map_err(ExtractError::OrchardParse)?;
-        let ironwood = ironwood
-            .into_ironwood_parsed()
-            .map_err(ExtractError::IronwoodParse)?;
 
         let version = match (global.tx_version, global.version_group_id) {
             (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
@@ -432,6 +439,39 @@ impl Pczt {
                 version_group_id,
             }),
         }?;
+
+        match version {
+            // Only the v6 transaction format carries an Ironwood bundle.
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
+                if ironwood != crate::orchard::EMPTY_IRONWOOD {
+                    return Err(ExtractError::IronwoodNotSupported.into());
+                }
+            }
+            // The v6 transaction format does not exist prior to NU6.3 (the first
+            // upgrade under which the Orchard protocol is at revision V3).
+            TxVersion::V6 => {
+                if orchard_protocol_revision < OrchardProtocolRevision::V3 {
+                    return Err(ExtractError::UnsupportedConsensusBranchId.into());
+                }
+            }
+        }
+
+        let transparent = transparent
+            .into_parsed()
+            .map_err(ExtractError::TransparentParse)?;
+        let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
+        let orchard = orchard
+            .into_parsed_with_version(
+                crate::orchard::bundle_version_for_revision(
+                    orchard_protocol_revision,
+                    ::orchard::ValuePool::Orchard,
+                )
+                .expect("the Orchard pool is supported under every protocol revision"),
+            )
+            .map_err(ExtractError::OrchardParse)?;
+        let ironwood = ironwood
+            .into_ironwood_parsed()
+            .map_err(ExtractError::IronwoodParse)?;
 
         let lock_time = determine_lock_time(&global, transparent.inputs())
             .ok_or(ExtractError::IncompatibleLockTimes)?;
@@ -544,6 +584,9 @@ pub enum ExtractError {
     IncompatibleLockTimes,
     /// An error occurred extracting the Ironwood protocol bundle from the Ironwood PCZT bundle.
     IronwoodExtract(::orchard::pczt::TxExtractorError),
+    /// The PCZT carries Ironwood bundle data, but its transaction version does not
+    /// support an Ironwood bundle.
+    IronwoodNotSupported,
     /// An error occurred parsing the Ironwood PCZT bundle from the PCZT data.
     IronwoodParse(::orchard::pczt::ParseError),
     /// An error occurred extracting the Orchard protocol bundle from the Orchard PCZT bundle.
@@ -580,4 +623,35 @@ pub enum ParseError {
     TooShort,
     /// The PCZT has an unknown version.
     UnknownVersion(u32),
+}
+
+#[cfg(all(test, any(feature = "io-finalizer", feature = "signer")))]
+mod extraction_tests {
+    use zcash_protocol::consensus::BranchId;
+
+    use crate::{ExtractError, roles::creator::Creator};
+
+    #[test]
+    fn v5_pczt_with_ironwood_data_does_not_extract() {
+        let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+            .unwrap()
+            .build();
+        pczt.ironwood.bsk = Some([1; 32]);
+        assert!(matches!(
+            pczt.into_effects(),
+            Err(ExtractError::IronwoodNotSupported)
+        ));
+    }
+
+    #[test]
+    fn v6_pczt_with_pre_nu6_3_branch_does_not_extract() {
+        let mut pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
+            .unwrap()
+            .build();
+        pczt.global.consensus_branch_id = BranchId::Nu6_2.into();
+        assert!(matches!(
+            pczt.into_effects(),
+            Err(ExtractError::UnsupportedConsensusBranchId)
+        ));
+    }
 }

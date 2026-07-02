@@ -45,6 +45,16 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
+/// The canonical empty Sapling bundle: the form the Sapling bundle of a PCZT takes
+/// when it carries no Sapling data.
+pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
+    spends: Vec::new(),
+    outputs: Vec::new(),
+    value_sum: 0,
+    anchor: [0; 32],
+    bsk: None,
+};
+
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
