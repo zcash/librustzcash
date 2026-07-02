@@ -140,8 +140,12 @@ pub(super) fn all_migrations<
     //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
     //                                                    /          \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
-    //                                                                       \
-    //                                                                        add_transparent_value_index
+    //
+    // add_transparent_value_index depends directly on fix_transparent_received_outputs (not
+    // shown above to avoid further complicating the diagram): that migration drops and
+    // recreates the transparent_received_outputs table, which would silently destroy the
+    // index if add_transparent_value_index instead depended only on utxos_to_txos and
+    // happened to run first.
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![

@@ -20,17 +20,18 @@ use rusqlite::params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use super::utxos_to_txos;
+use super::fix_transparent_received_outputs;
 use crate::wallet::init::WalletMigrationError;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x8b1a3c2d_4e5f_6a7b_8c9d_0e1f2a3b4c5d);
 
-// `utxos_to_txos` is the migration that first creates the `transparent_received_outputs`
-// table (with `value_zat`), so depending on it is sufficient to ensure the table exists
-// before the index is created. The `fix_transparent_received_outputs` migration rebuilds
-// the table later, but the column name and meaning are preserved, so the index remains
-// valid across the rebuild.
-const DEPENDENCIES: &[Uuid] = &[utxos_to_txos::MIGRATION_ID];
+// `fix_transparent_received_outputs` drops and recreates the `transparent_received_outputs`
+// table (via `DROP TABLE` + `ALTER TABLE ... RENAME TO`), which destroys any index that was
+// created on the old table. Depending on it here (rather than on `utxos_to_txos`, which only
+// creates the table initially) guarantees this migration always runs after that rebuild, so
+// the index is created on the table that will actually persist. `utxos_to_txos` does not need
+// to be listed explicitly: `fix_transparent_received_outputs` transitively depends on it.
+const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
 
 pub(super) struct Migration;
 
