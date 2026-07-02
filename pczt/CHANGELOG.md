@@ -31,6 +31,14 @@ workspace.
   version from the PCZT's consensus branch ID, and returns an
   `UnsupportedConsensusBranchId` error when that branch ID is unrecognized or
   predates NU5.
+- `pczt::roles::creator::Creator::new` now selects the v6 transaction format
+  (and its version group ID) for consensus branch IDs at NU6.3 or later;
+  previously the v5 format was always used.
+- Transaction extraction now rejects v6 PCZTs whose consensus branch ID
+  predates NU6.3, and non-v6 PCZTs that carry non-canonical Ironwood bundle
+  data.
+- The v1 serialization format refuses to encode v6 PCZTs, which a v1 parser
+  could decode but never extract a transaction from.
 - `pczt::roles::low_level_signer::Signer::sign_orchard_with` now bounds its
   error parameter by `From<pczt::roles::low_level_signer::OrchardParseError>`
   instead of `From<orchard::pczt::ParseError>` (as does the new
@@ -74,6 +82,9 @@ workspace.
 - The logical `pczt::Pczt` type now includes an Ironwood bundle.
 - Ironwood PCZT role support.
 - `pczt::ExtractError::UnsupportedConsensusBranchId`
+- `pczt::ExtractError::IronwoodNotSupported`
+- `pczt::roles::creator::Creator::{with_ironwood_anchor, with_ironwood_flags}`
+- `pczt::roles::creator::Error::IronwoodNotSupported`
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
   `pczt::roles::verifier::OrchardError`, and `pczt::roles::prover::OrchardError`.
