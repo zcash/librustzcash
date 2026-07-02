@@ -11,6 +11,13 @@ workspace.
 ## Unreleased
 
 ### Added
+- A new migration adds a `note_version` column to `orchard_received_notes` and
+  widens its uniqueness constraint from `(transaction_id, action_index)` to
+  `(transaction_id, action_index, note_version)`. Ironwood notes are stored in
+  this table alongside Orchard notes, and an Orchard action and an Ironwood
+  action in the same transaction can share an action index; the note version
+  (2 for Orchard, 3 for Ironwood) keeps them distinct. Existing rows are
+  backfilled as version 2.
 - The wallet database now persists Ironwood note commitment tree data. A new
   migration adds the `ironwood_tree_shards`, `ironwood_tree_cap`,
   `ironwood_tree_checkpoints`, and `ironwood_tree_checkpoint_marks_removed`
