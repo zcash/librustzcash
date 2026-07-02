@@ -2814,6 +2814,14 @@ mod tests {
     }
 
     #[test]
+    fn propose_t2shielded_requires_transparent_regather() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2shielded_requires_transparent_regather(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn value_bounded_transparent_gather() {
         zcash_client_backend::data_api::testing::transparent::value_bounded_transparent_gather(
             TestDbFactory::default(),

@@ -904,6 +904,19 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 },
             );
 
+            // Tracks whether this iteration's `InsufficientFunds` handling grew the
+            // transparent input set. Growing the transparent gather is a valid form of
+            // progress in its own right (distinct from the shielded-note progress tracked
+            // by `prior_available`/`new_available` below); without this, an account with
+            // no spendable shielded notes at all (or none beyond what's already excluded)
+            // would spuriously report `InsufficientFunds` on the very next check below, even
+            // though the enlarged transparent gather might already be sufficient to satisfy
+            // the request on the next iteration.
+            #[cfg(not(feature = "transparent-inputs"))]
+            let transparent_gather_grew = false;
+            #[cfg(feature = "transparent-inputs")]
+            let mut transparent_gather_grew = false;
+
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
             let tr0_balance = change_strategy.compute_balance(
@@ -1001,6 +1014,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 .map(|utxo| utxo.redact_account_data())
                                 .collect::<Vec<_>>();
                             amount_at_transparent_gather = required;
+                            transparent_gather_grew = true;
                         }
                     }
                 }
@@ -1031,14 +1045,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 .map_err(InputSelectorError::DataSource)?;
 
             let new_available = shielded_inputs.total_value()?;
-            if new_available <= prior_available {
+            if new_available <= prior_available && !transparent_gather_grew {
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
                     available: new_available,
                 });
             } else {
-                // If the set of selected inputs has changed after selection, we will loop again
-                // and see whether we now have enough funds.
+                // If the set of selected shielded notes has grown, or the transparent
+                // gather grew this iteration, we will loop again and see whether we now
+                // have enough funds.
                 prior_available = new_available;
             }
         }
