@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use crate::orchard::orchard_bundle_version_for_revision;
+use crate::orchard::bundle_version_for_revision;
 
 use zcash_protocol::consensus::BranchId;
 use zcash_protocol::constants::{
@@ -124,14 +124,14 @@ impl Creator {
         })
     }
 
-    /// Returns the Orchard-pool bundle version implied by this Creator's consensus
-    /// branch ID.
+    /// Returns the bundle version in effect for the given Orchard-protocol value pool
+    /// under this Creator's consensus branch ID, or `None` if the pool is not
+    /// supported under that branch.
     #[cfg(feature = "orchard")]
-    fn orchard_bundle_version(&self) -> orchard::bundle::BundleVersion {
+    fn bundle_version(&self, pool: orchard::ValuePool) -> Option<orchard::bundle::BundleVersion> {
         self.consensus_branch_id
             .orchard_protocol_revision()
-            .map(orchard_bundle_version_for_revision)
-            .expect("`Creator::new` rejects branches that predate NU5")
+            .and_then(|revision| bundle_version_for_revision(revision, pool))
     }
 
     pub fn with_fallback_lock_time(mut self, fallback: u32) -> Self {
@@ -157,7 +157,10 @@ impl Creator {
         orchard_flags: orchard::bundle::Flags,
     ) -> Result<Self, Error> {
         self.orchard_flags = orchard_flags
-            .to_byte(self.orchard_bundle_version())
+            .to_byte(
+                self.bundle_version(orchard::ValuePool::Orchard)
+                    .expect("`Creator::new` rejects branches that predate NU5"),
+            )
             .ok_or(Error::UnrepresentableOrchardFlags)?;
         Ok(self)
     }
@@ -190,11 +193,11 @@ impl Creator {
         mut self,
         ironwood_flags: orchard::bundle::Flags,
     ) -> Result<Self, Error> {
-        if self.tx_version != V6_TX_VERSION {
-            return Err(Error::IronwoodNotSupported);
-        }
         self.ironwood_flags = ironwood_flags
-            .to_byte(orchard::bundle::BundleVersion::ironwood_v3())
+            .to_byte(
+                self.bundle_version(orchard::ValuePool::Ironwood)
+                    .ok_or(Error::IronwoodNotSupported)?,
+            )
             .ok_or(Error::UnrepresentableOrchardFlags)?;
         Ok(self)
     }
@@ -229,7 +232,10 @@ impl Creator {
                 anchor: self.orchard_anchor,
                 // The note-plaintext version is determined by the Orchard bundle version.
                 #[cfg(feature = "orchard")]
-                note_version: self.orchard_bundle_version().note_version(),
+                note_version: self
+                    .bundle_version(orchard::ValuePool::Orchard)
+                    .expect("`Creator::new` rejects branches that predate NU5")
+                    .note_version(),
                 #[cfg(not(feature = "orchard"))]
                 note_version: crate::orchard::NoteVersion::V2,
                 zkproof: None,

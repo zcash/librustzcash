@@ -756,18 +756,27 @@ impl Bundle {
     }
 }
 
-/// Returns the Orchard-pool [`BundleVersion`] corresponding to the given Orchard
-/// protocol revision.
+/// Returns the [`BundleVersion`] in effect for the given Orchard-protocol value pool
+/// under the given Orchard protocol revision, or `None` if the pool is not supported
+/// under that revision (the Ironwood pool exists only from revision V3).
 #[cfg(feature = "orchard")]
-pub(crate) fn orchard_bundle_version_for_revision(
+pub(crate) fn bundle_version_for_revision(
     revision: zcash_protocol::consensus::OrchardProtocolRevision,
-) -> BundleVersion {
+    pool: orchard::ValuePool,
+) -> Option<BundleVersion> {
+    use orchard::ValuePool;
     use zcash_protocol::consensus::OrchardProtocolRevision;
 
-    match revision {
-        OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
-        OrchardProtocolRevision::V2 => BundleVersion::orchard_v2(),
-        OrchardProtocolRevision::V3 => BundleVersion::orchard_v3(),
+    match pool {
+        ValuePool::Orchard => Some(match revision {
+            OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
+            OrchardProtocolRevision::V2 => BundleVersion::orchard_v2(),
+            OrchardProtocolRevision::V3 => BundleVersion::orchard_v3(),
+        }),
+        ValuePool::Ironwood => match revision {
+            OrchardProtocolRevision::InsecureV1 | OrchardProtocolRevision::V2 => None,
+            OrchardProtocolRevision::V3 => Some(BundleVersion::ironwood_v3()),
+        },
     }
 }
 
@@ -781,7 +790,7 @@ pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<B
     BranchId::try_from(global.consensus_branch_id)
         .ok()?
         .orchard_protocol_revision()
-        .map(orchard_bundle_version_for_revision)
+        .and_then(|revision| bundle_version_for_revision(revision, orchard::ValuePool::Orchard))
 }
 
 #[cfg(feature = "orchard")]
