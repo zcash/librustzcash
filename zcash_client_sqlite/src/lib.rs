@@ -2301,16 +2301,29 @@ where
     ))
 }
 
-/// Returns a handle to the Ironwood note commitment tree.
+/// The shard store backing the Ironwood note commitment tree.
 ///
-/// Ironwood note commitments are Orchard-shaped, so the tree reuses the Orchard shard store
-/// and hash type; only the backing table prefix differs.
+/// Ironwood note commitments are Orchard-shaped, so this reuses the Orchard hash type and shard
+/// height; only the backing table prefix differs (see [`IRONWOOD_TABLES_PREFIX`]). It is defined
+/// as a distinct alias to make Ironwood usage self-documenting at call sites.
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodShardStore<C> =
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>;
+
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodCommitmentTree<C> = ShardTree<
+    IronwoodShardStore<C>,
+    { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+    ORCHARD_SHARD_HEIGHT,
+>;
+
+/// Returns a handle to the Ironwood note commitment tree.
 #[cfg(feature = "orchard")]
 pub(crate) fn ironwood_tree<C>(
     conn: C,
-) -> Result<OrchardCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+) -> Result<IronwoodCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
 where
-    OrchardShardStore<C>:
+    IronwoodShardStore<C>:
         ShardStore<H = orchard::tree::MerkleHashOrchard, CheckpointId = BlockHeight>,
 {
     Ok(ShardTree::new(
@@ -2423,7 +2436,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
     fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
     where
         for<'a> F:
-            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let tx = self
@@ -2507,7 +2520,7 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
     fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
     where
         for<'a> F:
-            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let mut shardtree = ironwood_tree(self.conn.0)?;
