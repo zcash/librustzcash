@@ -14,7 +14,12 @@ impl super::Verifier {
             ironwood,
         } = self.pczt;
 
-        let bundle = orchard.into_orchard_parsed().map_err(OrchardError::Parse)?;
+        let bundle = orchard
+            .into_parsed_with_version(
+                crate::orchard::orchard_bundle_version(&global)
+                    .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
+            )
+            .map_err(OrchardError::Parse)?;
 
         f(&bundle)?;
 
@@ -34,6 +39,9 @@ impl super::Verifier {
 #[derive(Debug)]
 pub enum OrchardError<E> {
     Parse(orchard::pczt::ParseError),
+    /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
+    /// the Orchard protocol is not supported).
+    UnsupportedConsensusBranchId,
     Verify(orchard::pczt::VerifyError),
     Custom(E),
 }

@@ -14,7 +14,10 @@ impl super::Prover {
         } = self.pczt;
 
         let mut bundle = orchard
-            .into_orchard_parsed()
+            .into_parsed_with_version(
+                crate::orchard::orchard_bundle_version(&global)
+                    .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
+            )
             .map_err(OrchardError::Parser)?;
 
         bundle
@@ -66,6 +69,9 @@ impl super::Prover {
 pub enum OrchardError {
     Parser(orchard::pczt::ParseError),
     Prover(orchard::pczt::ProverError),
+    /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
+    /// the Orchard protocol is not supported).
+    UnsupportedConsensusBranchId,
 }
 
 /// Errors that can occur while creating Ironwood proofs for a PCZT.

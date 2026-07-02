@@ -406,15 +406,19 @@ impl Pczt {
 
         let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
             .map_err(|_| ExtractError::UnknownConsensusBranchId)?;
+        let orchard_bundle_version = consensus_branch_id
+            .orchard_protocol_revision()
+            .map(crate::orchard::orchard_bundle_version_for_revision)
+            // The v5 and v6 transaction formats do not exist prior to NU5, so no
+            // transaction could be extracted under such a branch in any case.
+            .ok_or(ExtractError::UnsupportedConsensusBranchId)?;
 
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
         let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
         let orchard = orchard
-            .into_parsed_with_version(crate::orchard::orchard_bundle_version_for_branch(
-                consensus_branch_id,
-            ))
+            .into_parsed_with_version(orchard_bundle_version)
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
             .into_ironwood_parsed()
@@ -558,6 +562,9 @@ pub enum ExtractError {
     /// The consensus branch ID requested by the PCZT does not correspond to a
     /// known network upgrade.
     UnknownConsensusBranchId,
+    /// The network upgrade for the PCZT's consensus branch ID predates the v5
+    /// transaction format, so no transaction can be extracted from it.
+    UnsupportedConsensusBranchId,
     /// The PCZT specifies an unsupported transaction version.
     UnsupportedTxVersion { version: u32, version_group_id: u32 },
 }

@@ -15,7 +15,10 @@ use orchard::{
     value::ValueCommitment,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_protocol::{consensus::BranchId, value::ZatBalance};
+use zcash_protocol::{
+    consensus::{BranchId, OrchardProtocolRevision},
+    value::ZatBalance,
+};
 
 use crate::transaction::Transaction;
 
@@ -102,8 +105,9 @@ fn read_bundle<R: Read>(
 /// under the given consensus branch, or `None` if the pool is not supported under that
 /// branch (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3).
 ///
-/// The `BundleVersion` fixes a bundle's flag-byte grammar, cross-address semantics, and
-/// circuit generation:
+/// The protocol revision is determined by
+/// [`BranchId::orchard_protocol_revision`]. The `BundleVersion` fixes a bundle's
+/// flag-byte grammar, cross-address semantics, and circuit generation:
 ///   * Orchard pool, NU5 through NU6.1: historical insecure circuit, cross-address
 ///     enabled, proof size not enforced;
 ///   * Orchard pool, NU6.2: fixed circuit, cross-address enabled;
@@ -114,36 +118,16 @@ pub fn bundle_version_for_branch(
     consensus_branch_id: BranchId,
     pool: ValuePool,
 ) -> Option<BundleVersion> {
+    let revision = consensus_branch_id.orchard_protocol_revision()?;
     match pool {
-        ValuePool::Orchard => match consensus_branch_id {
-            BranchId::Sprout
-            | BranchId::Overwinter
-            | BranchId::Sapling
-            | BranchId::Blossom
-            | BranchId::Heartwood
-            | BranchId::Canopy => None,
-            BranchId::Nu5 | BranchId::Nu6 | BranchId::Nu6_1 => {
-                Some(BundleVersion::orchard_insecure_v1())
-            }
-            BranchId::Nu6_2 => Some(BundleVersion::orchard_v2()),
-            BranchId::Nu6_3 => Some(BundleVersion::orchard_v3()),
-            #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => Some(BundleVersion::orchard_v3()),
-        },
-        ValuePool::Ironwood => match consensus_branch_id {
-            BranchId::Sprout
-            | BranchId::Overwinter
-            | BranchId::Sapling
-            | BranchId::Blossom
-            | BranchId::Heartwood
-            | BranchId::Canopy
-            | BranchId::Nu5
-            | BranchId::Nu6
-            | BranchId::Nu6_1
-            | BranchId::Nu6_2 => None,
-            BranchId::Nu6_3 => Some(BundleVersion::ironwood_v3()),
-            #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => Some(BundleVersion::ironwood_v3()),
+        ValuePool::Orchard => Some(match revision {
+            OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
+            OrchardProtocolRevision::V2 => BundleVersion::orchard_v2(),
+            OrchardProtocolRevision::V3 => BundleVersion::orchard_v3(),
+        }),
+        ValuePool::Ironwood => match revision {
+            OrchardProtocolRevision::InsecureV1 | OrchardProtocolRevision::V2 => None,
+            OrchardProtocolRevision::V3 => Some(BundleVersion::ironwood_v3()),
         },
     }
 }

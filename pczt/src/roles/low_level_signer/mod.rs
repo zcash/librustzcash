@@ -12,17 +12,22 @@ impl Signer {
         Self { pczt }
     }
 
+    /// Exposes the capability to sign the Ironwood spends.
     #[cfg(feature = "orchard")]
     pub fn sign_ironwood_with<E, F>(self, f: F) -> Result<Self, E>
     where
-        E: From<orchard::pczt::ParseError>,
+        E: From<OrchardParseError>,
         F: FnOnce(&Pczt, &mut orchard::pczt::Bundle, &mut u8) -> Result<(), E>,
     {
         let mut pczt = self.pczt;
 
         let mut tx_modifiable = pczt.global.tx_modifiable;
 
-        let mut bundle = pczt.ironwood.clone().into_ironwood_parsed()?;
+        let mut bundle = pczt
+            .ironwood
+            .clone()
+            .into_ironwood_parsed()
+            .map_err(OrchardParseError::Parse)?;
 
         f(&pczt, &mut bundle, &mut tx_modifiable)?;
 
@@ -36,14 +41,20 @@ impl Signer {
     #[cfg(feature = "orchard")]
     pub fn sign_orchard_with<E, F>(self, f: F) -> Result<Self, E>
     where
-        E: From<orchard::pczt::ParseError>,
+        E: From<OrchardParseError>,
         F: FnOnce(&Pczt, &mut orchard::pczt::Bundle, &mut u8) -> Result<(), E>,
     {
         let mut pczt = self.pczt;
 
         let mut tx_modifiable = pczt.global.tx_modifiable;
 
-        let mut bundle = pczt.orchard.clone().into_orchard_parsed()?;
+        let bundle_version = crate::orchard::orchard_bundle_version(&pczt.global)
+            .ok_or(OrchardParseError::UnsupportedConsensusBranchId)?;
+        let mut bundle = pczt
+            .orchard
+            .clone()
+            .into_parsed_with_version(bundle_version)
+            .map_err(OrchardParseError::Parse)?;
 
         f(&pczt, &mut bundle, &mut tx_modifiable)?;
 
@@ -98,5 +109,24 @@ impl Signer {
     /// Finishes the low-level Signer role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
         self.pczt
+    }
+}
+
+/// Errors that can occur while parsing an Orchard-protocol bundle of a PCZT for
+/// signing.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+pub enum OrchardParseError {
+    /// The bundle data was structurally invalid.
+    Parse(orchard::pczt::ParseError),
+    /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
+    /// the Orchard protocol is not supported).
+    UnsupportedConsensusBranchId,
+}
+
+#[cfg(feature = "orchard")]
+impl From<orchard::pczt::ParseError> for OrchardParseError {
+    fn from(e: orchard::pczt::ParseError) -> Self {
+        OrchardParseError::Parse(e)
     }
 }

@@ -13,6 +13,14 @@ workspace.
 ### Changed
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
+- Every PCZT role that parses the Orchard-pool bundle derives its bundle
+  version from the PCZT's consensus branch ID, and returns an
+  `UnsupportedConsensusBranchId` error when that branch ID is unrecognized or
+  predates NU5.
+- `pczt::roles::low_level_signer::Signer::sign_orchard_with` now bounds its
+  error parameter by `From<pczt::roles::low_level_signer::OrchardParseError>`
+  instead of `From<orchard::pczt::ParseError>` (as does the new
+  `sign_ironwood_with`).
 - `pczt::roles::creator::Creator::new` is now fallible, returning
   `Result<Self, pczt::roles::creator::Error>`; it rejects unrecognized consensus
   branch IDs and upgrades that predate the v5 transaction format.
@@ -51,6 +59,10 @@ workspace.
   bundles for v2 serialization).
 - The logical `pczt::Pczt` type now includes an Ironwood bundle.
 - Ironwood PCZT role support.
+- `pczt::ExtractError::UnsupportedConsensusBranchId`
+- `pczt::roles::low_level_signer::OrchardParseError`
+- `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
+  `pczt::roles::verifier::OrchardError`, and `pczt::roles::prover::OrchardError`.
 
 ## [0.7.0] - 2026-06-02
 

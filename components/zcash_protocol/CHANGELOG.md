@@ -8,6 +8,12 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Added
+- `zcash_protocol::consensus::OrchardProtocolRevision`
+- `zcash_protocol::consensus::BranchId::orchard_protocol_revision`
+
 ## [0.10.0-pre.0] - 2026-06-30
 
 This release sets the NU6.3 activation height to 4134000 on testnet.

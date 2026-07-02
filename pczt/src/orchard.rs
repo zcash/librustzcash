@@ -749,49 +749,36 @@ impl Bundle {
     }
 }
 
-/// Returns the Orchard bundle version used by the Orchard pool of the given
-/// (v5-or-later) network upgrade.
+/// Returns the Orchard-pool [`BundleVersion`] corresponding to the given Orchard
+/// protocol revision.
 #[cfg(feature = "orchard")]
-pub(crate) fn orchard_bundle_version_for_branch(
-    branch_id: zcash_protocol::consensus::BranchId,
+pub(crate) fn orchard_bundle_version_for_revision(
+    revision: zcash_protocol::consensus::OrchardProtocolRevision,
 ) -> BundleVersion {
+    use zcash_protocol::consensus::OrchardProtocolRevision;
+
+    match revision {
+        OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
+        OrchardProtocolRevision::V2 => BundleVersion::orchard_v2(),
+        OrchardProtocolRevision::V3 => BundleVersion::orchard_v3(),
+    }
+}
+
+/// Returns the Orchard-pool [`BundleVersion`] implied by the given PCZT global data,
+/// or `None` if the PCZT's consensus branch ID is unrecognized or predates NU5 (under
+/// which the Orchard protocol is not supported).
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<BundleVersion> {
     use zcash_protocol::consensus::BranchId;
 
-    match branch_id {
-        // NU5, NU6, and NU6.1 use the original (pre-NU6.2) Orchard pool; pre-NU5
-        // branches are rejected before reaching here.
-        BranchId::Sprout
-        | BranchId::Overwinter
-        | BranchId::Sapling
-        | BranchId::Blossom
-        | BranchId::Heartwood
-        | BranchId::Canopy
-        | BranchId::Nu5
-        | BranchId::Nu6
-        | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
-        BranchId::Nu6_2 => BundleVersion::orchard_v2(),
-        BranchId::Nu6_3 => BundleVersion::orchard_v3(),
-        #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => BundleVersion::orchard_v3(),
-    }
+    BranchId::try_from(global.consensus_branch_id)
+        .ok()?
+        .orchard_protocol_revision()
+        .map(orchard_bundle_version_for_revision)
 }
 
 #[cfg(feature = "orchard")]
 impl Bundle {
-    /// Parses the Orchard-pool bundle using the legacy (pre-NU6.3) Orchard bundle
-    /// version.
-    ///
-    /// TODO: this is incorrect for PCZTs whose consensus branch ID is NU6.3 or later
-    /// (under which the Orchard pool mandates the cross-address restriction); callers
-    /// should instead derive the bundle version from the PCZT's consensus branch ID via
-    /// [`orchard_bundle_version_for_branch`] and use [`Self::into_parsed_with_version`],
-    /// as `Pczt::extract_tx_data` does.
-    pub(crate) fn into_orchard_parsed(
-        self,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        self.into_parsed_with_version(BundleVersion::orchard_v2())
-    }
-
     pub(crate) fn into_ironwood_parsed(
         self,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {

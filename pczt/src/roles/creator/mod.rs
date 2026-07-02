@@ -50,7 +50,7 @@ fn consensus_branch_id_for_pczt(consensus_branch_id: u32) -> Result<BranchId, Er
 }
 
 #[cfg(feature = "orchard")]
-use crate::orchard::orchard_bundle_version_for_branch;
+use crate::orchard::orchard_bundle_version_for_revision;
 
 pub struct Creator {
     tx_version: u32,
@@ -85,7 +85,10 @@ impl Creator {
         let branch_id = consensus_branch_id_for_pczt(consensus_branch_id)?;
 
         #[cfg(feature = "orchard")]
-        let orchard_bundle_version = orchard_bundle_version_for_branch(branch_id);
+        let orchard_bundle_version = branch_id
+            .orchard_protocol_revision()
+            .map(orchard_bundle_version_for_revision)
+            .expect("`consensus_branch_id_for_pczt` rejects branches that predate NU5");
 
         Ok(Self {
             // Default to v5 transaction format.
