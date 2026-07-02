@@ -33,6 +33,36 @@ impl super::Verifier {
             },
         })
     }
+
+    /// Parses the Ironwood bundle and then verifies it in the given closure.
+    pub fn with_ironwood<E, F>(self, f: F) -> Result<Self, OrchardError<E>>
+    where
+        F: FnOnce(&orchard::pczt::Bundle) -> Result<(), OrchardError<E>>,
+    {
+        let Pczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+            ironwood,
+        } = self.pczt;
+
+        let bundle = ironwood
+            .into_ironwood_parsed()
+            .map_err(OrchardError::Parse)?;
+
+        f(&bundle)?;
+
+        Ok(Self {
+            pczt: Pczt {
+                global,
+                transparent,
+                sapling,
+                orchard,
+                ironwood: crate::orchard::Bundle::serialize_from(bundle),
+            },
+        })
+    }
 }
 
 /// Errors that can occur while verifying the Orchard bundle of a PCZT.

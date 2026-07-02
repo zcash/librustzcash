@@ -84,6 +84,10 @@ workspace.
 - `pczt::ExtractError::UnsupportedConsensusBranchId`
 - `pczt::ExtractError::IronwoodNotSupported`
 - `pczt::roles::creator::Creator::{with_ironwood_anchor, with_ironwood_flags}`
+- `pczt::roles::signer::Signer::{sign_ironwood, apply_ironwood_signature}`
+- `pczt::roles::signer::Error::{IronwoodSign, IronwoodVerify}`
+- `pczt::roles::verifier::Verifier::with_ironwood`
+- `pczt::roles::updater::Updater::update_ironwood_with`
 - `pczt::roles::creator::Error::IronwoodNotSupported`
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
