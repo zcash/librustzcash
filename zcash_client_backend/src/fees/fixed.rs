@@ -83,6 +83,8 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -107,6 +109,10 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+            #[cfg(feature = "orchard")]
+            orchard_change_to_ironwood,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -166,6 +172,10 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );
@@ -214,6 +224,10 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            false,
             None,
             &(),
         );

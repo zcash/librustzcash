@@ -558,6 +558,16 @@ pub trait ChangeStrategy {
     /// inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
+    /// - `ironwood`: the Ironwood bundle view (behind the `orchard` feature). A V6
+    ///   transaction carries a separate Ironwood bundle, distinct from `orchard`,
+    ///   with its own action count; pass an empty view when nothing targets the
+    ///   Ironwood pool.
+    /// - `orchard_change_to_ironwood`: whether Orchard-pool change should be counted
+    ///   in the Ironwood bundle, mirroring how the builder routes Orchard-pool
+    ///   outputs into a separate Ironwood bundle when Ironwood is active. This is a
+    ///   single boolean rather than a richer type because it simply carries the
+    ///   builder's already-computed routing decision, so the proposal and the built
+    ///   transaction stay in lock-step.
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
@@ -565,7 +575,7 @@ pub trait ChangeStrategy {
     /// - `wallet_meta`: Additional wallet metadata that the change strategy may use
     ///   in determining how to construct change outputs. This wallet metadata value
     ///   should be computed excluding the inputs provided in the `transparent_inputs`,
-    ///   `sapling`, and `orchard` arguments.
+    ///   `sapling`, `orchard`, and `ironwood` arguments.
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
@@ -577,6 +587,8 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] ironwood: &impl orchard::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
