@@ -1396,12 +1396,7 @@ where
         .involves(PoolType::Shielded(ShieldedPool::Orchard))
     {
         proposal_step.shielded_inputs().map_or_else(
-            || {
-                Ok((
-                    Some(orchard::Anchor::empty_tree()),
-                    Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new(),
-                ))
-            },
+            || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
             |inputs| {
                 wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|orchard_tree| {
                     let anchor = orchard_tree
