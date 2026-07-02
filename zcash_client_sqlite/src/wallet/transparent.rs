@@ -2346,7 +2346,11 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
          VALUES (:txid, :block, :mined_height, :observation_height)
          ON CONFLICT (txid) DO UPDATE
          SET block = IFNULL(block, :block),
-             mined_height = :mined_height,
+             -- A NULL :mined_height means the height is unknown to the caller (e.g. the
+             -- output was observed in the mempool), not that the transaction is unmined;
+             -- it must not discard a previously-recorded mined height. Un-mining is the
+             -- responsibility of `truncate_to_height`.
+             mined_height = IFNULL(:mined_height, mined_height),
              min_observed_height = MIN(min_observed_height, :observation_height),
              confirmed_unmined_at_height = CASE
                 WHEN :mined_height IS NOT NULL THEN NULL
@@ -2527,6 +2531,97 @@ mod tests {
         zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
             TestDbFactory::default(),
         );
+    }
+
+    /// Re-storing a transparent output with an unknown mined height (`None`) must not discard
+    /// the mined height already recorded for its transaction. A `None` height means "we do not
+    /// yet know this to have been mined" — for example, an output re-observed via the mempool
+    /// or a transaction fetched from a backend that could not locate it on the best chain — and
+    /// carries no evidence that a previously-recorded height is wrong. (Genuine un-mining is the
+    /// responsibility of `truncate_to_height`.)
+    #[test]
+    fn put_received_transparent_utxo_preserves_mined_height() {
+        use transparent::bundle::{OutPoint, TxOut};
+        use zcash_client_backend::{data_api::WalletRead as _, wallet::WalletTransparentOutput};
+        use zcash_keys::keys::UnifiedAddressRequest;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().height();
+        let taddr = *st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap()
+            .transparent()
+            .unwrap();
+
+        let mined_at = birthday + 100;
+        st.wallet_mut().update_chain_tip(mined_at + 10).unwrap();
+
+        let outpoint = OutPoint::fake();
+        let txout = TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into());
+
+        // Store the output as mined at `mined_at`.
+        let mined_utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            txout.clone(),
+            Some(mined_at),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&mined_utxo)
+            .unwrap();
+
+        let mined_height: Option<u32> = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT mined_height FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mined_height, Some(u32::from(mined_at)));
+
+        // Re-store the same output with an unknown mined height.
+        let unknown_height_utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            txout,
+            None,
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&unknown_height_utxo)
+            .unwrap();
+
+        // The previously-recorded mined height must be preserved.
+        let mined_height: Option<u32> = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT mined_height FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mined_height, Some(u32::from(mined_at)));
     }
 
     #[test]

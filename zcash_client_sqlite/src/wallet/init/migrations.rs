@@ -30,6 +30,7 @@ mod orchard_received_notes;
 mod orchard_shardtree;
 mod received_notes_nullable_nf;
 mod receiving_key_scopes;
+mod restore_scanned_mined_heights;
 mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
@@ -233,6 +234,7 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(add_transparent_receiver_address_index::Migration),
+        Box::new(restore_scanned_mined_heights::Migration),
     ]
 }
 
