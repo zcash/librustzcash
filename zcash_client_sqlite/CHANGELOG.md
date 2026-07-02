@@ -41,6 +41,15 @@ workspace.
   redundant records. A receiver duplicated across more than one account cannot be safely merged
   and causes the migration to abort.
 
+### Fixed
+- Storing a transparent output with an unknown mined height (for example, an output re-observed
+  via the mempool, or provided by a backend that could not locate its transaction on the best
+  chain) no longer clears a previously-recorded `mined_height` for the transaction that created
+  it. Previously this could mark a mined transaction as unmined; for coinbase transactions
+  (which never expire) the affected funds were then misclassified as pending rather than
+  spendable until the height was re-learned. A new migration repairs affected wallets by
+  restoring the mined height of any transaction that was observed in a scanned block.
+
 ## [0.21.1] - 2026-06-19
 
 ### Fixed
