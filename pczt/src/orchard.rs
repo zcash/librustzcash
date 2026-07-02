@@ -81,6 +81,36 @@ pub struct Bundle {
 /// an empty bundle for serialization purposes.
 pub(crate) const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
+/// The default Ironwood bundle flags: spends, outputs, and cross-address transfers
+/// enabled (bits 0, 1, and 2). This is the value the Creator sets on a new bundle,
+/// and the flag value of an empty bundle for serialization purposes.
+pub(crate) const IRONWOOD_SPENDS_OUTPUTS_AND_CROSS_ADDRESS_ENABLED: u8 = 0b0000_0111;
+
+/// The canonical empty Orchard-pool bundle: the form the Orchard slot of a PCZT takes
+/// when it carries no Orchard-protocol data. The Creator, the v1 decoder, and the v2
+/// decoder all produce exactly this value for an absent bundle, so that copies of a
+/// PCZT that take different serialization paths continue to merge successfully.
+pub(crate) const EMPTY_ORCHARD: Bundle = Bundle {
+    actions: Vec::new(),
+    flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+    value_sum: (0, false),
+    anchor: [0; 32],
+    note_version: NoteVersion::V2,
+    zkproof: None,
+    bsk: None,
+};
+
+/// The canonical empty Ironwood bundle; see [`EMPTY_ORCHARD`].
+pub(crate) const EMPTY_IRONWOOD: Bundle = Bundle {
+    actions: Vec::new(),
+    flags: IRONWOOD_SPENDS_OUTPUTS_AND_CROSS_ADDRESS_ENABLED,
+    value_sum: (0, false),
+    anchor: [0; 32],
+    note_version: NoteVersion::V3,
+    zkproof: None,
+    bsk: None,
+};
+
 /// Information about an Orchard action within a transaction.
 #[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Action {
@@ -565,43 +595,20 @@ pub(crate) mod v2 {
         }
     }
 
-    /// The canonical empty Orchard bundle reconstructed for omitted v2 bundles.
-    pub(crate) const EMPTY_BUNDLE: super::Bundle = super::Bundle {
-        actions: Vec::new(),
-        flags: super::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-        value_sum: (0, true),
-        anchor: [0; 32],
-        note_version: NoteVersion::V2,
-        zkproof: None,
-        bsk: None,
-    };
-
-    /// Whether `bundle` can be omitted from the v2 encoding.
-    ///
-    /// We check that actions, value sum, anchor, zkproof, and bsk are all
-    /// equal to the empty bundle. We do not check note version or flags, as
-    /// values can be defaulted there.
-    fn is_empty(bundle: &super::Bundle) -> bool {
-        bundle.actions == EMPTY_BUNDLE.actions
-            && bundle.value_sum == EMPTY_BUNDLE.value_sum
-            && bundle.anchor == EMPTY_BUNDLE.anchor
-            && bundle.zkproof == EMPTY_BUNDLE.zkproof
-            && bundle.bsk == EMPTY_BUNDLE.bsk
-    }
-
-    /// Encodes a logical Orchard bundle for the v2 PCZT format, owning the
-    /// decision of whether the bundle can be omitted. An [empty](is_empty) bundle
-    /// serializes to `None` and is dropped from the encoding; any other bundle is
-    /// converted via the [`Bundle`]-producing [`TryFrom`] impl. The reverse
-    /// direction is [`From<Bundle>`] plus [`EMPTY_BUNDLE`] for the omitted case.
-    impl TryFrom<super::Bundle> for Option<Bundle> {
-        type Error = crate::EncodingError;
-
-        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
-            (!is_empty(&bundle))
-                .then(|| Bundle::try_from(bundle))
-                .transpose()
-        }
+    /// Encodes a logical Orchard-protocol bundle for the v2 PCZT format, owning the
+    /// decision of whether the bundle can be omitted. A bundle that is exactly equal
+    /// to `empty` (the canonical empty bundle for its slot, [`super::EMPTY_ORCHARD`]
+    /// or [`super::EMPTY_IRONWOOD`]) serializes to `None` and is dropped from the
+    /// encoding; any other bundle is converted via the [`Bundle`]-producing
+    /// [`TryFrom`] impl. The reverse direction is [`From<Bundle>`] plus the canonical
+    /// empty bundle for the omitted case.
+    pub(crate) fn encode(
+        bundle: super::Bundle,
+        empty: &super::Bundle,
+    ) -> Result<Option<Bundle>, crate::EncodingError> {
+        (bundle != *empty)
+            .then(|| Bundle::try_from(bundle))
+            .transpose()
     }
 }
 

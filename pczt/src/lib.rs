@@ -124,7 +124,10 @@ pub mod v1 {
         type Error = super::EncodingError;
 
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
-            if !pczt.ironwood.actions.is_empty() {
+            // The v1 format cannot represent an Ironwood bundle in any state other
+            // than the canonical empty one; a parser of the v1 encoding will
+            // reconstruct exactly that value.
+            if pczt.ironwood != orchard::EMPTY_IRONWOOD {
                 return Err(super::EncodingError::UnsupportedTxVersion);
             }
 
@@ -144,15 +147,7 @@ pub mod v1 {
                 transparent: pczt.transparent,
                 sapling: pczt.sapling,
                 orchard: pczt.orchard.into(),
-                ironwood: orchard::Bundle {
-                    actions: vec![],
-                    flags: 0,
-                    value_sum: (0, true),
-                    anchor: [0; 32],
-                    note_version: orchard::NoteVersion::V3,
-                    zkproof: None,
-                    bsk: None,
-                },
+                ironwood: orchard::EMPTY_IRONWOOD,
             }
         }
     }
@@ -164,19 +159,6 @@ pub mod v2 {
     use serde::{Deserialize, Serialize};
 
     use crate::{common, orchard, sapling, transparent};
-
-    const EMPTY_TRANSPARENT: transparent::Bundle = transparent::Bundle {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-    };
-
-    const EMPTY_SAPLING: sapling::Bundle = sapling::Bundle {
-        spends: Vec::new(),
-        outputs: Vec::new(),
-        value_sum: 0,
-        anchor: [0; 32],
-        bsk: None,
-    };
 
     /// The in-memory type used for derived serialization of the v2 Pczt encoding.
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -213,10 +195,11 @@ pub mod v2 {
         fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
             Ok(Self {
                 global: pczt.global,
-                transparent: (pczt.transparent != EMPTY_TRANSPARENT).then_some(pczt.transparent),
-                sapling: (pczt.sapling != EMPTY_SAPLING).then_some(pczt.sapling),
-                orchard: pczt.orchard.try_into()?,
-                ironwood: pczt.ironwood.try_into()?,
+                transparent: (pczt.transparent != transparent::EMPTY_BUNDLE)
+                    .then_some(pczt.transparent),
+                sapling: (pczt.sapling != sapling::EMPTY_BUNDLE).then_some(pczt.sapling),
+                orchard: orchard::v2::encode(pczt.orchard, &orchard::EMPTY_ORCHARD)?,
+                ironwood: orchard::v2::encode(pczt.ironwood, &orchard::EMPTY_IRONWOOD)?,
             })
         }
     }
@@ -225,23 +208,16 @@ pub mod v2 {
         fn from(pczt: Pczt) -> Self {
             Self {
                 global: pczt.global,
-                transparent: pczt.transparent.unwrap_or(EMPTY_TRANSPARENT),
-                sapling: pczt.sapling.unwrap_or(EMPTY_SAPLING),
+                transparent: pczt.transparent.unwrap_or(transparent::EMPTY_BUNDLE),
+                sapling: pczt.sapling.unwrap_or(sapling::EMPTY_BUNDLE),
                 orchard: pczt
                     .orchard
                     .map(orchard::Bundle::from)
-                    .unwrap_or(orchard::v2::EMPTY_BUNDLE),
-                ironwood: pczt.ironwood.map(orchard::Bundle::from).unwrap_or_else(|| {
-                    orchard::Bundle {
-                        actions: Vec::new(),
-                        flags: orchard::ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-                        value_sum: (0, true),
-                        anchor: [0; 32],
-                        note_version: orchard::NoteVersion::V3,
-                        zkproof: None,
-                        bsk: None,
-                    }
-                }),
+                    .unwrap_or(orchard::EMPTY_ORCHARD),
+                ironwood: pczt
+                    .ironwood
+                    .map(orchard::Bundle::from)
+                    .unwrap_or(orchard::EMPTY_IRONWOOD),
             }
         }
     }
@@ -304,16 +280,22 @@ pub mod v2 {
         }
 
         #[test]
-        fn orchard_flags_and_note_version_do_not_prevent_omission() {
+        fn non_canonical_orchard_flags_and_note_version_prevent_omission() {
             let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
                 .unwrap()
                 .build();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
-            let encoded = Pczt::try_from(pczt).unwrap();
+            // A bundle whose flags or note version differ from the canonical empty
+            // bundle is not omitted, so that those fields round-trip losslessly.
+            let encoded = Pczt::try_from(pczt.clone()).unwrap();
+            assert!(encoded.orchard.is_some());
 
-            assert!(encoded.orchard.is_none());
+            let decoded = crate::Pczt::from(encoded);
+            assert_eq!(decoded.orchard, pczt.orchard);
+            assert_eq!(decoded.orchard.flags, 0);
+            assert_eq!(decoded.orchard.note_version, NoteVersion::V3);
         }
     }
 }

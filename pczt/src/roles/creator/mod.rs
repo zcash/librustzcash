@@ -10,7 +10,7 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    orchard::{Bundle as OrchardBundle, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED},
+    orchard::{Bundle as OrchardBundle, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED},
 };
 
 use zcash_protocol::consensus::BranchId;
@@ -160,7 +160,7 @@ impl Creator {
             orchard: OrchardBundle {
                 actions: vec![],
                 flags: self.orchard_flags,
-                value_sum: (0, true),
+                value_sum: (0, false),
                 anchor: self.orchard_anchor,
                 // The note-plaintext version is determined by the Orchard bundle version.
                 #[cfg(feature = "orchard")]
@@ -170,15 +170,7 @@ impl Creator {
                 zkproof: None,
                 bsk: None,
             },
-            ironwood: OrchardBundle {
-                actions: vec![],
-                flags: self.orchard_flags,
-                value_sum: (0, true),
-                anchor: self.orchard_anchor,
-                note_version: NoteVersion::V3,
-                zkproof: None,
-                bsk: None,
-            },
+            ironwood: crate::orchard::EMPTY_IRONWOOD,
         }
     }
 
@@ -231,41 +223,19 @@ impl Creator {
             transparent: parts
                 .transparent
                 .map(crate::transparent::Bundle::serialize_from)
-                .unwrap_or_else(|| crate::transparent::Bundle {
-                    inputs: vec![],
-                    outputs: vec![],
-                }),
+                .unwrap_or(crate::transparent::EMPTY_BUNDLE),
             sapling: parts
                 .sapling
                 .map(crate::sapling::Bundle::serialize_from)
-                .unwrap_or_else(|| crate::sapling::Bundle {
-                    spends: vec![],
-                    outputs: vec![],
-                    value_sum: 0,
-                    anchor: sapling::Anchor::empty_tree().to_bytes(),
-                    bsk: None,
-                }),
+                .unwrap_or(crate::sapling::EMPTY_BUNDLE),
             orchard: parts
                 .orchard
                 .map(OrchardBundle::serialize_from)
-                .unwrap_or_else(|| OrchardBundle {
-                    actions: vec![],
-                    flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-                    value_sum: (0, true),
-                    anchor: orchard::Anchor::empty_tree().to_bytes(),
-                    note_version: NoteVersion::V2,
-                    zkproof: None,
-                    bsk: None,
-                }),
-            ironwood: OrchardBundle {
-                actions: vec![],
-                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-                value_sum: (0, true),
-                anchor: orchard::Anchor::empty_tree().to_bytes(),
-                note_version: NoteVersion::V3,
-                zkproof: None,
-                bsk: None,
-            },
+                .unwrap_or(crate::orchard::EMPTY_ORCHARD),
+            ironwood: parts
+                .ironwood
+                .map(OrchardBundle::serialize_from)
+                .unwrap_or(crate::orchard::EMPTY_IRONWOOD),
         })
     }
 }
