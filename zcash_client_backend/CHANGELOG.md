@@ -13,9 +13,6 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
-- `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
-  an optional accessor that wallet backends can override to provide Ironwood
-  anchors and witnesses to the transaction builder.
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
@@ -88,6 +85,9 @@ workspace.
     height.
 
 ### Changed
+- `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
+  an optional accessor that wallet backends can override to provide Ironwood
+  anchors and witnesses to the transaction builder.
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
   `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
