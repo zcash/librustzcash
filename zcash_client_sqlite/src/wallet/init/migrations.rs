@@ -24,6 +24,7 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod ironwood_shardtree;
 mod ivk_item_cache;
 mod nullifier_map;
 mod orchard_received_notes;
@@ -184,6 +185,9 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(orchard_shardtree::Migration {
+            params: params.clone(),
+        }),
+        Box::new(ironwood_shardtree::Migration {
             params: params.clone(),
         }),
         Box::new(orchard_received_notes::Migration),
