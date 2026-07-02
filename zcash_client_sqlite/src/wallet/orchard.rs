@@ -290,6 +290,27 @@ pub(crate) fn select_unspent_note_meta(
     )
 }
 
+/// The `note_version` recorded for Orchard notes stored in `orchard_received_notes`.
+///
+/// Ironwood notes ([`IRONWOOD_NOTE_VERSION`]) are stored in the same table under a distinct note
+/// version, so that an Orchard action and an Ironwood action in the same transaction can share an
+/// action index without violating the `(transaction_id, action_index, note_version)` uniqueness
+/// constraint.
+pub(crate) const ORCHARD_NOTE_VERSION: i64 = 2;
+
+/// The `note_version` recorded for Ironwood notes stored in `orchard_received_notes`.
+///
+/// See [`ORCHARD_NOTE_VERSION`]. The two versions match the Orchard protocol revision: pre-NU6.3
+/// Orchard notes are version 2, and NU6.3 Ironwood notes are version 3.
+// Referenced by the migration tests and by the invariant assertion below; the Ironwood
+// note-storage write path that uses it at runtime lands with Ironwood scanning.
+#[allow(dead_code)]
+pub(crate) const IRONWOOD_NOTE_VERSION: i64 = 3;
+
+// The two note versions must differ so that an Orchard and an Ironwood action in the same
+// transaction can share an action index under the widened uniqueness constraint.
+const _: () = assert!(ORCHARD_NOTE_VERSION != IRONWOOD_NOTE_VERSION);
+
 /// Records the specified shielded output as having been received.
 ///
 /// This implementation relies on the facts that:
@@ -315,15 +336,15 @@ pub(crate) fn put_received_note<
             transaction_id, action_index, account_id, address_id,
             diversifier, value, rho, rseed, memo, nf,
             is_change, commitment_tree_position,
-            recipient_key_scope
+            recipient_key_scope, note_version
         )
         VALUES (
             :transaction_id, :action_index, :account_id, :address_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
             :is_change, :commitment_tree_position,
-            :recipient_key_scope
+            :recipient_key_scope, :note_version
         )
-        ON CONFLICT (transaction_id, action_index) DO UPDATE
+        ON CONFLICT (transaction_id, action_index, note_version) DO UPDATE
         SET account_id = :account_id,
             address_id = :address_id,
             diversifier = :diversifier,
@@ -356,6 +377,7 @@ pub(crate) fn put_received_note<
         ":is_change": output.is_change(),
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
         ":recipient_key_scope": output.recipient_key_scope().map(|s| KeyScope::from(s).encode()),
+        ":note_version": ORCHARD_NOTE_VERSION,
     ];
 
     let received_note_id = stmt_upsert_received_note

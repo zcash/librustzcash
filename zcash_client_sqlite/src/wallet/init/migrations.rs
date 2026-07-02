@@ -27,6 +27,7 @@ mod initial_setup;
 mod ironwood_shardtree;
 mod ivk_item_cache;
 mod nullifier_map;
+mod orchard_note_version_uniqueness;
 mod orchard_received_notes;
 mod orchard_shardtree;
 mod received_notes_nullable_nf;
@@ -236,6 +237,7 @@ pub(super) fn all_migrations<
         Box::new(witness_stabilized_notes::Migration {
             params: params.clone(),
         }),
+        Box::new(orchard_note_version_uniqueness::Migration),
         Box::new(add_transparent_receiver_address_index::Migration),
     ]
 }
@@ -430,9 +432,11 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashSet;
 
+    #[cfg(feature = "orchard")]
+    use proptest::prelude::*;
     use rusqlite::Connection;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
@@ -444,6 +448,46 @@ mod tests {
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
     };
+
+    /// A synthetic set of Orchard note payload values, for exercising migrations that touch the
+    /// `orchard_received_notes` table.
+    ///
+    /// The identity columns (`transaction_id`, `action_index`, `nf`) are assigned by the caller so
+    /// that they stay unique; this strategy fuzzes only the note payload. Kept in the shared
+    /// migration-test module so later migration tests can reuse it.
+    #[cfg(feature = "orchard")]
+    #[derive(Clone, Debug)]
+    pub(crate) struct ArbOrchardNote {
+        pub(crate) value: i64,
+        pub(crate) diversifier: [u8; 11],
+        pub(crate) rho: [u8; 32],
+        pub(crate) rseed: [u8; 32],
+        pub(crate) is_change: bool,
+        pub(crate) memo: Option<Vec<u8>>,
+    }
+
+    #[cfg(feature = "orchard")]
+    prop_compose! {
+        /// A strategy generating arbitrary [`ArbOrchardNote`] payload values. Note values are
+        /// constrained to the non-negative `i64` range, matching the on-chain 2^63 value bound.
+        pub(crate) fn arb_orchard_note()(
+            value in 0i64..=i64::MAX,
+            diversifier in any::<[u8; 11]>(),
+            rho in any::<[u8; 32]>(),
+            rseed in any::<[u8; 32]>(),
+            is_change in any::<bool>(),
+            memo in proptest::option::of(proptest::collection::vec(any::<u8>(), 0..64)),
+        ) -> ArbOrchardNote {
+            ArbOrchardNote {
+                value,
+                diversifier,
+                rho,
+                rseed,
+                is_change,
+                memo,
+            }
+        }
+    }
 
     /// Tests that we can migrate from a completely empty wallet database to the target
     /// migrations.

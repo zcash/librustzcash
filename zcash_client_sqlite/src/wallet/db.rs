@@ -470,7 +470,8 @@ CREATE TABLE "orchard_received_notes" (
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (transaction_id, action_index)
+    note_version INTEGER NOT NULL DEFAULT 2,
+    UNIQUE (transaction_id, action_index, note_version)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
 CREATE INDEX idx_orchard_received_notes_account ON orchard_received_notes (
