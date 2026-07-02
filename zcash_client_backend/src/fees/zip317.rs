@@ -673,6 +673,7 @@ mod tests {
                 &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
             ),
             &orchard_fees::EmptyBundleView,
+            false,
             None,
             &(),
         );
@@ -714,7 +715,7 @@ mod tests {
             &[] as &[Infallible],
         );
         let orchard_view = (
-            crate::ANY_ORCHARD_BUNDLE_VERSION,
+            ::orchard::bundle::BundleVersion::orchard_v2(),
             &[] as &[Infallible],
             &orchard_outputs[..],
         );
@@ -781,7 +782,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             DustOutputPolicy::default(),
         );
 
@@ -804,7 +805,7 @@ mod tests {
             &[] as &[Infallible],
         );
         let orchard_view = (
-            crate::ANY_ORCHARD_BUNDLE_VERSION,
+            ::orchard::bundle::BundleVersion::orchard_v2(),
             &[] as &[Infallible],
             &orchard_outputs[..],
         );

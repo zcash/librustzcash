@@ -745,21 +745,13 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // action counts (and hence the fee) match the transaction that gets
             // built. We reuse the builder's own routing predicate so the proposal
             // and build paths cannot drift.
-            #[cfg(all(
-                feature = "orchard",
-                any(zcash_unstable = "nu6.3", zcash_unstable = "nu7")
-            ))]
+            #[cfg(feature = "orchard")]
             let orchard_outputs_are_ironwood = super::orchard_outputs_to_ironwood(
                 params,
                 target_height,
                 #[cfg(feature = "unstable")]
                 proposed_version,
             );
-            #[cfg(all(
-                feature = "orchard",
-                not(any(zcash_unstable = "nu6.3", zcash_unstable = "nu7"))
-            ))]
-            let orchard_outputs_are_ironwood = false;
 
             // The Orchard bundle keeps the Orchard spends; its outputs move to the
             // Ironwood bundle when routing is active. Ironwood has no spends yet
@@ -767,11 +759,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // so `&orchard_inputs[..0]` is an empty slice of the correct type.
             #[cfg(feature = "orchard")]
             let orchard_view = (
-                // TODO: thread the target-height-selected Orchard `BundleVersion`
-                // here rather than this placeholder, which only approximates the
-                // Orchard action count for paths that restrict cross-address
-                // transfers.
-                crate::ANY_ORCHARD_BUNDLE_VERSION,
+                orchard_bundle_version_for_height(params, target_height),
                 &orchard_inputs[..],
                 if orchard_outputs_are_ironwood {
                     &orchard_outputs[..0]
