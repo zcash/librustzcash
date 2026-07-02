@@ -728,15 +728,21 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
     // exposure, and spend-search state already attached to the imported receiver carry over and
     // become spendable.
     //
+    // The import may have been made under a *different* account: deriving the address is itself
+    // proof that the deriving account owns it, so in that case the row's account attribution
+    // (and that of any outputs received at the address) moves to the deriving account. The
+    // receiver-uniqueness index guarantees at most one row per receiver, and the deriving
+    // account cannot already hold a row at this (key scope, child index) — such a row would be
+    // this same receiver — so retargeting the row cannot violate the address-tuple constraint.
+    //
     // The lookup below reads only columns present at every schema version at which
     // `store_address_range` runs, so it is safe when this function is called from a migration.
     // The upgrade `UPDATE` clears the `imported_transparent_receiver_*` columns, so it is only
     // ever prepared and executed when a `Foreign` row exists — which cannot occur before those
     // columns have been added.
     let mut stmt_lookup_foreign = conn.prepare_cached(
-        "SELECT id FROM addresses
-         WHERE account_id = :account_id
-           AND cached_transparent_receiver_address = :transparent_address
+        "SELECT id, account_id FROM addresses
+         WHERE cached_transparent_receiver_address = :transparent_address
            AND key_scope = :foreign_scope",
     )?;
 
@@ -769,21 +775,21 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
         let child_index = transparent_child_index.index();
         let flags = receiver_flags.bits();
 
-        let foreign_id: Option<i64> = stmt_lookup_foreign
+        let foreign_row: Option<(i64, i64)> = stmt_lookup_foreign
             .query_row(
                 named_params![
-                    ":account_id": account_id.0,
                     ":transparent_address": transparent_address_enc,
                     ":foreign_scope": KeyScope::Foreign.encode(),
                 ],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
 
-        if let Some(foreign_id) = foreign_id {
+        if let Some((foreign_id, foreign_account)) = foreign_row {
             conn.execute(
                 "UPDATE addresses
-                 SET key_scope = :key_scope,
+                 SET account_id = :account_id,
+                     key_scope = :key_scope,
                      diversifier_index_be = :diversifier_index_be,
                      address = :address,
                      transparent_child_index = :transparent_child_index,
@@ -792,6 +798,7 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                      imported_transparent_receiver_script = NULL
                  WHERE id = :id",
                 named_params![
+                    ":account_id": account_id.0,
                     ":key_scope": derived_scope,
                     ":diversifier_index_be": diversifier_index_be,
                     ":address": address_enc,
@@ -800,6 +807,27 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
                     ":id": foreign_id,
                 ],
             )?;
+
+            // If the import was recorded under a different account, the outputs received at
+            // the address follow the (derivation-proven) attribution to this account.
+            if foreign_account != account_id.0 {
+                for table in [
+                    "transparent_received_outputs",
+                    "sapling_received_notes",
+                    "orchard_received_notes",
+                ] {
+                    conn.execute(
+                        &format!(
+                            "UPDATE {table} SET account_id = :account_id
+                             WHERE address_id = :address_id"
+                        ),
+                        named_params![
+                            ":account_id": account_id.0,
+                            ":address_id": foreign_id,
+                        ],
+                    )?;
+                }
+            }
         } else {
             stmt_insert_address.execute(named_params![
                 ":account_id": account_id.0,
@@ -2836,6 +2864,138 @@ mod tests {
             )
             .unwrap();
         assert_eq!(utxo_addr_id, foreign_id);
+
+        tx.commit().unwrap();
+    }
+
+    /// Deriving an address that was imported as a standalone (`Foreign`) receiver under a
+    /// *different* account also upgrades the existing row in place: deriving the address is
+    /// itself proof that the deriving account owns it, so the row's account attribution moves
+    /// to the deriving account, along with the account attribution of any outputs received at
+    /// the address. Without this, the derive would fail on the receiver-uniqueness index.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_upgrades_receiver_imported_under_other_account() {
+        use rusqlite::named_params;
+        use transparent::address::TransparentAddress;
+        use zcash_client_backend::data_api::{AccountBirthday, chain::ChainState};
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+        use crate::wallet::encoding::KeyScope;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_a_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // A second account, under which the address will be imported.
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
+                BlockHash([0; 32]),
+            ),
+            None,
+        );
+        let seed_b = Secret::new(vec![42u8; 32]);
+        let (account_b_uuid, _) = st
+            .wallet_mut()
+            .create_account("b", &seed_b, &birthday, None)
+            .unwrap();
+
+        // An address we pretend was imported standalone under account B, and is derivable by
+        // account A at child index 100 (beyond the default external gap of 10).
+        let taddr = TransparentAddress::PublicKeyHash([0x22; 20]);
+        let taddr_enc = taddr.encode(&network);
+        let child_index = NonHardenedChildIndex::from_index(100).unwrap();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_a = get_account_ref(&tx, account_a_uuid).unwrap();
+        let account_b = get_account_ref(&tx, account_b_uuid).unwrap();
+
+        // The standalone (`Foreign`) row under account B.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+             VALUES (:account_id, :foreign, :address, :taddr,
+                  X'020000000000000000000000000000000000000000000000000000000000000004', 1, 55)",
+            named_params! {
+                ":account_id": account_b.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        // A UTXO attached to the imported row, attributed to account B.
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height) VALUES (1, X'00', 1)",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO transparent_received_outputs
+                 (transaction_id, output_index, account_id, address, script, value_zat, address_id)
+             VALUES (1, 0, :account_id, :taddr, X'00', 100000, :addr_id)",
+            named_params! { ":account_id": account_b.0, ":taddr": &taddr_enc, ":addr_id": foreign_id },
+        )
+        .unwrap();
+
+        // Account A derives the same address.
+        super::store_address_range(
+            &tx,
+            &network,
+            account_a,
+            TransparentKeyScope::EXTERNAL,
+            vec![(Address::from(taddr), taddr, child_index)],
+        )
+        .unwrap();
+
+        // Exactly one row remains for the receiver: the upgraded former-import row, now
+        // belonging to account A.
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, account_id, key_scope, transparent_child_index,
+                        imported_transparent_receiver_pubkey IS NULL
+                 FROM addresses WHERE cached_transparent_receiver_address = :taddr",
+            )
+            .unwrap();
+        let rows: Vec<(i64, i64, i64, Option<u32>, bool)> = stmt
+            .query_map(named_params! { ":taddr": &taddr_enc }, |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+
+        assert_eq!(rows.len(), 1);
+        let (id, account_id, key_scope, child, pubkey_is_null) = rows[0];
+        assert_eq!(id, foreign_id, "upgraded in place, same id");
+        assert_eq!(
+            account_id, account_a.0,
+            "attribution moved to the deriving account"
+        );
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert_eq!(child, Some(100));
+        assert!(pubkey_is_null, "standalone-import column cleared");
+
+        // The UTXO followed the row, and its account attribution moved with it.
+        let (utxo_addr_id, utxo_account_id): (i64, i64) = tx
+            .query_row(
+                "SELECT address_id, account_id FROM transparent_received_outputs
+                 WHERE transaction_id = 1 AND output_index = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((utxo_addr_id, utxo_account_id), (foreign_id, account_a.0));
 
         tx.commit().unwrap();
     }
