@@ -602,6 +602,51 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_v3_change_counts_spends_and_outputs_separately() {
+        use crate::fees::{sapling as sapling_fees, tests::TestOrchardInput};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Orchard,
+            DustOutputPolicy::default(),
+        );
+
+        // Under the post-NU6.3 Orchard pool restriction (cross-address transfers
+        // disabled), every spend and output occupies its own action: one spend plus a
+        // payment and a change output make three logical actions, where the legacy
+        // policy would count `max(1, 2) == 2`.
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu6_3)
+                .unwrap()
+                .into(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
+            &sapling_fees::EmptyBundleView,
+            &(
+                ::orchard::bundle::BundleVersion::orchard_v3(),
+                &[TestOrchardInput {
+                    note_id: 0,
+                    value: Zatoshis::const_from_u64(80000),
+                }][..],
+                &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
+            ),
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::orchard(Zatoshis::const_from_u64(35000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(15000)
+        );
+    }
+
+    #[test]
     fn change_with_transparent_payments_implicitly_allowing_zero_change() {
         change_with_transparent_payments(DustOutputPolicy::default())
     }

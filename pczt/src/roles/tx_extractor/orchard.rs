@@ -1,8 +1,4 @@
-use orchard::{
-    Bundle,
-    bundle::Authorized,
-    circuit::{OrchardCircuitVersion, VerifyingKey},
-};
+use orchard::{Bundle, bundle::Authorized, circuit::VerifyingKey};
 use rand_core::OsRng;
 use zcash_protocol::value::ZatBalance;
 
@@ -11,26 +7,15 @@ pub(super) fn verify_bundle(
     orchard_vk: Option<&VerifyingKey>,
     sighash: [u8; 32],
 ) -> Result<(), OrchardError> {
-    if let Some(vk) = orchard_vk {
-        verify_bundle_with_key(bundle, vk, sighash)
-    } else {
-        // PCZT extraction produces new Orchard bundles using the NU6.2 fixed
-        // circuit.
-        let vk = VerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
-        verify_bundle_with_key(bundle, &vk, sighash)
-    }
-}
-
-pub(super) fn verify_ironwood_bundle(
-    bundle: &Bundle<Authorized, ZatBalance>,
-    orchard_vk: Option<&VerifyingKey>,
-    sighash: [u8; 32],
-) -> Result<(), OrchardError> {
-    if let Some(vk) = orchard_vk {
-        verify_bundle_with_key(bundle, vk, sighash)
-    } else {
-        let vk = VerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
-        verify_bundle_with_key(bundle, &vk, sighash)
+    match orchard_vk {
+        Some(vk) => verify_bundle_with_key(bundle, vk, sighash),
+        // The circuit version is fixed by the bundle's own `BundleVersion`, which
+        // `extract_tx_data` derives from the PCZT's consensus branch ID.
+        None => verify_bundle_with_key(
+            bundle,
+            &VerifyingKey::build(bundle.bundle_version().circuit_version()),
+            sighash,
+        ),
     }
 }
 

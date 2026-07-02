@@ -404,12 +404,17 @@ impl Pczt {
             ironwood,
         } = self;
 
+        let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
+            .map_err(|_| ExtractError::UnknownConsensusBranchId)?;
+
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
         let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
         let orchard = orchard
-            .into_orchard_parsed()
+            .into_parsed_with_version(crate::orchard::orchard_bundle_version_for_branch(
+                consensus_branch_id,
+            ))
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
             .into_ironwood_parsed()
@@ -423,9 +428,6 @@ impl Pczt {
                 version_group_id,
             }),
         }?;
-
-        let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
-            .map_err(|_| ExtractError::UnknownConsensusBranchId)?;
 
         let lock_time = determine_lock_time(&global, transparent.inputs())
             .ok_or(ExtractError::IncompatibleLockTimes)?;

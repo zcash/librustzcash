@@ -138,7 +138,8 @@ pub(crate) fn transparent_outputs_hash<T: Borrow<TxOut>>(vout: &[T]) -> Blake2bH
     h.finalize()
 }
 
-/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest)
+/// Implements [ZIP 244 section T.3a](https://zips.z.cash/zip-0244#t-3a-sapling-spends-digest);
+/// the v6 variant is specified in [ZIP 229](https://zips.z.cash/zip-0229).
 ///
 /// Write disjoint parts of each Sapling shielded spend to a pair of hashes:
 /// * \[nullifier*\] - personalized with ZCASH_SAPLING_SPENDS_COMPACT_HASH_PERSONALIZATION
@@ -263,7 +264,9 @@ pub(crate) fn hash_transparent_txid_data(
     h.finalize()
 }
 
-/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
+/// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest);
+/// for v6 transactions the Sapling digest follows
+/// [ZIP 229](https://zips.z.cash/zip-0229).
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     version: TxVersion,
     bundle: &sapling::Bundle<A, ZatBalance>,
@@ -504,8 +507,9 @@ pub fn to_txid(
 pub struct BlockTxCommitmentDigester;
 
 impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
-    /// We use the header digest to pass the transaction ID into
-    /// where it needs to be used for personalization string construction.
+    /// We use the header digest to pass the transaction version and consensus
+    /// branch ID into where they need to be used for personalization string
+    /// construction.
     type HeaderDigest = (TxVersion, BranchId);
     type TransparentDigest = Blake2bHash;
     type SaplingDigest = Blake2bHash;

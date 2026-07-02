@@ -618,4 +618,20 @@ pub(crate) mod tests {
             self.value
         }
     }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) struct TestOrchardInput {
+        pub note_id: u32,
+        pub value: Zatoshis,
+    }
+
+    #[cfg(feature = "orchard")]
+    impl super::orchard::InputView<u32> for TestOrchardInput {
+        fn note_id(&self) -> &u32 {
+            &self.note_id
+        }
+        fn value(&self) -> Zatoshis {
+            self.value
+        }
+    }
 }
