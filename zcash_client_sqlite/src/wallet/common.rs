@@ -14,7 +14,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
 };
@@ -62,14 +62,15 @@ pub(crate) trait ErrUnsupportedPool {
 }
 
 pub(crate) fn table_constants<E: ErrUnsupportedPool>(
-    shielded_protocol: ShieldedProtocol,
+    shielded_protocol: ShieldedPool,
 ) -> Result<TableConstants, E> {
     match shielded_protocol {
-        ShieldedProtocol::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
+        ShieldedPool::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
         #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
+        ShieldedPool::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        ShieldedPool::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     }
 }
 
@@ -154,7 +155,7 @@ fn unscanned_tip_exists(
 /// select a few too many nullifiers, it's not a big deal.
 pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
     conn: &Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     query: NullifierQuery,
     parse_nf: F,
 ) -> Result<Vec<(AccountUuid, N)>, SqliteClientError> {
@@ -205,7 +206,7 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     params: &P,
     txid: &TxId,
     index: u32,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     to_spendable_note: F,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
@@ -304,7 +305,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
@@ -361,7 +362,7 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_received_note: F,
     note_request: NoteRequest,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
@@ -520,7 +521,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
@@ -726,7 +727,7 @@ impl UnspentNoteMeta {
 
 pub(crate) fn select_unspent_note_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
@@ -788,7 +789,7 @@ pub(crate) fn select_unspent_note_meta(
 
 pub(crate) fn unspent_notes_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     account: AccountUuid,
     filter: &NoteFilter,
@@ -971,7 +972,7 @@ mod tests {
         AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedProtocol, value::Zatoshis};
+    use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
     use crate::testing::{BlockCache, db::TestDbFactory};
 
@@ -994,7 +995,7 @@ mod tests {
 
         let unspent_note_meta = super::select_unspent_note_meta(
             st.wallet().conn(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             birthday_height,
             h,
         )

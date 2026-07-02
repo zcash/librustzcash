@@ -17,7 +17,7 @@ use zcash_client_backend::{
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
+    ShieldedPool, TxId,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -32,7 +32,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get("id")?);
+    let note_id = ReceivedNoteId(ShieldedPool::Sapling, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let output_index = row.get("output_index")?;
     let diversifier = {
@@ -144,7 +144,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         params,
         txid,
         index,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         target_height,
         to_received_note,
     )
@@ -172,7 +172,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         exclude,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         to_received_note,
     )
 }
@@ -184,7 +184,7 @@ pub(crate) fn select_unspent_note_meta(
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         wallet_birthday,
         anchor_height,
     )
@@ -200,7 +200,7 @@ pub(crate) fn get_sapling_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    super::common::get_nullifiers(conn, ShieldedProtocol::Sapling, query, |nf_bytes| {
+    super::common::get_nullifiers(conn, ShieldedPool::Sapling, query, |nf_bytes| {
         sapling::Nullifier::from_slice(nf_bytes).map_err(|_| {
             SqliteClientError::CorruptedData("unable to parse Sapling nullifier".to_string())
         })

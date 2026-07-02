@@ -19,9 +19,7 @@ use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId, consensus::BlockHeight, value::BalanceError,
-};
+use zcash_protocol::{PoolType, ShieldedPool, TxId, consensus::BlockHeight, value::BalanceError};
 use zip32::DiversifierIndex;
 
 use crate::{
@@ -130,7 +128,7 @@ pub enum SqliteClientError {
     /// added to the wallet when the error occurred.
     PutBlocksCommitmentTree {
         /// The shielded pool whose note commitment tree was being updated when the error occurred.
-        pool: ShieldedProtocol,
+        pool: ShieldedPool,
         /// The range of block heights that were being added to the wallet when the error
         /// occurred.
         block_range: Range<BlockHeight>,
@@ -144,7 +142,7 @@ pub enum SqliteClientError {
     /// truncated to when the error occurred.
     TruncateCommitmentTree {
         /// The shielded pool whose note commitment tree was being updated when the error occurred.
-        pool: ShieldedProtocol,
+        pool: ShieldedPool,
         /// The block height that the wallet was being truncated to when the error occurred.
         height: BlockHeight,
         /// The underlying note commitment tree error.

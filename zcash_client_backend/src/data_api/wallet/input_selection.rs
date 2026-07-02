@@ -16,7 +16,7 @@ use zcash_primitives::transaction::fees::{
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -803,11 +803,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
             let selectable_pools = {
                 if orchard_supported && sapling_supported {
-                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard][..]
+                    &[ShieldedPool::Sapling, ShieldedPool::Orchard][..]
                 } else if orchard_supported {
-                    &[ShieldedProtocol::Orchard][..]
+                    &[ShieldedPool::Orchard][..]
                 } else if sapling_supported {
-                    &[ShieldedProtocol::Sapling][..]
+                    &[ShieldedPool::Sapling][..]
                 } else {
                     &[]
                 }
@@ -862,7 +862,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     wallet_db: &InputSourceT,
     fee_rule: &FeeRuleT,
     source_account: InputSourceT::AccountId,
-    spend_pools: &[ShieldedProtocol],
+    spend_pools: &[ShieldedPool],
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     mode: MaxSpendMode,

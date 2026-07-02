@@ -14,7 +14,7 @@ use zcash_primitives::{
     transaction::{Transaction, components::sapling::zip212_enforcement},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 
@@ -597,7 +597,7 @@ fn tree_sizes_around(
     activation_height: Option<BlockHeight>,
     prior_tree_size: Option<u32>,
     mut output_counts: impl Iterator<Item = usize>,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
 ) -> Result<(u32, u32), ScanError> {
     let start_tree_size = match prior_tree_size {
         Some(size) => size,
@@ -670,7 +670,7 @@ impl PositionTracker {
                 b.tx.sapling_bundle()
                     .map_or(0, |bd| bd.shielded_outputs().len())
             }),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
         )?;
 
         #[cfg(feature = "orchard")]
@@ -680,7 +680,7 @@ impl PositionTracker {
             prior_block_metadata.and_then(|m| m.orchard_tree_size()),
             vtx.iter()
                 .map(|b| b.tx.orchard_bundle().map_or(0, |bd| bd.actions().len())),
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
         )?;
 
         Ok(Self {
@@ -762,7 +762,7 @@ mod tests {
 
     // The behaviour of `tree_sizes_around` is independent of the shielded protocol (the
     // protocol is only echoed back in errors), so these properties are checked for a
-    // `ShieldedProtocol` drawn uniformly at random via `arb_protocol`.
+    // `ShieldedPool` drawn uniformly at random via `arb_protocol`.
     proptest! {
         /// A known prior tree size is the starting point, and each transaction's outputs
         /// are summed onto it to reach the final size. An empty block (no transactions, or

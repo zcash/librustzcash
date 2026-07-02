@@ -35,7 +35,7 @@ use zcash_primitives::{
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
@@ -945,9 +945,9 @@ where
         let input_selector = GreedyInputSelector::new();
 
         #[cfg(not(feature = "orchard"))]
-        let fallback_change_pool = ShieldedProtocol::Sapling;
+        let fallback_change_pool = ShieldedPool::Sapling;
         #[cfg(feature = "orchard")]
-        let fallback_change_pool = ShieldedProtocol::Orchard;
+        let fallback_change_pool = ShieldedPool::Orchard;
 
         let change_strategy = standard::SingleOutputChangeStrategy::new(
             StandardFeeRule::Zip317,
@@ -1071,7 +1071,7 @@ where
             self.wallet_mut(),
             &network,
             spend_from_account,
-            &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+            &[ShieldedPool::Sapling, ShieldedPool::Orchard],
             fee_rule,
             to,
             memo,
@@ -1092,7 +1092,7 @@ where
         amount: Zatoshis,
         memo: Option<MemoBytes>,
         change_memo: Option<MemoBytes>,
-        fallback_change_pool: ShieldedProtocol,
+        fallback_change_pool: ShieldedPool,
     ) -> Result<
         Proposal<StandardFeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<
@@ -1451,7 +1451,7 @@ impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
 pub fn single_output_change_strategy<DbT: InputSource>(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
 ) -> standard::SingleOutputChangeStrategy<DbT> {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
     standard::SingleOutputChangeStrategy::new(
@@ -2714,7 +2714,7 @@ impl InputSource for MockWalletDb {
     fn get_spendable_note(
         &self,
         _txid: &TxId,
-        _protocol: ShieldedProtocol,
+        _protocol: ShieldedPool,
         _index: u32,
         _target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
@@ -2725,7 +2725,7 @@ impl InputSource for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _target_value: TargetValue,
-        _sources: &[ShieldedProtocol],
+        _sources: &[ShieldedPool],
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
@@ -2736,7 +2736,7 @@ impl InputSource for MockWalletDb {
     fn select_unspent_notes(
         &self,
         _account: Self::AccountId,
-        _sources: &[ShieldedProtocol],
+        _sources: &[ShieldedPool],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
