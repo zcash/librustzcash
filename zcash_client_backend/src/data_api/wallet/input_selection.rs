@@ -190,6 +190,13 @@ pub trait InputSelector {
     ///
     /// If insufficient funds are available to satisfy the required outputs for the shielding
     /// request, this operation must fail and return [`InputSelectorError::InsufficientFunds`].
+    ///
+    /// `spend_policy` (behind the `transparent-inputs` feature flag) controls whether, and
+    /// from which addresses, the account's transparent UTXOs may additionally be spent to
+    /// help satisfy the request. Under the default [`TransparentSpendPolicy::ShieldedOnly`],
+    /// implementations must not spend transparent UTXOs even as a fallback; other policies
+    /// require the caller to have explicitly opted in, since spending transparent funds
+    /// links the chosen addresses on-chain.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_transaction<ParamsT, ChangeT>(
@@ -425,12 +432,12 @@ const MAX_BLOCK_BYTES: usize = 2_000_000;
 const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 
 #[cfg(feature = "transparent-inputs")]
-/// A quick and easy non-empty `BTreeSet`.
-// This can be lifted out to a utils module or a separate crate later if
-// need be.
+/// A `BTreeSet` that is guaranteed to contain at least one element.
 #[derive(Clone)]
 pub struct NonEmptyBTreeSet<T> {
+    /// The guaranteed-present first element of the set.
     pub head: T,
+    /// The remaining elements of the set, if any.
     pub tail: BTreeSet<T>,
 }
 
@@ -450,8 +457,7 @@ pub enum TransparentSpendPolicy {
     /// potentially linking them. (`ANY_TADDR`)
     AnyAccountTaddr,
     /// Spend only from the specified transparent addresses, intentionally
-    /// linking them. (Wrap a non-empty set in an immutable type to enforce
-    /// safe construction, per AGENTS.md.)
+    /// linking them.
     FromAddresses(NonEmptyBTreeSet<TransparentAddress>),
 }
 

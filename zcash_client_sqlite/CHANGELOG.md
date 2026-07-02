@@ -24,6 +24,23 @@ workspace.
   during a truncation operation (`truncate_to_height` or
   `truncate_to_chain_state`). Previously such errors surfaced as the generic
   `CommitmentTree` variant without the affected pool or target height.
+- The `InputSource::get_spendable_transparent_outputs` implementation now
+  accepts `CoinbaseFilter::NonCoinbaseOnly`, restricting the SQL query to
+  outputs that are not from coinbase transactions. Outputs with an unknown
+  `tx_index` are treated as non-coinbase.
+- Added an implementation of `InputSource::select_spendable_transparent_outputs`
+  (behind the `transparent-inputs` feature flag). The query orders eligible
+  outputs by descending value (backed by a new
+  `idx_transparent_received_outputs_value_zat` index) and accumulates them,
+  recomputing the cumulative ZIP 317 marginal fee cost of the gathered
+  inputs via the supplied `fee_rule: &StandardFeeRule` at each step, stopping
+  once the post-fee accumulated value meets the requested `TargetValue`. This
+  bounds the work done to the prefix of the table needed to satisfy the
+  request, so a wallet with many small transparent UTXOs does not have to
+  materialize its full UTXO set to build a small transfer.
+- `zcash_client_sqlite::error::SqliteClientError::FeeRuleError`, a new variant
+  (behind the `transparent-inputs` feature flag) that wraps an error produced
+  by a `FeeRule` during transparent input selection.
 
 ### Changed
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`,
@@ -43,19 +60,6 @@ workspace.
   record over an imported one), repoints the affected received outputs to it, and deletes the
   redundant records. A receiver duplicated across more than one account cannot be safely merged
   and causes the migration to abort.
-- The `InputSource::select_spendable_transparent_outputs` implementation
-  (behind the `transparent-inputs` feature flag) now takes a
-  `fee_rule: &StandardFeeRule` parameter in place of the previous
-  `estimated_additional_fees: Option<Zatoshis>` static headroom. The gather
-  loop recomputes the cumulative ZIP 317 marginal fee cost of the transparent
-  inputs examined so far at each step (maintaining a running total of input
-  sizes, so the fee recomputation remains O(1) per candidate UTXO), and stops
-  once the post-fee accumulated value meets the requested `TargetValue`. This
-  removes the need for callers to guess a fee headroom up front, and avoids
-  the previously-common second round trip to correct an under-estimated one.
-- `zcash_client_sqlite::error::SqliteClientError::FeeRuleError`, a new variant
-  (behind the `transparent-inputs` feature flag) that wraps an error produced
-  by a `FeeRule` during transparent input selection.
 
 ## [0.21.1] - 2026-06-19
 
@@ -147,16 +151,7 @@ workspace.
 - The `InputSource::get_spendable_transparent_outputs` implementation now
   accepts an `output_filter: TransparentOutputFilter` parameter. When set to
   `CoinbaseOnly`, the SQL query restricts results to outputs from coinbase
-  transactions (identified by `tx_index = 0`); when set to `NonCoinbaseOnly`,
-  it restricts results to outputs that are not from coinbase transactions.
-  Outputs with an unknown `tx_index` are treated as non-coinbase.
-- Added an implementation of `InputSource::select_spendable_transparent_outputs`
-  (behind the `transparent-inputs` feature flag). The query orders eligible
-  outputs by descending value and stops as soon as the requested `TargetValue`
-  is met, so a wallet with many small transparent UTXOs does not have to
-  materialize the full UTXO set to build a small transfer. A new
-  `idx_transparent_received_outputs_value_zat` index (added by a new migration)
-  backs the value-descending ordering.
+  transactions (identified by `tx_index = 0`).
 - Migrated to `orchard 0.13`, `sapling-crypto 0.7`.
 - Renamed `zcash_client_sqlite::error::PubkeyImportConflict` to
   `zcash_client_sqlite::error::StandaloneImportConflict`

@@ -1405,8 +1405,8 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 /// The query is a single SQL statement that orders eligible UTXOs by descending value (using
 /// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
 /// values until the post-fee bound is met. This bounds the work done in SQLite to the prefix
-/// of the table that can possibly satisfy the request, rather than materializing the wallet's
-/// full UTXO set as the unbounded gather did.
+/// of the table that can possibly satisfy the request, which is important for wallets that
+/// hold large numbers of transparent UTXOs (e.g. a recovered `zcashd` import).
 ///
 /// The cumulative fee is recomputed via `fee_rule` at each step. To keep this loop linear in
 /// the number of UTXOs examined (rather than quadratic), we maintain a running total of the
