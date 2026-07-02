@@ -1970,6 +1970,149 @@ where
     assert!(!step.balance().proposed_change().is_empty());
 }
 
+/// Verifies that `GreedyInputSelector::propose_transaction` successfully re-gathers
+/// transparent inputs when the initial fee-aware gather's estimate (which accounts only
+/// for the transparent side of the transaction) turns out to be insufficient once the
+/// real change strategy accounts for the additional shielded action required by a
+/// shielded payment recipient.
+///
+/// This exercises the `ChangeError::InsufficientFunds` fallback path in
+/// `GreedyInputSelector::propose_transaction`, which re-invokes
+/// `InputSource::select_spendable_transparent_outputs` with a corrected `TargetValue`
+/// when the first gather's reservation proves too small. Funding many small transparent
+/// UTXOs forces the initial gather to stop with just enough inputs to cover the payment
+/// under its own (transparent-only) fee estimate; the shielded payment output then pushes
+/// the real required fee higher, so satisfying the request is only possible by gathering
+/// additional inputs beyond that initial estimate.
+pub fn propose_t2shielded_requires_transparent_regather<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with many small transparent UTXOs, none of which alone are
+    // remotely close to the payment amount, so that gathering enough of them to satisfy
+    // the (larger, corrected) real requirement remains possible.
+    let dust_value = Zatoshis::const_from_u64(10_000);
+    let n_dust = 30;
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..n_dust {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(dust_value, taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Pay a shielded recipient. The initial transparent gather's fee estimate accounts
+    // only for the transparent inputs it selects; it does not (and cannot, since the
+    // shielded payment output isn't known to `InputSource::select_spendable_transparent_outputs`)
+    // account for the additional sapling action this payment requires, so the first pass
+    // undershoots and a re-gather is required to actually satisfy the request.
+    let network = *st.network();
+    let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .to_diversifiable_full_viewing_key()
+        .default_address()
+        .1;
+    let payment_amount = Zatoshis::const_from_u64(50_000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::Sapling(recipient).to_zcash_address(&network),
+        payment_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedProtocol::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    // Independently reproduce the initial gather that `GreedyInputSelector` will perform
+    // (bounded only by the payment amount, since that's the only information available
+    // before the shielded payment output's fee contribution is known). Comparing this to
+    // the transparent inputs actually used by the successful proposal below demonstrates
+    // that the proposal could only have succeeded via the re-gather fallback: the initial
+    // gather's own reservation ignores the extra sapling action the payment requires, so
+    // it cannot by itself have covered the real, higher requirement.
+    let initial_gather = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            TargetHeight::from(height + 1),
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::NonCoinbaseOnly,
+            TargetValue::AtLeast(payment_amount),
+            &StandardFeeRule::Zip317,
+        )
+        .expect("initial gather should succeed");
+    let initial_gather_value: Zatoshis = initial_gather
+        .iter()
+        .map(|u| u.value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+        )
+        .expect(
+            "transparent spend should succeed via the re-gather fallback despite the \
+             initial gather's fee estimate being insufficient",
+        );
+
+    let step = &proposal.steps().head;
+    let gathered_value: Zatoshis = step
+        .transparent_inputs()
+        .iter()
+        .map(|i| i.txout().value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+    assert!(
+        gathered_value > initial_gather_value,
+        "the successful proposal should have gathered more transparent value ({}) than \
+         the insufficient initial gather ({})",
+        u64::from(gathered_value),
+        u64::from(initial_gather_value),
+    );
+    assert!(step.balance().fee_required() > Zatoshis::ZERO);
+}
+
 /// With [`TransparentSpendPolicy::FromAddresses`], only the explicitly named transparent
 /// addresses are eligible. Funds two of the account's external receivers but names only
 /// one; the proposal must select solely from the named address.
