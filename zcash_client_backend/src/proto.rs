@@ -18,7 +18,7 @@ use zcash_primitives::{
     transaction::TxId,
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight, NetworkType},
     memo::{self, MemoBytes},
     value::Zatoshis,
@@ -462,7 +462,7 @@ pub enum ProposalDecodingError<DbError> {
     /// The proposal violated balance or structural constraints.
     ProposalInvalid(ProposalError),
     /// An inputs field for the given protocol was present, but contained no input note references.
-    EmptyShieldedInputs(ShieldedProtocol),
+    EmptyShieldedInputs(ShieldedPool),
     /// A memo field was provided for a transparent output.
     TransparentMemo,
     /// Change outputs to the specified pool are not supported.
@@ -577,11 +577,16 @@ impl From<PoolType> for proposal::ValuePool {
     }
 }
 
-impl From<ShieldedProtocol> for proposal::ValuePool {
-    fn from(value: ShieldedProtocol) -> Self {
+impl From<ShieldedPool> for proposal::ValuePool {
+    fn from(value: ShieldedPool) -> Self {
         match value {
-            ShieldedProtocol::Sapling => proposal::ValuePool::Sapling,
-            ShieldedProtocol::Orchard => proposal::ValuePool::Orchard,
+            ShieldedPool::Sapling => proposal::ValuePool::Sapling,
+            ShieldedPool::Orchard => proposal::ValuePool::Orchard,
+            ShieldedPool::Ironwood => {
+                todo!(
+                    "Ironwood value pool is not yet representable in the protobuf proposal format"
+                )
+            }
         }
     }
 }
@@ -860,11 +865,11 @@ impl proposal::Proposal {
                                     })
                                     .transpose()?;
                                 match (cv.pool_type()?, cv.is_ephemeral) {
-                                    (PoolType::Shielded(ShieldedProtocol::Sapling), false) => {
+                                    (PoolType::Shielded(ShieldedPool::Sapling), false) => {
                                         Ok(ChangeValue::sapling(value, memo))
                                     }
                                     #[cfg(feature = "orchard")]
-                                    (PoolType::Shielded(ShieldedProtocol::Orchard), false) => {
+                                    (PoolType::Shielded(ShieldedPool::Orchard), false) => {
                                         Ok(ChangeValue::orchard(value, memo))
                                     }
                                     (PoolType::Transparent, _) if memo.is_some() => {

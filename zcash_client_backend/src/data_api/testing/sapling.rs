@@ -9,7 +9,7 @@ use shardtree::error::ShardTreeError;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::transaction::{Transaction, components::sapling::zip212_enforcement};
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
@@ -31,7 +31,7 @@ use super::{TestState, pool::ShieldedPoolTester};
 /// Type for running pool-agnostic tests on the Sapling pool.
 pub struct SaplingPoolTester;
 impl ShieldedPoolTester for SaplingPoolTester {
-    const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
+    const SHIELDED_PROTOCOL: ShieldedPool = ShieldedPool::Sapling;
     // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
 
     type Sk = ExtendedSpendingKey;
@@ -118,7 +118,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
             .select_spendable_notes(
                 account,
                 target_value,
-                &[ShieldedProtocol::Sapling],
+                &[ShieldedPool::Sapling],
                 target_height,
                 confirmations_policy,
                 exclude,
@@ -133,12 +133,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
-            .select_unspent_notes(
-                account,
-                &[ShieldedProtocol::Sapling],
-                target_height,
-                exclude,
-            )
+            .select_unspent_notes(account, &[ShieldedPool::Sapling], target_height, exclude)
             .map(|n| n.take_sapling())
     }
 

@@ -96,8 +96,8 @@ pub mod keys {
 }
 #[deprecated(note = "use ::zcash_protocol::PoolType instead")]
 pub type PoolType = zcash_protocol::PoolType;
-#[deprecated(note = "use ::zcash_protocol::ShieldedProtocol instead")]
-pub type ShieldedProtocol = zcash_protocol::ShieldedProtocol;
+#[deprecated(note = "use ::zcash_protocol::ShieldedPool instead")]
+pub type ShieldedPool = zcash_protocol::ShieldedPool;
 #[deprecated(note = "This module is deprecated; use the `zip321` crate instead.")]
 pub mod zip321 {
     pub use zip321::*;

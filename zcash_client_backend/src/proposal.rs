@@ -7,7 +7,7 @@ use std::{
 
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::{PoolType, ShieldedProtocol, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
@@ -587,13 +587,14 @@ impl<NoteRef> Step<NoteRef> {
             PoolType::SAPLING => self.shielded_inputs().iter().any(|s_in| {
                 s_in.notes()
                     .iter()
-                    .any(|note| matches!(note.note().protocol(), ShieldedProtocol::Sapling))
+                    .any(|note| matches!(note.note().protocol(), ShieldedPool::Sapling))
             }),
             PoolType::ORCHARD => self.shielded_inputs().iter().any(|s_in| {
                 s_in.notes()
                     .iter()
-                    .any(|note| matches!(note.note().protocol(), ShieldedProtocol::Orchard))
+                    .any(|note| matches!(note.note().protocol(), ShieldedPool::Orchard))
             }),
+            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
         }
     }
 
@@ -623,14 +624,15 @@ impl<NoteRef> Step<NoteRef> {
                 .shielded_inputs()
                 .iter()
                 .flat_map(|s_in| s_in.notes())
-                .filter(|note| note.note().protocol() == ShieldedProtocol::Sapling)
+                .filter(|note| note.note().protocol() == ShieldedPool::Sapling)
                 .count(),
             PoolType::ORCHARD => self
                 .shielded_inputs()
                 .iter()
                 .flat_map(|s_in| s_in.notes())
-                .filter(|note| note.note().protocol() == ShieldedProtocol::Orchard)
+                .filter(|note| note.note().protocol() == ShieldedPool::Orchard)
                 .count(),
+            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
         }
     }
 

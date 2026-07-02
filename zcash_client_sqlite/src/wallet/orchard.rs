@@ -18,7 +18,7 @@ use zcash_client_backend::{
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -33,7 +33,7 @@ pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get("id")?);
+    let note_id = ReceivedNoteId(ShieldedPool::Orchard, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let action_index = row.get("action_index")?;
     let diversifier = {
@@ -140,7 +140,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
         params,
         txid,
         index,
-        ShieldedProtocol::Orchard,
+        ShieldedPool::Orchard,
         target_height,
         to_received_note,
     )
@@ -163,7 +163,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         exclude,
-        ShieldedProtocol::Orchard,
+        ShieldedPool::Orchard,
         to_received_note,
     )
 }
@@ -284,7 +284,7 @@ pub(crate) fn select_unspent_note_meta(
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
-        ShieldedProtocol::Orchard,
+        ShieldedPool::Orchard,
         wallet_birthday,
         anchor_height,
     )
@@ -387,7 +387,7 @@ pub(crate) fn get_orchard_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    super::common::get_nullifiers(conn, ShieldedProtocol::Orchard, query, |nf_bytes| {
+    super::common::get_nullifiers(conn, ShieldedPool::Orchard, query, |nf_bytes| {
         Nullifier::from_bytes(<&[u8; 32]>::try_from(nf_bytes).map_err(|_| {
             SqliteClientError::CorruptedData(
                 "unable to parse Orchard nullifier: expected 32 bytes".to_string(),

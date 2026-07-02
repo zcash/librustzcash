@@ -14,7 +14,7 @@ use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
-use zcash_protocol::{PoolType, ShieldedProtocol, consensus::NetworkType, memo::MemoBytes};
+use zcash_protocol::{PoolType, ShieldedPool, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
 
 use crate::error::SqliteClientError;
@@ -37,8 +37,11 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // implementation detail.
     match pool_type {
         PoolType::Transparent => 0i64,
-        PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
+        PoolType::Shielded(ShieldedPool::Sapling) => 2i64,
+        PoolType::Shielded(ShieldedPool::Orchard) => 3i64,
+        PoolType::Shielded(ShieldedPool::Ironwood) => {
+            todo!("Ironwood pool code is not yet assigned")
+        }
     }
 }
 

@@ -10,7 +10,7 @@ use tracing::{debug, trace};
 use zcash_note_encryption::batch;
 use zcash_primitives::transaction::components::sapling::zip212_enforcement;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 
@@ -140,7 +140,7 @@ where
                             ScanError::EncodingInvalid {
                                 at_height: block_height,
                                 txid,
-                                pool_type: ShieldedProtocol::Sapling,
+                                pool_type: ShieldedPool::Sapling,
                                 index: i,
                             }
                         })
@@ -160,7 +160,7 @@ where
                         CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
                             at_height: block_height,
                             txid,
-                            pool_type: ShieldedProtocol::Orchard,
+                            pool_type: ShieldedPool::Orchard,
                             index: i,
                         })
                     })
@@ -296,7 +296,7 @@ where
                             ScanError::EncodingInvalid {
                                 at_height: cur_height,
                                 txid,
-                                pool_type: ShieldedProtocol::Sapling,
+                                pool_type: ShieldedPool::Sapling,
                                 index: i,
                             }
                         })?,
@@ -333,7 +333,7 @@ where
                         ScanError::EncodingInvalid {
                             at_height: cur_height,
                             txid,
-                            pool_type: ShieldedProtocol::Orchard,
+                            pool_type: ShieldedPool::Orchard,
                             index: i,
                         }
                     })?;
@@ -415,7 +415,7 @@ impl PositionTracker {
             params: &P,
             block: &CompactBlock,
             prior_block_metadata: Option<&BlockMetadata>,
-            protocol: ShieldedProtocol,
+            protocol: ShieldedPool,
             activation_nu: NetworkUpgrade,
             prior_tree_size: impl Fn(&BlockMetadata) -> Option<u32>,
             tx_output_count: impl Fn(&CompactTx) -> usize,
@@ -489,7 +489,7 @@ impl PositionTracker {
             params,
             block,
             prior_block_metadata,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             NetworkUpgrade::Sapling,
             |m| m.sapling_tree_size(),
             |tx| tx.outputs.len(),
@@ -501,7 +501,7 @@ impl PositionTracker {
             params,
             block,
             prior_block_metadata,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             NetworkUpgrade::Nu5,
             |m| m.orchard_tree_size(),
             |tx| tx.actions.len(),
@@ -556,7 +556,7 @@ impl PositionTracker {
         if let Some(chain_meta) = chain_metadata {
             if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
                 return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Sapling,
+                    protocol: ShieldedPool::Sapling,
                     at_height,
                     given: chain_meta.sapling_commitment_tree_size,
                     computed: self.sapling_tree_position,
@@ -566,7 +566,7 @@ impl PositionTracker {
             #[cfg(feature = "orchard")]
             if chain_meta.orchard_commitment_tree_size != self.orchard_tree_position {
                 return Err(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Orchard,
+                    protocol: ShieldedPool::Orchard,
                     at_height,
                     given: chain_meta.orchard_commitment_tree_size,
                     computed: self.orchard_tree_position,

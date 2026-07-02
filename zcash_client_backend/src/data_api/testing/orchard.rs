@@ -15,7 +15,7 @@ use zcash_keys::{
 use zcash_note_encryption::try_output_recovery_with_ovk;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
@@ -35,7 +35,7 @@ use crate::{
 /// Type for running pool-agnostic tests on the Orchard pool.
 pub struct OrchardPoolTester;
 impl ShieldedPoolTester for OrchardPoolTester {
-    const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
+    const SHIELDED_PROTOCOL: ShieldedPool = ShieldedPool::Orchard;
     // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
 
     type Sk = SpendingKey;
@@ -134,7 +134,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
             .select_spendable_notes(
                 account,
                 target_value,
-                &[ShieldedProtocol::Orchard],
+                &[ShieldedPool::Orchard],
                 target_height,
                 confirmations_policy,
                 exclude,
@@ -149,12 +149,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
-            .select_unspent_notes(
-                account,
-                &[ShieldedProtocol::Orchard],
-                target_height,
-                exclude,
-            )
+            .select_unspent_notes(account, &[ShieldedPool::Orchard], target_height, exclude)
             .map(|n| n.take_orchard())
     }
 

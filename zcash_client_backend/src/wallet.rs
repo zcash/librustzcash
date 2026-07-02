@@ -14,7 +14,7 @@ use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{TxId, fees::transparent as transparent_fees};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{BlockHeight, TxIndex},
     value::{BalanceError, Zatoshis},
 };
@@ -34,13 +34,13 @@ use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
     txid: TxId,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     output_index: u16,
 }
 
 impl NoteId {
     /// Constructs a new `NoteId` from its parts.
-    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
+    pub fn new(txid: TxId, protocol: ShieldedPool, output_index: u16) -> Self {
         Self {
             txid,
             protocol,
@@ -54,7 +54,7 @@ impl NoteId {
     }
 
     /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedProtocol {
+    pub fn protocol(&self) -> ShieldedPool {
         self.protocol
     }
 
@@ -575,11 +575,11 @@ impl Note {
     }
 
     /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedProtocol {
+    pub fn protocol(&self) -> ShieldedPool {
         match self {
-            Note::Sapling(_) => ShieldedProtocol::Sapling,
+            Note::Sapling(_) => ShieldedPool::Sapling,
             #[cfg(feature = "orchard")]
-            Note::Orchard(_) => ShieldedProtocol::Orchard,
+            Note::Orchard(_) => ShieldedPool::Orchard,
         }
     }
 }
