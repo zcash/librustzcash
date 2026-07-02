@@ -1978,6 +1978,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
             ShieldedPool::Orchard => last_scanned.orchard_tree_size(),
             #[cfg(not(feature = "orchard"))]
             ShieldedPool::Orchard => None,
+            ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
         }
         .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
     });
@@ -5008,6 +5009,7 @@ pub(crate) fn get_block_range(
     let prefix = match protocol {
         ShieldedPool::Sapling => "sapling",
         ShieldedPool::Orchard => "orchard",
+        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)

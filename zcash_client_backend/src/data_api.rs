@@ -1287,6 +1287,7 @@ impl AccountMeta {
         match protocol {
             ShieldedPool::Sapling => self.sapling_note_count(),
             ShieldedPool::Orchard => self.orchard_note_count(),
+            ShieldedPool::Ironwood => todo!("Ironwood note counts are not yet tracked"),
         }
     }
 

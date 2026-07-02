@@ -582,6 +582,11 @@ impl From<ShieldedPool> for proposal::ValuePool {
         match value {
             ShieldedPool::Sapling => proposal::ValuePool::Sapling,
             ShieldedPool::Orchard => proposal::ValuePool::Orchard,
+            ShieldedPool::Ironwood => {
+                todo!(
+                    "Ironwood value pool is not yet representable in the protobuf proposal format"
+                )
+            }
         }
     }
 }

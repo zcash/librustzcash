@@ -493,6 +493,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
             }
+            ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
         }
     }
 

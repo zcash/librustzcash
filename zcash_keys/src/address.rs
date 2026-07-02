@@ -444,7 +444,10 @@ impl Address {
             Address::Unified(ua) => match pool_type {
                 PoolType::Transparent => ua.has_transparent(),
                 PoolType::Shielded(ShieldedPool::Sapling) => ua.has_sapling(),
-                PoolType::Shielded(ShieldedPool::Orchard) => ua.has_orchard(),
+                // Ironwood shares the Orchard receiver.
+                PoolType::Shielded(ShieldedPool::Orchard | ShieldedPool::Ironwood) => {
+                    ua.has_orchard()
+                }
             },
         }
     }

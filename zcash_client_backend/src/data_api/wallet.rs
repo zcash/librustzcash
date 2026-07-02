@@ -1625,6 +1625,9 @@ where
                     let to = *ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction");
                     add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
                 }
+                PoolType::Shielded(ShieldedPool::Ironwood) => {
+                    todo!("Ironwood pool support is not yet implemented")
+                }
             },
             Address::Sapling(to) => {
                 add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
@@ -1699,6 +1702,9 @@ where
             PoolType::Transparent => {
                 #[cfg(not(feature = "transparent-inputs"))]
                 return Err(Error::UnsupportedChangeType(output_pool));
+            }
+            PoolType::Shielded(ShieldedPool::Ironwood) => {
+                todo!("Ironwood pool support is not yet implemented")
             }
         }
     }

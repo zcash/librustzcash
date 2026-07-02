@@ -39,6 +39,8 @@ pub enum ShieldedPool {
     Sapling,
     /// The Orchard pool
     Orchard,
+    /// The Ironwood pool
+    Ironwood,
 }
 
 #[deprecated(note = "Use `ShieldedPool` instead.")]
@@ -57,6 +59,7 @@ impl PoolType {
     pub const TRANSPARENT: PoolType = PoolType::Transparent;
     pub const SAPLING: PoolType = PoolType::Shielded(ShieldedPool::Sapling);
     pub const ORCHARD: PoolType = PoolType::Shielded(ShieldedPool::Orchard);
+    pub const IRONWOOD: PoolType = PoolType::Shielded(ShieldedPool::Ironwood);
 }
 
 impl fmt::Display for PoolType {
@@ -65,6 +68,7 @@ impl fmt::Display for PoolType {
             PoolType::Transparent => f.write_str("Transparent"),
             PoolType::Shielded(ShieldedPool::Sapling) => f.write_str("Sapling"),
             PoolType::Shielded(ShieldedPool::Orchard) => f.write_str("Orchard"),
+            PoolType::Shielded(ShieldedPool::Ironwood) => f.write_str("Ironwood"),
         }
     }
 }

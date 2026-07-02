@@ -594,6 +594,7 @@ impl<NoteRef> Step<NoteRef> {
                     .iter()
                     .any(|note| matches!(note.note().protocol(), ShieldedPool::Orchard))
             }),
+            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
         }
     }
 
@@ -631,6 +632,7 @@ impl<NoteRef> Step<NoteRef> {
                 .flat_map(|s_in| s_in.notes())
                 .filter(|note| note.note().protocol() == ShieldedPool::Orchard)
                 .count(),
+            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
         }
     }
 

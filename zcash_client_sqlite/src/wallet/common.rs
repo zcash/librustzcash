@@ -70,6 +70,7 @@ pub(crate) fn table_constants<E: ErrUnsupportedPool>(
         ShieldedPool::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
         ShieldedPool::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     }
 }
 

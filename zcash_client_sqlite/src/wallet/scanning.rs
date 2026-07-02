@@ -320,6 +320,9 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                         *protocol,
                     )));
                 }
+                ShieldedPool::Ironwood => {
+                    todo!("Ironwood pool support is not yet implemented")
+                }
             }
         }
 

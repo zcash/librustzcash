@@ -39,6 +39,9 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedPool::Sapling) => 2i64,
         PoolType::Shielded(ShieldedPool::Orchard) => 3i64,
+        PoolType::Shielded(ShieldedPool::Ironwood) => {
+            todo!("Ironwood pool code is not yet assigned")
+        }
     }
 }
 
