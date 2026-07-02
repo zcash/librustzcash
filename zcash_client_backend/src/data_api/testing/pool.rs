@@ -22,7 +22,7 @@ use zcash_primitives::{
     },
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
@@ -108,7 +108,7 @@ use dsl::{TestDsl, TestNoteConfig};
     doc = "[`OrchardPoolTester`]: https://github.com/zcash/librustzcash/blob/0777cbc2def6ba6b99f96333eaf96c314c1f3a37/zcash_client_backend/src/data_api/testing/orchard.rs#L33"
 )]
 pub trait ShieldedPoolTester {
-    const SHIELDED_PROTOCOL: ShieldedProtocol;
+    const SHIELDED_PROTOCOL: ShieldedPool;
 
     type Sk;
     type Fvk: TestFvk;
@@ -3997,10 +3997,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     // Since this is a cross-pool transfer, change will be sent to the preferred pool.
     assert_eq!(
         change_output.output_pool(),
-        PoolType::Shielded(std::cmp::max(
-            ShieldedProtocol::Sapling,
-            ShieldedProtocol::Orchard
-        ))
+        PoolType::Shielded(std::cmp::max(ShieldedPool::Sapling, ShieldedPool::Orchard))
     );
     assert_eq!(change_output.value(), expected_change);
 

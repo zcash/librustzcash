@@ -35,6 +35,36 @@ impl super::Updater {
             },
         })
     }
+
+    /// Updates the Ironwood bundle with information in the given closure.
+    pub fn update_ironwood_with<F>(self, f: F) -> Result<Self, OrchardError>
+    where
+        F: FnOnce(Updater<'_>) -> Result<(), UpdaterError>,
+    {
+        let Pczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+            ironwood,
+        } = self.pczt;
+
+        let mut bundle = ironwood
+            .into_ironwood_parsed()
+            .map_err(OrchardError::Parser)?;
+
+        bundle.update_with(f).map_err(OrchardError::Updater)?;
+
+        Ok(Self {
+            pczt: Pczt {
+                global,
+                transparent,
+                sapling,
+                orchard,
+                ironwood: crate::orchard::Bundle::serialize_from(bundle),
+            },
+        })
+    }
 }
 
 /// Errors that can occur while updating the Orchard bundle of a PCZT.

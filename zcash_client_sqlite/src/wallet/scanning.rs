@@ -11,7 +11,7 @@ use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange, spanning_tree::SpanningTree},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
 };
 
@@ -225,7 +225,7 @@ fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
@@ -287,7 +287,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
     range: Range<BlockHeight>,
-    wallet_note_positions: &[(ShieldedProtocol, Position)],
+    wallet_note_positions: &[(ShieldedPool, Position)],
 ) -> Result<(), SqliteClientError> {
     // Read the wallet birthday (if known).
     // TODO: use per-pool birthdays?
@@ -304,12 +304,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         let mut required_orchard_subtrees = BTreeSet::new();
         for (protocol, position) in wallet_note_positions {
             match protocol {
-                ShieldedProtocol::Sapling => {
+                ShieldedPool::Sapling => {
                     required_sapling_subtrees.insert(
                         Address::above_position(SAPLING_SHARD_HEIGHT.into(), *position).index(),
                     );
                 }
-                ShieldedProtocol::Orchard => {
+                ShieldedPool::Orchard => {
                     #[cfg(feature = "orchard")]
                     required_orchard_subtrees.insert(
                         Address::above_position(ORCHARD_SHARD_HEIGHT.into(), *position).index(),
@@ -320,6 +320,9 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                         *protocol,
                     )));
                 }
+                ShieldedPool::Ironwood => {
+                    todo!("Ironwood pool support is not yet implemented")
+                }
             }
         }
 
@@ -327,7 +330,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             &range,
             required_sapling_subtrees,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
         )?;
@@ -337,7 +340,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             extended_range.as_ref().unwrap_or(&range),
             required_orchard_subtrees,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
             wallet_birthday,
         )?
@@ -427,7 +430,7 @@ pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
 
 fn tip_shard_end_height(
     conn: &rusqlite::Transaction<'_>,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     conn.query_row(
@@ -478,9 +481,9 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
-    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Sapling)?;
+    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
-    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Orchard)?;
+    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedPool::Orchard)?;
 
     #[cfg(feature = "orchard")]
     let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {

@@ -26,9 +26,7 @@ use crate::{
     data_api::{
         Account as _, Balance, InputSource as _, TransparentOutputFilter, WalletRead as _,
         WalletTest as _, WalletWrite,
-        testing::{
-            AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
-        },
+        testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
             input_selection::GreedyInputSelector,
@@ -286,7 +284,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
     let txid = st
@@ -429,7 +427,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
     let txids = st
@@ -638,7 +636,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
     let proposal = st
@@ -1201,7 +1199,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 
@@ -1544,7 +1542,7 @@ where
     let change_strategy = standard::SingleOutputChangeStrategy::new(
         StandardFeeRule::Zip317,
         None,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         DustOutputPolicy::default(),
     );
 

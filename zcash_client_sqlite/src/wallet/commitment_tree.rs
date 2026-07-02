@@ -23,7 +23,7 @@ use zcash_client_backend::{
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
-use zcash_protocol::{ShieldedProtocol, consensus::BlockHeight};
+use zcash_protocol::{ShieldedPool, consensus::BlockHeight};
 
 use crate::{error::SqliteClientError, sapling_tree};
 
@@ -806,7 +806,7 @@ pub(crate) fn get_checkpoint(
 
 pub(crate) fn get_max_checkpointed_height(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
@@ -1146,7 +1146,7 @@ pub(crate) fn check_witnesses(
     }
 
     for addr in sapling_incomplete {
-        let range = super::get_block_range(conn, ShieldedProtocol::Sapling, addr)?;
+        let range = super::get_block_range(conn, ShieldedPool::Sapling, addr)?;
         scan_ranges.extend(range);
     }
 
@@ -1169,7 +1169,7 @@ pub(crate) fn check_witnesses(
         }
 
         for addr in orchard_incomplete {
-            let range = super::get_block_range(conn, ShieldedProtocol::Orchard, addr)?;
+            let range = super::get_block_range(conn, ShieldedPool::Orchard, addr)?;
             scan_ranges.extend(range);
         }
     }

@@ -5,7 +5,7 @@ use zcash_primitives::transaction::fees::{
     FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -117,24 +117,24 @@ where
 /// Decide which shielded pool change should go to if there is any.
 pub(crate) fn select_change_pool(
     _net_flows: &NetFlows,
-    _fallback_change_pool: ShieldedProtocol,
-) -> ShieldedProtocol {
+    _fallback_change_pool: ShieldedPool,
+) -> ShieldedPool {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
     if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
         // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
-        ShieldedProtocol::Orchard
+        ShieldedPool::Orchard
     } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
         // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
         // Sapling outputs, so that we avoid pool-crossing.
-        ShieldedProtocol::Sapling
+        ShieldedPool::Sapling
     } else {
         // The flows are transparent, so there may not be change. If there is, the caller
         // gets to decide where to shield it.
         _fallback_change_pool
     }
     #[cfg(not(feature = "orchard"))]
-    ShieldedProtocol::Sapling
+    ShieldedPool::Sapling
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -170,7 +170,7 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     dust_output_policy: &'a DustOutputPolicy,
     default_dust_threshold: Zatoshis,
     split_policy: &'a SplitPolicy,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
     marginal_fee: Zatoshis,
     grace_actions: usize,
 }
@@ -183,7 +183,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
         dust_output_policy: &'a DustOutputPolicy,
         default_dust_threshold: Zatoshis,
         split_policy: &'a SplitPolicy,
-        fallback_change_pool: ShieldedProtocol,
+        fallback_change_pool: ShieldedPool,
         marginal_fee: Zatoshis,
         grace_actions: usize,
     ) -> Self {
@@ -241,12 +241,12 @@ where
     });
     let target_change_counts = OutputManifest {
         transparent: 0,
-        sapling: if change_pool == ShieldedProtocol::Sapling {
+        sapling: if change_pool == ShieldedPool::Sapling {
             target_change_count
         } else {
             0
         },
-        orchard: if change_pool == ShieldedProtocol::Orchard {
+        orchard: if change_pool == ShieldedPool::Orchard {
             target_change_count
         } else {
             0
@@ -444,12 +444,12 @@ where
                         transparent_input_sizes,
                         transparent_output_sizes,
                         sapling_input_count,
-                        sapling_output_count(if change_pool == ShieldedProtocol::Sapling {
+                        sapling_output_count(if change_pool == ShieldedPool::Sapling {
                             split_count
                         } else {
                             0
                         })?,
-                        orchard_action_count(if change_pool == ShieldedProtocol::Orchard {
+                        orchard_action_count(if change_pool == ShieldedPool::Orchard {
                             split_count
                         } else {
                             0

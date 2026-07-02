@@ -11,7 +11,7 @@ use zcash_primitives::transaction::fees::{
     zip317::{self as prim_zip317},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -73,7 +73,7 @@ pub struct ChangeValue(ChangeValueInner);
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ChangeValueInner {
     Shielded {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         value: Zatoshis,
         memo: Option<MemoBytes>,
     },
@@ -89,7 +89,7 @@ impl ChangeValue {
     }
 
     /// Constructs a new change value that will be created as a shielded output.
-    pub fn shielded(protocol: ShieldedProtocol, value: Zatoshis, memo: Option<MemoBytes>) -> Self {
+    pub fn shielded(protocol: ShieldedPool, value: Zatoshis, memo: Option<MemoBytes>) -> Self {
         Self(ChangeValueInner::Shielded {
             protocol,
             value,
@@ -99,13 +99,13 @@ impl ChangeValue {
 
     /// Constructs a new change value that will be created as a Sapling output.
     pub fn sapling(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
-        Self::shielded(ShieldedProtocol::Sapling, value, memo)
+        Self::shielded(ShieldedPool::Sapling, value, memo)
     }
 
     /// Constructs a new change value that will be created as an Orchard output.
     #[cfg(feature = "orchard")]
     pub fn orchard(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
-        Self::shielded(ShieldedProtocol::Orchard, value, memo)
+        Self::shielded(ShieldedPool::Orchard, value, memo)
     }
 
     /// Returns the pool to which the change or ephemeral output should be sent.

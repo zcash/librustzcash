@@ -27,6 +27,13 @@ pub struct Bundle {
     pub(crate) outputs: Vec<Output>,
 }
 
+/// The canonical empty transparent bundle: the form the transparent bundle of a PCZT
+/// takes when it carries no transparent data.
+pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
+    inputs: Vec::new(),
+    outputs: Vec::new(),
+};
+
 /// Information about a transparent input within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]

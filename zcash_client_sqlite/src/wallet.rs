@@ -114,7 +114,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId,
+    PoolType, ShieldedPool, TxId,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters, TxIndex},
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
@@ -1922,7 +1922,7 @@ pub(crate) struct SubtreeProgressEstimator;
 fn estimate_tree_size<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    shielded_protocol: ShieldedProtocol,
+    shielded_protocol: ShieldedPool,
     pool_activation_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Option<u64>, SqliteClientError> {
@@ -1973,11 +1973,12 @@ fn estimate_tree_size<P: consensus::Parameters>(
     // Get the tree size at the last scanned height, if known.
     let last_scanned = block_max_scanned(conn, params)?.and_then(|last_scanned| {
         match shielded_protocol {
-            ShieldedProtocol::Sapling => last_scanned.sapling_tree_size(),
+            ShieldedPool::Sapling => last_scanned.sapling_tree_size(),
             #[cfg(feature = "orchard")]
-            ShieldedProtocol::Orchard => last_scanned.orchard_tree_size(),
+            ShieldedPool::Orchard => last_scanned.orchard_tree_size(),
             #[cfg(not(feature = "orchard"))]
-            ShieldedProtocol::Orchard => None,
+            ShieldedPool::Orchard => None,
+            ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
         }
         .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
     });
@@ -2097,7 +2098,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
 fn subtree_scan_progress<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    shielded_protocol: ShieldedProtocol,
+    shielded_protocol: ShieldedPool,
     pool_activation_height: BlockHeight,
     min_birthday_height: BlockHeight,
     recover_until_height: Option<BlockHeight>,
@@ -2364,7 +2365,7 @@ impl ProgressEstimator for SubtreeProgressEstimator {
         subtree_scan_progress(
             conn,
             params,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             sapling_activation_height,
             birthday_height,
             recover_until_height,
@@ -2390,7 +2391,7 @@ impl ProgressEstimator for SubtreeProgressEstimator {
         subtree_scan_progress(
             conn,
             params,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             nu5_activation_height,
             birthday_height,
             recover_until_height,
@@ -2492,7 +2493,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         anchor_height: Option<BlockHeight>,
         confirmations_policy: ConfirmationsPolicy,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         with_pool_balance: F,
     ) -> Result<(), SqliteClientError>
     where
@@ -2676,7 +2677,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             anchor_height,
             confirmations_policy,
             &mut account_balances,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             |balances,
              spendable_value,
              change_pending_confirmation,
@@ -2701,7 +2702,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         anchor_height,
         confirmations_policy,
         &mut account_balances,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         |balances,
          spendable_value,
          change_pending_confirmation,
@@ -3046,7 +3047,7 @@ pub(crate) fn get_anchor_height(
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     let sapling_anchor_height = get_max_checkpointed_height(
         conn,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         target_height,
         min_confirmations,
     )?;
@@ -3054,7 +3055,7 @@ pub(crate) fn get_anchor_height(
     #[cfg(feature = "orchard")]
     let orchard_anchor_height = get_max_checkpointed_height(
         conn,
-        ShieldedProtocol::Orchard,
+        ShieldedPool::Orchard,
         target_height,
         min_confirmations,
     )?;
@@ -3768,7 +3769,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_to_checkpoint(&truncation_height)
                 .map_err(|error| SqliteClientError::TruncateCommitmentTree {
-                    pool: ShieldedProtocol::Sapling,
+                    pool: ShieldedPool::Sapling,
                     height: truncation_height,
                     error,
                 })?;
@@ -3778,7 +3779,7 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         wdb.with_orchard_tree_mut(|tree| {
             tree.truncate_to_checkpoint(&truncation_height)
                 .map_err(|error| SqliteClientError::TruncateCommitmentTree {
-                    pool: ShieldedProtocol::Orchard,
+                    pool: ShieldedPool::Orchard,
                     height: truncation_height,
                     error,
                 })?;
@@ -3906,7 +3907,7 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                 },
             )
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
-                pool: ShieldedProtocol::Sapling,
+                pool: ShieldedPool::Sapling,
                 height: target_height,
                 error,
             })?;
@@ -3923,7 +3924,7 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
                 },
             )
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
-                pool: ShieldedProtocol::Orchard,
+                pool: ShieldedPool::Orchard,
                 height: target_height,
                 error,
             })?;
@@ -4736,9 +4737,9 @@ fn flag_previously_received_change(
         .map_err(SqliteClientError::from)
     };
 
-    flag_received_change(ShieldedProtocol::Sapling)?;
+    flag_received_change(ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
-    flag_received_change(ShieldedProtocol::Orchard)?;
+    flag_received_change(ShieldedPool::Orchard)?;
 
     Ok(())
 }
@@ -4843,7 +4844,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
-    spend_pool: ShieldedProtocol,
+    spend_pool: ShieldedPool,
     new_entries: &[(TxIndex, TxId, Vec<N>)],
 ) -> Result<(), SqliteClientError> {
     let mut stmt_select_tx_locators = conn.prepare_cached(
@@ -4932,7 +4933,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
 /// this nullifier is revealed, if any.
 pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
-    spend_pool: ShieldedProtocol,
+    spend_pool: ShieldedPool,
     nf: &N,
 ) -> Result<Option<TxRef>, SqliteClientError> {
     let mut stmt_select_locator = conn.prepare_cached(
@@ -5002,12 +5003,13 @@ pub(crate) fn prune_nullifier_map(
 
 pub(crate) fn get_block_range(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     commitment_tree_address: incrementalmerkletree::Address,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
     let prefix = match protocol {
-        ShieldedProtocol::Sapling => "sapling",
-        ShieldedProtocol::Orchard => "orchard",
+        ShieldedPool::Sapling => "sapling",
+        ShieldedPool::Orchard => "orchard",
+        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)
@@ -5130,7 +5132,7 @@ pub mod testing {
     use zcash_client_backend::data_api::testing::TransactionSummary;
     use zcash_primitives::transaction::TxId;
     use zcash_protocol::{
-        ShieldedProtocol,
+        ShieldedPool,
         consensus::BlockHeight,
         value::{ZatBalance, Zatoshis},
     };
@@ -5181,7 +5183,7 @@ pub mod testing {
     #[allow(dead_code)] // used only for tests that are flagged off by default
     pub(crate) fn get_checkpoint_history(
         conn: &rusqlite::Connection,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<(BlockHeight, Option<Position>)>, SqliteClientError> {
         let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
@@ -5389,7 +5391,7 @@ mod tests {
             testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
         };
         use zcash_protocol::{
-            ShieldedProtocol,
+            ShieldedPool,
             consensus::{NetworkUpgrade, Parameters},
         };
 
@@ -5494,7 +5496,7 @@ mod tests {
         let progress = super::subtree_scan_progress(
             st.wallet().conn(),
             st.network(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             sapling_activation_height,
             sapling_activation_height,
             Some(recover_until_height),
@@ -5535,7 +5537,7 @@ mod tests {
             testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
         };
         use zcash_protocol::{
-            ShieldedProtocol,
+            ShieldedPool,
             consensus::{NetworkUpgrade, Parameters},
         };
 
@@ -5633,7 +5635,7 @@ mod tests {
         let progress = super::subtree_scan_progress(
             st.wallet().conn(),
             st.network(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             sapling_activation_height,
             sapling_activation_height,
             Some(recover_until_height),
@@ -5697,7 +5699,7 @@ mod tests {
             testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
         };
         use zcash_protocol::{
-            ShieldedProtocol,
+            ShieldedPool,
             consensus::{NetworkUpgrade, Parameters},
         };
 
@@ -5804,7 +5806,7 @@ mod tests {
         let progress = super::subtree_scan_progress(
             st.wallet().conn(),
             st.network(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             sapling_activation_height,
             sapling_activation_height,
             Some(recover_until_height),
