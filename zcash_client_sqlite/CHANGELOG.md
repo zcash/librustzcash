@@ -42,8 +42,14 @@ workspace.
   them in place: within a single account it keeps a canonical record (preferring an HD-derived
   record over an imported one), repoints the affected received outputs to it, and deletes the
   redundant records, preserving the earliest recorded `exposed_at_height` among the merged
-  records. A receiver duplicated across more than one account cannot be safely merged
-  and causes the migration to abort.
+  records. A receiver duplicated across more than one account is resolved by derivation:
+  when exactly one of the records reproduces the receiver when derived from its own account's
+  viewing key at its recorded child index, that record is retained and the received outputs of
+  the others are reattributed to it (this can occur for wallets migrated from `zcashd`, where an
+  address may have been both imported standalone into one account and derived by another,
+  including under the ZIP 32 account index 0x7FFFFFFF used for the `zcashd` legacy account).
+  A cross-account duplicate for which no unique record can be verified by derivation causes
+  the migration to abort.
 
 ### Fixed
 - Deriving a transparent address that was previously imported as a standalone receiver now
