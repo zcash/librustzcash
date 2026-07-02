@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_protocol::consensus;
+use zcash_protocol::{ShieldedPool, consensus};
 
 use super::account_delete_cascade;
 use crate::wallet::init::WalletMigrationError;
@@ -55,7 +55,18 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         )?;
 
         // Backfill: Identify any notes which have stable witness data, and mark them as such.
-        mark_stabilized_notes(transaction, &self.params)?;
+        // Only the Sapling and Orchard received-note tables exist at this point in the migration
+        // DAG; the Ironwood table is introduced by a later migration (already stabilization-aware),
+        // so it is intentionally excluded from this backfill.
+        mark_stabilized_notes(
+            transaction,
+            &self.params,
+            &[
+                ShieldedPool::Sapling,
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard,
+            ],
+        )?;
 
         Ok(())
     }
@@ -415,6 +426,7 @@ mod tests {
     #[test]
     fn gap_in_scanned_coverage_prevents_stabilization() {
         use zcash_client_backend::data_api::scanning::ScanPriority;
+        use zcash_protocol::ShieldedPool;
 
         use crate::wallet::scanning::{mark_stabilized_notes, priority_code};
 
@@ -597,7 +609,16 @@ mod tests {
         // First call: the non-Scanned gap lies inside shard 0's extent, so the note must
         // NOT stabilize.
         let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(&tx, &network).unwrap();
+        mark_stabilized_notes(
+            &tx,
+            &network,
+            &[
+                ShieldedPool::Sapling,
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard,
+            ],
+        )
+        .unwrap();
         tx.commit().unwrap();
 
         assert_eq!(
@@ -632,7 +653,16 @@ mod tests {
             .unwrap();
 
         let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(&tx, &network).unwrap();
+        mark_stabilized_notes(
+            &tx,
+            &network,
+            &[
+                ShieldedPool::Sapling,
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard,
+            ],
+        )
+        .unwrap();
         tx.commit().unwrap();
 
         assert_eq!(

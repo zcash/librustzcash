@@ -102,8 +102,8 @@ use wallet::{
 
 #[cfg(feature = "orchard")]
 use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
     zcash_client_backend::data_api::ll::ReceivedOrchardOutput,
+    zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2335,13 +2335,13 @@ where
 /// as a distinct alias to make Ironwood usage self-documenting at call sites.
 #[cfg(feature = "orchard")]
 pub(crate) type IronwoodShardStore<C> =
-    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>;
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, IRONWOOD_SHARD_HEIGHT>;
 
 #[cfg(feature = "orchard")]
 pub(crate) type IronwoodCommitmentTree<C> = ShardTree<
     IronwoodShardStore<C>,
     { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-    ORCHARD_SHARD_HEIGHT,
+    IRONWOOD_SHARD_HEIGHT,
 >;
 
 /// Returns a handle to the Ironwood note commitment tree.
