@@ -2820,7 +2820,7 @@ mod tests {
         )
         .unwrap();
 
-        // Derive the same address at child index 7 via the gap-generation storage entry point.
+        // Derive the same address at child index 100 via the gap-generation storage entry point.
         super::store_address_range(
             &tx,
             &network,

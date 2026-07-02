@@ -27,7 +27,7 @@ use uuid::Uuid;
 use zcash_protocol::consensus;
 
 use super::standalone_p2sh;
-use crate::wallet::init::WalletMigrationError;
+use crate::wallet::{encoding::KeyScope, init::WalletMigrationError};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x3d4f12d6_3da9_4ace_ac65_a0dd0a7adc32);
 
@@ -41,10 +41,22 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-/// An address record participating in a duplicated-receiver group: its row id, its account's row
-/// id, its key scope code, its transparent child index, and its account's UFVK and UIVK
-/// encodings.
-type AddressRecord = (i64, i64, i64, Option<u32>, Option<String>, String);
+/// An address record participating in a duplicated-receiver group.
+#[cfg_attr(not(feature = "transparent-inputs"), allow(dead_code))]
+struct AddressRecord {
+    /// The `addresses` row id of the record.
+    id: i64,
+    /// The row id of the account that holds the record.
+    account_id: i64,
+    /// The record's key scope.
+    key_scope: KeyScope,
+    /// The record's transparent child index, if any.
+    transparent_child_index: Option<u32>,
+    /// The encoded UFVK of the record's account, if known.
+    ufvk: Option<String>,
+    /// The encoded UIVK of the record's account.
+    uivk: String,
+}
 
 /// The error reported when a duplicated receiver cannot be resolved automatically.
 fn unresolvable_duplicate(addr: &str) -> WalletMigrationError {
@@ -60,10 +72,7 @@ fn unresolvable_duplicate(addr: &str) -> WalletMigrationError {
 #[cfg(feature = "transparent-inputs")]
 fn record_derives_receiver<P: consensus::Parameters>(
     params: &P,
-    key_scope: i64,
-    child_index: Option<u32>,
-    ufvk: Option<&str>,
-    uivk: &str,
+    record: &AddressRecord,
     addr: &str,
 ) -> bool {
     use transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex};
@@ -72,22 +81,30 @@ fn record_derives_receiver<P: consensus::Parameters>(
         keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
     };
 
-    let Some(idx) = child_index.and_then(NonHardenedChildIndex::from_index) else {
+    let Some(idx) = record
+        .transparent_child_index
+        .and_then(NonHardenedChildIndex::from_index)
+    else {
         return false;
     };
 
-    let derived = match key_scope {
+    let account_pubkey = |ufvk: &str| {
+        UnifiedFullViewingKey::decode(params, ufvk)
+            .ok()
+            .and_then(|k| k.transparent().cloned())
+    };
+
+    let derived = match record.key_scope {
         // External scope: prefer the UFVK's account pubkey, falling back to the UIVK's
         // external IVK.
-        0 => ufvk
-            .and_then(|s| UnifiedFullViewingKey::decode(params, s).ok())
-            .and_then(|k| {
-                k.transparent()
-                    .and_then(|apk| apk.derive_external_ivk().ok())
-            })
+        KeyScope::Zip32(zip32::Scope::External) => record
+            .ufvk
+            .as_deref()
+            .and_then(account_pubkey)
+            .and_then(|apk| apk.derive_external_ivk().ok())
             .and_then(|ivk| ivk.derive_address(idx).ok())
             .or_else(|| {
-                UnifiedIncomingViewingKey::decode(params, uivk)
+                UnifiedIncomingViewingKey::decode(params, &record.uivk)
                     .ok()
                     .and_then(|k| {
                         k.transparent()
@@ -96,15 +113,22 @@ fn record_derives_receiver<P: consensus::Parameters>(
                     })
             }),
         // Internal scope: derivable only from the UFVK's account pubkey.
-        1 => ufvk
-            .and_then(|s| UnifiedFullViewingKey::decode(params, s).ok())
-            .and_then(|k| {
-                k.transparent()
-                    .and_then(|apk| apk.derive_internal_ivk().ok())
-            })
+        KeyScope::Zip32(zip32::Scope::Internal) => record
+            .ufvk
+            .as_deref()
+            .and_then(account_pubkey)
+            .and_then(|apk| apk.derive_internal_ivk().ok())
             .and_then(|ivk| ivk.derive_address(idx).ok()),
-        // Foreign and ephemeral records cannot be verified by scope derivation.
-        _ => None,
+        // Ephemeral scope: derivable only from the UFVK's account pubkey.
+        KeyScope::Ephemeral => record
+            .ufvk
+            .as_deref()
+            .and_then(account_pubkey)
+            .and_then(|apk| apk.derive_ephemeral_ivk().ok())
+            .and_then(|ivk| ivk.derive_ephemeral_address(idx).ok()),
+        // A `Foreign` record has no derivation relationship to its account, so it cannot be
+        // verified.
+        KeyScope::Foreign => None,
     };
 
     derived.is_some_and(|d| d.encode(params) == addr)
@@ -122,20 +146,11 @@ fn resolve_cross_account_duplicate<P: consensus::Parameters>(
 ) -> Result<(i64, i64), WalletMigrationError> {
     let verified = group
         .iter()
-        .filter(|(_, _, key_scope, child_index, ufvk, uivk)| {
-            record_derives_receiver(
-                params,
-                *key_scope,
-                *child_index,
-                ufvk.as_deref(),
-                uivk,
-                addr,
-            )
-        })
+        .filter(|record| record_derives_receiver(params, record, addr))
         .collect::<Vec<_>>();
 
     match verified[..] {
-        [(id, account_id, ..)] => Ok((*id, *account_id)),
+        [record] => Ok((record.id, record.account_id)),
         _ => Err(unresolvable_duplicate(addr)),
     }
 }
@@ -206,21 +221,35 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     Ok((
                         row.get(0)?,
                         row.get(1)?,
-                        row.get(2)?,
+                        row.get::<_, i64>(2)?,
                         row.get(3)?,
                         row.get(4)?,
                         row.get(5)?,
                     ))
                 })?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(
+                    |(id, account_id, scope_code, transparent_child_index, ufvk, uivk)| {
+                        Ok::<_, WalletMigrationError>(AddressRecord {
+                            id,
+                            account_id,
+                            key_scope: KeyScope::decode(scope_code)?,
+                            transparent_child_index,
+                            ufvk,
+                            uivk,
+                        })
+                    },
+                )
                 .collect::<Result<Vec<_>, _>>()?;
             drop(group_stmt);
 
             let single_account = group
                 .iter()
-                .all(|(_, account_id, ..)| *account_id == group[0].1);
+                .all(|record| record.account_id == group[0].account_id);
 
             let (canonical_id, canonical_account) = if single_account {
-                (group[0].0, group[0].1)
+                (group[0].id, group[0].account_id)
             } else {
                 // The received outputs referencing each record carry their own `account_id`, so a
                 // cross-account merge is only safe when derivation definitively establishes which
@@ -243,7 +272,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 named_params! { ":addr": addr, ":canonical": canonical_id },
             )?;
 
-            for (dup_id, ..) in group.iter().filter(|(id, ..)| *id != canonical_id) {
+            for dup_id in group
+                .iter()
+                .map(|record| record.id)
+                .filter(|id| *id != canonical_id)
+            {
                 for table in [
                     "transparent_received_outputs",
                     "sapling_received_notes",
@@ -558,6 +591,96 @@ mod tests {
             )
             .unwrap();
         assert_eq!((address_id, account_id), (derived_id, account_l));
+    }
+
+    /// The encoded transparent address derivable by the [`insert_account`] test account at the
+    /// given ZIP 32 account index, at *ephemeral* child index 0.
+    #[cfg(feature = "transparent-inputs")]
+    fn account_ephemeral_address(network: &Network, account_index: u32) -> String {
+        use transparent::keys::NonHardenedChildIndex;
+        use zcash_keys::encoding::AddressCodec as _;
+
+        let usk = UnifiedSpendingKey::from_seed(
+            network,
+            &[0xab; 32][..],
+            zip32::AccountId::try_from(account_index).unwrap(),
+        )
+        .unwrap();
+        usk.to_unified_full_viewing_key()
+            .transparent()
+            .unwrap()
+            .derive_ephemeral_ivk()
+            .unwrap()
+            .derive_ephemeral_address(NonHardenedChildIndex::ZERO)
+            .unwrap()
+            .encode(network)
+    }
+
+    /// Ephemeral-scope records are derivation-verifiable: a cross-account duplicate in which one
+    /// record is an ephemeral address genuinely derived by its own account is resolved in favor
+    /// of that record.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn resolves_cross_account_duplicate_by_ephemeral_derivation() {
+        let network = Network::TestNetwork;
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+
+        WalletMigrator::new()
+            .with_seed(Secret::new(vec![0xab; 32]))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
+
+        let account_a = insert_account(&db_data.conn, 0, [0xAA; 16]);
+        let account_l = insert_account(&db_data.conn, 0x7FFF_FFFF, [0xBB; 16]);
+
+        // The receiver genuinely derivable by account A at ephemeral index 0.
+        let taddr = account_ephemeral_address(&network, 0);
+
+        // Account A's ephemeral-scope record for the receiver: verification will succeed.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO addresses (account_id, key_scope, diversifier_index_be, address,
+                 transparent_child_index, cached_transparent_receiver_address, receiver_flags,
+                 exposed_at_height)
+                 VALUES (?1, 2, X'00000000000000000000000000', ?2, 0, ?2, 5, 200)",
+                rusqlite::params![account_a, taddr],
+            )
+            .unwrap();
+        let ephemeral_id = db_data.conn.last_insert_rowid();
+
+        // The same receiver imported standalone into the other account.
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO addresses (account_id, key_scope, address,
+                 cached_transparent_receiver_address, imported_transparent_receiver_pubkey,
+                 receiver_flags, exposed_at_height)
+                 VALUES (?1, -1, ?2, ?2,
+                 X'020000000000000000000000000000000000000000000000000000000000000005', 5, 100)",
+                rusqlite::params![account_l, taddr],
+            )
+            .unwrap();
+
+        WalletMigrator::new()
+            .with_seed(Secret::new(vec![0xab; 32]))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
+
+        // The ephemeral record verified by derivation wins.
+        let remaining: Vec<i64> = db_data
+            .conn
+            .prepare("SELECT id FROM addresses WHERE cached_transparent_receiver_address = ?1")
+            .unwrap()
+            .query_map([&taddr], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(remaining, vec![ephemeral_id]);
     }
 
     /// After the migration, two derived addresses that share a transparent receiver must be
