@@ -11,7 +11,7 @@ use ::transparent::{
 };
 use zcash_protocol::{
     PoolType,
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, Parameters},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
@@ -19,7 +19,7 @@ use zcash_script::opcode::PushValue;
 
 use crate::transaction::{
     Transaction, TxVersion,
-    components::orchard::orchard_bundle_version_for_branch,
+    components::orchard::bundle_version_for_branch,
     fees::{
         FeeRule,
         transparent::{InputView, OutputView},
@@ -595,16 +595,16 @@ impl<P: consensus::Parameters> Builder<P, ()> {
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let consensus_branch_id = BranchId::for_height(&params, target_height);
-        let bundle_version = orchard_bundle_version_for_branch(consensus_branch_id);
+        // `bundle_version_for_branch` returns `Some` exactly for the branches in
+        // which the Orchard pool is supported (NU5 onward), so this also gates
+        // Orchard builder construction on NU5 activation.
+        let bundle_version =
+            bundle_version_for_branch(consensus_branch_id, orchard::ValuePool::Orchard);
         // Default transaction version for the branch (V6 from NU6.3 onward).
         let tx_version = TxVersion::suggested_for_branch(consensus_branch_id);
 
-        let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            build_config.orchard_builder(bundle_version)
-        } else {
-            None
-        };
-        let orchard_bundle_version = orchard_builder.as_ref().map(|_| bundle_version);
+        let orchard_builder = bundle_version.and_then(|v| build_config.orchard_builder(v));
+        let orchard_bundle_version = orchard_builder.as_ref().and(bundle_version);
 
         // The Ironwood builder exists exactly when the branch's transaction version
         // carries an Ironwood bundle (V6, i.e. NU6.3 onward).
@@ -1269,8 +1269,12 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             let build_proving_key = build_proving_key || unauthed_tx.ironwood_bundle.is_some();
             build_proving_key.then(|| {
                 orchard::circuit::ProvingKey::build(
-                    orchard_bundle_version_for_branch(unauthed_tx.consensus_branch_id)
-                        .circuit_version(),
+                    bundle_version_for_branch(
+                        unauthed_tx.consensus_branch_id,
+                        orchard::ValuePool::Orchard,
+                    )
+                    .expect("an Orchard or Ironwood bundle implies an NU5+ consensus branch")
+                    .circuit_version(),
                 )
             })
         };

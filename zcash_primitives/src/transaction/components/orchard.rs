@@ -8,7 +8,7 @@ use corez::io::{self, Read, Write};
 use nonempty::NonEmpty;
 
 use orchard::{
-    Action, Anchor,
+    Action, Anchor, ValuePool,
     bundle::{Authorization, Authorized, BundleVersion, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
@@ -49,13 +49,20 @@ impl MapAuth<Authorized, Authorized> for () {
 
 fn read_bundle<R: Read>(
     mut reader: R,
-    bundle_version: BundleVersion,
+    bundle_version: Option<BundleVersion>,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
         Ok(None)
     } else {
+        let bundle_version = bundle_version.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Orchard-protocol bundles may not be present in this transaction version \
+                 under the transaction's consensus branch ID",
+            )
+        })?;
         let flags = read_flags(&mut reader, bundle_version)?;
         let value_balance = Transaction::read_amount(&mut reader)?;
         let anchor = read_anchor(&mut reader)?;
@@ -91,30 +98,53 @@ fn read_bundle<R: Read>(
     }
 }
 
-/// Returns the Orchard-pool [`BundleVersion`] in effect for the given consensus branch.
+/// Returns the [`BundleVersion`] in effect for the given Orchard-protocol value pool
+/// under the given consensus branch, or `None` if the pool is not supported under that
+/// branch (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3).
 ///
-/// The v5 Orchard flag byte is the same in every epoch (bit 2 reserved), so serialization
-/// is unaffected by this choice, but the `BundleVersion` fixes the bundle's cross-address
-/// semantics and circuit generation, which do follow the consensus epoch:
-///   * pre-NU6.2: historical insecure circuit, cross-address enabled, proof size not
-///     enforced;
-///   * NU6.2: fixed circuit, cross-address enabled;
-///   * NU6.3 onward: post-NU6.3 circuit, cross-address disabled (consensus-mandated).
-pub fn orchard_bundle_version_for_branch(consensus_branch_id: BranchId) -> BundleVersion {
-    match consensus_branch_id {
-        BranchId::Sprout
-        | BranchId::Overwinter
-        | BranchId::Sapling
-        | BranchId::Blossom
-        | BranchId::Heartwood
-        | BranchId::Canopy
-        | BranchId::Nu5
-        | BranchId::Nu6
-        | BranchId::Nu6_1 => BundleVersion::orchard_insecure_v1(),
-        BranchId::Nu6_2 => BundleVersion::orchard_v2(),
-        BranchId::Nu6_3 => BundleVersion::orchard_v3(),
-        #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => BundleVersion::orchard_v3(),
+/// The `BundleVersion` fixes a bundle's flag-byte grammar, cross-address semantics, and
+/// circuit generation:
+///   * Orchard pool, NU5 through NU6.1: historical insecure circuit, cross-address
+///     enabled, proof size not enforced;
+///   * Orchard pool, NU6.2: fixed circuit, cross-address enabled;
+///   * Orchard pool, NU6.3 onward: post-NU6.3 circuit, cross-address disabled
+///     (consensus-mandated);
+///   * Ironwood pool, NU6.3 onward: post-NU6.3 circuit, cross-address enabled.
+pub fn bundle_version_for_branch(
+    consensus_branch_id: BranchId,
+    pool: ValuePool,
+) -> Option<BundleVersion> {
+    match pool {
+        ValuePool::Orchard => match consensus_branch_id {
+            BranchId::Sprout
+            | BranchId::Overwinter
+            | BranchId::Sapling
+            | BranchId::Blossom
+            | BranchId::Heartwood
+            | BranchId::Canopy => None,
+            BranchId::Nu5 | BranchId::Nu6 | BranchId::Nu6_1 => {
+                Some(BundleVersion::orchard_insecure_v1())
+            }
+            BranchId::Nu6_2 => Some(BundleVersion::orchard_v2()),
+            BranchId::Nu6_3 => Some(BundleVersion::orchard_v3()),
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => Some(BundleVersion::orchard_v3()),
+        },
+        ValuePool::Ironwood => match consensus_branch_id {
+            BranchId::Sprout
+            | BranchId::Overwinter
+            | BranchId::Sapling
+            | BranchId::Blossom
+            | BranchId::Heartwood
+            | BranchId::Canopy
+            | BranchId::Nu5
+            | BranchId::Nu6
+            | BranchId::Nu6_1
+            | BranchId::Nu6_2 => None,
+            BranchId::Nu6_3 => Some(BundleVersion::ironwood_v3()),
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => Some(BundleVersion::ironwood_v3()),
+        },
     }
 }
 
@@ -123,17 +153,16 @@ pub fn orchard_bundle_version_for_branch(consensus_branch_id: BranchId) -> Bundl
 /// The v5 Orchard wire serialization is identical in every epoch (flag bit 2 is
 /// reserved), but the returned bundle's [`BundleVersion`] — which fixes its
 /// cross-address semantics and circuit generation — follows the consensus epoch
-/// identified by `consensus_branch_id` (see
-/// [`orchard_bundle_version_for_branch`]). By contrast, `read_v6_bundle` takes a
-/// `bundle_version` argument so the caller selects the Orchard or Ironwood v6
-/// slot.
+/// identified by `consensus_branch_id` (see [`bundle_version_for_branch`]). A
+/// non-empty Orchard bundle under a consensus branch that predates NU5 is
+/// rejected as invalid data.
 pub fn read_v5_bundle<R: Read>(
     reader: R,
     consensus_branch_id: BranchId,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     read_bundle(
         reader,
-        orchard_bundle_version_for_branch(consensus_branch_id),
+        bundle_version_for_branch(consensus_branch_id, ValuePool::Orchard),
     )
 }
 
@@ -154,16 +183,19 @@ fn check_v6_bundle_version(bundle_version: BundleVersion) -> io::Result<()> {
     }
 }
 
-/// Reads an [`orchard::Bundle`] from a v6 transaction format. `bundle_version`
-/// selects the pool: [`BundleVersion::orchard_v3`] for the Orchard v6 bundle, or
-/// [`BundleVersion::ironwood_v3`] for the Ironwood bundle (whose flag-byte encoding permits
-/// the cross-address bit, unlike the Orchard v6 pool).
+/// Reads an [`orchard::Bundle`] from a v6 transaction format. `pool` selects the bundle
+/// slot to read: the Orchard slot ([`ValuePool::Orchard`]) or the Ironwood slot
+/// ([`ValuePool::Ironwood`], whose flag-byte encoding permits the cross-address bit,
+/// unlike the Orchard v6 pool). The slot's [`BundleVersion`] is derived from
+/// `consensus_branch_id` (see [`bundle_version_for_branch`]); a non-empty bundle in a
+/// slot whose value pool is not supported under the transaction's consensus branch is
+/// rejected as invalid data.
 pub fn read_v6_bundle<R: Read>(
     reader: R,
-    bundle_version: BundleVersion,
+    consensus_branch_id: BranchId,
+    pool: ValuePool,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    check_v6_bundle_version(bundle_version)?;
-    read_bundle(reader, bundle_version)
+    read_bundle(reader, bundle_version_for_branch(consensus_branch_id, pool))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {

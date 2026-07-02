@@ -882,11 +882,13 @@ impl Transaction {
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::orchard_v3(),
+            header_fragment.consensus_branch_id,
+            orchard::ValuePool::Orchard,
         )?;
         let ironwood_bundle = orchard_serialization::read_v6_bundle(
             &mut reader,
-            orchard::bundle::BundleVersion::ironwood_v3(),
+            header_fragment.consensus_branch_id,
+            orchard::ValuePool::Ironwood,
         )?;
 
         let data = TransactionData {

@@ -11,13 +11,22 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_primitives::transaction::components::orchard::orchard_bundle_version_for_branch`
+- `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
 
 ### Changed
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
   the consensus branch ID under which the transaction was constructed instead of
   an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived
-  from the branch ID via `orchard_bundle_version_for_branch`.
+  from the branch ID via `bundle_version_for_branch`. A transaction whose
+  consensus branch ID predates NU5 is now rejected as invalid data if it
+  contains a non-empty Orchard bundle.
+- `zcash_primitives::transaction::components::orchard::read_v6_bundle` now takes
+  the consensus branch ID and the `orchard::ValuePool` identifying the bundle
+  slot to read, instead of an `orchard::bundle::BundleVersion`; the slot's
+  bundle version is derived via `bundle_version_for_branch`. A non-empty bundle
+  in a slot whose value pool is not supported under the transaction's consensus
+  branch ID (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3)
+  is now rejected as invalid data.
 
 ## [0.29.0-pre.0] - 2026-06-30
 

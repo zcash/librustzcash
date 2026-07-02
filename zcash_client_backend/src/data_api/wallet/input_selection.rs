@@ -746,11 +746,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    // Preserve the legacy Orchard action-count estimate here.
-                    // If this path targets restrictions that disable
-                    // cross-address transfers, thread the target-height-selected
-                    // `BundleVersion` through this call.
-                    crate::ANY_ORCHARD_BUNDLE_VERSION,
+                    orchard_bundle_version_for_height(params, target_height),
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
@@ -843,6 +839,23 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     }
 }
 
+/// Returns the Orchard bundle version whose action-count policy applies to
+/// transactions constructed for the given target height.
+#[cfg(feature = "orchard")]
+fn orchard_bundle_version_for_height<ParamsT: consensus::Parameters>(
+    params: &ParamsT,
+    target_height: TargetHeight,
+) -> ::orchard::bundle::BundleVersion {
+    zcash_primitives::transaction::components::orchard::bundle_version_for_branch(
+        consensus::BranchId::for_height(params, BlockHeight::from(target_height)),
+        ::orchard::ValuePool::Orchard,
+    )
+    // Orchard did not exist prior to NU5, so no Orchard bundle (and no Orchard
+    // action) can be produced for a pre-NU5 target height; every bundle version
+    // yields the correct action count (zero) for an empty bundle.
+    .unwrap_or(::orchard::bundle::BundleVersion::orchard_insecure_v1())
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     params: &ParamsT,
@@ -910,11 +923,7 @@ where
             0
         };
         orchard_fees::transactional_action_count(
-            // Preserve the legacy Orchard action-count estimate here. If this
-            // path targets restrictions that disable cross-address transfers,
-            // thread the target-height-selected `BundleVersion`
-            // through this call.
-            crate::ANY_ORCHARD_BUNDLE_VERSION,
+            orchard_bundle_version_for_height(params, target_height),
             spendable_notes.orchard.len(),
             requested_orchard_actions,
         )
@@ -1315,14 +1324,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             PoolType::ORCHARD => {
                 let count = orchard_fees::transactional_action_count(
-                    // With no Orchard spends and one requested output, the
-                    // padded action count is independent of the Orchard pool
-                    // restriction.
-                    crate::ANY_ORCHARD_BUNDLE_VERSION,
+                    orchard_bundle_version_for_height(params, target_height),
                     0,
                     1,
                 )
-                .expect("legacy Orchard protocol permits any transactional spend and output count");
+                .expect("every Orchard bundle version permits spending and output creation");
                 (0usize, count)
             }
             // Unreachable: `resolve_shielded_destination` rejects transparent

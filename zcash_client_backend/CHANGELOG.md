@@ -87,6 +87,11 @@ workspace.
   `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
   `zcash_proofs 0.29.0-pre.0`.
+- Fee and change calculation now derive the Orchard bundle version — and hence
+  the Orchard action-count policy — from the proposal's target height, instead
+  of unconditionally using the legacy (pre-NU6.3) policy. Proposals targeting
+  heights at or beyond NU6.3 activation now count one action per Orchard spend
+  or output, matching the post-NU6.3 transaction builder.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
