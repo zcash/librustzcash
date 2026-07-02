@@ -166,7 +166,7 @@ pub mod v1 {
 
         #[test]
         fn v1_refuses_v6_pczts_and_non_canonical_ironwood_bundles() {
-            // A v6 PCZT cannot be encoded as v1, even when its Ironwood bundle is
+            // A v6 tx cannot be encoded as a v1 PCZT, even when its Ironwood bundle is
             // canonically empty.
             let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
                 .unwrap()
@@ -176,8 +176,8 @@ pub mod v1 {
                 Err(crate::EncodingError::UnsupportedTxVersion)
             ));
 
-            // A v5 PCZT carrying non-canonical Ironwood bundle data cannot be encoded
-            // as v1, because the data would be dropped.
+            // A v5 tx carrying non-canonical Ironwood bundle data cannot be encoded
+            // as a v1 PCZT, because the data would be dropped.
             let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
                 .unwrap()
                 .build();
@@ -440,17 +440,20 @@ impl Pczt {
             }),
         }?;
 
-        // The v6 transaction format does not exist prior to NU6.3 (the first upgrade
-        // under which the Orchard protocol is at revision V3).
-        if matches!(version, TxVersion::V6)
-            && orchard_protocol_revision < OrchardProtocolRevision::V3
-        {
-            return Err(ExtractError::UnsupportedConsensusBranchId.into());
-        }
-
-        // Only the v6 transaction format carries an Ironwood bundle.
-        if !matches!(version, TxVersion::V6) && ironwood != crate::orchard::EMPTY_IRONWOOD {
-            return Err(ExtractError::IronwoodNotSupported.into());
+        match version {
+            // Only the v6 transaction format carries an Ironwood bundle.
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => {
+                if ironwood != crate::orchard::EMPTY_IRONWOOD {
+                    return Err(ExtractError::IronwoodNotSupported.into());
+                }
+            }
+            // The v6 transaction format does not exist prior to NU6.3 (the first
+            // upgrade under which the Orchard protocol is at revision V3).
+            TxVersion::V6 => {
+                if orchard_protocol_revision < OrchardProtocolRevision::V3 {
+                    return Err(ExtractError::UnsupportedConsensusBranchId.into());
+                }
+            }
         }
 
         let transparent = transparent
@@ -458,9 +461,13 @@ impl Pczt {
             .map_err(ExtractError::TransparentParse)?;
         let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
         let orchard = orchard
-            .into_parsed_with_version(crate::orchard::orchard_bundle_version_for_revision(
-                orchard_protocol_revision,
-            ))
+            .into_parsed_with_version(
+                crate::orchard::bundle_version_for_revision(
+                    orchard_protocol_revision,
+                    ::orchard::ValuePool::Orchard,
+                )
+                .expect("the Orchard pool is supported under every protocol revision"),
+            )
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
             .into_ironwood_parsed()
