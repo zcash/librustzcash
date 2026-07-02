@@ -72,15 +72,26 @@ impl IoFinalizer {
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
+        // The Sapling bundle is always finalized: unlike the Orchard-protocol
+        // Transaction Extractor, the Sapling one requires `bsk` to be set even when
+        // the bundle is empty.
         sapling
             .finalize_io(shielded_sighash, OsRng)
             .map_err(Error::SaplingFinalize)?;
-        orchard
-            .finalize_io(shielded_sighash, OsRng)
-            .map_err(Error::OrchardFinalize)?;
-        ironwood
-            .finalize_io(shielded_sighash, OsRng)
-            .map_err(Error::IronwoodFinalize)?;
+        // An empty Orchard-protocol bundle carries no value commitment information
+        // and contributes nothing to the transaction; leave its `bsk` unset so that
+        // it stays in its canonical empty form (and so remains omissible by, or
+        // representable in, the serialization formats).
+        if has_orchard_actions {
+            orchard
+                .finalize_io(shielded_sighash, OsRng)
+                .map_err(Error::OrchardFinalize)?;
+        }
+        if has_ironwood_actions {
+            ironwood
+                .finalize_io(shielded_sighash, OsRng)
+                .map_err(Error::IronwoodFinalize)?;
+        }
 
         Ok(Pczt {
             global,

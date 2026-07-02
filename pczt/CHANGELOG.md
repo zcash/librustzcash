@@ -13,6 +13,20 @@ workspace.
 ### Changed
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
   `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
+- The empty states of the transparent, Sapling, Orchard, and Ironwood bundles
+  now have a single canonical representation, produced consistently by the
+  Creator, `Creator::build_from_parts`, the serialization formats, and the IO
+  Finalizer, so that copies of a PCZT that take different serialization paths
+  continue to merge successfully:
+  - `Creator::build_from_parts` now uses an all-zeroes anchor (rather than the
+    empty-tree root) for absent Sapling and Orchard bundles.
+  - The Creator now initializes empty bundle value sums as non-negative zero.
+  - The IO Finalizer no longer sets `bsk` on an empty Orchard-protocol bundle.
+  - An Orchard-protocol bundle whose fields differ from the canonical empty
+    representation is no longer omitted from (and then lossily restored by)
+    the v2 serialization format, and the v1 serialization format refuses to
+    encode a PCZT whose Ironwood bundle is not canonically empty, rather than
+    silently dropping its non-default fields.
 - Every PCZT role that parses the Orchard-pool bundle derives its bundle
   version from the PCZT's consensus branch ID, and returns an
   `UnsupportedConsensusBranchId` error when that branch ID is unrecognized or
