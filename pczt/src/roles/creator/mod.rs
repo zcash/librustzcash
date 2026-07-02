@@ -13,6 +13,9 @@ use crate::{
     orchard::{Bundle as OrchardBundle, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED},
 };
 
+#[cfg(feature = "orchard")]
+use crate::orchard::orchard_bundle_version_for_revision;
+
 use zcash_protocol::consensus::BranchId;
 use zcash_protocol::constants::{
     V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
@@ -54,19 +57,14 @@ fn consensus_branch_id_for_pczt(consensus_branch_id: u32) -> Result<BranchId, Er
     }
 }
 
-#[cfg(feature = "orchard")]
-use crate::orchard::orchard_bundle_version_for_revision;
-
 pub struct Creator {
     tx_version: u32,
     version_group_id: u32,
-    consensus_branch_id: u32,
+    consensus_branch_id: BranchId,
     fallback_lock_time: Option<u32>,
     expiry_height: u32,
     coin_type: u32,
     orchard_flags: u8,
-    #[cfg(feature = "orchard")]
-    orchard_bundle_version: orchard::bundle::BundleVersion,
     ironwood_flags: u8,
     sapling_anchor: [u8; 32],
     orchard_anchor: [u8; 32],
@@ -111,27 +109,29 @@ impl Creator {
             BranchId::Nu7 => (V6_TX_VERSION, V6_VERSION_GROUP_ID),
         };
 
-        #[cfg(feature = "orchard")]
-        let orchard_bundle_version = branch_id
-            .orchard_protocol_revision()
-            .map(orchard_bundle_version_for_revision)
-            .expect("`consensus_branch_id_for_pczt` rejects branches that predate NU5");
-
         Ok(Self {
             tx_version,
             version_group_id,
-            consensus_branch_id,
+            consensus_branch_id: branch_id,
             fallback_lock_time: None,
             expiry_height,
             coin_type,
             orchard_flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
-            #[cfg(feature = "orchard")]
-            orchard_bundle_version,
             ironwood_flags: crate::orchard::IRONWOOD_SPENDS_OUTPUTS_AND_CROSS_ADDRESS_ENABLED,
             sapling_anchor,
             orchard_anchor,
             ironwood_anchor: [0; 32],
         })
+    }
+
+    /// Returns the Orchard-pool bundle version implied by this Creator's consensus
+    /// branch ID.
+    #[cfg(feature = "orchard")]
+    fn orchard_bundle_version(&self) -> orchard::bundle::BundleVersion {
+        self.consensus_branch_id
+            .orchard_protocol_revision()
+            .map(orchard_bundle_version_for_revision)
+            .expect("`Creator::new` rejects branches that predate NU5")
     }
 
     pub fn with_fallback_lock_time(mut self, fallback: u32) -> Self {
@@ -157,7 +157,7 @@ impl Creator {
         orchard_flags: orchard::bundle::Flags,
     ) -> Result<Self, Error> {
         self.orchard_flags = orchard_flags
-            .to_byte(self.orchard_bundle_version)
+            .to_byte(self.orchard_bundle_version())
             .ok_or(Error::UnrepresentableOrchardFlags)?;
         Ok(self)
     }
@@ -204,7 +204,7 @@ impl Creator {
             global: crate::common::Global {
                 tx_version: self.tx_version,
                 version_group_id: self.version_group_id,
-                consensus_branch_id: self.consensus_branch_id,
+                consensus_branch_id: self.consensus_branch_id.into(),
                 fallback_lock_time: self.fallback_lock_time,
                 expiry_height: self.expiry_height,
                 coin_type: self.coin_type,
@@ -229,7 +229,7 @@ impl Creator {
                 anchor: self.orchard_anchor,
                 // The note-plaintext version is determined by the Orchard bundle version.
                 #[cfg(feature = "orchard")]
-                note_version: self.orchard_bundle_version.note_version(),
+                note_version: self.orchard_bundle_version().note_version(),
                 #[cfg(not(feature = "orchard"))]
                 note_version: crate::orchard::NoteVersion::V2,
                 zkproof: None,
