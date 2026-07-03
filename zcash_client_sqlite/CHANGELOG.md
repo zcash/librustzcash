@@ -11,6 +11,17 @@ workspace.
 ## Unreleased
 
 ### Added
+- A new migration adds a `note_version` column to `orchard_received_notes`,
+  recording the note plaintext version from which each received note was
+  obtained. The Orchard note encryption domain accepts only version 2 note
+  plaintexts, so existing rows are backfilled as version 2.
+- A new migration adds the `ironwood_received_notes` and
+  `ironwood_received_note_spends` tables, mirroring the corresponding Orchard
+  tables. Received notes obtained from version 3 (Ironwood) note plaintexts
+  are recorded in `ironwood_received_notes`; Ironwood notes are stored
+  separately from Orchard notes because the two pools have distinct note
+  commitment trees, and because an Orchard action and an Ironwood action in
+  the same transaction may share an action index.
 - The wallet database now persists Ironwood note commitment tree data. A new
   migration adds the `ironwood_tree_shards`, `ironwood_tree_cap`,
   `ironwood_tree_checkpoints`, and `ironwood_tree_checkpoint_marks_removed`

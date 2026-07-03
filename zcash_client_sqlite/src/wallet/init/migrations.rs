@@ -25,9 +25,11 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod ironwood_received_notes;
 mod ironwood_shardtree;
 mod ivk_item_cache;
 mod nullifier_map;
+mod orchard_note_version;
 mod orchard_received_notes;
 mod orchard_shardtree;
 mod received_notes_nullable_nf;
@@ -127,6 +129,8 @@ pub(super) fn all_migrations<
     //                        \      ensure_default_transparent_address    /                                 \
     //                         \                     |                    /                                   \
     //                          `---- fix_transparent_received_outputs --'                                     \
+    //                                    /         /           \    \                                         |
+    //                                   /         /             \   add_transparent_value_index               |
     //                                  /         /               \                                            |
     //           support_zcashd_wallet_import    /             fix_v_transactions_expired_unmined              |
     //                \                         /                    /        |         \                      |
@@ -139,14 +143,12 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                                        /               |              \
     //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
-    //                                                    /          \
+    //                                                    /          \         \
+    //                                                   /            \      orchard_note_version
+    //                                                  /              \         \
+    //                                                 /                \      ironwood_received_notes
+    //                                                /                  \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
-    //
-    // add_transparent_value_index depends directly on fix_transparent_received_outputs (not
-    // shown above to avoid further complicating the diagram): that migration drops and
-    // recreates the transparent_received_outputs table, which would silently destroy the
-    // index if add_transparent_value_index instead depended only on utxos_to_txos and
-    // happened to run first.
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -247,6 +249,8 @@ pub(super) fn all_migrations<
             params: params.clone(),
         }),
         Box::new(add_transparent_value_index::Migration),
+        Box::new(orchard_note_version::Migration),
+        Box::new(ironwood_received_notes::Migration),
     ]
 }
 
@@ -440,7 +444,7 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashSet;
 
     use rusqlite::Connection;
