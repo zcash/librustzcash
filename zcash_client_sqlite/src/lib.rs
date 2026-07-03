@@ -168,6 +168,9 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 #[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
+#[cfg(feature = "orchard")]
+pub(crate) const IRONWOOD_TABLES_PREFIX: &str = "ironwood";
+
 #[cfg(not(feature = "orchard"))]
 pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Omit;
 #[cfg(feature = "orchard")]
@@ -2298,6 +2301,38 @@ where
     ))
 }
 
+/// The shard store backing the Ironwood note commitment tree.
+///
+/// Ironwood note commitments are Orchard-shaped, so this reuses the Orchard hash type and shard
+/// height; only the backing table prefix differs (see [`IRONWOOD_TABLES_PREFIX`]). It is defined
+/// as a distinct alias to make Ironwood usage self-documenting at call sites.
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodShardStore<C> =
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>;
+
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodCommitmentTree<C> = ShardTree<
+    IronwoodShardStore<C>,
+    { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+    ORCHARD_SHARD_HEIGHT,
+>;
+
+/// Returns a handle to the Ironwood note commitment tree.
+#[cfg(feature = "orchard")]
+pub(crate) fn ironwood_tree<C>(
+    conn: C,
+) -> Result<IronwoodCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    IronwoodShardStore<C>:
+        ShardStore<H = orchard::tree::MerkleHashOrchard, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, IRONWOOD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
 impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletCommitmentTrees
     for WalletDb<C, P, CL, R>
 {
@@ -2396,6 +2431,28 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
     }
+
+    #[cfg(feature = "orchard")]
+    fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
+    where
+        for<'a> F:
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ironwood_tree(&tx)?;
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(Some(result))
+    }
 }
 
 impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
@@ -2457,6 +2514,19 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
             start_index,
             roots,
         )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
+    where
+        for<'a> F:
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let mut shardtree = ironwood_tree(self.conn.0)?;
+        let result = callback(&mut shardtree)?;
+
+        Ok(Some(result))
     }
 }
 

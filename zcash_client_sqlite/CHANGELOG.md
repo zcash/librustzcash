@@ -11,6 +11,16 @@ workspace.
 ## Unreleased
 
 ### Added
+- The wallet database now persists Ironwood note commitment tree data. A new
+  migration adds the `ironwood_tree_shards`, `ironwood_tree_cap`,
+  `ironwood_tree_checkpoints`, and `ironwood_tree_checkpoint_marks_removed`
+  tables (mirroring the Orchard shard-tree tables), the
+  `ironwood_commitment_tree_size` and `ironwood_action_count` columns on
+  `blocks`, and the `v_ironwood_shard_scan_ranges`,
+  `v_ironwood_shard_unscanned_ranges`, and `v_ironwood_shards_scan_state` views.
+  The `WalletCommitmentTrees::with_ironwood_tree_mut` implementation now provides
+  the persisted Ironwood tree (Ironwood note commitments are Orchard-shaped, so
+  the tree reuses the Orchard shard store under a separate table prefix).
 - `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
   new variant that records the shielded pool and the range of block heights
   being added to the wallet when a note commitment tree error occurs during a
