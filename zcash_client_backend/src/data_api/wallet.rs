@@ -1316,8 +1316,9 @@ where
     } else {
         OrchardBuildMode::Orchard
     };
-    // Orchard-pool payment and change outputs are routed to the Ironwood bundle
-    // in exactly the Ironwood spend and Ironwood output modes.
+    // Orchard-pool *payment* outputs are routed to the Ironwood bundle in exactly the Ironwood
+    // spend and Ironwood output modes: post-NU6.3, new Orchard payment outputs are forbidden, so
+    // payments to an Orchard receiver are created in the Ironwood bundle.
     #[cfg(feature = "orchard")]
     let orchard_outputs_are_ironwood = matches!(
         orchard_build_mode,
@@ -1919,9 +1920,12 @@ where
                         orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
 
                     if orchard_outputs_are_ironwood {
-                        // The Ironwood builder enables cross-address transfers, so
-                        // change is an ordinary owned output; `add_ironwood_output`
-                        // covers it (the dedicated change entry point was dropped).
+                        // Once Ironwood is active, Orchard-pool change is routed into the Ironwood
+                        // bundle: the Orchard V3 bundle forbids cross-address outputs, so change to
+                        // the internal change address cannot be created there. The Ironwood builder
+                        // enables cross-address transfers, so change is an ordinary owned output;
+                        // `add_ironwood_output` covers it (the dedicated change entry point was
+                        // dropped).
                         builder.add_ironwood_output(
                             internal_ovk.map(|k| k.into()),
                             change_address,

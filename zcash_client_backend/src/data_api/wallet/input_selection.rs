@@ -713,6 +713,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             })?;
         #[cfg(not(feature = "unstable"))]
         let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
+        // Without the `orchard` feature there are no Orchard-family pools to select from, so
+        // `orchard_supported` (always false) is only referenced by Orchard-gated code.
+        #[cfg(not(feature = "orchard"))]
+        let _ = orchard_supported;
 
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
@@ -859,26 +863,21 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             #[cfg(not(feature = "orchard"))]
             let use_sapling = true;
             #[cfg(feature = "orchard")]
-            let (use_sapling, use_orchard) = {
-                // Ironwood notes are part of the Orchard-family selection: they are spent to the
-                // same (Orchard) receiver and are routed to the Ironwood bundle by the builder, so
-                // their value counts toward the Orchard-family input total and the same
-                // `use_orchard` decision governs whether they are spent.
-                let (sapling_input_total, orchard_input_total) = (
-                    shielded_inputs.sapling_value()?,
-                    (shielded_inputs.orchard_value()? + shielded_inputs.ironwood_value()?)
-                        .ok_or(BalanceError::Overflow)?,
-                );
-
-                // Use Sapling inputs if there are no Orchard outputs or if there are insufficient
-                // funds from Orchard inputs to cover the amount required.
-                let use_sapling =
-                    orchard_outputs.is_empty() || amount_required > orchard_input_total;
-                // Use Orchard inputs if there are insufficient funds from Sapling inputs to cover
-                // the amount required.
-                let use_orchard = !use_sapling || amount_required > sapling_input_total;
-
-                (use_sapling, use_orchard)
+            let (use_sapling, use_orchard, use_ironwood) = {
+                // The selection step below never mixes Orchard inputs with Sapling or Ironwood
+                // inputs: it selects either the Orchard group or the Sapling+Ironwood group.
+                // Spending Orchard is a migration that drains the legacy pool, so it must be a pure
+                // Orchard-input transaction; Sapling and Ironwood inputs may be combined. The
+                // presence of any selected Orchard note therefore means the Orchard group was
+                // chosen; otherwise the Sapling and Ironwood notes are spent. If neither group can
+                // cover the amount, the loop reports insufficient funds rather than combining
+                // Orchard with another pool: the API user must first move the Orchard funds out (to
+                // Sapling or Ironwood) in a separate transaction.
+                if shielded_inputs.orchard().is_empty() {
+                    (true, false, true)
+                } else {
+                    (false, true, false)
+                }
             };
 
             let sapling_inputs = if use_sapling {
@@ -902,11 +901,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 vec![]
             };
 
-            // Ironwood inputs are selected together with Orchard inputs (the same `use_orchard`
-            // decision), but kept in a separate list so that they are attributed to the Ironwood
-            // bundle for action-count and fee purposes.
+            // Ironwood inputs are selected only when the Ironwood pool was chosen (never together
+            // with Orchard inputs), and are attributed to the Ironwood bundle for action-count and
+            // fee purposes.
             #[cfg(feature = "orchard")]
-            let ironwood_inputs = if use_orchard {
+            let ironwood_inputs = if use_ironwood {
                 shielded_inputs
                     .ironwood()
                     .iter()
@@ -1064,6 +1063,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &orchard_view,
                 #[cfg(feature = "orchard")]
                 &ironwood_view,
+                // Once Ironwood is active, Orchard-pool change is routed into the Ironwood bundle
+                // (the Orchard V3 bundle forbids cross-address outputs, so change cannot stay in
+                // the Orchard bundle). This matches the builder's change routing so the fee cannot
+                // drift. Spending from a pool always moves value out of that pool.
                 #[cfg(feature = "orchard")]
                 orchard_outputs_are_ironwood,
                 ephemeral_output_value.map(EphemeralBalance::Output),
@@ -1079,9 +1082,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             sapling: use_sapling,
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
-                            // Ironwood notes are selected together with Orchard notes.
                             #[cfg(feature = "orchard")]
-                            ironwood: use_orchard,
+                            ironwood: use_ironwood,
                         }))
                         .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
 
@@ -1170,16 +1172,21 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
 
-            let selectable_pools = {
+            // Orchard inputs are never combined with Sapling or Ironwood, but Sapling and Ironwood
+            // may be combined, so we select from one of two mutually-exclusive input groups: the
+            // Orchard group alone, or the Sapling+Ironwood group. Prefer the Orchard group when its
+            // notes reach the required amount (draining the legacy pool as users migrate to
+            // Ironwood); otherwise use the Sapling+Ironwood group when it reaches the amount. If
+            // neither group can cover the amount, keep whichever group holds the greater value so
+            // the loop reports an accurate insufficient-funds error against a single group (Orchard
+            // is never combined with another pool to make up the difference).
+            let sapling_ironwood_pools = {
                 let mut pools = vec![];
                 if sapling_supported {
                     pools.push(ShieldedPool::Sapling);
                 }
-                if orchard_supported {
-                    pools.push(ShieldedPool::Orchard);
-                }
-                // Ironwood notes are Orchard-family and can be spent once the Ironwood pool is
-                // active at the target height.
+                // Ironwood notes can be spent once the Ironwood pool is active at the target
+                // height, and may be combined with Sapling inputs.
                 #[cfg(feature = "orchard")]
                 if orchard_supported
                     && super::ironwood_active_at(params, BlockHeight::from(target_height))
@@ -1188,17 +1195,71 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
                 pools
             };
-
-            shielded_inputs = wallet_db
+            let sapling_ironwood = wallet_db
                 .select_spendable_notes(
                     account,
                     TargetValue::AtLeast(amount_required),
-                    &selectable_pools,
+                    &sapling_ironwood_pools,
                     target_height,
                     confirmations_policy,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
+
+            #[cfg(feature = "orchard")]
+            {
+                let orchard = if orchard_supported {
+                    Some(
+                        wallet_db
+                            .select_spendable_notes(
+                                account,
+                                TargetValue::AtLeast(amount_required),
+                                &[ShieldedPool::Orchard],
+                                target_height,
+                                confirmations_policy,
+                                &exclude,
+                            )
+                            .map_err(InputSelectorError::DataSource)?,
+                    )
+                } else {
+                    None
+                };
+
+                shielded_inputs = match orchard {
+                    Some(orchard) => {
+                        let orchard_value = orchard.total_value()?;
+                        let sapling_ironwood_value = sapling_ironwood.total_value()?;
+                        let orchard_covers = orchard_value >= amount_required;
+                        let sapling_ironwood_covers = sapling_ironwood_value >= amount_required;
+                        // Prefer the input group that matches the payment's pool, to avoid an
+                        // unnecessary cross-pool (turnstile) output: spend the Orchard group when
+                        // the payment targets an Orchard receiver, otherwise spend the
+                        // Sapling+Ironwood group. Fall back to the other group when the preferred
+                        // one cannot cover the amount, and to the larger group when neither covers
+                        // (so the insufficient-funds error is accurate). Orchard is never combined
+                        // with Sapling or Ironwood to make up a shortfall.
+                        let prefer_orchard = !orchard_outputs.is_empty();
+                        if prefer_orchard && orchard_covers {
+                            orchard
+                        } else if !prefer_orchard && sapling_ironwood_covers {
+                            sapling_ironwood
+                        } else if orchard_covers {
+                            orchard
+                        } else if sapling_ironwood_covers {
+                            sapling_ironwood
+                        } else if orchard_value >= sapling_ironwood_value {
+                            orchard
+                        } else {
+                            sapling_ironwood
+                        }
+                    }
+                    None => sapling_ironwood,
+                };
+            }
+            #[cfg(not(feature = "orchard"))]
+            {
+                shielded_inputs = sapling_ironwood;
+            }
 
             let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available && !transparent_inputs_changed {
@@ -1266,9 +1327,56 @@ where
         )
         .map_err(InputSelectorError::DataSource)?;
 
-    let input_total = spendable_notes
-        .total_value()
-        .map_err(InputSelectorError::Selection)?;
+    // Orchard inputs are never combined with Sapling or Ironwood, but Sapling and Ironwood inputs
+    // may be combined. A send-max transaction therefore sweeps one of two input groups: Orchard
+    // alone (draining the legacy pool), or Sapling together with Ironwood. Prefer draining Orchard
+    // when it holds notes; otherwise sweep the Sapling and Ironwood pools together. Funds left in
+    // the other group are swept by a subsequent send-max transaction.
+    #[cfg(feature = "orchard")]
+    let spend_orchard_notes = !spendable_notes.orchard().is_empty();
+    #[cfg(feature = "orchard")]
+    let spend_sapling_notes = !spend_orchard_notes && !spendable_notes.sapling().is_empty();
+    #[cfg(feature = "orchard")]
+    let spend_ironwood_notes = !spend_orchard_notes && !spendable_notes.ironwood().is_empty();
+    #[cfg(not(feature = "orchard"))]
+    let spend_sapling_notes = !spendable_notes.sapling().is_empty();
+
+    // The Sapling inputs actually consumed by this transaction (zero unless Sapling is the chosen
+    // input pool). This is distinct from any Sapling *output* the recipient may require.
+    let sapling_input_count = if spend_sapling_notes {
+        spendable_notes.sapling().len()
+    } else {
+        0
+    };
+
+    // The total spendable value this transaction will consume: the chosen input group only
+    // (Orchard alone, or Sapling plus Ironwood). Value in the excluded group is not counted, so
+    // the "send max" amount matches the inputs the builder will use.
+    let input_total = {
+        #[allow(unused_mut)]
+        let mut total = Zatoshis::ZERO;
+        if spend_sapling_notes {
+            total = spendable_notes
+                .sapling_value()
+                .map_err(InputSelectorError::Selection)?;
+        }
+        #[cfg(feature = "orchard")]
+        if spend_orchard_notes {
+            total = spendable_notes
+                .orchard_value()
+                .map_err(InputSelectorError::Selection)?;
+        }
+        #[cfg(feature = "orchard")]
+        if spend_ironwood_notes {
+            // Ironwood may be combined with Sapling, so add rather than replace.
+            total = (total
+                + spendable_notes
+                    .ironwood_value()
+                    .map_err(InputSelectorError::Selection)?)
+            .ok_or(InputSelectorError::Selection(BalanceError::Overflow))?;
+        }
+        total
+    };
 
     let mut payment_pools = BTreeMap::new();
 
@@ -1285,11 +1393,13 @@ where
         };
 
         ::sapling::builder::BundleType::DEFAULT
-            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
+            .num_outputs(sapling_input_count, requested_sapling_outputs)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
     };
 
-    let use_sapling = !spendable_notes.sapling().is_empty() || sapling_output_count > 0;
+    // Retention keeps Sapling notes as inputs only when Sapling is the chosen input pool; a Sapling
+    // output required by the recipient does not pull Sapling notes into the input set.
+    let use_sapling = spend_sapling_notes;
 
     // A payment to an Orchard receiver is routed to the Ironwood bundle when the Ironwood pool is
     // active, so the requested output counts as an Ironwood action rather than an Orchard one.
@@ -1312,22 +1422,32 @@ where
     #[cfg(feature = "orchard")]
     let orchard_action_count = orchard_fees::transactional_action_count(
         orchard_bundle_version_for_height(params, target_height),
-        spendable_notes.orchard.len(),
+        if spend_orchard_notes {
+            spendable_notes.orchard.len()
+        } else {
+            0
+        },
         usize::from(recipient_wants_orchard && !route_to_ironwood),
     )
     .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
     #[cfg(not(feature = "orchard"))]
     let orchard_action_count: usize = 0;
 
+    // Retention spends notes from the chosen Orchard-family pool only; the action count above may
+    // additionally include a payment output routed to this pool.
     #[cfg(feature = "orchard")]
-    let use_orchard = orchard_action_count > 0;
+    let use_orchard = spend_orchard_notes;
 
     // Ironwood contributes an action per spent Ironwood note, plus the requested output when it is
     // routed to the Ironwood bundle.
     #[cfg(feature = "orchard")]
     let ironwood_action_count = orchard_fees::transactional_action_count(
         ::orchard::bundle::BundleVersion::ironwood_v3(),
-        spendable_notes.ironwood.len(),
+        if spend_ironwood_notes {
+            spendable_notes.ironwood.len()
+        } else {
+            0
+        },
         usize::from(recipient_wants_orchard && route_to_ironwood),
     )
     .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
@@ -1335,7 +1455,7 @@ where
     let ironwood_action_count: usize = 0;
 
     #[cfg(feature = "orchard")]
-    let use_ironwood = ironwood_action_count > 0;
+    let use_ironwood = spend_ironwood_notes;
 
     let recipient_address: Address = recipient
         .clone()
@@ -1348,7 +1468,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [],
-                spendable_notes.sapling().len(),
+                sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1360,7 +1480,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [P2PKH_STANDARD_OUTPUT_SIZE],
-                spendable_notes.sapling().len(),
+                sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1376,7 +1496,7 @@ where
                 } else {
                     vec![]
                 },
-                spendable_notes.sapling().len(),
+                sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1388,7 +1508,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [P2PKH_STANDARD_OUTPUT_SIZE],
-                spendable_notes.sapling().len(),
+                sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,

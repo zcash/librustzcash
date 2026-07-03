@@ -1284,4 +1284,407 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(total, ((value - spend_value).unwrap() + value3).unwrap());
     }
+
+    /// Property tests for the shielded-input pool-exclusivity rules enforced by input selection
+    /// once the Ironwood pool (NU6.3) is active:
+    ///
+    /// 1. Orchard inputs are never combined with Sapling or Ironwood inputs. Spending Orchard is a
+    ///    migration that drains the legacy pool, so it must be a pure Orchard-input transaction.
+    /// 2. Sapling and Ironwood inputs may be combined in a single transaction.
+    /// 3. If an amount would require Orchard PLUS another pool, input selection reports insufficient
+    ///    funds: the API user must first move the Orchard funds out (to Sapling or Ironwood) in a
+    ///    separate transaction.
+    /// 4. A payment to an Orchard receiver is routed to the Ironwood bundle once NU6.3 is active
+    ///    (no new Orchard payment outputs), and such a transaction builds successfully.
+    #[cfg(feature = "orchard")]
+    mod ironwood_privacy_invariants {
+        use std::convert::Infallible;
+
+        use ::orchard::note::NoteVersion;
+        use proptest::prelude::*;
+
+        use zcash_client_backend::{
+            data_api::{
+                Account, WalletRead,
+                testing::{
+                    AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                    pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+                },
+                wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+            },
+            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            wallet::{Note, OvkPolicy},
+        };
+        use zcash_keys::address::Address;
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{
+            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+        };
+        use zip321::{Payment, TransactionRequest};
+
+        use crate::testing::{
+            BlockCache,
+            db::{TestDb, TestDbFactory},
+        };
+
+        // A network on which Ironwood (NU6.3) is active from the Sapling activation height, so
+        // received Ironwood notes are offered by input selection (which gates on NU6.3 activation).
+        fn ironwood_active_network() -> LocalNetwork {
+            let activation = BlockHeight::from_u32(100_000);
+            LocalNetwork {
+                nu6: Some(activation),
+                nu6_1: Some(activation),
+                nu6_2: Some(activation),
+                nu6_3: Some(activation),
+                ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+            }
+        }
+
+        // A single-output ZIP 317 change strategy. Its nominal change pool is Orchard, but once
+        // Ironwood is active any Orchard-pool change is routed into the Ironwood bundle (the
+        // Orchard V3 bundle forbids cross-address outputs, so change cannot stay in it).
+        fn orchard_change_strategy() -> standard::SingleOutputChangeStrategy<TestDb> {
+            standard::SingleOutputChangeStrategy::new(
+                StandardFeeRule::Zip317,
+                None,
+                ShieldedPool::Orchard,
+                DustOutputPolicy::default(),
+            )
+        }
+
+        // Counts the shielded input notes selected across every step of a proposal, partitioned by
+        // pool: Sapling, Orchard (note version v2), and Ironwood (note version v3).
+        fn input_pool_counts<FeeRuleT, NoteRef>(
+            proposal: &zcash_client_backend::proposal::Proposal<FeeRuleT, NoteRef>,
+        ) -> (usize, usize, usize) {
+            let (mut sapling, mut v2, mut v3) = (0usize, 0usize, 0usize);
+            for step in proposal.steps() {
+                if let Some(inputs) = step.shielded_inputs() {
+                    for received in inputs.notes() {
+                        match received.note() {
+                            Note::Sapling(_) => sapling += 1,
+                            Note::Orchard(note) => match note.version() {
+                                NoteVersion::V3 => v3 += 1,
+                                _ => v2 += 1,
+                            },
+                        }
+                    }
+                }
+            }
+            (sapling, v2, v3)
+        }
+
+        // Requests a payment of `payment_zats` to an Orchard receiver that is not owned by the
+        // wallet.
+        fn orchard_payment_request(
+            st_network: &LocalNetwork,
+            payment_zats: u64,
+        ) -> TransactionRequest {
+            let to_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+            let to: Address = OrchardPoolTester::sk_default_address(&to_sk);
+            TransactionRequest::new(vec![Payment::without_memo(
+                to.to_zcash_address(st_network),
+                Zatoshis::from_u64(payment_zats).unwrap(),
+            )])
+            .unwrap()
+        }
+
+        prop_compose! {
+            // An Orchard note value (which may or may not, on its own, cover the payment) alongside
+            // large Sapling and Ironwood notes that always cover it, plus a small payment. This lets
+            // input selection freely choose between spending Orchard alone or the Sapling+Ironwood
+            // group.
+            fn arb_mixed_pool_amounts()(
+                orchard_zats in 5_000u64..300_000u64,
+                payment_zats in 10_000u64..40_000u64,
+            ) -> (u64, u64) {
+                (orchard_zats, payment_zats)
+            }
+        }
+
+        prop_compose! {
+            // Two moderate note values (used for Sapling and Ironwood) and a payment that exceeds
+            // either note on its own but is covered by the two together.
+            fn arb_combined_amounts()(
+                pool_zats in 60_000u64..90_000u64,
+                extra_zats in 10_000u64..40_000u64,
+            ) -> (u64, u64) {
+                // payment is strictly greater than a single note but below the two combined.
+                (pool_zats, pool_zats + extra_zats)
+            }
+        }
+
+        prop_compose! {
+            // A single Orchard note value large enough to fund the payment and fee, leaving change,
+            // plus the payment amount.
+            fn arb_single_pool_amount()(
+                note_zats in 80_000u64..400_000u64,
+                payment_zats in 10_000u64..40_000u64,
+            ) -> (u64, u64) {
+                (note_zats, payment_zats)
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(8))]
+
+            /// Rule 1: Orchard inputs are never combined with Sapling or Ironwood inputs. The wallet
+            /// holds notes in all three pools; whenever an Orchard note is spent, no Sapling or
+            /// Ironwood note is spent in the same transaction. (When the Orchard note alone covers
+            /// the amount it is preferred, draining the legacy pool; otherwise the Sapling+Ironwood
+            /// group funds the payment and no Orchard note is touched.)
+            #[test]
+            fn orchard_inputs_are_never_combined_with_sapling_or_ironwood(
+                (orchard_zats, payment_zats) in arb_mixed_pool_amounts(),
+            ) {
+                let mut st = TestBuilder::new()
+                    .with_network(ironwood_active_network())
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_block_cache(BlockCache::new())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account = st.test_account().cloned().unwrap();
+                let account_id = account.id();
+
+                // Receive one Orchard note, one Sapling note, and one Ironwood note. The Sapling and
+                // Ironwood notes are large enough to fund the payment on their own.
+                let (h, _, _) = st.generate_next_block(
+                    &OrchardPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(orchard_zats).unwrap(),
+                );
+                st.generate_next_block(
+                    &SaplingPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(200_000),
+                );
+                st.generate_next_block(
+                    &IronwoodFvk(OrchardPoolTester::test_account_fvk(&st)),
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(200_000),
+                );
+                st.scan_cached_blocks(h, 3);
+
+                for _ in 0..5 {
+                    let (h, _) = st.generate_empty_block();
+                    st.scan_cached_blocks(h, 1);
+                }
+
+                let request = orchard_payment_request(st.network(), payment_zats);
+                let change_strategy = orchard_change_strategy();
+                let input_selector = GreedyInputSelector::new();
+                let proposal = st
+                    .propose_transfer(
+                        account_id,
+                        &input_selector,
+                        &change_strategy,
+                        request,
+                        ConfirmationsPolicy::MIN,
+                    )
+                    .unwrap();
+
+                let (sapling, v2, v3) = input_pool_counts(&proposal);
+                prop_assert!(sapling + v2 + v3 > 0, "the transaction must spend some notes");
+                // Orchard is never combined with Sapling or Ironwood.
+                if v2 > 0 {
+                    prop_assert_eq!(
+                        (sapling, v3),
+                        (0, 0),
+                        "Orchard inputs must not be combined with Sapling ({}) or Ironwood ({})",
+                        sapling,
+                        v3,
+                    );
+                }
+            }
+
+            /// Rule 2: Sapling and Ironwood inputs may be combined. The wallet holds only a Sapling
+            /// note and an Ironwood note, each too small to fund the payment alone; the transaction
+            /// spends both, and no Orchard note is involved.
+            #[test]
+            fn sapling_and_ironwood_inputs_may_be_combined(
+                (pool_zats, payment_zats) in arb_combined_amounts(),
+            ) {
+                let mut st = TestBuilder::new()
+                    .with_network(ironwood_active_network())
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_block_cache(BlockCache::new())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account = st.test_account().cloned().unwrap();
+                let account_id = account.id();
+
+                let (h, _, _) = st.generate_next_block(
+                    &SaplingPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(pool_zats).unwrap(),
+                );
+                st.generate_next_block(
+                    &IronwoodFvk(OrchardPoolTester::test_account_fvk(&st)),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(pool_zats).unwrap(),
+                );
+                st.scan_cached_blocks(h, 2);
+
+                for _ in 0..5 {
+                    let (h, _) = st.generate_empty_block();
+                    st.scan_cached_blocks(h, 1);
+                }
+
+                let request = orchard_payment_request(st.network(), payment_zats);
+                let change_strategy = orchard_change_strategy();
+                let input_selector = GreedyInputSelector::new();
+                let proposal = st
+                    .propose_transfer(
+                        account_id,
+                        &input_selector,
+                        &change_strategy,
+                        request,
+                        ConfirmationsPolicy::MIN,
+                    )
+                    .unwrap();
+
+                let (sapling, v2, v3) = input_pool_counts(&proposal);
+                prop_assert_eq!(v2, 0, "no Orchard note is present to spend");
+                prop_assert!(sapling > 0, "a Sapling note must be spent");
+                prop_assert!(v3 > 0, "an Ironwood note must be spent (combined with Sapling)");
+            }
+
+            /// Rule 3: an amount that would require Orchard PLUS another pool must fail. The wallet
+            /// holds an Orchard note and a Sapling note, each too small to fund the payment alone;
+            /// since Orchard cannot be combined with Sapling, input selection reports insufficient
+            /// funds rather than spending both.
+            #[test]
+            fn orchard_plus_another_pool_is_insufficient(
+                (pool_zats, payment_zats) in arb_combined_amounts(),
+            ) {
+                let mut st = TestBuilder::new()
+                    .with_network(ironwood_active_network())
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_block_cache(BlockCache::new())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account = st.test_account().cloned().unwrap();
+                let account_id = account.id();
+
+                let (h, _, _) = st.generate_next_block(
+                    &OrchardPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(pool_zats).unwrap(),
+                );
+                st.generate_next_block(
+                    &SaplingPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(pool_zats).unwrap(),
+                );
+                st.scan_cached_blocks(h, 2);
+
+                for _ in 0..5 {
+                    let (h, _) = st.generate_empty_block();
+                    st.scan_cached_blocks(h, 1);
+                }
+
+                let request = orchard_payment_request(st.network(), payment_zats);
+                let change_strategy = orchard_change_strategy();
+                let input_selector = GreedyInputSelector::new();
+                let result = st.propose_transfer(
+                    account_id,
+                    &input_selector,
+                    &change_strategy,
+                    request,
+                    ConfirmationsPolicy::MIN,
+                );
+
+                let err = result.expect_err(
+                    "spending must fail: Orchard cannot be combined with Sapling to reach the amount",
+                );
+                prop_assert!(
+                    format!("{err:?}").contains("InsufficientFunds"),
+                    "expected an InsufficientFunds error, got: {:?}",
+                    err,
+                );
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(2))]
+
+            /// Rule 4 at the built-transaction level: when the wallet spends an Orchard note to pay
+            /// an Orchard receiver, the payment (and the Orchard change) are carried by the Ironwood
+            /// bundle, and the transaction builds successfully. This proves the transaction the
+            /// builder actually constructs, not just the proposal.
+            #[test]
+            fn orchard_payment_routes_to_ironwood_and_builds(
+                (note_zats, payment_zats) in arb_single_pool_amount(),
+            ) {
+                let mut st = TestBuilder::new()
+                    .with_network(ironwood_active_network())
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_block_cache(BlockCache::new())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account = st.test_account().cloned().unwrap();
+                let account_id = account.id();
+
+                let (h, _, _) = st.generate_next_block(
+                    &OrchardPoolTester::test_account_fvk(&st),
+                    AddressType::DefaultExternal,
+                    Zatoshis::from_u64(note_zats).unwrap(),
+                );
+                st.scan_cached_blocks(h, 1);
+
+                for _ in 0..5 {
+                    let (h, _) = st.generate_empty_block();
+                    st.scan_cached_blocks(h, 1);
+                }
+
+                let request = orchard_payment_request(st.network(), payment_zats);
+                let change_strategy = orchard_change_strategy();
+                let input_selector = GreedyInputSelector::new();
+                let proposal = st
+                    .propose_transfer(
+                        account_id,
+                        &input_selector,
+                        &change_strategy,
+                        request,
+                        ConfirmationsPolicy::MIN,
+                    )
+                    .unwrap();
+
+                // Only the Orchard (v2) note is spent (single-pool inputs).
+                let (sapling, v2, v3) = input_pool_counts(&proposal);
+                prop_assert!(v2 > 0, "the Orchard note must be spent");
+                prop_assert_eq!((sapling, v3), (0, 0), "only Orchard notes should be spent");
+
+                let created = st
+                    .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                        account.usk(),
+                        OvkPolicy::Sender,
+                        &proposal,
+                    )
+                    .unwrap();
+                prop_assert_eq!(created.len(), 1);
+
+                let tx = st
+                    .wallet()
+                    .get_transaction(created[0])
+                    .unwrap()
+                    .expect("the sent transaction was stored");
+
+                // The Orchard-receiver payment (and the Orchard-input change) are carried by the
+                // Ironwood bundle; the Orchard bundle carries the Orchard spend.
+                prop_assert!(
+                    tx.ironwood_bundle().is_some(),
+                    "the payment to an Orchard receiver must be routed to the Ironwood bundle",
+                );
+                prop_assert!(
+                    tx.orchard_bundle().is_some(),
+                    "the Orchard spend must remain in the Orchard bundle",
+                );
+            }
+        }
+    }
 }
