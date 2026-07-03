@@ -1072,6 +1072,143 @@ pub(crate) mod tests {
         assert!(ironwood_shards > 0);
     }
 
+    /// End-to-end: a wallet that has received an Ironwood note can select and spend it. The
+    /// resulting transaction spends the Ironwood note (it carries an Ironwood bundle), pays a
+    /// nonzero fee, records the note as spent, and reduces the account balance.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn spend_received_ironwood_note() {
+        use std::convert::Infallible;
+
+        use zcash_client_backend::{
+            data_api::{
+                Account, WalletRead,
+                testing::{
+                    AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                    pool::ShieldedPoolTester,
+                },
+                wallet::ConfirmationsPolicy,
+                wallet::input_selection::GreedyInputSelector,
+            },
+            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            wallet::OvkPolicy,
+        };
+        use zcash_keys::address::Address;
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{
+            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+        };
+        use zip321::{Payment, TransactionRequest};
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        // A network on which Ironwood (NU6.3) is active from the same height as Sapling, so
+        // received Ironwood notes are offered by input selection (which gates on NU6.3 activation)
+        // and can be spent.
+        let activation = BlockHeight::from_u32(100_000);
+        let network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let account_id = account.id();
+
+        // Receive an Ironwood note, comfortably larger than the payment and fee.
+        let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+        let note_value = Zatoshis::const_from_u64(100_000);
+        let (h, _, _) = st.generate_next_block(&received, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(h, 1);
+        assert_eq!(st.get_total_balance(account_id), note_value);
+
+        // Advance the chain so the note's shard is fully scanned and an anchor is available.
+        for _ in 0..5 {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+
+        // Propose and create a transfer that must spend the Ironwood note.
+        let to_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to: Address = OrchardPoolTester::sk_default_address(&to_sk);
+        let payment_value = Zatoshis::const_from_u64(10_000);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            payment_value,
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st
+            .propose_transfer(
+                account_id,
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let fee = proposal.steps().last().balance().fee_required();
+        assert!(fee.into_u64() > 0, "the transaction must pay a fee");
+
+        let created = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 1);
+        let sent_txid = created[0];
+
+        // The created transaction spends into the Ironwood bundle.
+        let tx = st
+            .wallet()
+            .get_transaction(sent_txid)
+            .unwrap()
+            .expect("The sent transaction was stored.");
+        assert!(
+            tx.ironwood_bundle().is_some(),
+            "the transaction must contain an Ironwood bundle"
+        );
+
+        // The received Ironwood note is now recorded as spent.
+        let ironwood_spends: i64 = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT COUNT(*) FROM ironwood_received_note_spends",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ironwood_spends, 1, "the Ironwood note must be spent");
+
+        // The balance decreased by at least the payment plus the fee.
+        assert!(
+            st.get_total_balance(account_id) <= (note_value - payment_value - fee).unwrap(),
+            "the account balance must decrease by the payment and fee"
+        );
+    }
+
     #[test]
     #[cfg(feature = "orchard")]
     fn get_unspent_orchard_notes_at_historical_height_boundary_heights() {
