@@ -50,7 +50,12 @@ workspace.
   independent of the target value, so that a wallet holding a very large
   number of small UTXOs cannot produce an arbitrarily large transaction; when
   the cap is reached before the target value, the shortfall is likewise
-  surfaced as `InsufficientFunds`.
+  surfaced as `InsufficientFunds`. An `address_allow_list` argument restricts
+  the gather to outputs received at the given transparent addresses (`None`
+  meaning any address belonging to the account); `GreedyInputSelector` uses
+  this to enforce `TransparentSpendPolicy::FromAddresses`. The restriction is
+  applied within the gather itself (not to its results), so that ineligible
+  outputs do not consume the value bound.
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:

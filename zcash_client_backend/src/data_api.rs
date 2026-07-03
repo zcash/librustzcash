@@ -1626,6 +1626,12 @@ pub trait InputSource {
     /// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
     /// eligible output up to `max_inputs`.
     ///
+    /// When `address_allow_list` is `Some`, only outputs received at one of the listed
+    /// transparent addresses are eligible; when `None`, outputs received at any of the
+    /// account's transparent addresses are eligible. The restriction must be applied
+    /// *within* the gather (not to its results), so that outputs excluded by the allow list
+    /// do not consume the value bound.
+    ///
     /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
     /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
     /// general (non-shielding) input selection in `propose_transaction`.
@@ -1639,6 +1645,7 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        address_allow_list: Option<&[TransparentAddress]>,
         target_value: TargetValue,
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
@@ -1648,6 +1655,7 @@ pub trait InputSource {
             target_height,
             confirmations_policy,
             output_filter,
+            address_allow_list,
             target_value,
             max_inputs,
             fee_rule,

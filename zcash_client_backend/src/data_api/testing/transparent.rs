@@ -2072,6 +2072,7 @@ where
             TargetHeight::from(height + 1),
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::NonCoinbaseOnly,
+            None,
             TargetValue::AtLeast(payment_amount),
             usize::MAX,
             &StandardFeeRule::Zip317,
@@ -2249,18 +2250,23 @@ where
         .next()
         .expect("at least two external taddrs");
 
-    // Fund both receivers with a spendable UTXO each.
-    let utxo_value = Zatoshis::const_from_u64(100_000);
+    // Fund both receivers with a spendable UTXO each. The unnamed address's UTXO is
+    // inserted first AND holds strictly more value than the named address's, so that if
+    // the address filter were not enforced, the value-descending gather would select the
+    // unnamed address's UTXO (which alone covers the payment) and stop -- making this test
+    // fail. The named UTXO must be selected by policy, not merely by gather order.
+    let named_value = Zatoshis::const_from_u64(100_000);
+    let other_value = Zatoshis::const_from_u64(150_000);
     let height = st.wallet().chain_height().unwrap().unwrap();
     let named_outpoint = OutPoint::new([1u8; 32], 0);
     let other_outpoint = OutPoint::new([2u8; 32], 0);
-    for (addr, outpoint) in [
-        (addr_named, named_outpoint.clone()),
-        (addr_other, other_outpoint.clone()),
+    for (addr, outpoint, value) in [
+        (addr_other, other_outpoint.clone(), other_value),
+        (addr_named, named_outpoint.clone(), named_value),
     ] {
         let utxo = WalletTransparentOutput::from_parts(
             outpoint,
-            TxOut::new(utxo_value, addr.script().into()),
+            TxOut::new(value, addr.script().into()),
             Some(height),
             Some(account.id()),
             Some(TransparentKeyScope::EXTERNAL),
@@ -2378,6 +2384,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            None,
             TargetValue::AtLeast(target),
             usize::MAX,
             &StandardFeeRule::Zip317,
@@ -2425,6 +2432,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            None,
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
             usize::MAX,
             &StandardFeeRule::Zip317,

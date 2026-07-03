@@ -1419,6 +1419,10 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 ///
 /// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
 /// eligible output up to `max_inputs`.
+///
+/// When `address_allow_list` is `Some`, the eligible set is additionally restricted (within
+/// the query, so that ineligible outputs do not consume the value bound) to outputs received
+/// at one of the given transparent addresses.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
@@ -1428,6 +1432,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
+    address_allow_list: Option<&[TransparentAddress]>,
     target_value: TargetValue,
     max_inputs: usize,
     fee_rule: &StandardFeeRule,
@@ -1441,8 +1446,16 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
 
     let coinbase_filter = coinbase_filter_encoding(output_filter);
 
+    // `:has_address_allow_list` and `:addresses` are always bound (the latter to an empty
+    // array when there is no allow list), following the same always-bound-flag idiom as
+    // `:coinbase_filter`, so that there is a single query text regardless of whether an
+    // allow list is present.
     let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
-        "accounts.uuid = :account_uuid",
+        "accounts.uuid = :account_uuid
+         AND (
+             :has_address_allow_list = 0
+             OR addresses.cached_transparent_receiver_address IN rarray(:addresses)
+         )",
         "u.value_zat DESC, u.output_index",
     ))?;
 
@@ -1454,12 +1467,21 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
+    let address_values: Vec<Value> = address_allow_list
+        .unwrap_or(&[])
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
     let mut rows = stmt_utxos.query(named_params![
         ":account_uuid": account.0,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
         ":coinbase_filter": coinbase_filter,
+        ":has_address_allow_list": address_allow_list.is_some(),
+        ":addresses": &addresses_ptr,
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
