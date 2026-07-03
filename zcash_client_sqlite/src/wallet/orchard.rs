@@ -956,9 +956,8 @@ pub(crate) mod tests {
     }
 
     /// End-to-end: a wallet that scans a block containing an Ironwood (version 3) note stores it in
-    /// `ironwood_received_notes` as note version 3, persists the Ironwood note commitment tree, and
-    /// records nothing in the Orchard tables. The note is not yet reflected in the wallet balance
-    /// (see the TODO below).
+    /// `ironwood_received_notes` as note version 3, counts it in the wallet balance, persists the
+    /// Ironwood note commitment tree, and records nothing in the Orchard tables.
     #[test]
     #[cfg(feature = "orchard")]
     fn scan_block_stores_received_ironwood_note() {
@@ -1013,12 +1012,8 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(orchard_count, 0);
 
-        // TODO: Ironwood notes are stored but are not yet reflected in the wallet balance. The
-        // `AccountBalance` model computed by `get_wallet_summary` has Sapling and Orchard
-        // components but no Ironwood component, so `get_total_balance` currently reports zero for a
-        // wallet holding only Ironwood notes. Change this assertion to expect `value` once an
-        // Ironwood balance is added to the wallet summary.
-        assert_eq!(st.get_total_balance(account_id), Zatoshis::ZERO);
+        // The received Ironwood note is reflected in the wallet balance.
+        assert_eq!(st.get_total_balance(account_id), value);
 
         // The Ironwood note commitment tree was persisted.
         let ironwood_shards: i64 = st
