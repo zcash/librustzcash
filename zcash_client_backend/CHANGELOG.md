@@ -11,6 +11,11 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
+  `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
+  funds in an account. Received Ironwood notes are now included in the account's
+  total, spendable, pending, and uneconomic balances alongside Sapling and
+  Orchard.
 - `zcash_client_backend::scanning::ScanningKeys::ironwood` (behind the `orchard`
   feature flag), an accessor for the Ironwood scanning keys. Ironwood outputs
   are trial-decrypted with the account's Orchard viewing keys but are tracked as
