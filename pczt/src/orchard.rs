@@ -924,16 +924,7 @@ impl Bundle {
                 action.output.proprietary,
             )?;
 
-            if preverified {
-                orchard::pczt::Action::parse_preverified_for_signing(
-                    action.cv_net,
-                    spend,
-                    output,
-                    action.rcv,
-                )
-            } else {
-                orchard::pczt::Action::parse(action.cv_net, spend, output, action.rcv)
-            }
+            orchard::pczt::Action::parse(action.cv_net, spend, output, action.rcv)
         }
 
         let note_version = self.note_version;
@@ -942,27 +933,15 @@ impl Bundle {
             actions.push(parse_action_inner(action, note_version, preverified)?);
         }
 
-        if preverified {
-            orchard::pczt::Bundle::parse_preverified_for_signing(
-                actions,
-                self.flags,
-                bundle_version,
-                self.value_sum,
-                self.anchor,
-                self.zkproof,
-                self.bsk,
-            )
-        } else {
-            orchard::pczt::Bundle::parse(
-                actions,
-                self.flags,
-                bundle_version,
-                self.value_sum,
-                self.anchor,
-                self.zkproof,
-                self.bsk,
-            )
-        }
+        orchard::pczt::Bundle::parse(
+            actions,
+            self.flags,
+            bundle_version,
+            self.value_sum,
+            self.anchor,
+            self.zkproof,
+            self.bsk,
+        )
     }
 
     pub(crate) fn serialize_from(bundle: orchard::pczt::Bundle) -> Self {
