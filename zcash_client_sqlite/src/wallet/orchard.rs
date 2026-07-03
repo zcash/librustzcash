@@ -177,6 +177,31 @@ pub(crate) fn get_spendable_ironwood_note<P: consensus::Parameters>(
     )
 }
 
+/// Selects spendable Ironwood notes to satisfy the given target value. Ironwood notes are
+/// Orchard-shaped, so this reuses the Orchard note reconstruction; only the pool (and thus the
+/// `ironwood_received_notes` table) differs.
+pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_value: TargetValue,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::select_spendable_notes(
+        conn,
+        params,
+        account,
+        target_value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Ironwood,
+        to_received_note,
+    )
+}
+
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,

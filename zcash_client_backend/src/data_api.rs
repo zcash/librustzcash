@@ -932,12 +932,18 @@ pub trait NoteRetention<NoteRef> {
     /// Returns whether the specified Orchard note should be retained.
     #[cfg(feature = "orchard")]
     fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+    /// Returns whether the specified Ironwood note should be retained. Ironwood notes are
+    /// Orchard-shaped, so this uses the same note type as Orchard.
+    #[cfg(feature = "orchard")]
+    fn should_retain_ironwood(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
 }
 
 pub(crate) struct SimpleNoteRetention {
     pub(crate) sapling: bool,
     #[cfg(feature = "orchard")]
     pub(crate) orchard: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) ironwood: bool,
 }
 
 impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
@@ -949,6 +955,11 @@ impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
     fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
         self.orchard
     }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_ironwood(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.ironwood
+    }
 }
 
 /// Shielded outputs that were received by the wallet.
@@ -957,12 +968,19 @@ pub struct ReceivedNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
     #[cfg(feature = "orchard")]
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    // Ironwood notes are Orchard-shaped `orchard::note::Note` values (note plaintext version 3),
+    // but are tracked as a distinct pool so that Orchard and Ironwood value and bundle action
+    // counts are accounted for separately.
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
 impl<NoteRef> ReceivedNotes<NoteRef> {
     /// Construct a new empty [`ReceivedNotes`].
     pub fn empty() -> Self {
         Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
@@ -973,11 +991,14 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     pub fn new(
         sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
         #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+        #[cfg(feature = "orchard")] ironwood: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -1003,6 +1024,18 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         self.orchard
     }
 
+    /// Returns the set of spendable Ironwood notes.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.ironwood.as_ref()
+    }
+
+    /// Consumes this value and returns the Ironwood notes contained within it.
+    #[cfg(feature = "orchard")]
+    pub fn take_ironwood(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
+        self.ironwood
+    }
+
     /// Computes the total value of Sapling notes.
     pub fn sapling_value(&self) -> Result<Zatoshis, BalanceError> {
         self.sapling.iter().try_fold(Zatoshis::ZERO, |acc, n| {
@@ -1010,10 +1043,18 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         })
     }
 
-    /// Computes the total value of Sapling notes.
+    /// Computes the total value of Orchard notes.
     #[cfg(feature = "orchard")]
     pub fn orchard_value(&self) -> Result<Zatoshis, BalanceError> {
         self.orchard.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
+    }
+
+    /// Computes the total value of Ironwood notes.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.ironwood.iter().try_fold(Zatoshis::ZERO, |acc, n| {
             (acc + n.note_value()?).ok_or(BalanceError::Overflow)
         })
     }
@@ -1024,7 +1065,8 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         return self.sapling_value();
 
         #[cfg(feature = "orchard")]
-        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+        return (self.sapling_value()? + self.orchard_value()? + self.ironwood_value()?)
+            .ok_or(BalanceError::Overflow);
     }
 
     /// Consumes this [`ReceivedNotes`] value and produces a vector of
@@ -1043,6 +1085,15 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
             retention
                 .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        // Ironwood notes are `orchard::note::Note` values, so they are emitted as `Note::Orchard`;
+        // the transaction builder routes them to the Ironwood bundle by their version 3 plaintext.
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.ironwood.into_iter().filter_map(|n| {
+            retention
+                .should_retain_ironwood(&n)
                 .then(|| n.map_note(Note::Orchard))
         }));
 

@@ -551,6 +551,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             } else {
                 vec![]
             },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::orchard::select_spendable_ironwood_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
         ))
     }
 
@@ -587,6 +601,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ConfirmationsPolicy::MIN,
                     exclude,
                     ShieldedPool::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
