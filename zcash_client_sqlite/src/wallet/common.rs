@@ -60,6 +60,8 @@ const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
     shard_height: ORCHARD_SHARD_HEIGHT,
 };
 
+// Ironwood notes are Orchard-shaped, so the Ironwood tables mirror the Orchard tables; they differ
+// only in the table prefix and the block-level action-count column.
 #[cfg(feature = "orchard")]
 const IRONWOOD_TABLE_CONSTANTS: TableConstants = TableConstants {
     table_prefix: IRONWOOD_TABLES_PREFIX,
