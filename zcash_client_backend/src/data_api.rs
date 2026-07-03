@@ -109,6 +109,7 @@ use {
     crate::fees::StandardFeeRule,
     crate::wallet::TransparentAddressMetadata,
     getset::{CopyGetters, Getters},
+    std::collections::BTreeSet,
     std::time::SystemTime,
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
 };
@@ -1600,6 +1601,12 @@ pub trait InputSource {
     /// themselves, per `fee_rule`) is at least `target_value`, or `max_inputs` outputs
     /// (whichever is reached first).
     ///
+    /// When `address_filter` is `Some`, only outputs received at the given transparent
+    /// addresses are eligible; the addresses must belong to `account`. When `None`, outputs
+    /// received at any of the account's transparent addresses are eligible. The filter must
+    /// be applied *within* the gather (not to its results), so that ineligible outputs do not
+    /// consume the value bound.
+    ///
     /// The gather is intended to scale to wallets with large numbers of transparent addresses and
     /// UTXOs: it returns a value-bounded subset rather than every spendable output, so the
     /// selector does not need to materialize the wallet's full UTXO set. Data stores should
@@ -1636,6 +1643,7 @@ pub trait InputSource {
     fn select_spendable_transparent_outputs(
         &self,
         account: Self::AccountId,
+        address_filter: Option<&BTreeSet<TransparentAddress>>,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
@@ -1645,6 +1653,7 @@ pub trait InputSource {
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
+            address_filter,
             target_height,
             confirmations_policy,
             output_filter,

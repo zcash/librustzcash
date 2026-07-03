@@ -10,9 +10,11 @@ use std::{
 use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::fees::transparent as transparent_fees;
 use zcash_primitives::transaction::fees::{
     FeeRule,
-    transparent::{self as transparent_fees, InputSize},
+    transparent::InputSize,
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
 };
 use zcash_protocol::{
@@ -727,13 +729,20 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         #[cfg(not(feature = "transparent-inputs"))]
         let transparent_inputs = vec![];
-        let mut amount_at_transparent_gather = Zatoshis::ZERO;
+        // The address filter for the transparent gather, as determined by the spend policy:
+        // `None` if the policy forbids spending transparent UTXOs entirely; `Some(filter)` if
+        // it permits them, where the inner filter restricts the gather to the given addresses
+        // (`None` meaning any address belonging to the account).
         #[cfg(feature = "transparent-inputs")]
-        let mut transparent_inputs = {
-            // For `ShieldedOnly`, we don't need any transparent inputs; skip the gather entirely.
-            if matches!(spend_policy, TransparentSpendPolicy::ShieldedOnly) {
-                Vec::new()
-            } else {
+        let transparent_gather_filter: Option<Option<&BTreeSet<TransparentAddress>>> =
+            match spend_policy {
+                TransparentSpendPolicy::ShieldedOnly => None,
+                TransparentSpendPolicy::AnyAccountTaddr => Some(None),
+                TransparentSpendPolicy::FromAddresses(addrs) => Some(Some(addrs.as_set())),
+            };
+        #[cfg(feature = "transparent-inputs")]
+        let (mut transparent_inputs, mut amount_at_transparent_gather) =
+            if let Some(address_filter) = transparent_gather_filter {
                 // Compute the initial bound for the value-bounded transparent gather: the
                 // total payment amount. The gather itself reserves value for the marginal
                 // fee cost of the gathered inputs (estimated via `StandardFeeRule::Zip317`,
@@ -744,25 +753,18 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 // A `TransactionRequest` may have payments with no fixed amount (e.g. for
                 // `propose_send_max`); in that case we fall back to `TargetValue::AllFunds`
                 // so the gather returns everything.
-                let max_money = Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY);
-                let mut total_opt: Option<Zatoshis> = Some(Zatoshis::ZERO);
-                for payment in transaction_request.payments().values() {
-                    let Some(payment_amount) = payment.amount() else {
-                        total_opt = None;
-                        break;
-                    };
-                    if let Some(t) = total_opt {
-                        match t + payment_amount {
-                            Some(sum) => total_opt = Some(sum),
-                            None => {
-                                return Err(InputSelectorError::InsufficientFunds {
-                                    available: Zatoshis::ZERO,
-                                    required: max_money,
-                                });
-                            }
-                        }
+                //
+                // A request whose payment total overflows `MAX_MONEY` cannot be satisfied
+                // by any wallet (request construction does not enforce this bound), so we
+                // report it as an insufficient-funds condition for the maximum
+                // representable amount. No inputs have been selected at this point, so
+                // there is no meaningful `available` value to report.
+                let total_opt = transaction_request.total().map_err(|_| {
+                    InputSelectorError::InsufficientFunds {
+                        available: Zatoshis::ZERO,
+                        required: Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY),
                     }
-                }
+                })?;
                 let (target_value, amount_at_gather) = match total_opt {
                     Some(z) => (TargetValue::AtLeast(z), z),
                     None => (
@@ -770,10 +772,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         Zatoshis::ZERO,
                     ),
                 };
-                amount_at_transparent_gather = amount_at_gather;
-                wallet_db
+                let inputs = wallet_db
                     .select_spendable_transparent_outputs(
                         account,
+                        address_filter,
                         target_height,
                         confirmations_policy,
                         CoinbaseFilter::NonCoinbaseOnly,
@@ -784,9 +786,18 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     .map_err(InputSelectorError::DataSource)?
                     .into_iter()
                     .map(|utxo| utxo.redact_account_data())
-                    .collect::<Vec<_>>()
-            }
-        };
+                    .collect::<Vec<_>>();
+                (inputs, amount_at_gather)
+            } else {
+                // For `ShieldedOnly`, we don't need any transparent inputs; skip the gather
+                // entirely.
+                (Vec::new(), Zatoshis::ZERO)
+            };
+        // Outpoints of gathered transparent inputs that the change strategy has identified as
+        // dust. Accumulated across loop iterations so that a re-gather does not re-introduce
+        // previously pruned outputs.
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent_dust: BTreeSet<OutPoint> = BTreeSet::new();
 
         let mut shielded_inputs = ReceivedNotes::empty();
         let mut prior_available = Zatoshis::ZERO;
@@ -949,18 +960,22 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 },
             );
 
-            // Tracks whether this iteration's `InsufficientFunds` handling grew the
-            // transparent input set. Growing the transparent gather is a valid form of
-            // progress in its own right (distinct from the shielded-note progress tracked
-            // by `prior_available`/`new_available` below); without this, an account with
-            // no spendable shielded notes at all (or none beyond what's already excluded)
-            // would spuriously report `InsufficientFunds` on the very next check below, even
-            // though the enlarged transparent gather might already be sufficient to satisfy
-            // the request on the next iteration.
+            // Tracks whether this iteration's error handling changed the transparent input
+            // set, either by re-gathering with a corrected value bound (`InsufficientFunds`)
+            // or by pruning dust (`DustInputs`). A changed transparent input set is a valid
+            // form of progress in its own right (distinct from the shielded-note progress
+            // tracked by `prior_available`/`new_available` below): without this, an account
+            // with no spendable shielded notes at all (or none beyond what's already
+            // excluded) would spuriously report `InsufficientFunds` on the very next check
+            // below, even though the changed transparent input set might already be
+            // sufficient to satisfy the request on the next iteration. Termination is
+            // preserved: `amount_at_transparent_gather` increases strictly across
+            // re-gathers, and each outpoint can be pruned as dust at most once (pruned
+            // outpoints accumulate in `transparent_dust` and are never re-gathered).
             #[cfg(not(feature = "transparent-inputs"))]
-            let transparent_gather_grew = false;
+            let transparent_inputs_changed = false;
             #[cfg(feature = "transparent-inputs")]
-            let mut transparent_gather_grew = false;
+            let mut transparent_inputs_changed = false;
 
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
@@ -1029,8 +1044,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     exclude.append(&mut orchard);
                     #[cfg(feature = "transparent-inputs")]
                     {
-                        let dust: BTreeSet<OutPoint> = transparent.into_iter().collect();
-                        transparent_inputs.retain(|i| !dust.contains(i.outpoint()));
+                        let len_before = transparent_inputs.len();
+                        transparent_dust.extend(transparent);
+                        transparent_inputs.retain(|i| !transparent_dust.contains(i.outpoint()));
+                        // Pruning dust changes the balance computation, so give the loop a
+                        // chance to re-evaluate the pruned set before concluding that funds
+                        // are insufficient.
+                        if transparent_inputs.len() != len_before {
+                            transparent_inputs_changed = true;
+                        }
                     }
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
@@ -1041,13 +1063,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     // defensive fallback. The common case (fee estimate was close) is
                     // a no-op.
                     #[cfg(feature = "transparent-inputs")]
-                    {
-                        if !matches!(spend_policy, TransparentSpendPolicy::ShieldedOnly)
-                            && required > amount_at_transparent_gather
-                        {
+                    if let Some(address_filter) = transparent_gather_filter {
+                        if required > amount_at_transparent_gather {
                             transparent_inputs = wallet_db
                                 .select_spendable_transparent_outputs(
                                     account,
+                                    address_filter,
                                     target_height,
                                     confirmations_policy,
                                     CoinbaseFilter::NonCoinbaseOnly,
@@ -1057,10 +1078,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 )
                                 .map_err(InputSelectorError::DataSource)?
                                 .into_iter()
+                                // Do not re-introduce outputs previously pruned as dust; the
+                                // value they would contribute is (approximately) consumed by
+                                // their own fee cost, so their absence does not meaningfully
+                                // reduce the gathered value.
+                                .filter(|utxo| !transparent_dust.contains(utxo.outpoint()))
                                 .map(|utxo| utxo.redact_account_data())
                                 .collect::<Vec<_>>();
                             amount_at_transparent_gather = required;
-                            transparent_gather_grew = true;
+                            transparent_inputs_changed = true;
                         }
                     }
                 }
@@ -1091,15 +1117,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 .map_err(InputSelectorError::DataSource)?;
 
             let new_available = shielded_inputs.total_value()?;
-            if new_available <= prior_available && !transparent_gather_grew {
+            if new_available <= prior_available && !transparent_inputs_changed {
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
                     available: new_available,
                 });
             } else {
                 // If the set of selected shielded notes has grown, or the transparent
-                // gather grew this iteration, we will loop again and see whether we now
-                // have enough funds.
+                // input set changed this iteration, we will loop again and see whether
+                // we now have enough funds.
                 prior_available = new_available;
             }
         }

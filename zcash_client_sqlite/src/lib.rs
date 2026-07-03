@@ -114,6 +114,7 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
+    std::collections::BTreeSet,
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
@@ -633,6 +634,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn select_spendable_transparent_outputs(
         &self,
         account: Self::AccountId,
+        address_filter: Option<&BTreeSet<TransparentAddress>>,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
@@ -644,6 +646,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             self.conn.borrow(),
             &self.params,
             account,
+            address_filter,
             target_height,
             confirmations_policy,
             output_filter,

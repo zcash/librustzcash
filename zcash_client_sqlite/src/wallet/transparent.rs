@@ -1,5 +1,7 @@
 //! Functions for transparent input support in the wallet.
 use core::ops::Range;
+#[cfg(feature = "transparent-inputs")]
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::num::TryFromIntError;
 use std::ops::DerefMut;
@@ -1419,12 +1421,17 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 ///
 /// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
 /// eligible output up to `max_inputs`.
+///
+/// When `address_filter` is `Some`, the eligible set is restricted (within the query, so
+/// that ineligible outputs do not consume the value bound) to outputs received at the given
+/// transparent addresses.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountUuid,
+    address_filter: Option<&BTreeSet<TransparentAddress>>,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
@@ -1442,7 +1449,12 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     let coinbase_filter = coinbase_filter_encoding(output_filter);
 
     let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
-        "accounts.uuid = :account_uuid",
+        if address_filter.is_some() {
+            "accounts.uuid = :account_uuid
+             AND addresses.cached_transparent_receiver_address IN rarray(:addresses)"
+        } else {
+            "accounts.uuid = :account_uuid"
+        },
         "u.value_zat DESC, u.output_index",
     ))?;
 
@@ -1454,13 +1466,32 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
-    let mut rows = stmt_utxos.query(named_params![
-        ":account_uuid": account.0,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-        ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_filter": coinbase_filter,
-    ])?;
+    let addresses_ptr = address_filter.map(|addresses| {
+        Rc::new(
+            addresses
+                .iter()
+                .map(|addr| Value::Text(addr.encode(params)))
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    let mut rows = match addresses_ptr.as_ref() {
+        Some(addresses_ptr) => stmt_utxos.query(named_params![
+            ":account_uuid": account.0,
+            ":target_height": u32::from(target_height),
+            ":min_confirmations": min_confirmations,
+            ":min_value": u64::from(zip317::MARGINAL_FEE),
+            ":coinbase_filter": coinbase_filter,
+            ":addresses": addresses_ptr,
+        ])?,
+        None => stmt_utxos.query(named_params![
+            ":account_uuid": account.0,
+            ":target_height": u32::from(target_height),
+            ":min_confirmations": min_confirmations,
+            ":min_value": u64::from(zip317::MARGINAL_FEE),
+            ":coinbase_filter": coinbase_filter,
+        ])?,
+    };
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     let mut accumulated_value: u64 = 0;

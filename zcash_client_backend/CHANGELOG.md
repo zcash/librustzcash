@@ -50,15 +50,12 @@ workspace.
   independent of the target value, so that a wallet holding a very large
   number of small UTXOs cannot produce an arbitrarily large transaction; when
   the cap is reached before the target value, the shortfall is likewise
-  surfaced as `InsufficientFunds`.
-- A new `spend-index` feature flag, for consumers whose chain-data source can
-  resolve the spend of an individual transparent output (e.g. a full node with a
-  spent-outpoint index). It gates:
-  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
-    a per-outpoint request to detect the spend of a specific transparent output.
-  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
-    which records that a transparent outpoint was confirmed unspent as of a given
-    height.
+  surfaced as `InsufficientFunds`. An `address_filter` argument restricts the
+  gather to outputs received at the given transparent addresses (`None`
+  meaning any address belonging to the account); `GreedyInputSelector` uses it
+  to enforce `TransparentSpendPolicy::FromAddresses`. The filter must be
+  applied within the gather (not to its results) so that ineligible outputs
+  do not consume the value bound.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
   a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable

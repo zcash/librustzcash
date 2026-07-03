@@ -694,6 +694,15 @@ impl ConfirmationsPolicy {
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
+///
+/// The `spend_policy` parameter (available under the `transparent-inputs` feature flag) controls
+/// whether, and from which addresses, the account's transparent UTXOs may be spent to help
+/// satisfy the request. The default [`TransparentSpendPolicy::ShieldedOnly`] policy never spends
+/// transparent UTXOs; see [`TransparentSpendPolicy`] for the available opt-in policies and their
+/// privacy implications.
+///
+/// [`TransparentSpendPolicy`]: input_selection::TransparentSpendPolicy
+/// [`TransparentSpendPolicy::ShieldedOnly`]: input_selection::TransparentSpendPolicy::ShieldedOnly
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(

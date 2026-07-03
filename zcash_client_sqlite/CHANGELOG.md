@@ -38,7 +38,10 @@ workspace.
   the supplied `max_inputs` cap is reached, whichever happens first. This
   bounds the work done to the prefix of the table needed to satisfy the
   request, so a wallet with many small transparent UTXOs does not have to
-  materialize its full UTXO set to build a small transfer.
+  materialize its full UTXO set to build a small transfer. When an
+  `address_filter` is supplied, the restriction to the given addresses is
+  applied within the SQL query, so that ineligible outputs do not consume
+  the value bound.
 - `zcash_client_sqlite::error::SqliteClientError::FeeRuleError`, a new variant
   (behind the `transparent-inputs` feature flag) that wraps an error produced
   by a `FeeRule` during transparent input selection.
