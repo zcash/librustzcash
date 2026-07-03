@@ -955,6 +955,82 @@ pub(crate) mod tests {
         assert_eq!(note_row("ironwood"), (20_000, 3));
     }
 
+    /// End-to-end: a wallet that scans a block containing an Ironwood (version 3) note stores it in
+    /// `ironwood_received_notes` as note version 3, persists the Ironwood note commitment tree, and
+    /// records nothing in the Orchard tables. The note is not yet reflected in the wallet balance
+    /// (see the TODO below).
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_block_stores_received_ironwood_note() {
+        use zcash_client_backend::data_api::{
+            Account,
+            testing::{
+                AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                pool::ShieldedPoolTester,
+            },
+        };
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        // The account's Ironwood outputs are trial-decrypted with its Orchard viewing key.
+        let recipient = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+
+        let value = Zatoshis::const_from_u64(60_000);
+        let (h, _, _) = st.generate_next_block(&recipient, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        // The note is stored in `ironwood_received_notes` as note version 3, with its value.
+        let (ironwood_count, stored_value, note_version): (i64, i64, i64) = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MIN(value), 0), COALESCE(MIN(note_version), 0)
+                 FROM ironwood_received_notes",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(ironwood_count, 1);
+        assert_eq!(stored_value as u64, value.into_u64());
+        assert_eq!(note_version, 3);
+
+        // The note went to the Ironwood pool, not Orchard.
+        let orchard_count: i64 = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row("SELECT COUNT(*) FROM orchard_received_notes", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(orchard_count, 0);
+
+        // TODO: Ironwood notes are stored but are not yet reflected in the wallet balance. The
+        // `AccountBalance` model computed by `get_wallet_summary` has Sapling and Orchard
+        // components but no Ironwood component, so `get_total_balance` currently reports zero for a
+        // wallet holding only Ironwood notes. Change this assertion to expect `value` once an
+        // Ironwood balance is added to the wallet summary.
+        assert_eq!(st.get_total_balance(account_id), Zatoshis::ZERO);
+
+        // The Ironwood note commitment tree was persisted.
+        let ironwood_shards: i64 = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row("SELECT COUNT(*) FROM ironwood_tree_shards", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(ironwood_shards > 0);
+    }
+
     #[test]
     #[cfg(feature = "orchard")]
     fn get_unspent_orchard_notes_at_historical_height_boundary_heights() {
