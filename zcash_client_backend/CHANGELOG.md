@@ -26,6 +26,10 @@ workspace.
   Orchard-input transaction. It prefers the input group matching the payment's
   receiver to avoid an unnecessary cross-pool output, and a transfer that would
   require Orchard combined with another pool fails as insufficient funds.
+- `zcash_client_backend::wallet::Note::pool`, which returns the shielded value
+  pool to which a note belongs. Unlike `Note::protocol` (which reports the
+  cryptographic protocol, Sapling or Orchard), this classifies version-3 Orchard
+  notes as belonging to the Ironwood pool.
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
@@ -189,6 +193,10 @@ workspace.
     height.
 
 ### Changed
+- `zcash_client_backend::proposal::Step::input_in_pool` and
+  `Step::input_count_in_pool` now support `PoolType::Ironwood`, which previously
+  panicked. Ironwood inputs (version-3 Orchard notes) are counted for the
+  Ironwood pool, and the Orchard variants now exclude them.
 - `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
   an optional accessor that wallet backends can override to provide Ironwood
   anchors and witnesses to the transaction builder.
