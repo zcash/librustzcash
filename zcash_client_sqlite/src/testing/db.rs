@@ -26,7 +26,6 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
         *,
     },
-    fees::StandardFeeRule,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
@@ -52,6 +51,7 @@ use {
     crate::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
+    zcash_client_backend::fees::StandardFeeRule,
     zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
 

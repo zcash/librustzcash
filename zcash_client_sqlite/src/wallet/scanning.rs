@@ -28,6 +28,9 @@ use super::{block_max_scanned, wallet_birthday};
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
+#[cfg(not(feature = "orchard"))]
+use zcash_protocol::PoolType;
+
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
     match priority {
@@ -674,7 +677,6 @@ pub(crate) mod tests {
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{
-        ShieldedPool,
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
         local_consensus::LocalNetwork,
         value::Zatoshis,
@@ -696,9 +698,9 @@ pub(crate) mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn extend_range_uses_ironwood_tree_shards() {
-        use std::collections::BTreeSet;
-
         use rusqlite::Connection;
+        use std::collections::BTreeSet;
+        use zcash_protocol::ShieldedPool;
 
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
