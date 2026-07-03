@@ -239,7 +239,9 @@ pub(super) fn all_migrations<
         Box::new(witness_stabilized_notes::Migration {
             params: params.clone(),
         }),
-        Box::new(add_transparent_receiver_address_index::Migration),
+        Box::new(add_transparent_receiver_address_index::Migration {
+            params: params.clone(),
+        }),
         Box::new(add_transparent_value_index::Migration),
     ]
 }
