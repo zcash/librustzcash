@@ -587,14 +587,18 @@ impl<NoteRef> Step<NoteRef> {
             PoolType::SAPLING => self.shielded_inputs().iter().any(|s_in| {
                 s_in.notes()
                     .iter()
-                    .any(|note| matches!(note.note().protocol(), ShieldedPool::Sapling))
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Sapling))
             }),
             PoolType::ORCHARD => self.shielded_inputs().iter().any(|s_in| {
                 s_in.notes()
                     .iter()
-                    .any(|note| matches!(note.note().protocol(), ShieldedPool::Orchard))
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Orchard))
             }),
-            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
+            PoolType::IRONWOOD => self.shielded_inputs().iter().any(|s_in| {
+                s_in.notes()
+                    .iter()
+                    .any(|note| matches!(note.note().pool(), ShieldedPool::Ironwood))
+            }),
         }
     }
 
@@ -624,15 +628,20 @@ impl<NoteRef> Step<NoteRef> {
                 .shielded_inputs()
                 .iter()
                 .flat_map(|s_in| s_in.notes())
-                .filter(|note| note.note().protocol() == ShieldedPool::Sapling)
+                .filter(|note| note.note().pool() == ShieldedPool::Sapling)
                 .count(),
             PoolType::ORCHARD => self
                 .shielded_inputs()
                 .iter()
                 .flat_map(|s_in| s_in.notes())
-                .filter(|note| note.note().protocol() == ShieldedPool::Orchard)
+                .filter(|note| note.note().pool() == ShieldedPool::Orchard)
                 .count(),
-            PoolType::IRONWOOD => todo!("Ironwood pool support is not yet implemented"),
+            PoolType::IRONWOOD => self
+                .shielded_inputs()
+                .iter()
+                .flat_map(|s_in| s_in.notes())
+                .filter(|note| note.note().pool() == ShieldedPool::Ironwood)
+                .count(),
         }
     }
 

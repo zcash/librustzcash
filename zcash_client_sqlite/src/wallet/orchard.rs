@@ -1300,7 +1300,6 @@ pub(crate) mod tests {
     mod ironwood_privacy_invariants {
         use std::convert::Infallible;
 
-        use ::orchard::note::NoteVersion;
         use proptest::prelude::*;
 
         use zcash_client_backend::{
@@ -1313,12 +1312,13 @@ pub(crate) mod tests {
                 wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
             },
             fees::{DustOutputPolicy, StandardFeeRule, standard},
-            wallet::{Note, OvkPolicy},
+            wallet::OvkPolicy,
         };
         use zcash_keys::address::Address;
         use zcash_primitives::block::BlockHash;
         use zcash_protocol::{
-            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+            PoolType, ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork,
+            value::Zatoshis,
         };
         use zip321::{Payment, TransactionRequest};
 
@@ -1353,25 +1353,18 @@ pub(crate) mod tests {
         }
 
         // Counts the shielded input notes selected across every step of a proposal, partitioned by
-        // pool: Sapling, Orchard (note version v2), and Ironwood (note version v3).
+        // pool: Sapling, Orchard, and Ironwood. Delegates the per-pool classification to
+        // `Step::input_count_in_pool`.
         fn input_pool_counts<FeeRuleT, NoteRef>(
             proposal: &zcash_client_backend::proposal::Proposal<FeeRuleT, NoteRef>,
         ) -> (usize, usize, usize) {
-            let (mut sapling, mut v2, mut v3) = (0usize, 0usize, 0usize);
+            let (mut sapling, mut orchard, mut ironwood) = (0usize, 0usize, 0usize);
             for step in proposal.steps() {
-                if let Some(inputs) = step.shielded_inputs() {
-                    for received in inputs.notes() {
-                        match received.note() {
-                            Note::Sapling(_) => sapling += 1,
-                            Note::Orchard(note) => match note.version() {
-                                NoteVersion::V3 => v3 += 1,
-                                _ => v2 += 1,
-                            },
-                        }
-                    }
-                }
+                sapling += step.input_count_in_pool(PoolType::SAPLING);
+                orchard += step.input_count_in_pool(PoolType::ORCHARD);
+                ironwood += step.input_count_in_pool(PoolType::IRONWOOD);
             }
-            (sapling, v2, v3)
+            (sapling, orchard, ironwood)
         }
 
         // Requests a payment of `payment_zats` to an Orchard receiver that is not owned by the
@@ -1484,16 +1477,19 @@ pub(crate) mod tests {
                     )
                     .unwrap();
 
-                let (sapling, v2, v3) = input_pool_counts(&proposal);
-                prop_assert!(sapling + v2 + v3 > 0, "the transaction must spend some notes");
+                let (sapling, orchard, ironwood) = input_pool_counts(&proposal);
+                prop_assert!(
+                    sapling + orchard + ironwood > 0,
+                    "the transaction must spend some notes"
+                );
                 // Orchard is never combined with Sapling or Ironwood.
-                if v2 > 0 {
+                if orchard > 0 {
                     prop_assert_eq!(
-                        (sapling, v3),
+                        (sapling, ironwood),
                         (0, 0),
                         "Orchard inputs must not be combined with Sapling ({}) or Ironwood ({})",
                         sapling,
-                        v3,
+                        ironwood,
                     );
                 }
             }
@@ -1545,10 +1541,13 @@ pub(crate) mod tests {
                     )
                     .unwrap();
 
-                let (sapling, v2, v3) = input_pool_counts(&proposal);
-                prop_assert_eq!(v2, 0, "no Orchard note is present to spend");
+                let (sapling, orchard, ironwood) = input_pool_counts(&proposal);
+                prop_assert_eq!(orchard, 0, "no Orchard note is present to spend");
                 prop_assert!(sapling > 0, "a Sapling note must be spent");
-                prop_assert!(v3 > 0, "an Ironwood note must be spent (combined with Sapling)");
+                prop_assert!(
+                    ironwood > 0,
+                    "an Ironwood note must be spent (combined with Sapling)"
+                );
             }
 
             /// Rule 3: an amount that would require Orchard PLUS another pool must fail. The wallet
@@ -1654,10 +1653,14 @@ pub(crate) mod tests {
                     )
                     .unwrap();
 
-                // Only the Orchard (v2) note is spent (single-pool inputs).
-                let (sapling, v2, v3) = input_pool_counts(&proposal);
-                prop_assert!(v2 > 0, "the Orchard note must be spent");
-                prop_assert_eq!((sapling, v3), (0, 0), "only Orchard notes should be spent");
+                // Only the Orchard note is spent (single-pool inputs).
+                let (sapling, orchard, ironwood) = input_pool_counts(&proposal);
+                prop_assert!(orchard > 0, "the Orchard note must be spent");
+                prop_assert_eq!(
+                    (sapling, ironwood),
+                    (0, 0),
+                    "only Orchard notes should be spent"
+                );
 
                 let created = st
                     .create_proposed_transactions::<Infallible, _, Infallible, _>(

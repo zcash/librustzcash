@@ -624,6 +624,22 @@ impl Note {
             Note::Orchard(_) => ShieldedPool::Orchard,
         }
     }
+
+    /// Returns the shielded value pool to which this note belongs.
+    ///
+    /// Unlike [`Note::protocol`], which reports the note's cryptographic protocol (Sapling or
+    /// Orchard), this classifies version-3 Orchard notes as belonging to the Ironwood pool.
+    /// Sapling and version-2 Orchard notes report their own pool.
+    pub fn pool(&self) -> ShieldedPool {
+        match self {
+            Note::Sapling(_) => ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            Note::Orchard(n) => match n.version() {
+                orchard::note::NoteVersion::V3 => ShieldedPool::Ironwood,
+                _ => ShieldedPool::Orchard,
+            },
+        }
+    }
 }
 
 /// A note that was received by the wallet, along with contextual information about the output that
