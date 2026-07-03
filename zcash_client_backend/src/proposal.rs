@@ -710,3 +710,144 @@ impl<NoteRef> Debug for Step<NoteRef> {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(all(test, feature = "orchard"))]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use incrementalmerkletree::Position;
+    use nonempty::NonEmpty;
+    use orchard::{
+        keys::{FullViewingKey, SpendingKey},
+        note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
+    use proptest::prelude::*;
+    use zcash_primitives::transaction::TxId;
+    use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+    use zip321::TransactionRequest;
+
+    use super::{Proposal, ShieldedInputs, Step};
+    use crate::{data_api::wallet::TargetHeight, fees::TransactionBalance, wallet::Note};
+
+    // Builds an Orchard note of the given version and value. The recipient, rho, and rseed are
+    // fixed; only the version and value vary, which is all `Note::pool`/`Note::protocol` depend on.
+    fn orchard_note(value: u64, version: NoteVersion) -> Option<OrchardNote> {
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32]))?;
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let rho = Option::from(Rho::from_bytes(&[0; 32]))?;
+        let rseed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho))?;
+        Option::from(OrchardNote::from_parts(
+            recipient,
+            NoteValue::from_raw(value),
+            rho,
+            rseed,
+            version,
+        ))
+    }
+
+    // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
+    fn step_with_notes(notes: Vec<Note>) -> Step<u32> {
+        let received = notes
+            .into_iter()
+            .enumerate()
+            .map(|(i, note)| {
+                crate::wallet::ReceivedNote::from_parts(
+                    i as u32,
+                    TxId::from_bytes([0; 32]),
+                    i as u16,
+                    note,
+                    zip32::Scope::External,
+                    Position::from(i as u64),
+                    Some(BlockHeight::from_u32(100)),
+                    None,
+                )
+            })
+            .collect::<Vec<_>>();
+        let shielded_inputs = NonEmpty::from_vec(received)
+            .map(|notes| ShieldedInputs::from_parts(BlockHeight::from_u32(100), notes));
+        Step {
+            transaction_request: TransactionRequest::empty(),
+            payment_pools: BTreeMap::new(),
+            transparent_inputs: vec![],
+            shielded_inputs,
+            prior_step_inputs: vec![],
+            balance: TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
+            is_shielding: false,
+        }
+    }
+
+    // Builds `n` version-2 (Orchard) notes followed by `m` version-3 (Ironwood) notes.
+    fn orchard_and_ironwood_notes(n: usize, m: usize) -> Vec<Note> {
+        let mut notes = Vec::with_capacity(n + m);
+        for _ in 0..n {
+            notes.push(Note::from(orchard_note(10_000, NoteVersion::V2).unwrap()));
+        }
+        for _ in 0..m {
+            notes.push(Note::from(orchard_note(20_000, NoteVersion::V3).unwrap()));
+        }
+        notes
+    }
+
+    proptest! {
+        // `Note::pool` classifies an Orchard note by its version: version-3 notes belong to the
+        // Ironwood pool, all others to the Orchard pool. `Note::protocol` always reports Orchard
+        // regardless of version. The classification is independent of the note's value.
+        #[test]
+        fn note_pool_classifies_orchard_by_version(
+            value in 1u64..1_000_000_000u64,
+            is_v3 in any::<bool>(),
+        ) {
+            let version = if is_v3 { NoteVersion::V3 } else { NoteVersion::V2 };
+            let Some(note) = orchard_note(value, version) else {
+                // A handful of (value, rho, rseed) combinations do not form a valid note; skip them.
+                return Err(TestCaseError::reject("invalid orchard note"));
+            };
+            let note = Note::from(note);
+            prop_assert_eq!(note.protocol(), ShieldedPool::Orchard);
+            let expected = if is_v3 { ShieldedPool::Ironwood } else { ShieldedPool::Orchard };
+            prop_assert_eq!(note.pool(), expected);
+        }
+
+        // `Step::input_count_in_pool` returns the number of selected notes in each pool, splitting
+        // Orchard (version 2) from Ironwood (version 3); Sapling is zero here. `input_in_pool`
+        // agrees with `input_count_in_pool > 0`, and `Proposal::input_count_in_pool` sums the
+        // per-step counts.
+        #[test]
+        fn step_and_proposal_input_counts_match_constructed_notes(
+            n_orchard in 0usize..5,
+            n_ironwood in 0usize..5,
+            m_orchard in 0usize..5,
+            m_ironwood in 0usize..5,
+        ) {
+            let step1 = step_with_notes(orchard_and_ironwood_notes(n_orchard, n_ironwood));
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::SAPLING), 0);
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::ORCHARD), n_orchard);
+            prop_assert_eq!(step1.input_count_in_pool(PoolType::IRONWOOD), n_ironwood);
+
+            for pool in [ShieldedPool::Sapling, ShieldedPool::Orchard, ShieldedPool::Ironwood] {
+                let pool_type = PoolType::Shielded(pool);
+                prop_assert_eq!(
+                    step1.input_in_pool(pool_type),
+                    step1.input_count_in_pool(pool_type) > 0
+                );
+            }
+
+            let step2 = step_with_notes(orchard_and_ironwood_notes(m_orchard, m_ironwood));
+            let proposal = Proposal::<(), u32> {
+                fee_rule: (),
+                min_target_height: TargetHeight::from(100u32),
+                steps: NonEmpty::from_vec(vec![step1, step2]).unwrap(),
+            };
+            prop_assert_eq!(proposal.input_count_in_pool(PoolType::SAPLING), 0);
+            prop_assert_eq!(
+                proposal.input_count_in_pool(PoolType::ORCHARD),
+                n_orchard + m_orchard
+            );
+            prop_assert_eq!(
+                proposal.input_count_in_pool(PoolType::IRONWOOD),
+                n_ironwood + m_ironwood
+            );
+        }
+    }
+}
