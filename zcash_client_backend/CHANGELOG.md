@@ -11,6 +11,15 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- Received Ironwood notes can now be selected and spent. `InputSource`
+  implementations select Ironwood notes when the Ironwood pool is active at the
+  target height, the greedy input selector spends them (attributing each spent
+  note to the Ironwood bundle for correct fee and action accounting), and the
+  transaction builder routes the Orchard-receiver outputs and change to the
+  Ironwood bundle. `zcash_client_backend::data_api::ReceivedNotes` gains an
+  `ironwood` accessor and `take_ironwood`/`ironwood_value` methods, and
+  `NoteRetention` gains `should_retain_ironwood` (behind the `orchard` feature
+  flag).
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
