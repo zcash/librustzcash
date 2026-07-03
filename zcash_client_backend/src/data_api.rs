@@ -165,6 +165,13 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
 
+/// The height of subtree roots in the Ironwood note commitment tree.
+///
+/// This conforms to the structure of subtree data returned by
+/// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
+#[cfg(feature = "orchard")]
+pub const IRONWOOD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
+
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
 pub enum NullifierQuery {

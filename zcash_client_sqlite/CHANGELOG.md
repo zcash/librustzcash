@@ -32,6 +32,10 @@ workspace.
   The `WalletCommitmentTrees::with_ironwood_tree_mut` implementation now provides
   the persisted Ironwood tree (Ironwood note commitments are Orchard-shaped, so
   the tree reuses the Orchard shard store under a separate table prefix).
+- Block scan-range planning now extends suggested scan ranges to complete
+  Ironwood note commitment tree subtrees when Ironwood notes are detected,
+  mirroring the existing Sapling and Orchard behavior. The extension activates at
+  NU6.3.
 - `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
   new variant that records the shielded pool and the range of block heights
   being added to the wallet when a note commitment tree error occurs during a

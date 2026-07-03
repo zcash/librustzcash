@@ -29,7 +29,11 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use {
+    crate::IRONWOOD_TABLES_PREFIX, crate::ORCHARD_TABLES_PREFIX,
+    zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 pub(crate) struct TableConstants {
     pub(crate) table_prefix: &'static str,
@@ -56,6 +60,15 @@ const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
     shard_height: ORCHARD_SHARD_HEIGHT,
 };
 
+#[cfg(feature = "orchard")]
+const IRONWOOD_TABLE_CONSTANTS: TableConstants = TableConstants {
+    table_prefix: IRONWOOD_TABLES_PREFIX,
+    output_index_col: "action_index",
+    output_count_col: "ironwood_action_count",
+    note_reconstruction_cols: "rho, rseed, note_version",
+    shard_height: IRONWOOD_SHARD_HEIGHT,
+};
+
 #[allow(dead_code)]
 pub(crate) trait ErrUnsupportedPool {
     fn unsupported_pool_type(pool_type: PoolType) -> Self;
@@ -70,7 +83,10 @@ pub(crate) fn table_constants<E: ErrUnsupportedPool>(
         ShieldedPool::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
         ShieldedPool::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
-        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => Ok(IRONWOOD_TABLE_CONSTANTS),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Ironwood => Err(E::unsupported_pool_type(PoolType::IRONWOOD)),
     }
 }
 

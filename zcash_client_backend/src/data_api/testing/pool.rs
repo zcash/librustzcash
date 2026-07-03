@@ -1,6 +1,6 @@
 use std::{
     cmp::Eq,
-    collections::{BTreeSet, HashSet},
+    collections::HashSet,
     convert::Infallible,
     hash::Hash,
     num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -23,7 +23,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::{
     ShieldedPool,
-    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
@@ -6575,6 +6575,8 @@ where
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
+    use std::collections::BTreeSet;
+
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
     let (t_addr, _) = st.get_account().usk().default_transparent_address();
     let account = st.get_account().id();
@@ -7072,6 +7074,8 @@ pub fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
+    use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
+
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
     let account = st.get_account();
     let (t_addr, _) = account.usk().default_transparent_address();

@@ -392,9 +392,12 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
+    ironwood_shardtree::MIGRATION_ID,
     v_tx_outputs_key_scopes::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
-    witness_stabilized_notes::MIGRATION_ID,
+    add_transparent_receiver_address_index::MIGRATION_ID,
+    add_transparent_value_index::MIGRATION_ID,
+    ironwood_received_notes::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

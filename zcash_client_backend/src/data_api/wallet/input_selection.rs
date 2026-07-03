@@ -12,7 +12,7 @@ use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_primitives::transaction::fees::{
     FeeRule,
-    transparent::{self as transparent_fees, InputSize},
+    transparent::InputSize,
     zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
 };
 use zcash_protocol::{
@@ -45,6 +45,7 @@ use {
     std::collections::BTreeSet,
     std::convert::Infallible,
     transparent::{address::TransparentAddress, bundle::OutPoint},
+    zcash_primitives::transaction::fees::transparent as transparent_fees,
     zip321::Payment,
 };
 
@@ -808,6 +809,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         #[cfg(not(feature = "transparent-inputs"))]
         let transparent_inputs = vec![];
+        #[cfg(feature = "transparent-inputs")]
         let mut amount_at_transparent_gather = Zatoshis::ZERO;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent_inputs = match spend_policy {

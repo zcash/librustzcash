@@ -26,7 +26,7 @@ use super::common::table_constants;
 use super::{block_max_scanned, wallet_birthday};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
@@ -225,11 +225,11 @@ fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    protocol: ShieldedPool,
+    pool: ShieldedPool,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
-    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(pool)?;
 
     // we'll either have both min and max bounds, or we'll have neither
     let subtree_index_bounds = required_subtree_indices
@@ -302,6 +302,10 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         let mut required_sapling_subtrees = BTreeSet::new();
         #[cfg(feature = "orchard")]
         let mut required_orchard_subtrees = BTreeSet::new();
+        // Ironwood note commitments are Orchard-shaped and use the Orchard shard height, but are
+        // tracked in a separate commitment tree.
+        #[cfg(feature = "orchard")]
+        let mut required_ironwood_subtrees = BTreeSet::new();
         for (protocol, position) in wallet_note_positions {
             match protocol {
                 ShieldedPool::Sapling => {
@@ -321,7 +325,15 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                     )));
                 }
                 ShieldedPool::Ironwood => {
-                    todo!("Ironwood pool support is not yet implemented")
+                    #[cfg(feature = "orchard")]
+                    required_ironwood_subtrees.insert(
+                        Address::above_position(IRONWOOD_SHARD_HEIGHT.into(), *position).index(),
+                    );
+
+                    #[cfg(not(feature = "orchard"))]
+                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                        *protocol,
+                    )));
                 }
             }
         }
@@ -342,6 +354,18 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             required_orchard_subtrees,
             ShieldedPool::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
+            wallet_birthday,
+        )?
+        .or(extended_range);
+
+        // Ironwood's commitment tree activates at NU6.3.
+        #[cfg(feature = "orchard")]
+        let extended_range = extend_range(
+            conn,
+            extended_range.as_ref().unwrap_or(&range),
+            required_ironwood_subtrees,
+            ShieldedPool::Ironwood,
+            params.activation_height(NetworkUpgrade::Nu6_3),
             wallet_birthday,
         )?
         .or(extended_range);
@@ -373,8 +397,18 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
-    // Check for any newly stabilized notes, and mark them as stabilized
-    mark_stabilized_notes(conn, params)?;
+    // Check for any newly stabilized notes, and mark them as stabilized.
+    mark_stabilized_notes(
+        conn,
+        params,
+        &[
+            ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood,
+        ],
+    )?;
 
     Ok(())
 }
@@ -384,28 +418,38 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 ///
 /// This means that a note within the chain-tip shard can not be marked as `witness_stabilized`,
 /// because the tip shard is by definition not complete or confirmed to the `PRUNING_DEPTH`.
+///
+/// Only the pools listed in `pools` are processed. Callers must restrict this to pools whose
+/// received-note tables exist in the schema at the point of the call; in particular the
+/// `witness_stabilized_notes` migration runs before the Ironwood received-note table is created,
+/// so it must not request the Ironwood pool.
 pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
+    pools: &[ShieldedPool],
 ) -> Result<(), SqliteClientError> {
     fn mark_pool(
         conn: &rusqlite::Transaction<'_>,
-        pool: &str,
-        shard_height: u8,
+        pool: ShieldedPool,
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
+        let TableConstants {
+            table_prefix,
+            shard_height,
+            ..
+        } = table_constants::<SqliteClientError>(pool)?;
         let sql = format!(
-            "UPDATE {pool}_received_notes
+            "UPDATE {table_prefix}_received_notes
              SET witness_stabilized = 1
              WHERE witness_stabilized = 0
                AND commitment_tree_position IS NOT NULL
                AND EXISTS (
-                   SELECT 1 FROM {pool}_tree_shards shard
+                   SELECT 1 FROM {table_prefix}_tree_shards shard
                    WHERE shard.subtree_end_height IS NOT NULL
                      AND shard.subtree_end_height <= :pruning_floor
                      AND (commitment_tree_position >> :shard_height) = shard.shard_index
                      AND shard.shard_index NOT IN (
-                         SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                         SELECT shard_index FROM v_{table_prefix}_shard_unscanned_ranges
                      )
                )",
         );
@@ -419,10 +463,10 @@ pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     if let Some(max_scanned_height) = block_max_scanned(conn, params)?.map(|m| m.block_height()) {
         let pruning_floor: u32 = u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
 
-        // Mark stabilized notes in each pool
-        mark_pool(conn, "sapling", SAPLING_SHARD_HEIGHT, pruning_floor)?;
-        #[cfg(feature = "orchard")]
-        mark_pool(conn, "orchard", ORCHARD_SHARD_HEIGHT, pruning_floor)?;
+        // Mark stabilized notes in each requested pool.
+        for pool in pools {
+            mark_pool(conn, *pool, pruning_floor)?;
+        }
     }
 
     Ok(())
@@ -647,6 +691,49 @@ pub(crate) mod tests {
         },
         wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
     };
+
+    /// `extend_range` for the Ironwood pool must query the `ironwood_tree_shards` table (rather
+    /// than the Orchard tree), extending the scan range to cover the subtrees containing the
+    /// discovered notes.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn extend_range_uses_ironwood_tree_shards() {
+        use rusqlite::Connection;
+        use std::collections::BTreeSet;
+        use zcash_protocol::ShieldedPool;
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ironwood_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER
+            );
+            INSERT INTO ironwood_tree_shards (shard_index, subtree_end_height)
+            VALUES (0, 100), (1, 200);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let range = BlockHeight::from_u32(50)..BlockHeight::from_u32(60);
+        let required = BTreeSet::from([1u64]);
+
+        let extended = super::extend_range(
+            &tx,
+            &range,
+            required,
+            ShieldedPool::Ironwood,
+            Some(BlockHeight::from_u32(10)),
+            Some(BlockHeight::from_u32(5)),
+        )
+        .unwrap();
+
+        // Subtree 1 spans from the end of subtree 0 (height 100) to its own end (height 200), so
+        // the scan range is extended to cover [50, 201).
+        assert_eq!(
+            extended,
+            Some(BlockHeight::from_u32(50)..BlockHeight::from_u32(201))
+        );
+    }
 
     #[cfg(feature = "orchard")]
     use {
