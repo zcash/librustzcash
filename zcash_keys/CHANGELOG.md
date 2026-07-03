@@ -23,6 +23,19 @@ workspace.
   (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
   (GHSA-2x4w-pxqw-58v9).
 
+### Changed
+- The minimum seed length accepted by ZIP 32 key derivation has been reduced
+  from 32 bytes to 16 bytes, matching the minimum wallet seed entropy required
+  by [ZIP 315]. This enables import of 128-bit master secrets such as those
+  produced by 20-word SLIP-39 shares. Affected APIs:
+  - `zcash_keys::keys::sapling::spending_key` (panic threshold lowered)
+  - `zcash_keys::keys::UnifiedSpendingKey::from_seed` (panic threshold lowered)
+
+  Requires the corresponding relaxation in `zip32`. The transparent derivation
+  path via `bip32` already supports 16-byte seeds.
+
+[ZIP 315]: https://zips.z.cash/zip-0315#wallet-seeds
+
 ## [0.13.0] - 2026-04-27
 
 ### Added

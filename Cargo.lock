@@ -7439,10 +7439,10 @@ dependencies = [
 
 [[package]]
 name = "zip32"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13ff9ea444cdbce820211f91e6aa3d3a56bde7202d3c0961b7c38f793abf5637"
+version = "0.2.1"
+source = "git+https://github.com/dianaravenborne/zip32?branch=relax-seed-minimum-to-16-bytes#e663768f9ad24dcbfac2d60f5bdbaebd24727827"
 dependencies = [
+ "bech32",
  "blake2b_simd",
  "memuse",
  "subtle",

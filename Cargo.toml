@@ -227,3 +227,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+# Pull the matching `zip32` relaxation directly from the companion PR while
+# both PRs are in review. Remove this `[patch]` section once the upstream
+# zip32 release containing https://github.com/zcash/zip32/pull/31 is published.
+[patch.crates-io]
+zip32 = { git = "https://github.com/dianaravenborne/zip32", branch = "relax-seed-minimum-to-16-bytes" }
