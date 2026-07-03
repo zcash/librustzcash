@@ -498,8 +498,10 @@ impl TransparentSpendPolicy {
 /// This implementation performs input selection using methods available via the
 /// [`InputSource`] interface.
 pub struct GreedyInputSelector<DbT> {
-    /// The maximum fraction of a block's space, as an integer percentage (0–100), that a single
-    /// shielding transaction's transparent inputs may occupy.
+    /// The maximum fraction of a block's space, as an integer percentage (0–100), that a
+    /// single transaction's transparent inputs may occupy. Bounds both shielding
+    /// transactions and the transparent gather performed for general (non-shielding)
+    /// transfers when the active [`TransparentSpendPolicy`] requires it.
     #[cfg(feature = "transparent-inputs")]
     shielding_block_space_percent: u32,
     _ds_type: PhantomData<DbT>,
@@ -524,11 +526,15 @@ impl<DbT> GreedyInputSelector<DbT> {
     }
 
     /// Sets the maximum fraction of a block's space, as an integer percentage (0–100), that a
-    /// single shielding transaction's transparent inputs may occupy.
+    /// single transaction's transparent inputs may occupy.
     ///
-    /// When shielding gathers more spendable transparent outputs than will fit within this bound,
-    /// the highest-value outputs are selected first and the remainder are left unspent, to be
-    /// consolidated by a subsequent shielding transaction. Values above 100 are clamped to 100.
+    /// When shielding gathers more spendable transparent outputs than will fit within this
+    /// bound, the highest-value outputs are selected first and the remainder are left unspent,
+    /// to be consolidated by a subsequent shielding transaction. When a general (non-shielding)
+    /// transfer's transparent gather would otherwise require more inputs than fit within this
+    /// bound, the gather stops at the cap even if the requested value has not yet been
+    /// reached; the caller's input-selection loop surfaces this as an `InsufficientFunds`
+    /// error, the same as for any other value shortfall. Values above 100 are clamped to 100.
     /// Defaults to 10.
     #[cfg(feature = "transparent-inputs")]
     pub fn with_shielding_block_space_percent(mut self, percent: u32) -> Self {
@@ -537,9 +543,10 @@ impl<DbT> GreedyInputSelector<DbT> {
     }
 }
 
-/// Returns the maximum number of transparent inputs that a single shielding transaction may
-/// select, given the configured fraction of a block's space (as an integer percentage) that its
-/// inputs may occupy.
+/// Returns the maximum number of transparent inputs that a single transaction may select,
+/// given the configured fraction of a block's space (as an integer percentage) that its
+/// inputs may occupy. Used to bound both shielding transactions and the transparent gather
+/// for general (non-shielding) transfers.
 #[cfg(feature = "transparent-inputs")]
 fn shielding_max_inputs(block_space_percent: u32) -> usize {
     (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
@@ -740,6 +747,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         confirmations_policy,
                         CoinbaseFilter::NonCoinbaseOnly,
                         target_value,
+                        shielding_max_inputs(self.shielding_block_space_percent),
                         &StandardFeeRule::Zip317,
                     )
                     .map_err(InputSelectorError::DataSource)?
@@ -1013,6 +1021,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                     confirmations_policy,
                                     CoinbaseFilter::NonCoinbaseOnly,
                                     TargetValue::AtLeast(required),
+                                    shielding_max_inputs(self.shielding_block_space_percent),
                                     &StandardFeeRule::Zip317,
                                 )
                                 .map_err(InputSelectorError::DataSource)?

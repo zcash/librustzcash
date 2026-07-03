@@ -1597,7 +1597,8 @@ pub trait InputSource {
 
     /// Returns the spendable transparent outputs received by `account` whose total post-fee
     /// value (sum of values minus the cumulative marginal fee cost of the gathered inputs
-    /// themselves, per `fee_rule`) is at least `target_value`.
+    /// themselves, per `fee_rule`) is at least `target_value`, or `max_inputs` outputs
+    /// (whichever is reached first).
     ///
     /// The gather is intended to scale to wallets with large numbers of transparent addresses and
     /// UTXOs: it returns a value-bounded subset rather than every spendable output, so the
@@ -1608,6 +1609,13 @@ pub trait InputSource {
     /// static value bound, without requiring a separate round trip to correct an under-estimated
     /// headroom.
     ///
+    /// `max_inputs` bounds the number of transparent inputs a single transaction may consume,
+    /// independent of `target_value`: even a small requested value could otherwise require an
+    /// unbounded number of inputs for a wallet holding a very large number of small (e.g. dust)
+    /// UTXOs. When the cap is reached before the value target, the returned set's post-fee value
+    /// may be less than `target_value`; the caller's input-selection loop is expected to surface
+    /// this as an `InsufficientFunds` error, the same as for any other value shortfall.
+    ///
     /// `fee_rule` is fixed to [`StandardFeeRule`] (rather than being generic over the caller's
     /// actual [`ChangeStrategy`]) so that implementations of this method do not need to be
     /// generic over an arbitrary fee rule type. This is a heuristic bound only: the transaction's
@@ -1615,8 +1623,8 @@ pub trait InputSource {
     /// estimate turns out to be insufficient, the caller's input-selection loop will surface an
     /// `InsufficientFunds` error and can re-invoke this method with a corrected `target_value`.
     ///
-    /// For `TargetValue::AllFunds`, no bound is applied and the gather returns every eligible
-    /// output.
+    /// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
+    /// eligible output up to `max_inputs`.
     ///
     /// This is the value-bounded counterpart to [`InputSource::get_spendable_transparent_outputs`]
     /// and [`InputSource::get_spendable_transparent_outputs_for_addresses`], intended for use by
@@ -1624,6 +1632,7 @@ pub trait InputSource {
     ///
     /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
     #[cfg(feature = "transparent-inputs")]
+    #[allow(clippy::too_many_arguments)]
     fn select_spendable_transparent_outputs(
         &self,
         account: Self::AccountId,
@@ -1631,6 +1640,7 @@ pub trait InputSource {
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         target_value: TargetValue,
+        max_inputs: usize,
         fee_rule: &StandardFeeRule,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
@@ -1639,6 +1649,7 @@ pub trait InputSource {
             confirmations_policy,
             output_filter,
             target_value,
+            max_inputs,
             fee_rule,
         );
         unimplemented!(

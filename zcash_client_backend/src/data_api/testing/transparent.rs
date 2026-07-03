@@ -2073,6 +2073,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::NonCoinbaseOnly,
             TargetValue::AtLeast(payment_amount),
+            usize::MAX,
             &StandardFeeRule::Zip317,
         )
         .expect("initial gather should succeed");
@@ -2109,6 +2110,103 @@ where
         u64::from(initial_gather_value),
     );
     assert!(step.balance().fee_required() > Zatoshis::ZERO);
+}
+
+/// Verifies that `GreedyInputSelector::with_shielding_block_space_percent` also bounds the
+/// transparent gather performed for general (non-shielding) transfers, not just shielding.
+///
+/// Funds more dust UTXOs than fit within a 1%-of-block-space cap, and requests a payment
+/// whose post-fee cost can only be met by exceeding that cap. The gather must stop at the
+/// cap rather than consuming every eligible UTXO, so the proposal fails with
+/// [`InsufficientFunds`] instead of succeeding with an uncapped number of transparent inputs.
+///
+/// [`InsufficientFunds`]: crate::data_api::error::Error::InsufficientFunds
+pub fn propose_transfer_transparent_input_cap<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    // At 1% of block space the cap is (2_000_000 * 1 / 100) / 150 = 133 inputs.
+    const BLOCK_SPACE_PERCENT: u32 = 1;
+    const CAP: usize = 133;
+    const NUM_UTXOS: usize = CAP + 7; // 140; more than enough to exceed the cap.
+    const DUST_VALUE: u64 = 10_000;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with more dust UTXOs than fit within the cap.
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..NUM_UTXOS {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(Zatoshis::const_from_u64(DUST_VALUE), taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Request a post-fee amount that is only reachable by gathering more than `CAP` inputs
+    // (with the cap, `CAP` inputs net `DUST_VALUE * CAP - 5_000 * CAP = 5_000 * CAP`
+    // post-fee; requesting exactly that much would succeed, so request more).
+    let payment_amount = Zatoshis::const_from_u64(5_000 * (CAP as u64) + DUST_VALUE);
+
+    let network = *st.network();
+    let request = t2t_request(&network, payment_amount);
+
+    let input_selector =
+        GreedyInputSelector::new().with_shielding_block_space_percent(BLOCK_SPACE_PERCENT);
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let result = st.propose_transfer_with_policy(
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+    );
+
+    assert_matches!(
+        result,
+        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        "the transparent gather should stop at the input cap rather than consuming every \
+         eligible dust UTXO, so the request should fail rather than succeed with an \
+         uncapped number of inputs",
+    );
 }
 
 /// With [`TransparentSpendPolicy::FromAddresses`], only the explicitly named transparent
@@ -2281,6 +2379,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             TargetValue::AtLeast(target),
+            usize::MAX,
             &StandardFeeRule::Zip317,
         )
         .expect("value-bounded gather should succeed");
@@ -2327,6 +2426,7 @@ where
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+            usize::MAX,
             &StandardFeeRule::Zip317,
         )
         .expect("AllFunds gather should succeed");

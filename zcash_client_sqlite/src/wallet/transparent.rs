@@ -1400,13 +1400,15 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 
 /// Returns the spendable transparent outputs received by the given `account` whose total
 /// post-fee value (sum of values minus the cumulative marginal fee cost of the gathered
-/// inputs themselves, per `fee_rule`) is at least `target_value`.
+/// inputs themselves, per `fee_rule`) is at least `target_value`, or `max_inputs` outputs
+/// (whichever is reached first).
 ///
 /// The query is a single SQL statement that orders eligible UTXOs by descending value (using
 /// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
-/// values until the post-fee bound is met. This bounds the work done in SQLite to the prefix
-/// of the table that can possibly satisfy the request, which is important for wallets that
-/// hold large numbers of transparent UTXOs (e.g. a recovered `zcashd` import).
+/// values until the post-fee bound (or the `max_inputs` cap) is met. This bounds the work
+/// done in SQLite to the prefix of the table that can possibly satisfy the request, which is
+/// important for wallets that hold large numbers of transparent UTXOs (e.g. a recovered
+/// `zcashd` import).
 ///
 /// The cumulative fee is recomputed via `fee_rule` at each step. To keep this loop linear in
 /// the number of UTXOs examined (rather than quadratic), we maintain a running total of the
@@ -1415,8 +1417,8 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 /// time. This is valid for ZIP 317, whose transparent-input fee contribution depends only on
 /// the sum of input sizes.
 ///
-/// For `TargetValue::AllFunds`, no bound is applied and the gather returns every eligible
-/// output.
+/// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
+/// eligible output up to `max_inputs`.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
@@ -1427,6 +1429,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
     target_value: TargetValue,
+    max_inputs: usize,
     fee_rule: &StandardFeeRule,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
@@ -1466,6 +1469,15 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     // UTXO rather than O(prefix length), keeping the overall gather linear.
     let mut cumulative_input_size: usize = 0;
     while let Some(row) = rows.next()? {
+        // Stop once the cap on the number of transparent inputs is reached, regardless of
+        // whether the value target has been met. This bounds the size of the resulting
+        // transaction independent of `target_value`, since a wallet holding a very large
+        // number of small (e.g. dust) UTXOs could otherwise require an unbounded number of
+        // inputs to satisfy even a modest request.
+        if utxos.len() >= max_inputs {
+            break;
+        }
+
         let output = to_unspent_transparent_output(conn, row)?;
 
         // If we have a target bound, stop once the post-fee accumulated value reaches it.
@@ -2817,6 +2829,14 @@ mod tests {
     #[test]
     fn propose_t2shielded_requires_transparent_regather() {
         zcash_client_backend::data_api::testing::transparent::propose_t2shielded_requires_transparent_regather(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_transfer_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::propose_transfer_transparent_input_cap(
             TestDbFactory::default(),
             BlockCache::new(),
         );

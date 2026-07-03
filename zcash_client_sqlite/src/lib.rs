@@ -637,6 +637,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
         target_value: TargetValue,
+        max_inputs: usize,
         fee_rule: &StandardFeeRule,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
@@ -647,6 +648,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             confirmations_policy,
             output_filter,
             target_value,
+            max_inputs,
             fee_rule,
         )
     }
