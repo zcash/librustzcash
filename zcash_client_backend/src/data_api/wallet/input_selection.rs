@@ -433,12 +433,42 @@ const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 
 #[cfg(feature = "transparent-inputs")]
 /// A `BTreeSet` that is guaranteed to contain at least one element.
-#[derive(Clone)]
-pub struct NonEmptyBTreeSet<T> {
-    /// The guaranteed-present first element of the set.
-    pub head: T,
-    /// The remaining elements of the set, if any.
-    pub tail: BTreeSet<T>,
+///
+/// Non-emptiness is maintained by construction: every constructor requires at least one
+/// element, and no mutating operations are exposed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NonEmptyBTreeSet<T>(BTreeSet<T>);
+
+#[cfg(feature = "transparent-inputs")]
+impl<T: Ord> NonEmptyBTreeSet<T> {
+    /// Constructs a set containing only the given element.
+    pub fn singleton(value: T) -> Self {
+        Self(BTreeSet::from_iter([value]))
+    }
+
+    /// Constructs a set containing the elements of the given non-empty list, collapsing
+    /// duplicates.
+    pub fn from_nonempty(values: NonEmpty<T>) -> Self {
+        Self(values.into_iter().collect())
+    }
+
+    /// Constructs a set from the given `BTreeSet`, or returns `None` if the set is empty.
+    pub fn from_set(values: BTreeSet<T>) -> Option<Self> {
+        (!values.is_empty()).then_some(Self(values))
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<T> NonEmptyBTreeSet<T> {
+    /// Returns a reference to the wrapped set.
+    pub fn as_set(&self) -> &BTreeSet<T> {
+        &self.0
+    }
+
+    /// Returns an iterator over the elements of the set, in ascending order.
+    pub fn iter(&self) -> std::collections::btree_set::Iter<'_, T> {
+        self.0.iter()
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -447,14 +477,21 @@ pub struct NonEmptyBTreeSet<T> {
 /// Spending transparent funds links the chosen transparent addresses on-chain,
 /// reducing privacy; callers must opt in explicitly. Corresponds to the legacy
 /// `AllowTransparentAddressLinking` privacy policy / `ANY_TADDR`.
-#[derive(Default)]
+///
+/// Under any policy other than [`ShieldedOnly`], eligible transparent funds are
+/// spent *preferentially*: transparent UTXOs are gathered up to the payment total
+/// before shielded notes are selected to cover any remainder. Since change is
+/// directed to a shielded pool by the change strategy, opting in also
+/// opportunistically shields residual transparent value.
+///
+/// [`ShieldedOnly`]: TransparentSpendPolicy::ShieldedOnly
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum TransparentSpendPolicy {
     /// Do not spend any transparent UTXOs (default; fully-shielded behavior).
     #[default]
     ShieldedOnly,
-    /// Spend from arbitrary transparent receivers belonging to the account, as
-    /// needed to satisfy the request. The proposer chooses the addresses,
-    /// potentially linking them. (`ANY_TADDR`)
+    /// Spend from arbitrary transparent receivers belonging to the account. The
+    /// proposer chooses the addresses, potentially linking them. (`ANY_TADDR`)
     AnyAccountTaddr,
     /// Spend only from the specified transparent addresses, intentionally
     /// linking them.
@@ -475,20 +512,14 @@ impl TransparentSpendPolicy {
     }
 
     /// Creates a policy that only spends from the specified transparent addresses,
-    /// potentially leaking them. (`ANY_TADDR`)
+    /// intentionally linking them.
     pub fn from_specific_transparent_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
-        Self::FromAddresses(NonEmptyBTreeSet {
-            head: taddrs.head,
-            tail: BTreeSet::from_iter(taddrs.tail),
-        })
+        Self::FromAddresses(NonEmptyBTreeSet::from_nonempty(taddrs))
     }
 
     /// Creates a policy that only spends from a single transparent address.
     pub fn from_one_transparent_address(taddr: TransparentAddress) -> Self {
-        Self::FromAddresses(NonEmptyBTreeSet {
-            head: taddr,
-            tail: Default::default(),
-        })
+        Self::FromAddresses(NonEmptyBTreeSet::singleton(taddr))
     }
 }
 
