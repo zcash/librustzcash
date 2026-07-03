@@ -30,6 +30,8 @@ workspace.
   pool to which a note belongs. Unlike `Note::protocol` (which reports the
   cryptographic protocol, Sapling or Orchard), this classifies version-3 Orchard
   notes as belonging to the Ironwood pool.
+- `zcash_client_backend::proposal::Proposal::input_count_in_pool`, which returns
+  the total number of inputs from a given pool across all steps of the proposal.
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
