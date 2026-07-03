@@ -195,6 +195,14 @@ workspace.
     height.
 
 ### Changed
+- When a transaction spends Orchard notes once the Ironwood pool is active, its
+  Orchard-pool change now stays in the Orchard pool instead of being routed into
+  the Ironwood bundle. The change is returned to a spent note's own address,
+  which the Orchard V3 cross-address restriction permits (via the builder's
+  dedicated change entry point), so only the payment crosses the turnstile into
+  Ironwood. Orchard-pool change is still routed into the Ironwood bundle when the
+  transaction spends no Orchard notes (e.g. an Orchard-receiver payment funded
+  from the Sapling and Ironwood pools).
 - `zcash_client_backend::proposal::Step::input_in_pool` and
   `Step::input_count_in_pool` now support `PoolType::Ironwood`, which previously
   panicked. Ironwood inputs (version-3 Orchard notes) are counted for the
