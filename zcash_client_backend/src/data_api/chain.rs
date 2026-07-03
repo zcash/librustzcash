@@ -639,7 +639,7 @@ where
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
-    let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
+    let mut runners = BatchRunners::<_, (), (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
         runners.add_block(params, block).map_err(|e| e.into())
@@ -664,7 +664,7 @@ where
         Some(limit),
         |block: CompactBlock| {
             scan_summary.scanned_range.end = block.height() + 1;
-            let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
+            let scanned_block = scan_block_with_runners::<_, _, _, (), (), ()>(
                 params,
                 block,
                 &scanning_keys,

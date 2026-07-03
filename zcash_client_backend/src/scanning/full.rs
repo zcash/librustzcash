@@ -72,9 +72,16 @@ type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     Tasks,
 >;
 
-// An Ironwood batch is type-identical to an Orchard batch (`IronwoodDomain` aliases
-// `OrchardDomain`), so the Orchard task type already satisfies the runner's bound and no separate
-// task type is required; the alias only names the runner as belonging to the Ironwood pool.
+// Ironwood outputs are decrypted under the Ironwood note-encryption domain, which is distinct from
+// the Orchard domain (it accepts version 3 note plaintexts), so an Ironwood batch is a distinct
+// type from an Orchard batch and requires its own task type.
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatch<IvkTag> = Batch<
+    IvkTag,
+    IronwoodDomain,
+    orchard::Action<redpallas::Signature<redpallas::SpendAuth>>,
+    FullDecryptor,
+>;
 #[cfg(feature = "orchard")]
 type TaggedIronwoodBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
@@ -97,21 +104,37 @@ pub(crate) trait OrchardTasks<IvkTag>: Tasks<TaggedOrchardBatch<IvkTag>> {}
 #[cfg(feature = "orchard")]
 impl<IvkTag, T: Tasks<TaggedOrchardBatch<IvkTag>>> OrchardTasks<IvkTag> for T {}
 
-pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTasks<IvkTag>> {
+#[cfg(not(feature = "orchard"))]
+pub(crate) trait IronwoodTasks<IvkTag> {}
+#[cfg(not(feature = "orchard"))]
+impl<IvkTag, T> IronwoodTasks<IvkTag> for T {}
+
+#[cfg(feature = "orchard")]
+pub(crate) trait IronwoodTasks<IvkTag>: Tasks<TaggedIronwoodBatch<IvkTag>> {}
+#[cfg(feature = "orchard")]
+impl<IvkTag, T: Tasks<TaggedIronwoodBatch<IvkTag>>> IronwoodTasks<IvkTag> for T {}
+
+pub(crate) struct BatchRunners<
+    IvkTag,
+    TS: SaplingTasks<IvkTag>,
+    TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
+> {
     sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
     #[cfg(feature = "orchard")]
     orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
     #[cfg(feature = "orchard")]
-    ironwood: TaggedIronwoodBatchRunner<IvkTag, TO>,
+    ironwood: TaggedIronwoodBatchRunner<IvkTag, TI>,
     #[cfg(not(feature = "orchard"))]
-    orchard: PhantomData<TO>,
+    orchard: PhantomData<(TO, TI)>,
 }
 
-impl<IvkTag, TS, TO> BatchRunners<IvkTag, TS, TO>
+impl<IvkTag, TS, TO, TI> BatchRunners<IvkTag, TS, TO, TI>
 where
     IvkTag: Clone + Send + 'static,
     TS: SaplingTasks<IvkTag>,
     TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
 {
     /// Constructs a fresh set of batch runners that will trial-decrypt outputs using the
     /// given scanning keys.
@@ -191,7 +214,7 @@ where
         #[cfg(feature = "orchard")]
         let ironwood_batch = tx.ironwood_bundle().map(|bundle| {
             self.ironwood
-                .process_outputs(OrchardDomain::for_action, bundle.actions().iter().cloned())
+                .process_outputs(IronwoodDomain::for_action, bundle.actions().iter().cloned())
         });
 
         PendingBatch {
@@ -312,7 +335,7 @@ where
     P: consensus::Parameters + Send + 'static,
     IvkTag: Copy + Send + 'static,
 {
-    let mut runners = BatchRunners::<_, (), ()>::for_keys(
+    let mut runners = BatchRunners::<_, (), (), ()>::for_keys(
         DEFAULT_BATCH_SIZE_THRESHOLD,
         #[cfg(feature = "orchard")]
         DEFAULT_BATCH_SIZE_THRESHOLD,
@@ -633,7 +656,7 @@ where
                     &bundle
                         .actions()
                         .iter()
-                        .map(|action| (OrchardDomain::for_action(action), action.clone()))
+                        .map(|action| (IronwoodDomain::for_action(action), action.clone()))
                         .collect::<Vec<_>>(),
                     Some(move |_| ironwood_decrypted),
                     batch::try_note_decryption,

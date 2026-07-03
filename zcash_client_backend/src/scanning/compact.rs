@@ -60,10 +60,12 @@ type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     Tasks,
 >;
 
-// Ironwood outputs are Orchard-shaped, so an Ironwood batch is identical in type to an Orchard
-// batch (`IronwoodDomain` aliases `OrchardDomain`). This means the Orchard task type `TO` already
-// satisfies the bound for the Ironwood runner, and no separate `IronwoodTasks` is required; the
-// alias exists only to name the Ironwood runner as belonging to its own pool.
+// Ironwood outputs are decrypted under the Ironwood note-encryption domain, which is distinct from
+// the Orchard domain (it accepts version 3 note plaintexts), so an Ironwood batch is a distinct
+// type from an Orchard batch and requires its own task type.
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatch<IvkTag> =
+    Batch<IvkTag, IronwoodDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
 #[cfg(feature = "orchard")]
 type TaggedIronwoodBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
@@ -86,21 +88,37 @@ pub(crate) trait OrchardTasks<IvkTag>: Tasks<TaggedOrchardBatch<IvkTag>> {}
 #[cfg(feature = "orchard")]
 impl<IvkTag, T: Tasks<TaggedOrchardBatch<IvkTag>>> OrchardTasks<IvkTag> for T {}
 
-pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTasks<IvkTag>> {
+#[cfg(not(feature = "orchard"))]
+pub(crate) trait IronwoodTasks<IvkTag> {}
+#[cfg(not(feature = "orchard"))]
+impl<IvkTag, T> IronwoodTasks<IvkTag> for T {}
+
+#[cfg(feature = "orchard")]
+pub(crate) trait IronwoodTasks<IvkTag>: Tasks<TaggedIronwoodBatch<IvkTag>> {}
+#[cfg(feature = "orchard")]
+impl<IvkTag, T: Tasks<TaggedIronwoodBatch<IvkTag>>> IronwoodTasks<IvkTag> for T {}
+
+pub(crate) struct BatchRunners<
+    IvkTag,
+    TS: SaplingTasks<IvkTag>,
+    TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
+> {
     sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
     #[cfg(feature = "orchard")]
     orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
     #[cfg(feature = "orchard")]
-    ironwood: TaggedIronwoodBatchRunner<IvkTag, TO>,
+    ironwood: TaggedIronwoodBatchRunner<IvkTag, TI>,
     #[cfg(not(feature = "orchard"))]
-    orchard: PhantomData<TO>,
+    orchard: PhantomData<(TO, TI)>,
 }
 
-impl<IvkTag, TS, TO> BatchRunners<IvkTag, TS, TO>
+impl<IvkTag, TS, TO, TI> BatchRunners<IvkTag, TS, TO, TI>
 where
     IvkTag: Clone + Send + 'static,
     TS: SaplingTasks<IvkTag>,
     TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
 {
     pub(crate) fn for_keys<AccountId>(
         batch_size_threshold: usize,
@@ -199,7 +217,7 @@ where
             self.ironwood.add_outputs(
                 block_hash,
                 txid,
-                OrchardDomain::for_compact_action,
+                IronwoodDomain::for_compact_action,
                 tx.ironwood_actions
                     .iter()
                     .enumerate()
@@ -220,13 +238,13 @@ where
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
+pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO, TI>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
+    mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO, TI>>,
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
@@ -234,6 +252,7 @@ where
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     TS: SaplingTasks<IvkTag> + Sync,
     TO: OrchardTasks<IvkTag> + Sync,
+    TI: IronwoodTasks<IvkTag> + Sync,
 {
     fn check_hash_continuity(
         block: &CompactBlock,
@@ -445,7 +464,7 @@ where
                             index: i,
                         }
                     })?;
-                    Ok((OrchardDomain::for_compact_action(&action), action))
+                    Ok((IronwoodDomain::for_compact_action(&action), action))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             batch_runners
@@ -783,7 +802,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 2);
 
             let mut batch_runners = if scan_multithreaded {
-                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
                 runners
                     .add_block(&Network::TestNetwork, cb.clone())
                     .unwrap();
@@ -871,7 +890,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 3);
 
             let mut batch_runners = if scan_multithreaded {
-                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
                 runners
                     .add_block(&Network::TestNetwork, cb.clone())
                     .unwrap();
