@@ -24,6 +24,13 @@ workspace.
   `BlockMetadata::from_parts`, `ScannedBlock::from_parts`, and `WalletTx::new`
   constructors now also take the corresponding Ironwood arguments. Received
   Ironwood notes are not yet persisted; the write path is added separately.
+- Received Ironwood notes are now stored during `put_blocks`, and Ironwood
+  nullifiers are tracked for spend detection (behind the `orchard` feature
+  flag). `WalletRead::get_ironwood_nullifiers` and the low-level
+  `detect_ironwood_spend`/`put_received_ironwood_note`/`mark_ironwood_note_spent`/
+  `track_block_ironwood_nullifiers` methods mirror their Orchard counterparts,
+  writing to the `ironwood_received_notes` table. The Ironwood commitment tree
+  is not yet persisted, so received Ironwood notes are not yet spendable.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
