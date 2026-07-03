@@ -22,10 +22,11 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, TransparentOutputFilter,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
+        TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
+    fees::StandardFeeRule,
     wallet::{
         Exposure, GapMetadata, TransparentAddressMetadata, TransparentAddressSource,
         WalletTransparentOutput,
@@ -42,7 +43,11 @@ use zcash_keys::{
 };
 #[cfg(not(feature = "spend-index"))]
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_primitives::transaction::fees::zip317;
+use zcash_primitives::transaction::fees::{
+    FeeRule,
+    transparent::{InputSize, InputView},
+    zip317,
+};
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
@@ -1316,6 +1321,56 @@ pub(crate) fn get_wallet_transparent_output(
     result
 }
 
+/// Builds the SQL query body shared by `get_spendable_transparent_outputs[_for_addresses]`
+/// and `select_spendable_transparent_outputs`.
+///
+/// The query body is parameterized over the address-predicate SQL fragment and the
+/// `ORDER BY` fragment, so callers can match on a single address, a set of addresses, or
+/// an account; and can order by address+index (per-address determinism) or by value
+/// descending (value-bounded selection).
+fn spendable_transparent_outputs_query(address_predicate_sql: &str, order_by_sql: &str) -> String {
+    format!(
+        "SELECT t.txid, u.output_index, u.script,
+                u.value_zat, addresses.key_scope,
+                accounts.uuid AS account_uuid,
+                u.transaction_id AS creating_tx_id,
+                addresses.imported_transparent_receiver_script,
+                t.mined_height AS received_height
+         FROM transparent_received_outputs u
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN accounts ON accounts.id = u.account_id
+         JOIN addresses ON addresses.id = u.address_id
+         WHERE {address_predicate_sql}
+         AND u.value_zat > :min_value
+         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the output is unspent
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+         AND ({}) -- exclude immature coinbase outputs
+         AND (
+             :coinbase_filter == 0
+             OR (:coinbase_filter == 1 AND IFNULL(t.tx_index, 1) == 0)
+             OR (:coinbase_filter == 2 AND IFNULL(t.tx_index, 1) != 0)
+         ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
+           -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
+           -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
+         ORDER BY {order_by_sql}",
+        tx_unexpired_condition_minconf_0("t"),
+        spent_utxos_clause(),
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        excluding_immature_coinbase_outputs("t"),
+    )
+}
+
+/// Encodes the common `CoinbaseFilter` encoding used by the transparent-output SQL queries:
+/// 0 = all transparent outputs, 1 = coinbase outputs only, 2 = non-coinbase outputs only.
+fn coinbase_filter_encoding(output_filter: CoinbaseFilter) -> i32 {
+    match output_filter {
+        CoinbaseFilter::AllTransparentOutputs => 0i32,
+        CoinbaseFilter::CoinbaseOnly => 1i32,
+        CoinbaseFilter::NonCoinbaseOnly => 2i32,
+    }
+}
+
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
@@ -1336,7 +1391,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // Defer to the batched query with a singleton address set, so that there is a single query
     // body to maintain. `transparent_received_outputs.address` is always equal to the
@@ -1373,40 +1428,17 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     addresses: &[TransparentAddress],
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     if addresses.is_empty() {
         return Ok(vec![]);
     }
 
-    let coinbase_only = match output_filter {
-        TransparentOutputFilter::All => 0i32,
-        TransparentOutputFilter::CoinbaseOnly => 1i32,
-    };
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
 
-    let mut stmt_utxos = conn.prepare_cached(&format!(
-        "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, addresses.key_scope,
-                accounts.uuid AS account_uuid,
-                u.transaction_id AS creating_tx_id,
-                addresses.imported_transparent_receiver_script,
-                t.mined_height AS received_height
-         FROM transparent_received_outputs u
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         JOIN accounts ON accounts.id = u.account_id
-         JOIN addresses ON addresses.id = u.address_id
-         WHERE addresses.cached_transparent_receiver_address IN rarray(:addresses)
-         AND u.value_zat > :min_value
-         AND ({}) -- the transaction is mined or unexpired with minconf 0
-         AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives
-         ORDER BY addresses.cached_transparent_receiver_address, u.output_index",
-        tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        excluding_immature_coinbase_outputs("t"),
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "addresses.cached_transparent_receiver_address IN rarray(:addresses)",
+        "addresses.cached_transparent_receiver_address, u.output_index",
     ))?;
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
@@ -1428,18 +1460,17 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_only": coinbase_only,
+        ":coinbase_filter": coinbase_filter,
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
         let mut output = to_unspent_transparent_output(conn, row)?;
-
         // If the address has a redeem script, compute the known input size for fee
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
-            row.get("imported_transparent_receiver_script")?;
-        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes {
+        if let Ok(Some(rs_bytes)) =
+            row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+        {
             if let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes)) {
                 if let Some(input_size) =
                     transparent::builder::p2sh_input_serialized_len(&from_chain)
@@ -1448,7 +1479,145 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
                 }
             }
         }
+        utxos.push(output);
+    }
 
+    Ok(utxos)
+}
+
+/// Returns the spendable transparent outputs received by the given `account` whose total
+/// post-fee value (sum of values minus the cumulative marginal fee cost of the gathered
+/// inputs themselves, per `fee_rule`) is at least `target_value`, or `max_inputs` outputs
+/// (whichever is reached first).
+///
+/// The query is a single SQL statement that orders eligible UTXOs by descending value (using
+/// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
+/// values until the post-fee bound (or the `max_inputs` cap) is met. This bounds the work
+/// done in SQLite to the prefix of the table that can possibly satisfy the request, which is
+/// important for wallets that hold large numbers of transparent UTXOs (e.g. a recovered
+/// `zcashd` import).
+///
+/// The cumulative fee is recomputed via `fee_rule` at each step. To keep this loop linear in
+/// the number of UTXOs examined (rather than quadratic), we maintain a running total of the
+/// serialized transparent input sizes seen so far and pass that single collapsed total to
+/// `FeeRule::fee_required` on each iteration, rather than re-summing the whole prefix each
+/// time. This is valid for ZIP 317, whose transparent-input fee contribution depends only on
+/// the sum of input sizes.
+///
+/// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
+/// eligible output up to `max_inputs`.
+///
+/// When `address_allow_list` is `Some`, the eligible set is additionally restricted (within
+/// the query, so that ineligible outputs do not consume the value bound) to outputs received
+/// at one of the given transparent addresses.
+#[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: CoinbaseFilter,
+    address_allow_list: Option<&[TransparentAddress]>,
+    target_value: TargetValue,
+    max_inputs: usize,
+    fee_rule: &StandardFeeRule,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
+    // return every eligible output in that case.
+    let target_zat: Option<u64> = match target_value {
+        TargetValue::AtLeast(z) => Some(u64::from(z)),
+        TargetValue::AllFunds(_) => None,
+    };
+
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    // `:has_address_allow_list` and `:addresses` are always bound (the latter to an empty
+    // array when there is no allow list), following the same always-bound-flag idiom as
+    // `:coinbase_filter`, so that there is a single query text regardless of whether an
+    // allow list is present.
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "accounts.uuid = :account_uuid
+         AND (
+             :has_address_allow_list = 0
+             OR addresses.cached_transparent_receiver_address IN rarray(:addresses)
+         )",
+        "u.value_zat DESC, u.output_index",
+    ))?;
+
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
+    let address_values: Vec<Value> = address_allow_list
+        .unwrap_or(&[])
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
+    let mut rows = stmt_utxos.query(named_params![
+        ":account_uuid": account.0,
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE),
+        ":coinbase_filter": coinbase_filter,
+        ":has_address_allow_list": address_allow_list.is_some(),
+        ":addresses": &addresses_ptr,
+    ])?;
+
+    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
+    let mut accumulated_value: u64 = 0;
+    // Running total of the serialized size of the transparent inputs gathered so far.
+    // Maintained incrementally so that the fee re-computation below is O(1) per candidate
+    // UTXO rather than O(prefix length), keeping the overall gather linear.
+    let mut cumulative_input_size: usize = 0;
+    while let Some(row) = rows.next()? {
+        // Stop once the cap on the number of transparent inputs is reached, regardless of
+        // whether the value target has been met. This bounds the size of the resulting
+        // transaction independent of `target_value`, since a wallet holding a very large
+        // number of small (e.g. dust) UTXOs could otherwise require an unbounded number of
+        // inputs to satisfy even a modest request.
+        if utxos.len() >= max_inputs {
+            break;
+        }
+
+        let output = to_unspent_transparent_output(conn, row)?;
+
+        // If we have a target bound, stop once the post-fee accumulated value reaches it.
+        if let Some(target) = target_zat {
+            let cumulative_fee = fee_rule
+                .fee_required(
+                    params,
+                    BlockHeight::from(target_height),
+                    [InputSize::Known(cumulative_input_size)],
+                    std::iter::empty::<usize>(),
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+                .map_err(SqliteClientError::from)?;
+            if accumulated_value.saturating_sub(u64::from(cumulative_fee)) >= target {
+                break;
+            }
+        }
+
+        let input_size = match output.serialized_size() {
+            InputSize::Known(size) => size,
+            // Fall back to the standard P2PKH size for inputs whose exact serialized size is
+            // not known (e.g. a P2SH output with an unrecognized redeem script). This is an
+            // estimate for the purposes of this gather only; the real fee is computed by the
+            // caller's actual change strategy once the transaction is built.
+            InputSize::Unknown(_) => zip317::P2PKH_STANDARD_INPUT_SIZE,
+        };
+        cumulative_input_size += input_size;
+        accumulated_value = accumulated_value.saturating_add(u64::from(output.value()));
         utxos.push(output);
     }
 
@@ -2737,6 +2906,54 @@ mod tests {
     #[test]
     fn shielding_transparent_input_cap() {
         zcash_client_backend::data_api::testing::transparent::shielding_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_shielded_only_is_insufficient() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_shielded_only_is_insufficient(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_any_account_taddr() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_any_account_taddr(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_from_addresses() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_from_addresses(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2shielded_requires_transparent_regather() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2shielded_requires_transparent_regather(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_transfer_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::propose_transfer_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn value_bounded_transparent_gather() {
+        zcash_client_backend::data_api::testing::transparent::value_bounded_transparent_gather(
             TestDbFactory::default(),
             BlockCache::new(),
         );

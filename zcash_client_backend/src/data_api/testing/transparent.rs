@@ -14,6 +14,7 @@ use zcash_keys::{
 };
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
+use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
 use {
@@ -24,12 +25,12 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, InputSource as _, TransparentOutputFilter, WalletRead as _,
-        WalletTest as _, WalletWrite,
+        Account as _, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode, TargetValue,
+        WalletRead as _, WalletTest as _, WalletWrite,
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            input_selection::{GreedyInputSelector, TransparentSpendPolicy},
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -77,7 +78,7 @@ fn check_balance<DSF>(
                 taddr,
                 target_height,
                 confirmations_policy,
-                TransparentOutputFilter::All
+                CoinbaseFilter::AllTransparentOutputs
             )
             .unwrap()
             .into_iter()
@@ -144,7 +145,7 @@ where
             taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -178,7 +179,7 @@ where
                 taddr,
                 target_height,
                 ConfirmationsPolicy::MIN,
-                TransparentOutputFilter::All
+                CoinbaseFilter::AllTransparentOutputs
             )
             .as_deref(),
         Ok(&[])
@@ -194,7 +195,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, TransparentOutputFilter::All)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -516,7 +517,7 @@ where
             &taddrs,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -534,7 +535,7 @@ where
                     taddr,
                     target_height,
                     ConfirmationsPolicy::MIN,
-                    TransparentOutputFilter::All,
+                    CoinbaseFilter::AllTransparentOutputs,
                 )
                 .unwrap(),
         );
@@ -551,7 +552,7 @@ where
             &taddrs[..1],
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -564,7 +565,7 @@ where
                 &[],
                 target_height,
                 ConfirmationsPolicy::MIN,
-                TransparentOutputFilter::All,
+                CoinbaseFilter::AllTransparentOutputs,
             )
             .unwrap()
             .is_empty()
@@ -647,7 +648,7 @@ where
             &[*taddr],
             account.id(),
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .expect("shielding proposal should succeed");
 
@@ -1119,7 +1120,7 @@ where
             &taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1465,7 +1466,7 @@ where
             &taddr,
             target_height,
             ConfirmationsPolicy::MIN,
-            TransparentOutputFilter::All,
+            CoinbaseFilter::AllTransparentOutputs,
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1794,4 +1795,648 @@ where
             .mark_transparent_addresses_exposed(&[(unknown, BlockHeight::from(1))])
             .is_err()
     );
+}
+
+/// Sets up a wallet whose account holds no shielded notes and a single spendable
+/// transparent UTXO at its default external transparent receiver, returning the test
+/// state, the account, the funding outpoint, and the UTXO value.
+///
+/// The chain is seeded with blocks containing notes that do *not* belong to the wallet,
+/// so that target/anchor heights resolve while the account remains shielded-empty. This
+/// isolates the transparent-UTXO selection path.
+#[allow(clippy::type_complexity)]
+fn setup_transparent_only_account<DSF>(
+    dsf: DSF,
+    cache: impl TestCache,
+    utxo_value: Zatoshis,
+) -> (
+    TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    TestAccount<<DSF as DataStoreFactory>::Account>,
+    OutPoint,
+)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve while
+    // the account remains without any shielded notes.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with a single transparent UTXO well above the marginal fee.
+    let txout = TxOut::new(utxo_value, taddr.script().into());
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let outpoint = OutPoint::fake();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        txout,
+        Some(height),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    (st, account, outpoint)
+}
+
+/// Builds a single-payment t->t [`TransactionRequest`] paying `amount` to a fixed
+/// external transparent recipient.
+fn t2t_request(network: &LocalNetwork, amount: Zatoshis) -> TransactionRequest {
+    let recipient = TransparentAddress::PublicKeyHash([7u8; 20]);
+    TransactionRequest::new(vec![Payment::without_memo(
+        Address::Transparent(recipient).to_zcash_address(network),
+        amount,
+    )])
+    .unwrap()
+}
+
+/// Regression test enforcing the privacy invariant: with the default
+/// [`TransparentSpendPolicy::ShieldedOnly`] policy, a transfer must NOT silently spend
+/// the account's transparent UTXOs as a fallback. An account holding only transparent
+/// funds must fail with [`InsufficientFunds`] rather than producing a t->t proposal.
+///
+/// [`InsufficientFunds`]: crate::data_api::error::Error::InsufficientFunds
+pub fn propose_t2t_shielded_only_is_insufficient<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let (mut st, account, _outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let result = st.propose_transfer_with_policy(
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &TransparentSpendPolicy::shielded_only(),
+    );
+
+    assert_matches!(
+        result,
+        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        "shielded-only policy must not spend transparent UTXOs as a fallback",
+    );
+}
+
+/// With [`TransparentSpendPolicy::AnyAccountTaddr`] (the legacy `ANY_TADDR` behavior), a
+/// transfer may spend the account's transparent UTXOs. Verifies that the funding UTXO is
+/// selected as a transparent input and that the proposal balance is consistent.
+pub fn propose_t2t_any_account_taddr<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let (mut st, account, outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, transfer_amount);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+        )
+        .expect("transparent spend must succeed under AnyAccountTaddr");
+
+    // A pure t->t transfer is a single step (no ZIP-320 ephemeral roundtrip).
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+
+    assert_eq!(
+        step.transparent_inputs().len(),
+        1,
+        "expected exactly one transparent input selected from the account's UTXOs",
+    );
+    assert_eq!(step.transparent_inputs()[0].outpoint(), &outpoint);
+    assert_eq!(step.transparent_inputs()[0].txout().value(), utxo_value);
+
+    // `TransactionBalance::total()` is `change + fee`, which by the balance equation equals
+    // input total minus the explicit payment.
+    assert_eq!(
+        step.balance().total(),
+        (utxo_value - transfer_amount).unwrap(),
+    );
+    assert!(step.balance().fee_required() > Zatoshis::ZERO);
+    assert!(!step.balance().proposed_change().is_empty());
+}
+
+/// Verifies that `GreedyInputSelector::propose_transaction` successfully re-gathers
+/// transparent inputs when the initial fee-aware gather's estimate (which accounts only
+/// for the transparent side of the transaction) turns out to be insufficient once the
+/// real change strategy accounts for the additional shielded action required by a
+/// shielded payment recipient.
+///
+/// This exercises the `ChangeError::InsufficientFunds` fallback path in
+/// `GreedyInputSelector::propose_transaction`, which re-invokes
+/// `InputSource::select_spendable_transparent_outputs` with a corrected `TargetValue`
+/// when the first gather's reservation proves too small. Funding many small transparent
+/// UTXOs forces the initial gather to stop with just enough inputs to cover the payment
+/// under its own (transparent-only) fee estimate; the shielded payment output then pushes
+/// the real required fee higher, so satisfying the request is only possible by gathering
+/// additional inputs beyond that initial estimate.
+pub fn propose_t2shielded_requires_transparent_regather<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with many small transparent UTXOs, none of which alone are
+    // remotely close to the payment amount, so that gathering enough of them to satisfy
+    // the (larger, corrected) real requirement remains possible.
+    let dust_value = Zatoshis::const_from_u64(10_000);
+    let n_dust = 30;
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..n_dust {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(dust_value, taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Pay a shielded recipient. The initial transparent gather's fee estimate accounts
+    // only for the transparent inputs it selects; it does not (and cannot, since the
+    // shielded payment output isn't known to `InputSource::select_spendable_transparent_outputs`)
+    // account for the additional sapling action this payment requires, so the first pass
+    // undershoots and a re-gather is required to actually satisfy the request.
+    let network = *st.network();
+    let recipient = ExtendedSpendingKey::master(&[1u8; 32])
+        .to_diversifiable_full_viewing_key()
+        .default_address()
+        .1;
+    let payment_amount = Zatoshis::const_from_u64(50_000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::Sapling(recipient).to_zcash_address(&network),
+        payment_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    // Independently reproduce the initial gather that `GreedyInputSelector` will perform
+    // (bounded only by the payment amount, since that's the only information available
+    // before the shielded payment output's fee contribution is known). Comparing this to
+    // the transparent inputs actually used by the successful proposal below demonstrates
+    // that the proposal could only have succeeded via the re-gather fallback: the initial
+    // gather's own reservation ignores the extra sapling action the payment requires, so
+    // it cannot by itself have covered the real, higher requirement.
+    let initial_gather = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            TargetHeight::from(height + 1),
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::NonCoinbaseOnly,
+            None,
+            TargetValue::AtLeast(payment_amount),
+            usize::MAX,
+            &StandardFeeRule::Zip317,
+        )
+        .expect("initial gather should succeed");
+    let initial_gather_value: Zatoshis = initial_gather
+        .iter()
+        .map(|u| u.value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+        )
+        .expect(
+            "transparent spend should succeed via the re-gather fallback despite the \
+             initial gather's fee estimate being insufficient",
+        );
+
+    let step = &proposal.steps().head;
+    let gathered_value: Zatoshis = step
+        .transparent_inputs()
+        .iter()
+        .map(|i| i.txout().value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+    assert!(
+        gathered_value > initial_gather_value,
+        "the successful proposal should have gathered more transparent value ({}) than \
+         the insufficient initial gather ({})",
+        u64::from(gathered_value),
+        u64::from(initial_gather_value),
+    );
+    assert!(step.balance().fee_required() > Zatoshis::ZERO);
+}
+
+/// Verifies that `GreedyInputSelector::with_shielding_block_space_percent` also bounds the
+/// transparent gather performed for general (non-shielding) transfers, not just shielding.
+///
+/// Funds more dust UTXOs than fit within a 1%-of-block-space cap, and requests a payment
+/// whose post-fee cost can only be met by exceeding that cap. The gather must stop at the
+/// cap rather than consuming every eligible UTXO, so the proposal fails with
+/// [`InsufficientFunds`] instead of succeeding with an uncapped number of transparent inputs.
+///
+/// [`InsufficientFunds`]: crate::data_api::error::Error::InsufficientFunds
+pub fn propose_transfer_transparent_input_cap<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    // At 1% of block space the cap is (2_000_000 * 1 / 100) / 150 = 133 inputs.
+    const BLOCK_SPACE_PERCENT: u32 = 1;
+    const CAP: usize = 133;
+    const NUM_UTXOS: usize = CAP + 7; // 140; more than enough to exceed the cap.
+    const DUST_VALUE: u64 = 10_000;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with more dust UTXOs than fit within the cap.
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..NUM_UTXOS {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(Zatoshis::const_from_u64(DUST_VALUE), taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Request a post-fee amount that is only reachable by gathering more than `CAP` inputs
+    // (with the cap, `CAP` inputs net `DUST_VALUE * CAP - 5_000 * CAP = 5_000 * CAP`
+    // post-fee; requesting exactly that much would succeed, so request more).
+    let payment_amount = Zatoshis::const_from_u64(5_000 * (CAP as u64) + DUST_VALUE);
+
+    let network = *st.network();
+    let request = t2t_request(&network, payment_amount);
+
+    let input_selector =
+        GreedyInputSelector::new().with_shielding_block_space_percent(BLOCK_SPACE_PERCENT);
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let result = st.propose_transfer_with_policy(
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+    );
+
+    assert_matches!(
+        result,
+        Err(crate::data_api::error::Error::InsufficientFunds { .. }),
+        "the transparent gather should stop at the input cap rather than consuming every \
+         eligible dust UTXO, so the request should fail rather than succeed with an \
+         uncapped number of inputs",
+    );
+}
+
+/// With [`TransparentSpendPolicy::FromAddresses`], only the explicitly named transparent
+/// addresses are eligible. Funds two of the account's external receivers but names only
+/// one; the proposal must select solely from the named address.
+pub fn propose_t2t_from_addresses<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    // Seed the chain with notes that do not belong to us so heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Enumerate two distinct external transparent receivers belonging to the account.
+    let external_taddrs = st
+        .wallet()
+        .get_transparent_receivers(account.id(), false, true)
+        .unwrap();
+    let mut taddrs_by_index = external_taddrs
+        .into_iter()
+        .filter_map(|(addr, meta)| meta.address_index().map(|i| (i, addr)))
+        .collect::<BTreeMap<_, _>>()
+        .into_values();
+    let addr_named = taddrs_by_index.next().expect("at least one external taddr");
+    let addr_other = taddrs_by_index
+        .next()
+        .expect("at least two external taddrs");
+
+    // Fund both receivers with a spendable UTXO each. The unnamed address's UTXO is
+    // inserted first AND holds strictly more value than the named address's, so that if
+    // the address filter were not enforced, the value-descending gather would select the
+    // unnamed address's UTXO (which alone covers the payment) and stop -- making this test
+    // fail. The named UTXO must be selected by policy, not merely by gather order.
+    let named_value = Zatoshis::const_from_u64(100_000);
+    let other_value = Zatoshis::const_from_u64(150_000);
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let named_outpoint = OutPoint::new([1u8; 32], 0);
+    let other_outpoint = OutPoint::new([2u8; 32], 0);
+    for (addr, outpoint, value) in [
+        (addr_other, other_outpoint.clone(), other_value),
+        (addr_named, named_outpoint.clone(), named_value),
+    ] {
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint,
+            TxOut::new(value, addr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    let network = *st.network();
+    let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    );
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &TransparentSpendPolicy::from_one_transparent_address(addr_named),
+        )
+        .expect("transparent spend from named address must succeed");
+
+    let step = &proposal.steps().head;
+    let selected: Vec<&OutPoint> = step
+        .transparent_inputs()
+        .iter()
+        .map(|i| i.outpoint())
+        .collect();
+    assert!(
+        selected.contains(&&named_outpoint),
+        "the named address's UTXO must be selected",
+    );
+    assert!(
+        !selected.contains(&&other_outpoint),
+        "an unnamed address's UTXO must not be selected",
+    );
+}
+
+/// Verifies that the value-bounded `select_spendable_transparent_outputs` gather returns
+/// only enough UTXOs to cover the requested `TargetValue`, rather than every spendable
+/// output held by the account. This is the behavior that prevents wallets with large
+/// numbers of small transparent UTXOs (e.g. recovered `zcashd` imports) from falling over
+/// when a small transfer is requested.
+pub fn value_bounded_transparent_gather<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = *uaddr.transparent().unwrap();
+
+    // Seed the chain with notes that do not belong to us so that heights resolve.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the account with many small dust UTXOs. Each is well above the marginal fee
+    // (1_000 zats) so it's spendable, but tiny relative to the total. A naive "return
+    // everything" gather would load all of these into memory; the value-bounded gather
+    // should only return enough to cover the request.
+    let dust_value = Zatoshis::const_from_u64(10_000);
+    let n_dust = 50;
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    for i in 0..n_dust {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&(i as u32).to_le_bytes());
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new(hash, 0),
+            TxOut::new(dust_value, taddr.script().into()),
+            Some(height),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    // Request 30_000 zats — 3x a single dust UTXO, but a small fraction of the total.
+    let target = Zatoshis::const_from_u64(30_000);
+    let target_height = TargetHeight::from(height + 1);
+
+    let bound = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            None,
+            TargetValue::AtLeast(target),
+            usize::MAX,
+            &StandardFeeRule::Zip317,
+        )
+        .expect("value-bounded gather should succeed");
+
+    // The gather should return enough UTXOs to cover the target post-fee, not all 50.
+    // Each UTXO is 10_000 zats. Under ZIP 317, `k` P2PKH inputs cost
+    // `5_000 * max(2, k)` zats in marginal fee, so the post-fee value of the first `k`
+    // gathered UTXOs is `10_000 * k - 5_000 * max(2, k)`. This first reaches the
+    // 30_000-zat target at `k = 6` (60_000 - 30_000 = 30_000), one more than the 5
+    // UTXOs (50_000 - 25_000 = 25_000) that would still fall short.
+    assert!(
+        !bound.is_empty(),
+        "value-bounded gather should return at least one UTXO",
+    );
+    assert_eq!(
+        bound.len(),
+        6,
+        "value-bounded gather should return exactly 6 UTXOs (10_000 zats each) to cover \
+         30_000 zats net of the ZIP 317 marginal fee for 6 P2PKH inputs",
+    );
+    assert!(
+        bound.len() < n_dust,
+        "value-bounded gather should not return all {n_dust} UTXOs (returned {})",
+        bound.len(),
+    );
+    // The summed value should meet the target.
+    let total: Zatoshis = bound
+        .iter()
+        .map(|u| u.value())
+        .fold(Zatoshis::ZERO, |acc, v| (acc + v).unwrap());
+    assert!(
+        total >= target,
+        "value-bounded gather should cover the target (got {}, want >= {})",
+        u64::from(total),
+        u64::from(target),
+    );
+
+    // AllFunds should return all eligible UTXOs.
+    let all = st
+        .wallet()
+        .select_spendable_transparent_outputs(
+            account.id(),
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            None,
+            TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
+            usize::MAX,
+            &StandardFeeRule::Zip317,
+        )
+        .expect("AllFunds gather should succeed");
+    assert_eq!(all.len(), n_dust);
 }

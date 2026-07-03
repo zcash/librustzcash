@@ -13,6 +13,7 @@ mod add_account_uuids;
 mod add_transaction_trust_marker;
 mod add_transaction_views;
 mod add_transparent_receiver_address_index;
+mod add_transparent_value_index;
 mod add_utxo_account;
 mod addresses_table;
 mod ensure_default_transparent_address;
@@ -141,6 +142,12 @@ pub(super) fn all_migrations<
     //                                                    /          \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
+    // add_transparent_value_index depends directly on fix_transparent_received_outputs (not
+    // shown above to avoid further complicating the diagram): that migration drops and
+    // recreates the transparent_received_outputs table, which would silently destroy the
+    // index if add_transparent_value_index instead depended only on utxos_to_txos and
+    // happened to run first.
+    //
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -239,6 +246,7 @@ pub(super) fn all_migrations<
         Box::new(add_transparent_receiver_address_index::Migration {
             params: params.clone(),
         }),
+        Box::new(add_transparent_value_index::Migration),
     ]
 }
 

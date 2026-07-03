@@ -43,9 +43,9 @@ use std::{
 
 use shardtree::error::{QueryError, ShardTreeError};
 
-use super::InputSource;
 #[cfg(feature = "transparent-inputs")]
-use super::TransparentOutputFilter;
+use super::CoinbaseFilter;
+use super::InputSource;
 use crate::{
     data_api::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
@@ -704,6 +704,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
+    #[cfg(feature = "transparent-inputs")] spend_policy: &input_selection::TransparentSpendPolicy,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
@@ -735,6 +736,8 @@ where
         spend_from_account,
         request,
         change_strategy,
+        #[cfg(feature = "transparent-inputs")]
+        spend_policy,
         #[cfg(feature = "unstable")]
         proposed_version,
     )?;
@@ -826,6 +829,8 @@ where
         &change_strategy,
         request,
         confirmations_policy,
+        #[cfg(feature = "transparent-inputs")]
+        &input_selection::TransparentSpendPolicy::default(),
         #[cfg(feature = "unstable")]
         proposed_version,
     )
@@ -886,7 +891,7 @@ where
 /// addresses.
 ///
 /// The `output_filter` parameter controls which transparent outputs are eligible for
-/// inclusion in the proposal. See [`TransparentOutputFilter`] for details.
+/// inclusion in the proposal. See [`CoinbaseFilter`] for details.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -899,7 +904,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -3060,7 +3065,7 @@ where
         from_addrs,
         to_account,
         confirmations_policy,
-        TransparentOutputFilter::All,
+        CoinbaseFilter::AllTransparentOutputs,
     )?;
 
     create_proposed_transactions(

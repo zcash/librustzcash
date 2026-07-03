@@ -16,6 +16,54 @@ workspace.
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
+- `zcash_client_backend::data_api::wallet::input_selection::TransparentSpendPolicy`
+  (behind the `transparent-inputs` feature flag): expresses a wallet's explicit,
+  privacy-acknowledging intent to spend transparent UTXOs in a transfer. Variants
+  are `ShieldedOnly` (the default; no transparent spends), `AnyAccountTaddr`
+  (the legacy `ANY_TADDR` behavior, spending from arbitrary account transparent
+  receivers and potentially linking them), and `FromAddresses` (spending only
+  from an explicitly named set of transparent addresses).
+- `zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet`
+  (behind the `transparent-inputs` feature flag): a minimal non-empty
+  `BTreeSet` wrapper used by `TransparentSpendPolicy::FromAddresses` to hold
+  the explicit set of transparent addresses to spend from.
+- `zcash_client_backend::data_api::CoinbaseFilter::NonCoinbaseOnly` (behind
+  `transparent-inputs`): a selection control (not an encoding of any
+  consensus rule) that excludes coinbase UTXOs from input selection, so that
+  general (non-shielding) transfers do not spend them; coinbase funds are
+  shielded separately via `propose_shielding_coinbase`.
+- `zcash_client_backend::data_api::InputSource::select_spendable_transparent_outputs`
+  method (behind `transparent-inputs`), a value-bounded counterpart to
+  `InputSource::get_spendable_transparent_outputs[_for_addresses]`, used by
+  `GreedyInputSelector::propose_transaction` when the `TransparentSpendPolicy`
+  requires gathering the account's transparent UTXOs. Implementations order
+  eligible outputs by descending value and accumulate them, recomputing the
+  cumulative marginal fee cost of the gathered inputs (per the supplied
+  `fee_rule: &StandardFeeRule` argument) at each step, so that the returned
+  set covers the requested post-fee value without needing to materialize
+  every spendable UTXO for the account. This fee estimate always uses
+  `StandardFeeRule::Zip317`, independent of the `ChangeStrategy::FeeRule`
+  actually configured for the proposal; it is a heuristic bound only, and
+  `GreedyInputSelector` re-gathers with a corrected `TargetValue` if the
+  caller's actual change strategy reports `InsufficientFunds`. A `max_inputs`
+  argument additionally bounds the number of outputs the gather may select,
+  independent of the target value, so that a wallet holding a very large
+  number of small UTXOs cannot produce an arbitrarily large transaction; when
+  the cap is reached before the target value, the shortfall is likewise
+  surfaced as `InsufficientFunds`. An `address_allow_list` argument restricts
+  the gather to outputs received at the given transparent addresses (`None`
+  meaning any address belonging to the account); `GreedyInputSelector` uses
+  this to enforce `TransparentSpendPolicy::FromAddresses`. The restriction is
+  applied within the gather itself (not to its results), so that ineligible
+  outputs do not consume the value bound.
+- A new `spend-index` feature flag, for consumers whose chain-data source can
+  resolve the spend of an individual transparent output (e.g. a full node with a
+  spent-outpoint index). It gates:
+  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
+    a per-outpoint request to detect the spend of a specific transparent output.
+  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
+    which records that a transparent outpoint was confirmed unspent as of a given
+    height.
 - `zcash_client_backend::data_api::error::RewindError`
 - `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
   a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable
@@ -25,11 +73,14 @@ workspace.
   database round-trip when gathering inputs from wallets with many transparent addresses.
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_shielding_block_space_percent`,
   which configures the maximum fraction of a block's space (as an integer percentage, default 10)
-  that a single shielding transaction's transparent inputs may occupy. When shielding gathers more
+  that a single transaction's transparent inputs may occupy. When shielding gathers more
   spendable transparent outputs than fit within this bound, the highest-value outputs are selected
   first and the remainder are left unspent, to be consolidated by a subsequent shielding
-  transaction. This bounds the size of the shielding transaction for wallets that hold very large
-  numbers of transparent UTXOs.
+  transaction. The same bound also applies to the transparent gather performed for general
+  (non-shielding) transfers when the active `TransparentSpendPolicy` requires it; if the cap is
+  reached before the requested value, the proposal fails with `InsufficientFunds` rather than
+  producing an oversized transaction. This bounds the size of any transaction with gathered
+  transparent inputs for wallets that hold very large numbers of transparent UTXOs.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
@@ -112,6 +163,11 @@ workspace.
 - `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` continues
   to use legacy Orchard routing for Orchard-recipient proposals until PCZT has
   Ironwood role support.
+- Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to `CoinbaseFilter`
+- During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
+  unspendable data outputs and skipped silently, instead of being logged as
+  unsupported script kinds. Other unrecognized transparent script kinds continue to
+  be logged.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
     - The result types of `InputSource::get_unspent_transparent_output` and
@@ -132,6 +188,13 @@ workspace.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+  now take an additional `&TransparentSpendPolicy` argument (behind the
+  `transparent-inputs` feature flag) that controls whether and how the
+  account's transparent UTXOs may be spent. The default policy preserves the
+  previous shielded-only behavior; transparent UTXOs are never spent unless the
+  caller explicitly opts in.
 - `zcash_client_backend::TransferType::WalletInternal` semantics have
   narrowed: it now specifically indicates a cross-account internal transfer
   (recipient and funder are distinct wallet accounts). Code that previously
