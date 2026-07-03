@@ -1394,10 +1394,12 @@ pub(crate) mod tests {
 
         prop_compose! {
             // Two moderate note values (used for Sapling and Ironwood) and a payment that exceeds
-            // either note on its own but is covered by the two together.
+            // either note on its own but is covered by the two together, with a comfortable fee
+            // margin: `2 * pool_zats - payment == pool_zats - extra_zats >= 50_000`, which safely
+            // exceeds the fee of a multi-bundle transaction.
             fn arb_combined_amounts()(
-                pool_zats in 60_000u64..90_000u64,
-                extra_zats in 10_000u64..40_000u64,
+                pool_zats in 70_000u64..90_000u64,
+                extra_zats in 5_000u64..20_000u64,
             ) -> (u64, u64) {
                 // payment is strictly greater than a single note but below the two combined.
                 (pool_zats, pool_zats + extra_zats)
@@ -1608,9 +1610,10 @@ pub(crate) mod tests {
             #![proptest_config(ProptestConfig::with_cases(2))]
 
             /// Rule 4 at the built-transaction level: when the wallet spends an Orchard note to pay
-            /// an Orchard receiver, the payment (and the Orchard change) are carried by the Ironwood
-            /// bundle, and the transaction builds successfully. This proves the transaction the
-            /// builder actually constructs, not just the proposal.
+            /// an Orchard receiver, the payment is carried by the Ironwood bundle while the change
+            /// stays in the Orchard bundle (returned to the spent note's own address), and the
+            /// transaction builds successfully. This proves the transaction the builder actually
+            /// constructs, not just the proposal.
             #[test]
             fn orchard_payment_routes_to_ironwood_and_builds(
                 (note_zats, payment_zats) in arb_single_pool_amount(),
@@ -1674,8 +1677,8 @@ pub(crate) mod tests {
                     .unwrap()
                     .expect("the sent transaction was stored");
 
-                // The Orchard-receiver payment (and the Orchard-input change) are carried by the
-                // Ironwood bundle; the Orchard bundle carries the Orchard spend.
+                // The Orchard-receiver payment is carried by the Ironwood bundle; the Orchard bundle
+                // carries the Orchard spend and the same-address change.
                 prop_assert!(
                     tx.ironwood_bundle().is_some(),
                     "the payment to an Orchard receiver must be routed to the Ironwood bundle",
@@ -1683,6 +1686,38 @@ pub(crate) mod tests {
                 prop_assert!(
                     tx.orchard_bundle().is_some(),
                     "the Orchard spend must remain in the Orchard bundle",
+                );
+
+                // The change stays in the Orchard pool. Only the payment crosses the turnstile into
+                // Ironwood (to a receiver the wallet does not own), so the wallet owns no Ironwood
+                // note, and the retained change is recorded as an Orchard note of the expected value.
+                let fee = proposal.steps().head.balance().fee_required();
+                let expected_change = (Zatoshis::from_u64(note_zats).unwrap()
+                    - Zatoshis::from_u64(payment_zats).unwrap()
+                    - fee)
+                    .unwrap();
+                prop_assume!(expected_change.into_u64() > 0);
+
+                let conn = st.wallet_mut().conn_mut();
+                let ironwood_notes: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM ironwood_received_notes", [], |r| r.get(0))
+                    .unwrap();
+                prop_assert_eq!(
+                    ironwood_notes,
+                    0,
+                    "the change must not cross the turnstile into the Ironwood pool"
+                );
+                let orchard_change: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM orchard_received_notes WHERE value = ?1",
+                        [i64::try_from(expected_change.into_u64()).unwrap()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(
+                    orchard_change,
+                    1,
+                    "the change must be retained as an Orchard note of the expected value"
                 );
             }
         }

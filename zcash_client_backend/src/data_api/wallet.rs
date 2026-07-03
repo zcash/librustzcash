@@ -1568,6 +1568,14 @@ where
         )?;
     }
 
+    // Post-NU6.3 the Orchard bundle enforces the cross-address restriction, so Orchard-pool
+    // change must be returned to a spent Orchard note's own address to remain in the Orchard pool
+    // (rather than crossing the turnstile into Ironwood). Capture that address before the spend
+    // loop consumes `orchard_inputs`; `None` means no Orchard note is spent, in which case any
+    // Orchard-pool change is routed into the Ironwood bundle instead.
+    #[cfg(feature = "orchard")]
+    let orchard_change_recipient = orchard_inputs.first().map(|(note, _)| note.recipient());
+
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
         builder.add_orchard_spend(
@@ -1916,45 +1924,73 @@ where
                         .orchard()
                         .cloned()
                         .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?;
-                    let change_address =
-                        orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
 
-                    if orchard_outputs_are_ironwood {
-                        // Once Ironwood is active, Orchard-pool change is routed into the Ironwood
-                        // bundle: the Orchard V3 bundle forbids cross-address outputs, so change to
-                        // the internal change address cannot be created there. The Ironwood builder
-                        // enables cross-address transfers, so change is an ordinary owned output;
-                        // `add_ironwood_output` covers it (the dedicated change entry point was
-                        // dropped).
-                        builder.add_ironwood_output(
-                            internal_ovk.map(|k| k.into()),
-                            change_address,
-                            change_value.value(),
-                            memo.clone(),
-                        )?;
-                        ironwood_output_meta.push((
-                            BuildRecipient::InternalAccount {
-                                receiving_account: account_id,
-                                external_address: None,
-                            },
-                            change_value.value(),
-                            Some(memo),
-                        ))
-                    } else {
-                        builder.add_orchard_output(
-                            internal_ovk.map(|k| k.into()),
-                            change_address,
-                            change_value.value(),
-                            memo.clone(),
-                        )?;
-                        orchard_output_meta.push((
-                            BuildRecipient::InternalAccount {
-                                receiving_account: account_id,
-                                external_address: None,
-                            },
-                            change_value.value(),
-                            Some(memo),
-                        ))
+                    match (orchard_outputs_are_ironwood, orchard_change_recipient) {
+                        // Post-NU6.3 with an Orchard spend: the change stays in the Orchard pool,
+                        // returned to a spent note's own address so it satisfies the Orchard V3
+                        // cross-address restriction. Only the payment crosses into Ironwood. The
+                        // Orchard V3 bundle forbids ordinary outputs, so the change is added via
+                        // `add_orchard_change_output`, which pairs it with a fabricated same-address
+                        // spend.
+                        (true, Some(change_address)) => {
+                            builder.add_orchard_change_output(
+                                orchard_fvk.clone(),
+                                internal_ovk.map(|k| k.into()),
+                                change_address,
+                                change_value.value(),
+                                memo.clone(),
+                            )?;
+                            orchard_output_meta.push((
+                                BuildRecipient::InternalAccount {
+                                    receiving_account: account_id,
+                                    external_address: None,
+                                },
+                                change_value.value(),
+                                Some(memo),
+                            ))
+                        }
+                        // Post-NU6.3 with no Orchard spend to anchor a same-address change output
+                        // (e.g. an Orchard-receiver payment funded from the Sapling+Ironwood group):
+                        // route the Orchard-pool change into the Ironwood bundle, where cross-address
+                        // transfers are permitted, using the internal change address.
+                        (true, None) => {
+                            let change_address =
+                                orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
+                            builder.add_ironwood_output(
+                                internal_ovk.map(|k| k.into()),
+                                change_address,
+                                change_value.value(),
+                                memo.clone(),
+                            )?;
+                            ironwood_output_meta.push((
+                                BuildRecipient::InternalAccount {
+                                    receiving_account: account_id,
+                                    external_address: None,
+                                },
+                                change_value.value(),
+                                Some(memo),
+                            ))
+                        }
+                        // Pre-NU6.3 or a legacy V5 bundle: the Orchard bundle permits cross-address
+                        // outputs, so ordinary internal-address change stays in the Orchard pool.
+                        (false, _) => {
+                            let change_address =
+                                orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
+                            builder.add_orchard_output(
+                                internal_ovk.map(|k| k.into()),
+                                change_address,
+                                change_value.value(),
+                                memo.clone(),
+                            )?;
+                            orchard_output_meta.push((
+                                BuildRecipient::InternalAccount {
+                                    receiving_account: account_id,
+                                    external_address: None,
+                                },
+                                change_value.value(),
+                                Some(memo),
+                            ))
+                        }
                     }
                 }
             }
@@ -2123,6 +2159,11 @@ where
     let orchard_fvk: orchard::keys::FullViewingKey = spending_keys.usk.orchard().into();
     #[cfg(feature = "orchard")]
     let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
+    // Same-address Orchard change (post-NU6.3, when spending Orchard notes) is returned to a spent
+    // note's own address, which may be external-scoped; try the external IVK as well so such change
+    // outputs remain decryptable for recording.
+    #[cfg(feature = "orchard")]
+    let orchard_external_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
     #[cfg(feature = "orchard")]
     let orchard_outputs = build_state.orchard_output_meta.into_iter().enumerate().map(
         |(i, (recipient, value, memo))| {
@@ -2138,6 +2179,9 @@ where
                     .and_then(|bundle| {
                         bundle
                             .decrypt_output_with_key(output_index, &orchard_internal_ivk)
+                            .or_else(|| {
+                                bundle.decrypt_output_with_key(output_index, &orchard_external_ivk)
+                            })
                             .map(|(note, _, _)| Note::Orchard(note))
                     })
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")

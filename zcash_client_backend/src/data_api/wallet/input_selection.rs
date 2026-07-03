@@ -1004,6 +1004,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 proposed_version,
             );
 
+            // Orchard-pool change stays in the Orchard bundle whenever we spend Orchard notes: it
+            // is returned to a spent note's own address, which the Orchard V3 cross-address
+            // restriction permits, so the change never crosses the turnstile into Ironwood. It is
+            // only routed into the Ironwood bundle when there is no Orchard spend to anchor a
+            // same-address change output. Mirror the build path so the fee cannot drift.
+            #[cfg(feature = "orchard")]
+            let orchard_change_to_ironwood =
+                orchard_outputs_are_ironwood && orchard_inputs.is_empty();
+
             // The Orchard bundle keeps the Orchard (version 2) spends; its outputs move to the
             // Ironwood bundle when routing is active. The Ironwood bundle takes the Ironwood
             // (version 3) spends, and its outputs when routing is active. Attributing each pool's
@@ -1063,12 +1072,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &orchard_view,
                 #[cfg(feature = "orchard")]
                 &ironwood_view,
-                // Once Ironwood is active, Orchard-pool change is routed into the Ironwood bundle
-                // (the Orchard V3 bundle forbids cross-address outputs, so change cannot stay in
-                // the Orchard bundle). This matches the builder's change routing so the fee cannot
-                // drift. Spending from a pool always moves value out of that pool.
+                // Matches the builder's change routing (see `orchard_change_to_ironwood` above) so
+                // the proposal's per-bundle action counts, and hence the fee, cannot drift from the
+                // transaction that gets built.
                 #[cfg(feature = "orchard")]
-                orchard_outputs_are_ironwood,
+                orchard_change_to_ironwood,
                 ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
