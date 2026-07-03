@@ -156,7 +156,7 @@ fn snapshot_spend_fvks(bundle: &crate::orchard::Bundle) -> SpendFvkSnapshot {
 }
 
 /// Restores the wire `fvk` bytes from [`snapshot_spend_fvks`] into each spend by
-/// position, after proving the signing closure did not resize or reorder the action
+/// position, after checking the signing closure did not resize or reorder the action
 /// list.
 ///
 /// Positional restore is only sound if each position still holds its original action,
