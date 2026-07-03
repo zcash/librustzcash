@@ -16,6 +16,14 @@ workspace.
   are trial-decrypted with the account's Orchard viewing keys but are tracked as
   a pool distinct from Orchard. `ScanningKeys::new` now also takes the Ironwood
   key map.
+- The block scanner now tracks Ironwood outputs as a pool distinct from Orchard
+  (behind the `orchard` feature flag). `ScannedBlock::ironwood`,
+  `ScannedBlockCommitments::ironwood`, `BlockMetadata::ironwood_tree_size`,
+  `WalletTx::ironwood_spends`/`ironwood_outputs`, and `Nullifiers::ironwood`
+  expose the Ironwood note commitments, tree size, and detected notes. The
+  `BlockMetadata::from_parts`, `ScannedBlock::from_parts`, and `WalletTx::new`
+  constructors now also take the corresponding Ironwood arguments. Received
+  Ironwood notes are not yet persisted; the write path is added separately.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
