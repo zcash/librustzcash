@@ -210,6 +210,22 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
     }
 }
 
+/// The note-encryption domain used to trial-decrypt Ironwood outputs.
+///
+/// Ironwood ([ZIP 2005], NU6.3) is a distinct shielded pool with its own note commitment tree,
+/// but its notes are Orchard-shaped: they are decrypted under the Orchard note-encryption domain
+/// and use the Orchard commitment and nullifier types. These aliases name that reuse so that
+/// Ironwood can share the underlying Orchard primitives without being modelled as part of an
+/// "Orchard family"; the two pools are kept strictly separate throughout the scanner.
+///
+/// [ZIP 2005]: https://zips.z.cash/zip-2005
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodDomain = OrchardDomain;
+
+/// The nullifier type for Ironwood notes. See [`IronwoodDomain`].
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodNullifier = orchard::note::Nullifier;
+
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
     sapling: HashMap<
@@ -220,6 +236,11 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     orchard: HashMap<
         IvkTag,
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
+    >,
+    #[cfg(feature = "orchard")]
+    ironwood: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
     >,
 }
 
@@ -238,11 +259,17 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
                     + Sync,
             >,
         >,
+        #[cfg(feature = "orchard")] ironwood: HashMap<
+            IvkTag,
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+        >,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -252,6 +279,8 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
             sapling: HashMap::new(),
             #[cfg(feature = "orchard")]
             orchard: HashMap::new(),
+            #[cfg(feature = "orchard")]
+            ironwood: HashMap::new(),
         }
     }
 
@@ -274,6 +303,20 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
     > {
         &self.orchard
+    }
+
+    /// Returns the Ironwood keys to be used for incoming note detection.
+    ///
+    /// Ironwood outputs are trial-decrypted with the account's Orchard viewing keys (see
+    /// [`IronwoodDomain`]), but are tracked as a separate pool from Orchard.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(
+        &self,
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+    > {
+        &self.ironwood
     }
 }
 
@@ -299,6 +342,11 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                     + Send
                     + Sync,
             >,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut ironwood: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -329,6 +377,20 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                         }),
                     );
                 }
+
+                // Ironwood outputs are decrypted with the same Orchard viewing keys, but are
+                // tracked as a separate pool.
+                for scope in [Scope::External, Scope::Internal] {
+                    ironwood.insert(
+                        (account_id, scope),
+                        Box::new(ScanningKey {
+                            ivk: fvk.to_ivk(scope),
+                            nk: Some(fvk.clone()),
+                            account_id,
+                            key_scope: Some(scope),
+                        }),
+                    );
+                }
             }
         }
 
@@ -336,6 +398,8 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 }
