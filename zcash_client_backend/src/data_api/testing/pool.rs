@@ -1,10 +1,15 @@
 use std::{
     cmp::Eq,
-    collections::{BTreeSet, HashSet},
+    collections::HashSet,
     convert::Infallible,
     hash::Hash,
     num::{NonZeroU8, NonZeroU32, NonZeroU64, NonZeroUsize},
 };
+
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+use std::collections::BTreeSet;
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
 use assert_matches::assert_matches;
 use incrementalmerkletree::{Level, Position, frontier::Frontier};
@@ -23,7 +28,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::{
     ShieldedPool,
-    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
