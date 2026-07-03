@@ -22,6 +22,10 @@ workspace.
   separately from Orchard notes because the two pools have distinct note
   commitment trees, and because an Orchard action and an Ironwood action in
   the same transaction may share an action index.
+- A new migration recreates the `v_received_outputs` and
+  `v_received_output_spends` views to include received Ironwood notes and their
+  spends, tagged with the Ironwood pool code (4). Ironwood notes now appear in
+  `v_transactions`, `v_tx_outputs`, and the balances derived from them.
 - The wallet database now persists Ironwood note commitment tree data. A new
   migration adds the `ironwood_tree_shards`, `ironwood_tree_cap`,
   `ironwood_tree_checkpoints`, and `ironwood_tree_checkpoint_marks_removed`
