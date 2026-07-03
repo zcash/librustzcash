@@ -311,6 +311,8 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error>;
 
     /// Add metadata about a transaction to the wallet data store.

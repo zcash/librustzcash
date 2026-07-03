@@ -2019,6 +2019,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error> {
         wallet::put_block(
             self.conn.borrow(),
@@ -2031,6 +2033,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             orchard_commitment_tree_size,
             #[cfg(feature = "orchard")]
             orchard_action_count,
+            #[cfg(feature = "orchard")]
+            ironwood_commitment_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_action_count,
         )
     }
 

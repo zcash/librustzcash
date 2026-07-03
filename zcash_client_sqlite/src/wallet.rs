@@ -4239,6 +4239,8 @@ pub(crate) fn put_block(
     sapling_output_count: u32,
     #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
     #[cfg(feature = "orchard")] orchard_action_count: u32,
+    #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+    #[cfg(feature = "orchard")] ironwood_action_count: u32,
 ) -> Result<(), SqliteClientError> {
     let block_hash_data = conn
         .query_row(
@@ -4271,7 +4273,9 @@ pub(crate) fn put_block(
             sapling_output_count,
             sapling_tree,
             orchard_commitment_tree_size,
-            orchard_action_count
+            orchard_action_count,
+            ironwood_commitment_tree_size,
+            ironwood_action_count
         )
         VALUES (
             :height,
@@ -4281,7 +4285,9 @@ pub(crate) fn put_block(
             :sapling_output_count,
             x'00',
             :orchard_commitment_tree_size,
-            :orchard_action_count
+            :orchard_action_count,
+            :ironwood_commitment_tree_size,
+            :ironwood_action_count
         )
         ON CONFLICT (height) DO UPDATE
         SET hash = :hash,
@@ -4289,13 +4295,19 @@ pub(crate) fn put_block(
             sapling_commitment_tree_size = :sapling_commitment_tree_size,
             sapling_output_count = :sapling_output_count,
             orchard_commitment_tree_size = :orchard_commitment_tree_size,
-            orchard_action_count = :orchard_action_count",
+            orchard_action_count = :orchard_action_count,
+            ironwood_commitment_tree_size = :ironwood_commitment_tree_size,
+            ironwood_action_count = :ironwood_action_count",
     )?;
 
     #[cfg(not(feature = "orchard"))]
     let orchard_commitment_tree_size: Option<u32> = None;
     #[cfg(not(feature = "orchard"))]
     let orchard_action_count: Option<u32> = None;
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_commitment_tree_size: Option<u32> = None;
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_action_count: Option<u32> = None;
 
     stmt_upsert_block.execute(named_params![
         ":height": u32::from(block_height),
@@ -4305,6 +4317,8 @@ pub(crate) fn put_block(
         ":sapling_output_count": sapling_output_count,
         ":orchard_commitment_tree_size": orchard_commitment_tree_size,
         ":orchard_action_count": orchard_action_count,
+        ":ironwood_commitment_tree_size": ironwood_commitment_tree_size,
+        ":ironwood_action_count": ironwood_action_count,
     ])?;
 
     // If we now have a block corresponding to a received transparent output that had not been

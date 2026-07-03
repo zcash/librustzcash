@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(feature = "orchard")]
+use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::ops::Range;
 
@@ -237,6 +239,9 @@ where
         initial_block_sequential &= from_state.final_orchard_tree().tree_size()
             + u64::try_from(initial_block.orchard().commitments().len()).unwrap()
             == u64::from(initial_block.orchard().final_tree_size());
+        initial_block_sequential &= from_state.final_ironwood_tree().tree_size()
+            + u64::try_from(initial_block.ironwood().commitments().len()).unwrap()
+            == u64::from(initial_block.ironwood().final_tree_size());
     }
     if !initial_block_sequential {
         return Err(PutBlocksError::NonSequentialBlocks {
@@ -248,6 +253,8 @@ where
     let mut sapling_commitments = vec![];
     #[cfg(feature = "orchard")]
     let mut orchard_commitments = vec![];
+    #[cfg(feature = "orchard")]
+    let mut ironwood_commitments = vec![];
     let mut last_scanned_height = None;
     let mut note_positions = vec![];
 
@@ -277,6 +284,10 @@ where
                 block.orchard().final_tree_size(),
                 #[cfg(feature = "orchard")]
                 block.orchard().commitments().len().try_into().unwrap(),
+                #[cfg(feature = "orchard")]
+                block.ironwood().final_tree_size(),
+                #[cfg(feature = "orchard")]
+                block.ironwood().commitments().len().try_into().unwrap(),
             )
             .map_err(PutBlocksError::Storage)?;
 
@@ -419,6 +430,12 @@ where
                     .iter()
                     .map(|out| (ShieldedPool::Orchard, out.note_commitment_tree_position())),
             );
+            #[cfg(feature = "orchard")]
+            let iter = iter.chain(
+                wtx.ironwood_outputs()
+                    .iter()
+                    .map(|out| (ShieldedPool::Ironwood, out.note_commitment_tree_position())),
+            );
 
             iter
         }));
@@ -448,6 +465,8 @@ where
         sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
         #[cfg(feature = "orchard")]
         orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
+        #[cfg(feature = "orchard")]
+        ironwood_commitments.extend(block_commitments.ironwood.into_iter().map(Some));
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -491,21 +510,57 @@ where
             CHUNK_SIZE,
         );
 
-        // Ensure that we have the same set of checkpoints across all trees.
+        // The Ironwood note commitment tree is Orchard-shaped and so uses the Orchard shard
+        // height, but is a distinct pool with its own tree.
         #[cfg(feature = "orchard")]
-        let (missing_sapling_checkpoints, missing_orchard_checkpoints) = {
+        let ironwood_subtrees = build_subtrees::<_, ORCHARD_SHARD_HEIGHT>(
+            Position::from(from_state.final_ironwood_tree().tree_size()),
+            &mut ironwood_commitments,
+            CHUNK_SIZE,
+        );
+
+        // Ensure that we have the same set of checkpoints across all trees. Each tree must gain a
+        // checkpoint at every height that is checkpointed in any of the other trees, so the set of
+        // heights to ensure for a given tree is the union of the checkpoint heights of the others.
+        #[cfg(feature = "orchard")]
+        let (
+            missing_sapling_checkpoints,
+            missing_orchard_checkpoints,
+            missing_ironwood_checkpoints,
+        ) = {
             let sapling_checkpoint_positions = checkpoint_positions(&sapling_subtrees);
             let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
+            let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
+
+            let union_heights =
+                |a: &BTreeMap<BlockHeight, Position>, b: &BTreeMap<BlockHeight, Position>| {
+                    a.keys().chain(b.keys()).copied().collect::<BTreeSet<_>>()
+                };
+
             (
                 ensure_checkpoints(
-                    orchard_checkpoint_positions.keys(),
+                    union_heights(
+                        &orchard_checkpoint_positions,
+                        &ironwood_checkpoint_positions,
+                    )
+                    .iter(),
                     &sapling_checkpoint_positions,
                     from_state.final_sapling_tree(),
                 ),
                 ensure_checkpoints(
-                    sapling_checkpoint_positions.keys(),
+                    union_heights(
+                        &sapling_checkpoint_positions,
+                        &ironwood_checkpoint_positions,
+                    )
+                    .iter(),
                     &orchard_checkpoint_positions,
                     from_state.final_orchard_tree(),
+                ),
+                ensure_checkpoints(
+                    union_heights(&sapling_checkpoint_positions, &orchard_checkpoint_positions)
+                        .iter(),
+                    &ironwood_checkpoint_positions,
+                    from_state.final_ironwood_tree(),
                 ),
             )
         };
@@ -549,6 +604,28 @@ where
                 )
                 .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
                     pool: ShieldedPool::Orchard,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
+            })?;
+        }
+
+        // Update the Ironwood note commitment tree with all newly read note commitments
+        #[cfg(feature = "orchard")]
+        {
+            let mut ironwood_subtrees = ironwood_subtrees.into_iter();
+            let mut missing_checkpoints = missing_ironwood_checkpoints.into_iter();
+            wallet_db.with_ironwood_tree_mut(|ironwood_tree| {
+                update_tree(
+                    "Ironwood",
+                    from_state.final_ironwood_tree(),
+                    from_state.block_height(),
+                    ironwood_tree,
+                    &mut ironwood_subtrees,
+                    &mut missing_checkpoints,
+                )
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedPool::Ironwood,
                     block_range: from_state.block_height()..(last_scanned_height + 1),
                     error,
                 })
