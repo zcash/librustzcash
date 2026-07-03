@@ -156,6 +156,27 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     )
 }
 
+/// Returns a single spendable Ironwood note, identified by the transaction that produced it and
+/// its action index. Ironwood notes are Orchard-shaped, so this reuses the Orchard note
+/// reconstruction; only the pool (and thus the `ironwood_received_notes` table) differs.
+pub(crate) fn get_spendable_ironwood_note<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    txid: &TxId,
+    index: u32,
+    target_height: TargetHeight,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::get_spendable_note(
+        conn,
+        params,
+        txid,
+        index,
+        ShieldedPool::Ironwood,
+        target_height,
+        to_received_note,
+    )
+}
+
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
