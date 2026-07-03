@@ -37,6 +37,13 @@ workspace.
   as a pool distinct from Orchard. `ChainState::new` now also takes the final
   Ironwood tree frontier. An absent `ironwood_tree` treestate field parses as an
   empty tree, which is the correct Ironwood treestate at pool activation.
+- `put_blocks` now persists the Ironwood note commitment tree and the Ironwood
+  block metadata (`ironwood_commitment_tree_size`/`ironwood_action_count`),
+  mirroring the Orchard handling with the shared Orchard shard height and
+  `with_ironwood_tree_mut`. Checkpoint reconciliation across the note commitment
+  trees now spans all three shielded pools, so each tree gains a checkpoint at
+  every height checkpointed in any other pool. With the Ironwood tree persisted,
+  received Ironwood notes are now spendable.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
