@@ -31,6 +31,12 @@ workspace.
   `track_block_ironwood_nullifiers` methods mirror their Orchard counterparts,
   writing to the `ironwood_received_notes` table. The Ironwood commitment tree
   is not yet persisted, so received Ironwood notes are not yet spendable.
+- `zcash_client_backend::data_api::chain::ChainState::final_ironwood_tree` and
+  `zcash_client_backend::proto::service::TreeState::ironwood_tree` (behind the
+  `orchard` feature flag), exposing the Ironwood note commitment tree frontier
+  as a pool distinct from Orchard. `ChainState::new` now also takes the final
+  Ironwood tree frontier. An absent `ironwood_tree` treestate field parses as an
+  empty tree, which is the correct Ironwood treestate at pool activation.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
