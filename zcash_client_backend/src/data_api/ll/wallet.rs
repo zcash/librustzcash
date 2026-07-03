@@ -532,33 +532,25 @@ where
             let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
             let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
 
-            let union_heights =
-                |a: &BTreeMap<BlockHeight, Position>, b: &BTreeMap<BlockHeight, Position>| {
-                    a.keys().chain(b.keys()).copied().collect::<BTreeSet<_>>()
-                };
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] = cross_pool_ensure_heights(
+                &sapling_checkpoint_positions.keys().copied().collect(),
+                &orchard_checkpoint_positions.keys().copied().collect(),
+                &ironwood_checkpoint_positions.keys().copied().collect(),
+            );
 
             (
                 ensure_checkpoints(
-                    union_heights(
-                        &orchard_checkpoint_positions,
-                        &ironwood_checkpoint_positions,
-                    )
-                    .iter(),
+                    ensure_sapling.iter(),
                     &sapling_checkpoint_positions,
                     from_state.final_sapling_tree(),
                 ),
                 ensure_checkpoints(
-                    union_heights(
-                        &sapling_checkpoint_positions,
-                        &ironwood_checkpoint_positions,
-                    )
-                    .iter(),
+                    ensure_orchard.iter(),
                     &orchard_checkpoint_positions,
                     from_state.final_orchard_tree(),
                 ),
                 ensure_checkpoints(
-                    union_heights(&sapling_checkpoint_positions, &orchard_checkpoint_positions)
-                        .iter(),
+                    ensure_ironwood.iter(),
                     &ironwood_checkpoint_positions,
                     from_state.final_ironwood_tree(),
                 ),
@@ -1381,6 +1373,32 @@ fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u
         .collect::<Vec<_>>()
 }
 
+/// Given the checkpoint heights present in each of the three shielded pools' note commitment
+/// trees, in the order (Sapling, Orchard, Ironwood), returns for each pool the set of checkpoint
+/// heights it must ensure so that every pool ends up checkpointed at every height that is
+/// checkpointed in any pool.
+///
+/// The set returned for a given pool is the union of the checkpoint heights of the other two
+/// pools. Consequently the union of a pool's existing checkpoint heights with the heights returned
+/// for it equals the union of all three pools' checkpoint heights, so all three trees end up
+/// checkpointed at the same set of heights. When one pool has no checkpoints, the sets returned for
+/// the other two reduce to each other's heights, matching the prior two-pool behavior.
+#[cfg(feature = "orchard")]
+fn cross_pool_ensure_heights(
+    sapling: &BTreeSet<BlockHeight>,
+    orchard: &BTreeSet<BlockHeight>,
+    ironwood: &BTreeSet<BlockHeight>,
+) -> [BTreeSet<BlockHeight>; 3] {
+    let union = |a: &BTreeSet<BlockHeight>, b: &BTreeSet<BlockHeight>| {
+        a.union(b).copied().collect::<BTreeSet<BlockHeight>>()
+    };
+    [
+        union(orchard, ironwood),
+        union(sapling, ironwood),
+        union(sapling, orchard),
+    ]
+}
+
 /// Updates the given note commitment tree with all newly read note commitments starting
 /// at the block `frontier_height + 1`.
 fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
@@ -1439,4 +1457,71 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use proptest::prelude::*;
+    use zcash_protocol::consensus::BlockHeight;
+
+    use super::cross_pool_ensure_heights;
+
+    prop_compose! {
+        /// An arbitrary set of note-commitment-tree checkpoint block heights.
+        fn arb_heights()(
+            heights in proptest::collection::vec(0u32..100, 0..20),
+        ) -> BTreeSet<BlockHeight> {
+            heights.into_iter().map(BlockHeight::from).collect()
+        }
+    }
+
+    fn union(a: &BTreeSet<BlockHeight>, b: &BTreeSet<BlockHeight>) -> BTreeSet<BlockHeight> {
+        a.union(b).copied().collect()
+    }
+
+    proptest! {
+        /// After reconciliation every pool is checkpointed at exactly the union of all three
+        /// pools' checkpoint heights, so the three note commitment trees end up with an identical
+        /// set of checkpoint heights. This is the invariant that keeps cross-pool rewinds
+        /// consistent.
+        #[test]
+        fn ensure_heights_align_all_pools(
+            sapling in arb_heights(),
+            orchard in arb_heights(),
+            ironwood in arb_heights(),
+        ) {
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] =
+                cross_pool_ensure_heights(&sapling, &orchard, &ironwood);
+
+            let total = union(&union(&sapling, &orchard), &ironwood);
+
+            prop_assert_eq!(union(&sapling, &ensure_sapling), total.clone());
+            prop_assert_eq!(union(&orchard, &ensure_orchard), total.clone());
+            prop_assert_eq!(union(&ironwood, &ensure_ironwood), total);
+
+            // The heights ensured for a pool are exactly the union of the other two pools'
+            // checkpoint heights.
+            prop_assert_eq!(ensure_sapling, union(&orchard, &ironwood));
+            prop_assert_eq!(ensure_orchard, union(&sapling, &ironwood));
+            prop_assert_eq!(ensure_ironwood, union(&sapling, &orchard));
+        }
+
+        /// With no Ironwood checkpoints (the pre-Ironwood-activation reality), reconciliation of
+        /// the Sapling and Orchard trees is unchanged from the prior two-pool behavior: each
+        /// ensures the other's heights, and the empty Ironwood tree ensures the union of both.
+        #[test]
+        fn ensure_heights_degrade_to_two_pools(
+            sapling in arb_heights(),
+            orchard in arb_heights(),
+        ) {
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] =
+                cross_pool_ensure_heights(&sapling, &orchard, &BTreeSet::new());
+
+            prop_assert_eq!(ensure_sapling, orchard.clone());
+            prop_assert_eq!(ensure_orchard, sapling.clone());
+            prop_assert_eq!(ensure_ironwood, union(&sapling, &orchard));
+        }
+    }
 }
