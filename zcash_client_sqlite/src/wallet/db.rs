@@ -1093,6 +1093,22 @@ UNION
        (orchard_received_notes.transaction_id, 3, orchard_received_notes.action_index)
 UNION
     SELECT
+        ironwood_received_notes.id AS id_within_pool_table,
+        ironwood_received_notes.transaction_id,
+        4 AS pool,
+        ironwood_received_notes.action_index AS output_index,
+        account_id,
+        ironwood_received_notes.value,
+        is_change,
+        ironwood_received_notes.memo,
+        sent_notes.id AS sent_note_id,
+        ironwood_received_notes.address_id
+    FROM ironwood_received_notes
+    LEFT JOIN sent_notes
+    ON (sent_notes.transaction_id, sent_notes.output_pool, sent_notes.output_index) =
+       (ironwood_received_notes.transaction_id, 4, ironwood_received_notes.action_index)
+UNION
+    SELECT
         u.id AS id_within_pool_table,
         u.transaction_id,
         0 AS pool,
@@ -1125,6 +1141,14 @@ SELECT
     rn.account_id
 FROM orchard_received_note_spends s
 JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
+UNION
+SELECT
+    4 AS pool,
+    s.ironwood_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM ironwood_received_note_spends s
+JOIN ironwood_received_notes rn ON rn.id = s.ironwood_received_note_id
 UNION
 SELECT
     0 AS pool,
@@ -1275,9 +1299,10 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   - 0: Transparent
 ///   - 2: Sapling
 ///   - 3: Orchard
+///   - 4: Ironwood
 /// - `output_index`: The index of the output within the transaction bundle associated with
 ///   the `output_pool` value; that is, within `vout` for transparent, the vector of
-///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+///   Sapling `OutputDescription` values, or the vector of Orchard or Ironwood actions.
 /// - `tx_mined_height`: An optional value identifying the block height at which the transaction that
 ///   produced this output was mined, or NULL if the transaction is unmined.
 /// - `tx_trust_status`: A flag indicating whether the transaction that produced this output
