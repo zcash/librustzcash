@@ -25,6 +25,7 @@ mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
 mod full_account_ids;
 mod initial_setup;
+mod ironwood_received_notes;
 mod ironwood_shardtree;
 mod ivk_item_cache;
 mod nullifier_map;
@@ -144,7 +145,9 @@ pub(super) fn all_migrations<
     //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
     //                                                    /          \         \
     //                                                   /            \      orchard_note_version
-    //                                                  /              \
+    //                                                  /              \         \
+    //                                                 /                \      ironwood_received_notes
+    //                                                /                  \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
     let rng = Rc::new(Mutex::new(rng));
@@ -247,6 +250,7 @@ pub(super) fn all_migrations<
         }),
         Box::new(add_transparent_value_index::Migration),
         Box::new(orchard_note_version::Migration),
+        Box::new(ironwood_received_notes::Migration),
     ]
 }
 
