@@ -62,6 +62,15 @@ workspace.
 - `pczt::Pczt::serialize` now consumes `self` and returns
   `Result<Vec<u8>, pczt::EncodingError>` rather than borrowing `self` and
   returning `Vec<u8>`.
+- The low-level Signer's `sign_orchard_with` and `sign_ironwood_with` now parse
+  the bundle with a preverified signing parse that skips deriving each spend's
+  full viewing key, driven by a bounded loop that keeps parsing stack usage flat
+  on constrained devices. These methods no longer validate the wire `fvk` bytes
+  (callers must first run the full Verifier checks over the identical PCZT bytes)
+  but preserve them unchanged in the returned PCZT. The signing closure must not
+  add, remove, or reorder actions; doing so now returns the new
+  `pczt::roles::low_level_signer::OrchardParseError::SigningClosureModifiedActions`
+  error and leaves the PCZT unmodified.
 
 ### Added
 - `pczt::roles::creator::Error`, the error type returned by the now-fallible

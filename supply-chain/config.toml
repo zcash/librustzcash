@@ -34,6 +34,9 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
+[policy.orchard]
+audit-as-crates-io = true
+
 [policy.pczt]
 audit-as-crates-io = true
 
@@ -833,6 +836,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.oorandom]]
 version = "11.1.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.orchard]]
+version = "0.15.0-pre.1@git:20c10904ae84af19fe657bbbb7369c4dac4f142a"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-float]]

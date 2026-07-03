@@ -227,3 +227,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+orchard = { git = "https://github.com/zcash/orchard", rev = "20c10904ae84af19fe657bbbb7369c4dac4f142a" }
