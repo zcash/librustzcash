@@ -846,12 +846,11 @@ impl Bundle {
         bundle_version: BundleVersion,
         preverified: bool,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        // Parse each action through an `#[inline(never)]` helper driven by a plain
-        // loop, not `.map(..).collect()`: the latter compiles to a single combined
-        // stack frame (the per-action closure inlined into `try_fold`) tens of KB
-        // deep, overflowing the fixed task stacks of embedded signers. The loop keeps
-        // one bounded helper frame live at a time, and is behaviorally identical
-        // (same order, same first error).
+        // We parse actions through a helper that is specifically `#[inline(never)]`.
+        // This is because if this gets inlined in a loop (e.g. `.map(..).collect()`),
+        // it could compile into a stack frame that is tens of KB deep.
+        // This can overflow stacks of embedded signers for high action count
+        // transactions.
         #[inline(never)]
         fn parse_action_inner(
             action: Action,
