@@ -11,6 +11,11 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::scanning::ScanningKeys::ironwood` (behind the `orchard`
+  feature flag), an accessor for the Ironwood scanning keys. Ironwood outputs
+  are trial-decrypted with the account's Orchard viewing keys but are tracked as
+  a pool distinct from Orchard. `ScanningKeys::new` now also takes the Ironwood
+  key map.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
