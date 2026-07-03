@@ -129,10 +129,15 @@ pub struct WalletTx<AccountId> {
     orchard_spends: Vec<WalletOrchardSpend<AccountId>>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+    #[cfg(feature = "orchard")]
+    ironwood_spends: Vec<WalletIronwoodSpend<AccountId>>,
+    #[cfg(feature = "orchard")]
+    ironwood_outputs: Vec<WalletIronwoodOutput<AccountId>>,
 }
 
 impl<AccountId> WalletTx<AccountId> {
     /// Constructs a new [`WalletTx`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         txid: TxId,
         block_index: TxIndex,
@@ -143,6 +148,10 @@ impl<AccountId> WalletTx<AccountId> {
             WalletSpend<orchard::note::Nullifier, AccountId>,
         >,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+        #[cfg(feature = "orchard")] ironwood_spends: Vec<
+            WalletSpend<orchard::note::Nullifier, AccountId>,
+        >,
+        #[cfg(feature = "orchard")] ironwood_outputs: Vec<WalletIronwoodOutput<AccountId>>,
     ) -> Self {
         Self {
             txid,
@@ -154,6 +163,10 @@ impl<AccountId> WalletTx<AccountId> {
             orchard_spends,
             #[cfg(feature = "orchard")]
             orchard_outputs,
+            #[cfg(feature = "orchard")]
+            ironwood_spends,
+            #[cfg(feature = "orchard")]
+            ironwood_outputs,
         }
     }
 
@@ -198,6 +211,20 @@ impl<AccountId> WalletTx<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn orchard_outputs(&self) -> &[WalletOrchardOutput<AccountId>] {
         self.orchard_outputs.as_ref()
+    }
+
+    /// Returns a record for each Ironwood note belonging to the wallet that was spent in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_spends(&self) -> &[WalletIronwoodSpend<AccountId>] {
+        self.ironwood_spends.as_ref()
+    }
+
+    /// Returns a record for each Ironwood note received or produced by the wallet in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_outputs(&self) -> &[WalletIronwoodOutput<AccountId>] {
+        self.ironwood_outputs.as_ref()
     }
 }
 
@@ -444,6 +471,13 @@ pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, Account
 #[cfg(feature = "orchard")]
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 
+/// A type alias for Ironwood [`WalletSpend`]s.
+///
+/// Ironwood notes are Orchard-shaped and therefore share the Orchard nullifier type, but Ironwood
+/// is a distinct pool from Orchard.
+#[cfg(feature = "orchard")]
+pub type WalletIronwoodSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
+
 /// An output that was successfully decrypted in the process of wallet scanning.
 #[derive(Clone)]
 pub struct WalletOutput<Note, Nullifier, AccountId> {
@@ -529,6 +563,14 @@ pub type WalletSaplingOutput<AccountId> =
 /// [`Action`]: orchard::Action
 #[cfg(feature = "orchard")]
 pub type WalletOrchardOutput<AccountId> =
+    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
+
+/// A type alias for Ironwood [`WalletOutput`]s.
+///
+/// Ironwood notes are Orchard-shaped and therefore share the Orchard note and nullifier types, but
+/// Ironwood is a distinct pool from Orchard.
+#[cfg(feature = "orchard")]
+pub type WalletIronwoodOutput<AccountId> =
     WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]

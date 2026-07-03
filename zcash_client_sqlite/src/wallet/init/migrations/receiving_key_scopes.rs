@@ -673,6 +673,8 @@ mod tests {
                 Some(0),
                 #[cfg(feature = "orchard")]
                 Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
             )),
         )
         .unwrap();
