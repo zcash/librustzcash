@@ -20,6 +20,12 @@ workspace.
   `ironwood` accessor and `take_ironwood`/`ironwood_value` methods, and
   `NoteRetention` gains `should_retain_ironwood` (behind the `orchard` feature
   flag).
+- The greedy input selector now selects shielded inputs from a single pool group:
+  either Orchard alone, or Sapling and Ironwood together, never combining Orchard
+  with Sapling or Ironwood. This keeps a spend of legacy Orchard funds to a pure
+  Orchard-input transaction. It prefers the input group matching the payment's
+  receiver to avoid an unnecessary cross-pool output, and a transfer that would
+  require Orchard combined with another pool fails as insufficient funds.
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
