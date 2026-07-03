@@ -1,4 +1,4 @@
-use crate::orchard::{Action, Bundle};
+use crate::orchard::{Action, Bundle, MemoKind};
 
 impl super::Redactor {
     /// Redacts the Orchard bundle with the given closure.
@@ -52,6 +52,18 @@ impl OrchardRedactor<'_> {
     pub fn clear_bsk(&mut self) {
         self.0.bsk = None;
     }
+
+    /// Removes the bundle anchor.
+    ///
+    /// The receiver refills it with the fixed placeholder `Anchor::empty_tree()`, not
+    /// the elided value, so this is only lossless if the anchor already was that
+    /// constant. It is only sound on transports where the anchor is not part of the
+    /// signed data (the v6 transaction format excludes it from the txid/sighash
+    /// digest), and the extracting wallet must install the real anchor. See
+    /// `crate::orchard::Bundle::fill_derived_fields` (requires the `orchard` feature).
+    pub fn clear_anchor(&mut self) {
+        self.0.anchor = None;
+    }
 }
 
 /// A Redactor for Orchard actions.
@@ -77,6 +89,69 @@ impl ActionRedactor<'_> {
                 f(action);
             }
         }
+    }
+
+    /// Removes the action's `cv_net` value commitment.
+    ///
+    /// The receiver recomputes it from the spend and output values and `rcv`; see
+    /// `crate::orchard::Bundle::fill_derived_fields` (requires the `orchard` feature;
+    /// likewise for the other derived-field `clear_*` methods below).
+    pub fn clear_cv_net(&mut self) {
+        self.redact(|action| {
+            action.cv_net = None;
+        });
+    }
+
+    /// Removes the spend's `nullifier`.
+    ///
+    /// The receiver recomputes it from the spent note's component fields and `fvk`, so
+    /// this must not be combined with [`Self::clear_spend_fvk`].
+    pub fn clear_nullifier(&mut self) {
+        self.redact(|action| {
+            action.spend.nullifier = None;
+        });
+    }
+
+    /// Removes the spend's randomized verification key `rk`.
+    ///
+    /// The receiver recomputes it from `fvk` and `alpha`, so this must not be combined
+    /// with [`Self::clear_spend_fvk`] or [`Self::clear_spend_alpha`].
+    pub fn clear_rk(&mut self) {
+        self.redact(|action| {
+            action.spend.rk = None;
+        });
+    }
+
+    /// Removes the output's note commitment `cmx`.
+    ///
+    /// The receiver recomputes it from the output note's component fields.
+    pub fn clear_cmx(&mut self) {
+        self.redact(|action| {
+            action.output.cmx = None;
+        });
+    }
+
+    /// Removes the output's `ephemeral_key`.
+    ///
+    /// The receiver recomputes it from the output note's component fields.
+    pub fn clear_ephemeral_key(&mut self) {
+        self.redact(|action| {
+            action.output.ephemeral_key = None;
+        });
+    }
+
+    /// Removes the output's `enc_ciphertext`, recording the note's memo as `memo_kind`.
+    ///
+    /// The receiver re-encrypts the note under the tagged memo. The reconstruction is
+    /// byte-identical only if the note's memo really is the tagged constant; the caller
+    /// must verify this before eliding (a mismatch is caught no earlier than signature
+    /// verification at extraction). `out_ciphertext` cannot be elided this way because
+    /// it is RNG-derived.
+    pub fn clear_enc_ciphertext(&mut self, memo_kind: MemoKind) {
+        self.redact(|action| {
+            action.output.enc_ciphertext = None;
+            action.output.memo_kind = Some(memo_kind);
+        });
     }
 
     /// Removes the spend authorizing signature.

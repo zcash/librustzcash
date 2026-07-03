@@ -71,8 +71,48 @@ workspace.
   add, remove, or reorder actions; doing so now returns the new
   `pczt::roles::low_level_signer::OrchardParseError::SigningClosureModifiedActions`
   error and leaves the PCZT unmodified.
+- The derived fields of the logical Orchard-shaped bundles are now optional, so
+  a producer can elide them from the serialized encoding and let the receiver
+  recompute them (byte-identically) from the note component fields it already
+  holds:
+  - `pczt::orchard::Action::cv_net`, `pczt::orchard::Spend::{nullifier, rk}`,
+    and `pczt::orchard::Output::{cmx, ephemeral_key, enc_ciphertext}` (and their
+    getters) are now `Option`al. `Output::out_ciphertext` remains required, as
+    it is RNG-derived and can never be recomputed.
+  - `pczt::orchard::Bundle::anchor` (and its getter) is now `Option`al. An
+    elided anchor is refilled with the fixed `Anchor::empty_tree()` placeholder
+    rather than recomputed, which is only sound on transports where the anchor
+    is not part of the signed data (the v6 transaction format excludes it from
+    the txid/sighash digest); the extracting wallet must install the real
+    anchor.
+  - The Combiner merges these fields like other optional fields, so a
+    fully-populated copy fills a peer's omissions.
+  - Parsing an Orchard-shaped bundle (in any role) recomputes elided fields
+    before constructing the protocol types, so every parsing consumer continues
+    to see fully-populated actions. In particular the low-level Signer accepts
+    an elided PCZT and returns it filled.
+  - The version 2 encoding carries these fields as optional (and each output's
+    memo-kind tag), so an elided PCZT serializes without them. The released
+    version 1 encoding is unchanged on the wire; it cannot represent the
+    omissions and rejects such PCZTs with the new
+    `pczt::EncodingError::RequiresV2`.
 
 ### Added
+- `pczt::orchard::MemoKind`, a one-byte tag naming the memo (all-zero, or the
+  ZIP 302 empty memo) under which an elided `enc_ciphertext` is reconstructed.
+- `pczt::orchard::Output::memo_kind`, the elision metadata set by the Redactor
+  and consumed by the fill.
+- `pczt::Pczt::fill_derived_fields` and
+  `pczt::orchard::Bundle::fill_derived_fields`, which recompute and fill every
+  elided derived field in place (the inverse of the redactor's `clear_*`
+  methods), for consumers that read the wire-format fields directly.
+- `pczt::orchard::FillError`, the error type of the fill.
+- `pczt::roles::low_level_signer::OrchardParseError::Fill`.
+- Redactor methods for eliding the recomputable fields:
+  `pczt::roles::redactor::orchard::ActionRedactor::{clear_cv_net,
+  clear_nullifier, clear_rk, clear_cmx, clear_ephemeral_key,
+  clear_enc_ciphertext}` and
+  `pczt::roles::redactor::orchard::OrchardRedactor::clear_anchor`.
 - `pczt::roles::creator::Error`, the error type returned by the now-fallible
   `Creator` methods.
 - `pczt::parse`, a free function for parsing PCZT encodings.
@@ -80,10 +120,15 @@ workspace.
 - `pczt::EncodingError::UnsupportedOrchardNoteVersion`, returned when an
   Orchard note plaintext version cannot be represented in the version 1 PCZT
   encoding.
+- `pczt::EncodingError::RequiresV2`, returned when a PCZT that elides derived
+  fields or an anchor (or carries a memo-kind tag) is encoded to the version 1
+  PCZT encoding, which cannot represent the omissions.
 - `pczt::v1`, a module providing the version 1 PCZT serialization format via
   `pczt::v1::Pczt`.
 - PCZT version 2 serialization, which encodes the Orchard note plaintext
-  version at the Orchard bundle level.
+  version at the Orchard bundle level, and in which the six derived
+  Orchard-shaped fields and the bundle anchor may be omitted and each output
+  carries an optional memo-kind tag.
 - `PartialEq` is now derived for the logical `pczt::transparent::{Bundle, Input,
   Output}`, `pczt::sapling::{Bundle, Spend, Output}`, and
   `pczt::orchard::{Bundle, Action, Spend, Output}` types (used to detect empty

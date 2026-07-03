@@ -2641,7 +2641,11 @@ where
                     .output()
                     .value()
                     .map(orchard::value::NoteValue::from_raw)?;
-                let rho = orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
+                // `nullifier` is optional in the PCZT wire format. On this path it is
+                // populated (the PCZT has been through the Prover), but the closure
+                // returns `Option`, so bail out gracefully rather than assume it.
+                let rho = orchard::note::Rho::from_bytes(act.spend().nullifier().as_ref()?)
+                    .into_option()?;
                 let rseed = act.output().rseed().as_ref().and_then(|rseed| {
                     orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
                 })?;

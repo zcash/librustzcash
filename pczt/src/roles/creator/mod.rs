@@ -229,7 +229,7 @@ impl Creator {
                 actions: vec![],
                 flags: self.orchard_flags,
                 value_sum: (0, false),
-                anchor: self.orchard_anchor,
+                anchor: Some(self.orchard_anchor),
                 // The note-plaintext version is determined by the Orchard bundle version.
                 #[cfg(feature = "orchard")]
                 note_version: self
@@ -243,7 +243,7 @@ impl Creator {
             },
             ironwood: OrchardBundle {
                 flags: self.ironwood_flags,
-                anchor: self.ironwood_anchor,
+                anchor: Some(self.ironwood_anchor),
                 ..crate::orchard::EMPTY_IRONWOOD
             },
         }
@@ -351,6 +351,6 @@ mod tests {
             .with_ironwood_anchor([1; 32])
             .unwrap()
             .build();
-        assert_eq!(pczt.ironwood.anchor, [1; 32]);
+        assert_eq!(pczt.ironwood.anchor, Some([1; 32]));
     }
 }

@@ -20,10 +20,15 @@ impl Signer {
     /// already run the full Verifier checks over the identical PCZT bytes: they are
     /// not validated here, and the signing closure sees each spend's `fvk` as `None`.
     ///
+    /// Any elided derived fields (and an elided anchor) are recomputed and filled in
+    /// place before parsing, so the returned PCZT carries them populated; see
+    /// [`crate::orchard::Bundle::fill_derived_fields`]. On error the fill may be
+    /// retained.
+    ///
     /// The signing closure must not add, remove, or reorder actions. A well-behaved
     /// closure leaves the returned PCZT's wire `fvk` bytes unchanged; a violating one
-    /// is detected and returns [`OrchardParseError::SigningClosureModifiedActions`],
-    /// leaving the PCZT unmodified.
+    /// is detected and returns [`OrchardParseError::SigningClosureModifiedActions`]
+    /// without applying its changes.
     #[cfg(feature = "orchard")]
     pub fn sign_ironwood_with<E, F>(self, f: F) -> Result<Self, E>
     where
@@ -34,6 +39,11 @@ impl Signer {
 
         let mut tx_modifiable = pczt.global.tx_modifiable;
 
+        // Fill any elided derived field on the wire bundle first, so the `rk`
+        // snapshotted below is always present.
+        pczt.ironwood
+            .fill_derived_fields()
+            .map_err(|e| E::from(OrchardParseError::Fill(e)))?;
         let fvk_snapshot = snapshot_spend_fvks(&pczt.ironwood);
         let mut bundle = pczt
             .ironwood
@@ -58,10 +68,15 @@ impl Signer {
     /// already run the full Verifier checks over the identical PCZT bytes: they are
     /// not validated here, and the signing closure sees each spend's `fvk` as `None`.
     ///
+    /// Any elided derived fields (and an elided anchor) are recomputed and filled in
+    /// place before parsing, so the returned PCZT carries them populated; see
+    /// [`crate::orchard::Bundle::fill_derived_fields`]. On error the fill may be
+    /// retained.
+    ///
     /// The signing closure must not add, remove, or reorder actions. A well-behaved
     /// closure leaves the returned PCZT's wire `fvk` bytes unchanged; a violating one
-    /// is detected and returns [`OrchardParseError::SigningClosureModifiedActions`],
-    /// leaving the PCZT unmodified.
+    /// is detected and returns [`OrchardParseError::SigningClosureModifiedActions`]
+    /// without applying its changes.
     #[cfg(feature = "orchard")]
     pub fn sign_orchard_with<E, F>(self, f: F) -> Result<Self, E>
     where
@@ -74,6 +89,11 @@ impl Signer {
 
         let bundle_version = crate::orchard::orchard_bundle_version(&pczt.global)
             .ok_or(OrchardParseError::UnsupportedConsensusBranchId)?;
+        // Fill any elided derived field on the wire bundle first, so the `rk`
+        // snapshotted below is always present.
+        pczt.orchard
+            .fill_derived_fields()
+            .map_err(|e| E::from(OrchardParseError::Fill(e)))?;
         let fvk_snapshot = snapshot_spend_fvks(&pczt.orchard);
         let mut bundle = pczt
             .orchard
@@ -142,7 +162,7 @@ impl Signer {
 /// preverified signing parse drops and must restore, paired with the `rk` used as a
 /// per-position tamper check. See [`restore_spend_fvks`].
 #[cfg(feature = "orchard")]
-type SpendFvkSnapshot = alloc::vec::Vec<([u8; 32], Option<[u8; 96]>)>;
+type SpendFvkSnapshot = alloc::vec::Vec<(Option<[u8; 32]>, Option<[u8; 96]>)>;
 
 /// Snapshots each action's spend `(rk, fvk)` wire bytes, by position, for
 /// [`restore_spend_fvks`] to restore after serialization.
@@ -160,10 +180,11 @@ fn snapshot_spend_fvks(bundle: &crate::orchard::Bundle) -> SpendFvkSnapshot {
 /// list.
 ///
 /// Positional restore is only sound if each position still holds its original action,
-/// so this checks the action count and each position's wire `rk` — the one
-/// always-present spend field that pins an action's identity, since a nullifier can
-/// be shared — against the snapshot before writing any `fvk`. On a mismatch it writes
-/// nothing and returns [`OrchardParseError::SigningClosureModifiedActions`].
+/// so this checks the action count and each position's wire `rk` — the spend field
+/// that pins an action's identity (a nullifier can be shared, and the pre-parse fill
+/// guarantees `rk` is present when the snapshot is taken) — against the snapshot
+/// before writing any `fvk`. On a mismatch it writes nothing and returns
+/// [`OrchardParseError::SigningClosureModifiedActions`].
 #[cfg(feature = "orchard")]
 fn restore_spend_fvks(
     bundle: &mut crate::orchard::Bundle,
@@ -192,6 +213,8 @@ fn restore_spend_fvks(
 pub enum OrchardParseError {
     /// The bundle data was structurally invalid.
     Parse(orchard::pczt::ParseError),
+    /// An elided derived field could not be recomputed and filled before parsing.
+    Fill(crate::orchard::FillError),
     /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
     /// the Orchard protocol is not supported).
     UnsupportedConsensusBranchId,
@@ -265,10 +288,10 @@ mod tests {
                 // Distinct `rk` per action (`[10; 32]`, `[11; 32]`), shared
                 // nullifier `[3; 32]`.
                 .map(|(i, fvk)| Action {
-                    cv_net: [0; 32],
+                    cv_net: Some([0; 32]),
                     spend: Spend {
-                        nullifier: [3u8; 32],
-                        rk: [10 + i as u8; 32],
+                        nullifier: Some([3u8; 32]),
+                        rk: Some([10 + i as u8; 32]),
                         spend_auth_sig: None,
                         recipient: None,
                         value: None,
@@ -282,9 +305,10 @@ mod tests {
                         proprietary: BTreeMap::new(),
                     },
                     output: Output {
-                        cmx: [0; 32],
-                        ephemeral_key: [0; 32],
-                        enc_ciphertext: Vec::new(),
+                        cmx: Some([0; 32]),
+                        ephemeral_key: Some([0; 32]),
+                        enc_ciphertext: Some(Vec::new()),
+                        memo_kind: None,
                         out_ciphertext: Vec::new(),
                         recipient: None,
                         value: None,
@@ -299,7 +323,7 @@ mod tests {
                 .collect(),
             flags: 0,
             value_sum: (0, false),
-            anchor: [0; 32],
+            anchor: Some([0; 32]),
             note_version: NoteVersion::V2,
             zkproof: None,
             bsk: None,

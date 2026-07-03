@@ -191,6 +191,14 @@ pub mod v1 {
 }
 
 /// Types and operations for the v2 Pczt encoding.
+///
+/// In the Orchard-shaped bundles of this encoding the derived fields (`cv_net`,
+/// `nullifier`, `rk`, `cmx`, `ephemeral_key`, `enc_ciphertext`) and the bundle
+/// `anchor` are optional, and each output carries an optional
+/// [`MemoKind`](crate::orchard::MemoKind) tag. A producer elides those fields with the
+/// Redactor to shrink the encoding, and the receiver recomputes them with
+/// `Pczt::fill_derived_fields` (which requires the `orchard` feature; parsing the
+/// bundles also performs the fill implicitly).
 pub mod v2 {
     use alloc::vec::Vec;
     use serde::{Deserialize, Serialize};
@@ -225,19 +233,18 @@ pub mod v2 {
     }
 
     /// Encodes the in-memory [`super::Pczt`] into the v2 serialization type [`Pczt`],
-    /// omitting empty Transparent, Sapling, and Orchard bundles.
-    impl TryFrom<super::Pczt> for Pczt {
-        type Error = super::EncodingError;
-
-        fn try_from(pczt: super::Pczt) -> Result<Self, Self::Error> {
-            Ok(Self {
+    /// omitting empty Transparent, Sapling, and Orchard bundles. Infallible: the v2
+    /// encoding can represent every in-memory PCZT.
+    impl From<super::Pczt> for Pczt {
+        fn from(pczt: super::Pczt) -> Self {
+            Self {
                 global: pczt.global,
                 transparent: (pczt.transparent != transparent::EMPTY_BUNDLE)
                     .then_some(pczt.transparent),
                 sapling: (pczt.sapling != sapling::EMPTY_BUNDLE).then_some(pczt.sapling),
-                orchard: orchard::v2::encode(pczt.orchard, &orchard::EMPTY_ORCHARD)?,
-                ironwood: orchard::v2::encode(pczt.ironwood, &orchard::EMPTY_IRONWOOD)?,
-            })
+                orchard: orchard::v2::encode(pczt.orchard, &orchard::EMPTY_ORCHARD),
+                ironwood: orchard::v2::encode(pczt.ironwood, &orchard::EMPTY_IRONWOOD),
+            }
         }
     }
 
@@ -274,7 +281,7 @@ pub mod v2 {
                 .unwrap()
                 .build();
 
-            let encoded = Pczt::try_from(pczt).unwrap();
+            let encoded = Pczt::from(pczt);
 
             assert!(encoded.transparent.is_none());
             assert!(encoded.sapling.is_none());
@@ -304,7 +311,7 @@ pub mod v2 {
                 .unwrap()
                 .build();
 
-            let encoded = Pczt::try_from(pczt).unwrap();
+            let encoded = Pczt::from(pczt);
 
             assert!(encoded.transparent.is_none());
             assert!(encoded.sapling.is_some());
@@ -313,7 +320,7 @@ pub mod v2 {
             let decoded = crate::parse(&encoded.serialize()).unwrap();
 
             assert_eq!(decoded.sapling.anchor, [1; 32]);
-            assert_eq!(decoded.orchard.anchor, [2; 32]);
+            assert_eq!(decoded.orchard.anchor, Some([2; 32]));
         }
 
         #[test]
@@ -326,7 +333,7 @@ pub mod v2 {
 
             // A bundle whose flags or note version differ from the canonical empty
             // bundle is not omitted, so that those fields round-trip losslessly.
-            let encoded = Pczt::try_from(pczt.clone()).unwrap();
+            let encoded = Pczt::from(pczt.clone());
             assert!(encoded.orchard.is_some());
 
             let decoded = crate::Pczt::from(encoded);
@@ -346,6 +353,10 @@ pub enum EncodingError {
     UnsupportedTxVersion,
     /// The v1 PCZT encoding does not support this Orchard note plaintext version.
     UnsupportedOrchardNoteVersion,
+    /// The PCZT elides fields this encoding cannot represent (an elided derived
+    /// Orchard-shaped field, an elided bundle anchor, or a memo-kind tag). Encode it
+    /// with [`v2`] instead.
+    RequiresV2,
 }
 
 impl Pczt {
@@ -374,7 +385,17 @@ impl Pczt {
     ///
     /// To serialize a specific PCZT version, e.g. v1, use [`v1::Pczt::serialize`].
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
-        Ok(v2::Pczt::try_from(self)?.serialize())
+        Ok(v2::Pczt::from(self).serialize())
+    }
+
+    /// Recomputes and fills, in place, every elided derived field across the PCZT's
+    /// Orchard and Ironwood bundles; see
+    /// [`orchard::Bundle::fill_derived_fields`](crate::orchard::Bundle::fill_derived_fields)
+    /// for the per-bundle contract. On error the PCZT may be left partially filled.
+    #[cfg(feature = "orchard")]
+    pub fn fill_derived_fields(&mut self) -> Result<(), crate::orchard::FillError> {
+        self.orchard.fill_derived_fields()?;
+        self.ironwood.fill_derived_fields()
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
