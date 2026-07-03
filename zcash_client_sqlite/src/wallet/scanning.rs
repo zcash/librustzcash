@@ -818,6 +818,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -975,6 +977,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots: if insert_prior_roots {
                         prior_sapling_roots
@@ -1233,6 +1237,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1426,6 +1432,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1755,6 +1763,7 @@ pub(crate) mod tests {
                         birthday_prior_block_hash,
                         Frontier::empty(), // the Sapling tree is unused in this test
                         orchard_initial_tree,
+                        Frontier::empty(), // the Ironwood tree is unused in this test
                     ),
                     prior_sapling_roots: vec![],
                     prior_orchard_roots,

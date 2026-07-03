@@ -436,12 +436,14 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
+            incrementalmerkletree::frontier::Frontier::empty(),
         ),
         ShieldedPool::Orchard => ChainState::new(
             capture_height,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),
             foreign.final_orchard_tree().clone(),
+            incrementalmerkletree::frontier::Frontier::empty(),
         ),
         ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };
@@ -558,12 +560,14 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
+            incrementalmerkletree::frontier::Frontier::empty(),
         ),
         ShieldedPool::Orchard => ChainState::new(
             from_height - 1,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),
             foreign.final_orchard_tree().clone(),
+            incrementalmerkletree::frontier::Frontier::empty(),
         ),
         ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };

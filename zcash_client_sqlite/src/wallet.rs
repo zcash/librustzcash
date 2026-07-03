@@ -3084,16 +3084,21 @@ pub(crate) fn get_target_and_anchor_heights(
     }
 }
 
+/// A row of block metadata as selected by [`block_metadata`] and [`block_max_scanned`]: the block
+/// height and hash, the Sapling commitment tree size and legacy Sapling tree, and the Orchard and
+/// Ironwood commitment tree sizes.
+type BlockMetadataRow = (
+    BlockHeight,
+    Vec<u8>,
+    Option<u32>,
+    Vec<u8>,
+    Option<u32>,
+    Option<u32>,
+);
+
 fn parse_block_metadata<P: consensus::Parameters>(
     _params: &P,
-    row: (
-        BlockHeight,
-        Vec<u8>,
-        Option<u32>,
-        Vec<u8>,
-        Option<u32>,
-        Option<u32>,
-    ),
+    row: BlockMetadataRow,
 ) -> Result<BlockMetadata, SqliteClientError> {
     let (
         block_height,
@@ -5486,6 +5491,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5633,6 +5640,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5797,6 +5806,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        Frontier::empty(),
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]

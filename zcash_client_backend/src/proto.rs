@@ -402,6 +402,33 @@ impl service::TreeState {
         }
     }
 
+    /// Deserializes and returns the Ironwood note commitment tree field of the tree state.
+    ///
+    /// The Ironwood tree is Orchard-shaped, but Ironwood is a distinct pool tracked separately
+    /// from Orchard. An empty field yields an empty tree, which is the correct treestate at the
+    /// Ironwood pool's activation.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_tree(
+        &self,
+    ) -> io::Result<CommitmentTree<MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>>
+    {
+        if self.ironwood_tree.is_empty() {
+            Ok(CommitmentTree::empty())
+        } else {
+            let ironwood_tree_bytes = hex::decode(&self.ironwood_tree).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Hex decoding of Ironwood tree bytes failed: {e:?}"),
+                )
+            })?;
+            read_commitment_tree::<
+                MerkleHashOrchard,
+                _,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >(&ironwood_tree_bytes[..])
+        }
+    }
+
     /// Parses this tree state into a [`ChainState`] for use with [`scan_cached_blocks`].
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
@@ -425,6 +452,8 @@ impl service::TreeState {
             self.sapling_tree()?.to_frontier(),
             #[cfg(feature = "orchard")]
             self.orchard_tree()?.to_frontier(),
+            #[cfg(feature = "orchard")]
+            self.ironwood_tree()?.to_frontier(),
         ))
     }
 }

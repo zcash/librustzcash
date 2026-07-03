@@ -343,6 +343,9 @@ where
             self.sapling_batch_size_threshold,
             #[cfg(feature = "orchard")]
             self.orchard_batch_size_threshold,
+            // Ironwood outputs are Orchard-shaped, so they use the same batching threshold.
+            #[cfg(feature = "orchard")]
+            self.orchard_batch_size_threshold,
             &scanning_keys,
         );
 
@@ -424,6 +427,10 @@ where
                         scanning_keys = Arc::new(reload_keys()?);
                         runners = BatchRunners::for_keys(
                             self.sapling_batch_size_threshold,
+                            #[cfg(feature = "orchard")]
+                            self.orchard_batch_size_threshold,
+                            // Ironwood outputs are Orchard-shaped, so they use the same batching
+                            // threshold.
                             #[cfg(feature = "orchard")]
                             self.orchard_batch_size_threshold,
                             &scanning_keys,

@@ -336,6 +336,8 @@ impl CachedBlock {
                 sapling_final_tree,
                 #[cfg(feature = "orchard")]
                 orchard_final_tree,
+                #[cfg(feature = "orchard")]
+                incrementalmerkletree::frontier::Frontier::empty(),
             ),
             sapling_end_size,
             orchard_end_size,
@@ -690,6 +692,8 @@ where
                     final_sapling_tree,
                     #[cfg(feature = "orchard")]
                     final_orchard_tree,
+                    #[cfg(feature = "orchard")]
+                    incrementalmerkletree::frontier::Frontier::empty(),
                 ),
                 initial_sapling_tree_size,
                 initial_orchard_tree_size,
@@ -1742,6 +1746,8 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///                 sapling_initial_tree,
     ///                 #[cfg(feature = "orchard")]
     ///                 orchard_initial_tree,
+    ///                 #[cfg(feature = "orchard")]
+    ///                 Frontier::empty(),
     ///             ),
     ///             prior_sapling_roots,
     ///             #[cfg(feature = "orchard")]
