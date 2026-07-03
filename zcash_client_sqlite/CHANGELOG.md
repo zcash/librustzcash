@@ -34,7 +34,8 @@ workspace.
   `idx_transparent_received_outputs_value_zat` index) and accumulates them,
   recomputing the cumulative ZIP 317 marginal fee cost of the gathered
   inputs via the supplied `fee_rule: &StandardFeeRule` at each step, stopping
-  once the post-fee accumulated value meets the requested `TargetValue`. This
+  once the post-fee accumulated value meets the requested `TargetValue` or
+  the supplied `max_inputs` cap is reached, whichever happens first. This
   bounds the work done to the prefix of the table needed to satisfy the
   request, so a wallet with many small transparent UTXOs does not have to
   materialize its full UTXO set to build a small transfer.

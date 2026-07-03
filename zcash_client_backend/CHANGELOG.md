@@ -45,7 +45,12 @@ workspace.
   `StandardFeeRule::Zip317`, independent of the `ChangeStrategy::FeeRule`
   actually configured for the proposal; it is a heuristic bound only, and
   `GreedyInputSelector` re-gathers with a corrected `TargetValue` if the
-  caller's actual change strategy reports `InsufficientFunds`.
+  caller's actual change strategy reports `InsufficientFunds`. A `max_inputs`
+  argument additionally bounds the number of outputs the gather may select,
+  independent of the target value, so that a wallet holding a very large
+  number of small UTXOs cannot produce an arbitrarily large transaction; when
+  the cap is reached before the target value, the shortfall is likewise
+  surfaced as `InsufficientFunds`.
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
@@ -63,11 +68,14 @@ workspace.
   database round-trip when gathering inputs from wallets with many transparent addresses.
 - `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_shielding_block_space_percent`,
   which configures the maximum fraction of a block's space (as an integer percentage, default 10)
-  that a single shielding transaction's transparent inputs may occupy. When shielding gathers more
+  that a single transaction's transparent inputs may occupy. When shielding gathers more
   spendable transparent outputs than fit within this bound, the highest-value outputs are selected
   first and the remainder are left unspent, to be consolidated by a subsequent shielding
-  transaction. This bounds the size of the shielding transaction for wallets that hold very large
-  numbers of transparent UTXOs.
+  transaction. The same bound also applies to the transparent gather performed for general
+  (non-shielding) transfers when the active `TransparentSpendPolicy` requires it; if the cap is
+  reached before the requested value, the proposal fails with `InsufficientFunds` rather than
+  producing an oversized transaction. This bounds the size of any transaction with gathered
+  transparent inputs for wallets that hold very large numbers of transparent UTXOs.
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
