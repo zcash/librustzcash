@@ -867,6 +867,156 @@ mod tests {
         go(true);
     }
 
+    #[cfg(feature = "orchard")]
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(24))]
+
+        /// An Ironwood output (a version 3 note in `tx.ironwood_actions`) is detected by the
+        /// scanner using the account's Orchard viewing key under the Ironwood note-encryption
+        /// domain, and is reported as an Ironwood output distinct from the Orchard pool. This
+        /// exercises the fix that decrypts Ironwood notes with `IronwoodDomain` rather than
+        /// `OrchardDomain` (which, accepting only version 2 plaintexts, would silently fail to
+        /// detect the note). Fuzzing the value, diversified address index, and key scope covers a
+        /// range of notes the wallet must detect.
+        #[test]
+        fn scan_block_detects_ironwood_note(
+            value in 1u64..=1_000_000_000u64,
+            diversifier_index in 0u32..8,
+            internal in proptest::bool::ANY,
+        ) {
+            use orchard::{
+                keys::Scope,
+                note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
+                note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+                value::NoteValue,
+            };
+            use pasta_curves::{
+                group::ff::{Field, PrimeField},
+                pallas,
+            };
+            use proptest::prelude::*;
+            use rand_core::{OsRng, RngCore};
+            use zcash_note_encryption::Domain;
+
+            use crate::proto::compact_formats::{
+                ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
+            };
+
+            let network = Network::TestNetwork;
+            let account = AccountId::ZERO;
+            let usk =
+                UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+            let ufvk = usk.to_unified_full_viewing_key();
+            let orchard_fvk = ufvk.orchard().expect("Orchard key is present").clone();
+            let scanning_keys = ScanningKeys::from_account_ufvks([(account, ufvk)]);
+
+            let scope = if internal { Scope::Internal } else { Scope::External };
+            let mut rng = OsRng;
+            let recipient = orchard_fvk.address_at(diversifier_index, scope);
+
+            // Build a version 3 (Ironwood) compact action. `rho` is derived from the revealed
+            // nullifier exactly as the crate does internally (`Rho::from_nf_old(nf) ==
+            // Rho(nf.inner())`, which `Rho::from_bytes(&nf.to_bytes())` reconstructs), so the domain
+            // the scanner builds via `IronwoodDomain::for_compact_action` will match and decryption
+            // will succeed.
+            let nf_old =
+                orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                    .unwrap();
+            let rho = Rho::from_bytes(&nf_old.to_bytes()).unwrap();
+            let rseed = loop {
+                let mut bytes = [0u8; 32];
+                rng.fill_bytes(&mut bytes);
+                if let Some(rseed) = Option::from(RandomSeed::from_bytes(bytes, &rho)) {
+                    break rseed;
+                }
+            };
+            let note = Note::from_parts(
+                recipient,
+                NoteValue::from_raw(value),
+                rho,
+                rseed,
+                NoteVersion::V3,
+            )
+            .unwrap();
+            let encryptor = IronwoodNoteEncryption::new(
+                Some(orchard_fvk.to_ovk(Scope::External)),
+                note,
+                [0u8; 512],
+            );
+            let cmx = ExtractedNoteCommitment::from(note.commitment());
+            let ephemeral_key = IronwoodDomain::epk_bytes(encryptor.epk());
+            let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+            let action = CompactOrchardAction {
+                nullifier: nf_old.to_bytes().to_vec(),
+                cmx: cmx.to_bytes().to_vec(),
+                ephemeral_key: ephemeral_key.0.to_vec(),
+                ciphertext: enc_ciphertext[..52].to_vec(),
+            };
+
+            let mut ctx = CompactTx::default();
+            let mut txid = vec![0u8; 32];
+            rng.fill_bytes(&mut txid);
+            ctx.txid = txid;
+            ctx.ironwood_actions.push(action);
+
+            let mut cb = CompactBlock {
+                hash: {
+                    let mut hash = vec![0u8; 32];
+                    rng.fill_bytes(&mut hash);
+                    hash
+                },
+                prev_hash: vec![0u8; 32],
+                height: 1,
+                ..Default::default()
+            };
+            cb.vtx.push(ctx);
+            // The block contains a single Ironwood action and no Sapling or Orchard outputs, so
+            // only the Ironwood tree grows (from 0 to 1).
+            cb.chain_metadata = Some(ChainMetadata {
+                sapling_commitment_tree_size: 0,
+                orchard_commitment_tree_size: 0,
+                ironwood_commitment_tree_size: 1,
+            });
+
+            let mut runners = BatchRunners::<_, (), (), ()>::for_keys(10, &scanning_keys);
+            runners.add_block(&network, cb.clone()).unwrap();
+            runners.flush();
+
+            let scanned_block = scan_block_with_runners(
+                &network,
+                cb,
+                &scanning_keys,
+                &Nullifiers::empty(),
+                Some(&BlockMetadata::from_parts(
+                    BlockHeight::from(0),
+                    BlockHash([0u8; 32]),
+                    Some(0),
+                    Some(0),
+                    Some(0),
+                )),
+                Some(&mut runners),
+            )
+            .unwrap();
+
+            let txs = scanned_block.transactions();
+            prop_assert_eq!(txs.len(), 1);
+            let tx = &txs[0];
+            // The note appears as an Ironwood output, not an Orchard one.
+            prop_assert_eq!(tx.orchard_outputs().len(), 0);
+            prop_assert_eq!(tx.ironwood_outputs().len(), 1);
+            prop_assert_eq!(tx.ironwood_outputs()[0].account_id(), &account);
+            prop_assert_eq!(tx.ironwood_outputs()[0].note().value().inner(), value);
+            prop_assert_eq!(
+                tx.ironwood_outputs()[0].note_commitment_tree_position(),
+                Position::from(0)
+            );
+
+            prop_assert_eq!(scanned_block.ironwood().final_tree_size(), 1);
+            prop_assert_eq!(scanned_block.orchard().final_tree_size(), 0);
+        }
+    }
+
     #[test]
     fn scan_block_with_txs_after_my_tx() {
         fn go(scan_multithreaded: bool) {
