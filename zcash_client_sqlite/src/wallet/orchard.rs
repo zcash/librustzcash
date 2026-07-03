@@ -1352,19 +1352,16 @@ pub(crate) mod tests {
             )
         }
 
-        // Counts the shielded input notes selected across every step of a proposal, partitioned by
-        // pool: Sapling, Orchard, and Ironwood. Delegates the per-pool classification to
-        // `Step::input_count_in_pool`.
+        // Returns the shielded input notes selected across a proposal as a
+        // (sapling, orchard, ironwood) tuple, using `Proposal::input_count_in_pool`.
         fn input_pool_counts<FeeRuleT, NoteRef>(
             proposal: &zcash_client_backend::proposal::Proposal<FeeRuleT, NoteRef>,
         ) -> (usize, usize, usize) {
-            let (mut sapling, mut orchard, mut ironwood) = (0usize, 0usize, 0usize);
-            for step in proposal.steps() {
-                sapling += step.input_count_in_pool(PoolType::SAPLING);
-                orchard += step.input_count_in_pool(PoolType::ORCHARD);
-                ironwood += step.input_count_in_pool(PoolType::IRONWOOD);
-            }
-            (sapling, orchard, ironwood)
+            (
+                proposal.input_count_in_pool(PoolType::SAPLING),
+                proposal.input_count_in_pool(PoolType::ORCHARD),
+                proposal.input_count_in_pool(PoolType::IRONWOOD),
+            )
         }
 
         // Requests a payment of `payment_zats` to an Orchard receiver that is not owned by the

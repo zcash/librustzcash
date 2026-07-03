@@ -354,6 +354,20 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn steps(&self) -> &NonEmpty<Step<NoteRef>> {
         &self.steps
     }
+
+    /// Returns the total number of inputs across all steps of this proposal that belong to the
+    /// given pool.
+    ///
+    /// For a shielded pool this is the number of spent notes of that pool (Ironwood notes are
+    /// counted for [`PoolType::IRONWOOD`], not [`PoolType::ORCHARD`]); for
+    /// [`PoolType::Transparent`] it is the number of transparent inputs. See
+    /// [`Step::input_count_in_pool`].
+    pub fn input_count_in_pool(&self, pool_type: PoolType) -> usize {
+        self.steps
+            .iter()
+            .map(|step| step.input_count_in_pool(pool_type))
+            .sum()
+    }
 }
 
 impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
