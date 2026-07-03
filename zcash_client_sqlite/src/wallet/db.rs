@@ -566,6 +566,10 @@ pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_TX: &str = r#"
 CREATE INDEX idx_transparent_received_outputs_tx ON transparent_received_outputs (
     transaction_id
 )"#;
+pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_VALUE_ZAT: &str = r#"
+CREATE INDEX idx_transparent_received_outputs_value_zat ON transparent_received_outputs (
+    value_zat DESC
+)"#;
 
 /// A junction table between received transparent outputs and the transactions that spend them.
 ///

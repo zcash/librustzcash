@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::fix_transparent_received_outputs;
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x8b1a3c2d_4e5f_6a7b_8c9d_0e1f2a3b4c5d);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x47c0e9c2_2eda_4b9c_be15_63c636c0e1c7);
 
 // `fix_transparent_received_outputs` drops and recreates the `transparent_received_outputs`
 // table (via `DROP TABLE` + `ALTER TABLE ... RENAME TO`), which destroys any index that was
