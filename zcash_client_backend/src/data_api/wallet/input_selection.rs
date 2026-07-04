@@ -50,7 +50,7 @@ use {
 };
 
 #[cfg(feature = "orchard")]
-use crate::fees::orchard as orchard_fees;
+use crate::{data_api::wallet::ironwood_active_at, fees::orchard as orchard_fees};
 
 #[cfg(feature = "unstable")]
 use zcash_primitives::transaction::TxVersion;
@@ -991,28 +991,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 }
             };
 
-            // When the builder will route Orchard-pool outputs into a separate
-            // Ironwood bundle, mirror that split here so the proposal's per-bundle
-            // action counts (and hence the fee) match the transaction that gets
-            // built. We reuse the builder's own routing predicate so the proposal
-            // and build paths cannot drift.
-            #[cfg(feature = "orchard")]
-            let orchard_outputs_are_ironwood = super::orchard_outputs_to_ironwood(
-                params,
-                target_height,
-                #[cfg(feature = "unstable")]
-                proposed_version,
-            );
-
-            // Orchard-pool change stays in the Orchard bundle whenever we spend Orchard notes: it
-            // is returned to a spent note's own address, which the Orchard V3 cross-address
-            // restriction permits, so the change never crosses the turnstile into Ironwood. It is
-            // only routed into the Ironwood bundle when there is no Orchard spend to anchor a
-            // same-address change output. Mirror the build path so the fee cannot drift.
-            #[cfg(feature = "orchard")]
-            let orchard_change_to_ironwood =
-                orchard_outputs_are_ironwood && orchard_inputs.is_empty();
-
             // The Orchard bundle keeps the Orchard (version 2) spends; its outputs move to the
             // Ironwood bundle when routing is active. The Ironwood bundle takes the Ironwood
             // (version 3) spends, and its outputs when routing is active. Attributing each pool's
@@ -1022,8 +1000,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let orchard_view = (
                 orchard_bundle_version_for_height(params, target_height),
                 &orchard_inputs[..],
-                if orchard_outputs_are_ironwood {
-                    &orchard_outputs[..0]
+                if ironwood_active_at(params, target_height) {
+                    &[]
                 } else {
                     &orchard_outputs[..]
                 },
@@ -1032,10 +1010,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let ironwood_view = (
                 ::orchard::bundle::BundleVersion::ironwood_v3(),
                 &ironwood_inputs[..],
-                if orchard_outputs_are_ironwood {
+                if ironwood_active_at(params, target_height) {
                     &orchard_outputs[..]
                 } else {
-                    &orchard_outputs[..0]
+                    &[]
                 },
             );
 
@@ -1072,11 +1050,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &orchard_view,
                 #[cfg(feature = "orchard")]
                 &ironwood_view,
-                // Matches the builder's change routing (see `orchard_change_to_ironwood` above) so
-                // the proposal's per-bundle action counts, and hence the fee, cannot drift from the
-                // transaction that gets built.
+                // TODO: do we want to allow routing of orchard change to ironwood?
                 #[cfg(feature = "orchard")]
-                orchard_change_to_ironwood,
+                false,
                 ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
@@ -1196,9 +1172,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 // Ironwood notes can be spent once the Ironwood pool is active at the target
                 // height, and may be combined with Sapling inputs.
                 #[cfg(feature = "orchard")]
-                if orchard_supported
-                    && super::ironwood_active_at(params, BlockHeight::from(target_height))
-                {
+                if orchard_supported && super::ironwood_active_at(params, target_height) {
                     pools.push(ShieldedPool::Ironwood);
                 }
                 pools
@@ -1288,12 +1262,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 /// Returns the Orchard bundle version whose action-count policy applies to
 /// transactions constructed for the given target height.
 #[cfg(feature = "orchard")]
-fn orchard_bundle_version_for_height<ParamsT: consensus::Parameters>(
+fn orchard_bundle_version_for_height<ParamsT: consensus::Parameters, H: Into<BlockHeight>>(
     params: &ParamsT,
-    target_height: TargetHeight,
+    target_height: H,
 ) -> ::orchard::bundle::BundleVersion {
     zcash_primitives::transaction::components::orchard::bundle_version_for_branch(
-        consensus::BranchId::for_height(params, BlockHeight::from(target_height)),
+        consensus::BranchId::for_height(params, target_height.into()),
         ::orchard::ValuePool::Orchard,
     )
     // Orchard did not exist prior to NU5, so no Orchard bundle (and no Orchard
@@ -1335,56 +1309,9 @@ where
         )
         .map_err(InputSelectorError::DataSource)?;
 
-    // Orchard inputs are never combined with Sapling or Ironwood, but Sapling and Ironwood inputs
-    // may be combined. A send-max transaction therefore sweeps one of two input groups: Orchard
-    // alone (draining the legacy pool), or Sapling together with Ironwood. Prefer draining Orchard
-    // when it holds notes; otherwise sweep the Sapling and Ironwood pools together. Funds left in
-    // the other group are swept by a subsequent send-max transaction.
-    #[cfg(feature = "orchard")]
-    let spend_orchard_notes = !spendable_notes.orchard().is_empty();
-    #[cfg(feature = "orchard")]
-    let spend_sapling_notes = !spend_orchard_notes && !spendable_notes.sapling().is_empty();
-    #[cfg(feature = "orchard")]
-    let spend_ironwood_notes = !spend_orchard_notes && !spendable_notes.ironwood().is_empty();
-    #[cfg(not(feature = "orchard"))]
-    let spend_sapling_notes = !spendable_notes.sapling().is_empty();
-
-    // The Sapling inputs actually consumed by this transaction (zero unless Sapling is the chosen
-    // input pool). This is distinct from any Sapling *output* the recipient may require.
-    let sapling_input_count = if spend_sapling_notes {
-        spendable_notes.sapling().len()
-    } else {
-        0
-    };
-
-    // The total spendable value this transaction will consume: the chosen input group only
-    // (Orchard alone, or Sapling plus Ironwood). Value in the excluded group is not counted, so
-    // the "send max" amount matches the inputs the builder will use.
-    let input_total = {
-        #[allow(unused_mut)]
-        let mut total = Zatoshis::ZERO;
-        if spend_sapling_notes {
-            total = spendable_notes
-                .sapling_value()
-                .map_err(InputSelectorError::Selection)?;
-        }
-        #[cfg(feature = "orchard")]
-        if spend_orchard_notes {
-            total = spendable_notes
-                .orchard_value()
-                .map_err(InputSelectorError::Selection)?;
-        }
-        #[cfg(feature = "orchard")]
-        if spend_ironwood_notes {
-            // Ironwood may be combined with Sapling, so add rather than replace.
-            total = (total
-                + spendable_notes
-                    .ironwood_value()
-                    .map_err(InputSelectorError::Selection)?)
-            .ok_or(InputSelectorError::Selection(BalanceError::Overflow))?;
-        }
-        total
-    };
+    let input_total = spendable_notes
+        .total_value()
+        .map_err(InputSelectorError::Selection)?;
 
     let mut payment_pools = BTreeMap::new();
 
@@ -1401,69 +1328,50 @@ where
         };
 
         ::sapling::builder::BundleType::DEFAULT
-            .num_outputs(sapling_input_count, requested_sapling_outputs)
+            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
     };
 
-    // Retention keeps Sapling notes as inputs only when Sapling is the chosen input pool; a Sapling
-    // output required by the recipient does not pull Sapling notes into the input set.
-    let use_sapling = spend_sapling_notes;
+    let use_sapling = !spendable_notes.sapling().is_empty() || sapling_output_count > 0;
 
-    // A payment to an Orchard receiver is routed to the Ironwood bundle when the Ironwood pool is
-    // active, so the requested output counts as an Ironwood action rather than an Orchard one.
-    #[cfg(feature = "orchard")]
-    let route_to_ironwood = super::orchard_outputs_to_ironwood(
-        params,
-        target_height,
-        #[cfg(feature = "unstable")]
-        None,
-    );
+    // A payment to an Orchard receiver is represented in the proposal as an Orchard-pool output.
+    // When Ironwood is active the builder routes that output to the Ironwood bundle instead, so the
+    // per-bundle action counts reflect that split even though the payment pool stays `ORCHARD`.
     #[cfg(feature = "orchard")]
     let recipient_wants_orchard = recipient.can_receive_as(PoolType::ORCHARD);
     #[cfg(feature = "orchard")]
+    let route_orchard_output_to_ironwood = ironwood_active_at(params, target_height);
+    #[cfg(feature = "orchard")]
     if recipient_wants_orchard {
-        // The payment output is represented in the proposal as an Orchard-pool output regardless
-        // of whether the builder routes it to the Ironwood bundle.
         payment_pools.insert(0, PoolType::ORCHARD);
     }
 
     #[cfg(feature = "orchard")]
     let orchard_action_count = orchard_fees::transactional_action_count(
         orchard_bundle_version_for_height(params, target_height),
-        if spend_orchard_notes {
-            spendable_notes.orchard.len()
-        } else {
-            0
-        },
-        usize::from(recipient_wants_orchard && !route_to_ironwood),
+        spendable_notes.orchard.len(),
+        usize::from(recipient_wants_orchard && !route_orchard_output_to_ironwood),
     )
     .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
     #[cfg(not(feature = "orchard"))]
     let orchard_action_count: usize = 0;
 
-    // Retention spends notes from the chosen Orchard-family pool only; the action count above may
-    // additionally include a payment output routed to this pool.
     #[cfg(feature = "orchard")]
-    let use_orchard = spend_orchard_notes;
+    let use_orchard = orchard_action_count > 0;
 
-    // Ironwood contributes an action per spent Ironwood note, plus the requested output when it is
-    // routed to the Ironwood bundle.
     #[cfg(feature = "orchard")]
-    let ironwood_action_count = orchard_fees::transactional_action_count(
-        ::orchard::bundle::BundleVersion::ironwood_v3(),
-        if spend_ironwood_notes {
-            spendable_notes.ironwood.len()
-        } else {
-            0
-        },
-        usize::from(recipient_wants_orchard && route_to_ironwood),
-    )
-    .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
+    let ironwood_action_count = orchard::builder::BundleType::DEFAULT
+        .num_actions(
+            orchard::bundle::Flags::ENABLED,
+            spendable_notes.ironwood.len(),
+            usize::from(recipient_wants_orchard && route_orchard_output_to_ironwood),
+        )
+        .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
     #[cfg(not(feature = "orchard"))]
     let ironwood_action_count: usize = 0;
 
     #[cfg(feature = "orchard")]
-    let use_ironwood = spend_ironwood_notes;
+    let use_ironwood = ironwood_action_count > 0;
 
     let recipient_address: Address = recipient
         .clone()
@@ -1476,7 +1384,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [],
-                sapling_input_count,
+                spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1488,7 +1396,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [P2PKH_STANDARD_OUTPUT_SIZE],
-                sapling_input_count,
+                spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1504,7 +1412,7 @@ where
                 } else {
                     vec![]
                 },
-                sapling_input_count,
+                spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1516,7 +1424,7 @@ where
                 BlockHeight::from(target_height),
                 [],
                 [P2PKH_STANDARD_OUTPUT_SIZE],
-                sapling_input_count,
+                spendable_notes.sapling().len(),
                 sapling_output_count,
                 orchard_action_count,
                 ironwood_action_count,
@@ -1833,28 +1741,6 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         let destination_pool =
             resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(&to_address, params)?;
 
-        // Compute the fee directly from the fee rule. This method produces no
-        // change in any pool, so there is no change-strategy or wallet-metadata
-        // computation to perform. The proposal will carry exactly one shielded
-        // payment output (in `destination_pool`) and zero transparent outputs.
-        //
-        // Both Sapling and Orchard transactional bundles pad up to a minimum
-        // of 2 outputs/actions when any output is added (see `MIN_ACTIONS` /
-        // `MIN_SHIELDED_OUTPUTS` in the respective crates). The proposal fee
-        // must reflect the *padded* counts that the builder will actually
-        // produce, otherwise the subsequent `create_proposed_transactions`
-        // call fails with `InsufficientFunds(need additional <marginal_fee>)`.
-        // We query each bundle type for the count it will materialize.
-        // A payment to an Orchard receiver is routed to the Ironwood bundle when the Ironwood pool
-        // is active at the target height, in which case the single output is an Ironwood action.
-        #[cfg(feature = "orchard")]
-        let route_to_ironwood = super::orchard_outputs_to_ironwood(
-            params,
-            target_height,
-            #[cfg(feature = "unstable")]
-            None,
-        );
-
         let (sapling_output_count, orchard_action_count, ironwood_action_count) =
             match destination_pool {
                 PoolType::SAPLING => {
@@ -1866,16 +1752,12 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 #[cfg(feature = "orchard")]
                 PoolType::ORCHARD => {
                     let count = orchard_fees::transactional_action_count(
-                        if route_to_ironwood {
-                            ::orchard::bundle::BundleVersion::ironwood_v3()
-                        } else {
-                            orchard_bundle_version_for_height(params, target_height)
-                        },
+                        orchard_bundle_version_for_height(params, target_height),
                         0,
                         1,
                     )
                     .expect("every Orchard bundle version permits spending and output creation");
-                    if route_to_ironwood {
+                    if ironwood_active_at(params, target_height) {
                         (0usize, 0usize, count)
                     } else {
                         (0usize, count, 0usize)

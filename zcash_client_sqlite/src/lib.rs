@@ -492,7 +492,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Orchard,
+                        })
+                    })
+                });
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
@@ -506,7 +513,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Ironwood,
+                        })
+                    })
+                });
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::IRONWOOD));

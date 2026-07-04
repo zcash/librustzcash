@@ -3474,6 +3474,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         &DecryptedOutput::new(
                             output.output_index(),
                             note.clone(),
+                            ShieldedPool::Sapling,
                             *receiving_account,
                             output
                                 .memo()
@@ -3486,13 +3487,14 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     )?;
                 }
                 #[cfg(feature = "orchard")]
-                Note::Orchard(note) => {
-                    // The decrypted-transaction path handles a single Orchard-domain output
-                    // stream, so the target pool table is selected from the note's plaintext
-                    // version: version 2 notes belong to Orchard, version 3 notes to Ironwood.
-                    let table_prefix = match note.version() {
-                        ::orchard::note::NoteVersion::V2 => crate::ORCHARD_TABLES_PREFIX,
-                        ::orchard::note::NoteVersion::V3 => crate::IRONWOOD_TABLES_PREFIX,
+                Note::Orchard { note, pool } => {
+                    let (table_prefix, shielded_pool) = match pool {
+                        ::orchard::ValuePool::Orchard => {
+                            (crate::ORCHARD_TABLES_PREFIX, ShieldedPool::Orchard)
+                        }
+                        ::orchard::ValuePool::Ironwood => {
+                            (crate::IRONWOOD_TABLES_PREFIX, ShieldedPool::Ironwood)
+                        }
                     };
                     orchard::put_received_note(
                         conn,
@@ -3500,7 +3502,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         table_prefix,
                         &DecryptedOutput::new(
                             output.output_index(),
-                            *note,
+                            (*note, *pool),
+                            shielded_pool,
                             *receiving_account,
                             output
                                 .memo()
@@ -4794,7 +4797,7 @@ fn recipient_params<P: consensus::Parameters>(
                 from_account_id,
                 external_address.as_ref().map(|a| a.encode()),
                 Some(to_account),
-                PoolType::Shielded(note.protocol()),
+                PoolType::Shielded(note.pool()),
             ))
         }
     }

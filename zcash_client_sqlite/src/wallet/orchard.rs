@@ -907,6 +907,7 @@ pub(crate) mod tests {
     #[test]
     fn put_received_note_records_to_caller_selected_table() {
         use orchard::{
+            ValuePool,
             keys::{FullViewingKey, SpendingKey},
             note::{Note, NoteVersion, RandomSeed, Rho},
             value::NoteValue,
@@ -917,7 +918,7 @@ pub(crate) mod tests {
             data_api::{Account as _, testing::TestBuilder},
         };
         use zcash_primitives::block::BlockHash;
-        use zcash_protocol::memo::MemoBytes;
+        use zcash_protocol::{ShieldedPool, memo::MemoBytes};
 
         use crate::{TxRef, testing::db::TestDbFactory};
 
@@ -945,10 +946,15 @@ pub(crate) mod tests {
             ))
             .unwrap()
         };
-        let output = |index: usize, note: Note| {
+        let output = |index: usize, note: Note, pool: ValuePool| {
+            let shielded_pool = match pool {
+                ValuePool::Orchard => ShieldedPool::Orchard,
+                ValuePool::Ironwood => ShieldedPool::Ironwood,
+            };
             DecryptedOutput::new(
                 index,
-                note,
+                (note, pool),
+                shielded_pool,
                 account_uuid,
                 MemoBytes::empty(),
                 TransferType::AccountInternal,
@@ -972,7 +978,7 @@ pub(crate) mod tests {
             &tx,
             &network,
             crate::ORCHARD_TABLES_PREFIX,
-            &output(0, note(10_000, NoteVersion::V2)),
+            &output(0, note(10_000, NoteVersion::V2), ValuePool::Orchard),
             tx_ref,
             None,
             None,
@@ -982,7 +988,7 @@ pub(crate) mod tests {
             &tx,
             &network,
             crate::IRONWOOD_TABLES_PREFIX,
-            &output(0, note(20_000, NoteVersion::V3)),
+            &output(0, note(20_000, NoteVersion::V3), ValuePool::Ironwood),
             tx_ref,
             None,
             None,

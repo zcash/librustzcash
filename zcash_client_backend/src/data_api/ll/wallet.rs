@@ -1087,12 +1087,11 @@ where
     DbT: LowLevelWalletWrite,
     P: consensus::Parameters,
     Output: ReceivedShieldedOutput<AccountId = <DbT as LowLevelWalletRead>::AccountId>,
-    Output::Note: Clone,
 {
     for output in outputs {
         let sent_output = match output.transfer_type() {
             TransferType::Outgoing => {
-                let note = output.note().clone().into();
+                let note = output.to_wallet_note();
 
                 let recipient = Recipient::External {
                     recipient_address: external_address(
@@ -1101,7 +1100,7 @@ where
                         output.account_id(),
                         note.receiver(),
                     )?,
-                    output_pool: Output::POOL_TYPE,
+                    output_pool: PoolType::Shielded(note.pool()),
                 };
 
                 Some((output.account_id(), recipient, note.value()))
@@ -1110,7 +1109,7 @@ where
                 let spent_in = detect_note_spent_in(wallet_db, output)?;
                 put_received_note(wallet_db, output, tx_ref, spent_in)?;
 
-                let note = output.note().clone().into();
+                let note = output.to_wallet_note();
                 let value = note.value();
 
                 let recipient = Recipient::InternalAccount {
@@ -1127,7 +1126,7 @@ where
                 on_external_account(output.account_id());
 
                 if let Some(account_id) = funding_account {
-                    let note = output.note().clone().into();
+                    let note = output.to_wallet_note();
                     let value = note.value();
 
                     // Even if the recipient address is external, record the send as internal.

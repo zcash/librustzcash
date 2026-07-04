@@ -275,7 +275,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                     match &s_out.note() {
                         Note::Sapling(_) => PoolType::SAPLING,
                         #[cfg(feature = "orchard")]
-                        Note::Orchard(_) => PoolType::ORCHARD,
+                        Note::Orchard { pool, .. } => match pool {
+                            orchard::ValuePool::Orchard => PoolType::ORCHARD,
+                            orchard::ValuePool::Ironwood => PoolType::IRONWOOD,
+                        },
                     },
                     *s_out.txid(),
                     s_out.output_index().into(),
@@ -718,6 +721,7 @@ mod tests {
     use incrementalmerkletree::Position;
     use nonempty::NonEmpty;
     use orchard::{
+        ValuePool,
         keys::{FullViewingKey, SpendingKey},
         note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
         value::NoteValue,
@@ -781,31 +785,37 @@ mod tests {
     fn orchard_and_ironwood_notes(n: usize, m: usize) -> Vec<Note> {
         let mut notes = Vec::with_capacity(n + m);
         for _ in 0..n {
-            notes.push(Note::from(orchard_note(10_000, NoteVersion::V2).unwrap()));
+            notes.push(Note::Orchard {
+                note: orchard_note(10_000, NoteVersion::V2).unwrap(),
+                pool: ValuePool::Orchard,
+            });
         }
         for _ in 0..m {
-            notes.push(Note::from(orchard_note(20_000, NoteVersion::V3).unwrap()));
+            notes.push(Note::Orchard {
+                note: orchard_note(20_000, NoteVersion::V3).unwrap(),
+                pool: ValuePool::Ironwood,
+            });
         }
         notes
     }
 
     proptest! {
-        // `Note::pool` classifies an Orchard note by its version: version-3 notes belong to the
-        // Ironwood pool, all others to the Orchard pool. `Note::protocol` always reports Orchard
-        // regardless of version. The classification is independent of the note's value.
+        // `Note::pool` reports the `ValuePool` recorded alongside an Orchard note.
         #[test]
-        fn note_pool_classifies_orchard_by_version(
+        fn note_pool_reports_stored_value_pool(
             value in 1u64..1_000_000_000u64,
-            is_v3 in any::<bool>(),
+            is_ironwood in any::<bool>(),
         ) {
-            let version = if is_v3 { NoteVersion::V3 } else { NoteVersion::V2 };
+            let (version, pool, expected) = if is_ironwood {
+                (NoteVersion::V3, ValuePool::Ironwood, ShieldedPool::Ironwood)
+            } else {
+                (NoteVersion::V2, ValuePool::Orchard, ShieldedPool::Orchard)
+            };
             let Some(note) = orchard_note(value, version) else {
                 // A handful of (value, rho, rseed) combinations do not form a valid note; skip them.
                 return Err(TestCaseError::reject("invalid orchard note"));
             };
-            let note = Note::from(note);
-            prop_assert_eq!(note.protocol(), ShieldedPool::Orchard);
-            let expected = if is_v3 { ShieldedPool::Ironwood } else { ShieldedPool::Orchard };
+            let note = Note::Orchard { note, pool };
             prop_assert_eq!(note.pool(), expected);
         }
 

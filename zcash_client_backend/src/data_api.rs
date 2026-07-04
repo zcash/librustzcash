@@ -1083,18 +1083,24 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
 
         #[cfg(feature = "orchard")]
         let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
-            retention
-                .should_retain_orchard(&n)
-                .then(|| n.map_note(Note::Orchard))
+            retention.should_retain_orchard(&n).then(|| {
+                n.map_note(|note| Note::Orchard {
+                    note,
+                    pool: orchard::ValuePool::Orchard,
+                })
+            })
         }));
 
         // Ironwood notes are `orchard::note::Note` values, so they are emitted as `Note::Orchard`;
         // the transaction builder routes them to the Ironwood bundle by their version 3 plaintext.
         #[cfg(feature = "orchard")]
         let iter = iter.chain(self.ironwood.into_iter().filter_map(|n| {
-            retention
-                .should_retain_ironwood(&n)
-                .then(|| n.map_note(Note::Orchard))
+            retention.should_retain_ironwood(&n).then(|| {
+                n.map_note(|note| Note::Orchard {
+                    note,
+                    pool: orchard::ValuePool::Ironwood,
+                })
+            })
         }));
 
         iter.collect()
@@ -2647,7 +2653,7 @@ pub trait DecryptableTransaction<AccountId> {
 impl<AccountId> DecryptableTransaction<AccountId> for Transaction {
     type DecryptedSaplingOutput = DecryptedOutput<sapling::Note, AccountId>;
     #[cfg(feature = "orchard")]
-    type DecryptedOrchardOutput = DecryptedOutput<orchard::Note, AccountId>;
+    type DecryptedOrchardOutput = DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>;
 }
 
 /// A transaction that was detected during scanning of the blockchain,
