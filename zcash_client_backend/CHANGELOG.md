@@ -97,6 +97,12 @@ workspace.
   of unconditionally using the legacy (pre-NU6.3) policy. Proposals targeting
   heights at or beyond NU6.3 activation now count one action per Orchard spend
   or output, matching the post-NU6.3 transaction builder.
+- Fee and change calculation now count transactional Ironwood bundles as
+  unpadded, matching the transaction builder (which no longer pads them to the
+  2-action minimum; see
+  `zcash_primitives::transaction::builder::transactional_bundle_type`). A
+  proposal whose Ironwood bundle carries a single requested action is now
+  charged for one action rather than two.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` now takes an
   additional `ironwood` bundle view and an `orchard_change_to_ironwood` flag
   (behind the `orchard` feature flag), alongside the existing `orchard` view. A

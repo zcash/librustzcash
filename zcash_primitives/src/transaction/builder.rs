@@ -290,7 +290,7 @@ impl BuildConfig {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor.as_ref().map(|a| {
                 orchard::builder::Builder::new(
-                    orchard::builder::BundleType::DEFAULT,
+                    transactional_bundle_type(bundle_version),
                     bundle_version,
                     bundle_version.default_flags(),
                     *a,
@@ -318,6 +318,9 @@ impl BuildConfig {
     }
 
     /// Returns the Ironwood builder for this configuration.
+    ///
+    /// Transactional Ironwood bundles are unpadded (see [`transactional_bundle_type`]),
+    /// so the single-output Orchard→Ironwood migration shape builds as one action.
     fn ironwood_builder(&self) -> Option<orchard::builder::Builder> {
         let bundle_version = orchard::bundle::BundleVersion::ironwood_v3();
         match self {
@@ -325,7 +328,7 @@ impl BuildConfig {
                 ironwood_anchor, ..
             } => ironwood_anchor.as_ref().map(|a| {
                 orchard::builder::Builder::new(
-                    orchard::builder::BundleType::DEFAULT,
+                    transactional_bundle_type(bundle_version),
                     bundle_version,
                     bundle_version.default_flags(),
                     *a,
@@ -350,6 +353,34 @@ impl BuildConfig {
     }
 }
 
+/// Returns the [`BundleType`](orchard::builder::BundleType) the builder uses for
+/// transactional (non-coinbase) bundles of the given Orchard-pool bundle version.
+///
+/// Orchard bundles keep [`BundleType::DEFAULT`](orchard::builder::BundleType::DEFAULT),
+/// padded to the 2-action minimum. Ironwood bundles are unpadded, so a bundle with a
+/// single requested action — the Orchard→Ironwood migration shape, one self-addressed
+/// output — stays one action instead of two, halving its proving and transport cost
+/// (e.g. air-gapped PCZT QR codes). One-action bundles are consensus-valid; the
+/// trade-off is that the action count of a small Ironwood bundle reveals its shape,
+/// which for a migration is already implied by the surrounding transaction (Orchard
+/// spends paired with an Ironwood bundle).
+///
+/// Fee and change calculation must derive Orchard-pool action counts from this same
+/// bundle type, because building a standard transaction enforces an exact balance
+/// against the fee computed by [`Builder::get_fee`].
+pub fn transactional_bundle_type(
+    bundle_version: orchard::bundle::BundleVersion,
+) -> orchard::builder::BundleType {
+    if bundle_version == orchard::bundle::BundleVersion::ironwood_v3() {
+        orchard::builder::BundleType::Transactional {
+            bundle_required: false,
+            pad_to_minimum: false,
+        }
+    } else {
+        orchard::builder::BundleType::DEFAULT
+    }
+}
+
 fn orchard_action_count(
     builder: &orchard::builder::Builder,
     is_coinbase: bool,
@@ -362,9 +393,10 @@ fn orchard_action_count(
         .checked_add(builder.changes().len())
         .ok_or("num_outputs + num_changes overflowed")?;
 
-    // The flags must match those the builder constructs for each configuration (see
-    // `orchard_builder`). For a `Coinbase` bundle `num_actions` ignores the flags, but supplying
-    // the matching set keeps the two paths consistent.
+    // The bundle type and flags must match those the builder constructs for each
+    // configuration (see `orchard_builder` / `ironwood_builder`). For a `Coinbase`
+    // bundle `num_actions` ignores the flags, but supplying the matching set keeps the
+    // two paths consistent.
     let (bundle_type, flags) = if is_coinbase {
         (
             orchard::builder::BundleType::Coinbase,
@@ -372,7 +404,7 @@ fn orchard_action_count(
         )
     } else {
         (
-            orchard::builder::BundleType::DEFAULT,
+            transactional_bundle_type(bundle_version),
             bundle_version.default_flags(),
         )
     };
@@ -1977,6 +2009,67 @@ mod tests {
             )
             .unwrap(),
             3
+        );
+    }
+
+    /// The per-pool padding asymmetry of [`super::transactional_bundle_type`]: a
+    /// transactional Orchard bundle pads a single requested action up to the 2-action
+    /// minimum, while a transactional Ironwood bundle is unpadded, so the
+    /// single-output Orchard→Ironwood migration shape counts as exactly one action.
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn ironwood_transactional_bundles_are_unpadded() {
+        let recipient = orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
+        )
+        .address_at(0u32, orchard::keys::Scope::External);
+
+        let config = BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+        };
+
+        // Orchard keeps the padded default. (`orchard_v2` here: the NU6.3 `orchard_v3`
+        // version disables cross-address transfers, so a bare output cannot be added.)
+        let mut orchard_builder = config
+            .orchard_builder(orchard::bundle::BundleVersion::orchard_v2())
+            .unwrap();
+        orchard_builder
+            .add_output(
+                None,
+                recipient,
+                orchard::value::NoteValue::from_raw(10_000),
+                [0u8; 512],
+            )
+            .unwrap();
+        assert_eq!(
+            super::orchard_action_count(
+                &orchard_builder,
+                false,
+                orchard::bundle::BundleVersion::orchard_v2(),
+            )
+            .unwrap(),
+            2
+        );
+
+        let mut ironwood_builder = config.ironwood_builder().unwrap();
+        ironwood_builder
+            .add_output(
+                None,
+                recipient,
+                orchard::value::NoteValue::from_raw(10_000),
+                [0u8; 512],
+            )
+            .unwrap();
+        assert_eq!(
+            super::orchard_action_count(
+                &ironwood_builder,
+                false,
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )
+            .unwrap(),
+            1
         );
     }
 

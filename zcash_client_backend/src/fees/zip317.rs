@@ -754,17 +754,18 @@ mod tests {
             )
             .unwrap();
 
-        // ZIP 317 floors each shielded bundle that is used at 2 actions. Without
-        // an Ironwood bundle: sapling (2) + orchard (2 outputs) = 4 actions; with
-        // an Ironwood output: + ironwood (2) = 6 actions. At 5000 zat/action that
-        // is 20000 vs 30000.
+        // The Sapling and Orchard bundles pad up to 2 spends/actions when used, while
+        // the Ironwood bundle is unpadded (see `transactional_bundle_type`). Without
+        // an Ironwood bundle: sapling (2) + orchard (2 outputs) = 4 actions; with an
+        // Ironwood output: + ironwood (1) = 5 actions. At 5000 zat/action that is
+        // 20000 vs 25000.
         assert_eq!(
             without_ironwood.fee_required(),
             Zatoshis::const_from_u64(20000)
         );
         assert_eq!(
             with_ironwood.fee_required(),
-            Zatoshis::const_from_u64(30000)
+            Zatoshis::const_from_u64(25000)
         );
     }
 

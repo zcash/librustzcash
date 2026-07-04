@@ -3,15 +3,28 @@
 
 use std::convert::Infallible;
 
-use orchard::{builder::BundleType, bundle::BundleVersion};
+use orchard::bundle::BundleVersion;
+use zcash_primitives::transaction::builder::transactional_bundle_type;
 use zcash_protocol::value::Zatoshis;
 
+/// Returns the number of actions the transaction builder will produce for a
+/// transactional (non-coinbase) Orchard-pool bundle of the given version, carrying the
+/// given numbers of requested spends and outputs.
+///
+/// This derives the count from [`transactional_bundle_type`], so it follows the
+/// builder's padding policy per pool (Orchard padded to the 2-action minimum, Ironwood
+/// unpadded); the builder enforces an exact balance against the fee computed from
+/// these counts.
 pub(crate) fn transactional_action_count(
     bundle_version: BundleVersion,
     num_spends: usize,
     num_outputs: usize,
 ) -> Result<usize, &'static str> {
-    BundleType::DEFAULT.num_actions(bundle_version.default_flags(), num_spends, num_outputs)
+    transactional_bundle_type(bundle_version).num_actions(
+        bundle_version.default_flags(),
+        num_spends,
+        num_outputs,
+    )
 }
 
 /// A trait that provides a minimized view of Orchard-style bundle configuration
