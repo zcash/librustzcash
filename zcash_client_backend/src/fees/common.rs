@@ -374,10 +374,9 @@ where
 
     // The Ironwood bundle is accounted separately from Orchard: a V6 transaction
     // carries distinct Orchard and Ironwood bundles, each contributing its own
-    // action count under the builder's per-pool padding policy (see
-    // `transactional_bundle_type`; Orchard padded, Ironwood unpadded). Callers
-    // route Ironwood inputs/outputs into the `ironwood` view; it is empty
-    // (contributing no actions) when nothing targets the Ironwood pool.
+    // action count under the builder's default transactional bundle type.
+    // Callers route Ironwood inputs/outputs into the `ironwood` view; it is
+    // empty (contributing no actions) when nothing targets the Ironwood pool.
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change_count| {
         orchard_fees::transactional_action_count(

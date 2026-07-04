@@ -12,18 +12,12 @@ workspace.
 
 ### Added
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
-- `zcash_primitives::transaction::builder::transactional_bundle_type`, exposing
-  the per-pool `orchard::builder::BundleType` the builder uses for
-  transactional (non-coinbase) Orchard-pool bundles, for fee and change
-  calculation to stay consistent with.
 
 ### Changed
-- The transaction builder no longer pads transactional Ironwood bundles to the
-  2-action minimum: an Ironwood bundle now contains exactly the requested
-  actions (so the single-output Orchard→Ironwood migration shape builds as one
-  action instead of two). Transactional Orchard bundles remain padded. See
-  `zcash_primitives::transaction::builder::transactional_bundle_type` for the
-  rationale and trade-off.
+- The transaction builder no longer pads default transactional Orchard-pool
+  bundles to the 2-action minimum: Orchard and Ironwood bundles now contain
+  exactly the requested actions (so a single-output bundle builds as one action
+  instead of two).
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
   the consensus branch ID under which the transaction was constructed instead of
   an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived
