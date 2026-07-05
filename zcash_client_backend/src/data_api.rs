@@ -1378,7 +1378,11 @@ impl AccountMeta {
         match protocol {
             ShieldedPool::Sapling => self.sapling_note_count(),
             ShieldedPool::Orchard => self.orchard_note_count(),
-            ShieldedPool::Ironwood => todo!("Ironwood note counts are not yet tracked"),
+            // Ironwood note metadata is not yet queried by the wallet
+            // backends; report "no metadata available" rather than panic so
+            // change strategies targeting the Ironwood pool fall back to
+            // their single-output behaviour.
+            ShieldedPool::Ironwood => None,
         }
     }
 

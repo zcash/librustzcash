@@ -155,7 +155,14 @@ pub(crate) fn select_change_pool(
 ) -> ShieldedPool {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
-    if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
+    if _net_flows.ironwood_in.is_positive() || _net_flows.ironwood_out.is_positive() {
+        // Send change to Ironwood if any Ironwood value flows through the
+        // transaction: post-NU6.3 consensus forbids value entering the Orchard
+        // pool, so Ironwood-involved transactions keep their change in
+        // Ironwood. (Orchard-only spends still take the Orchard arm below —
+        // spend change staying in-pool satisfies the V3 cross-address rule.)
+        ShieldedPool::Ironwood
+    } else if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
         // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
         ShieldedPool::Orchard
     } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
@@ -176,6 +183,7 @@ pub(crate) struct OutputManifest {
     transparent: usize,
     sapling: usize,
     orchard: usize,
+    ironwood: usize,
 }
 
 impl OutputManifest {
@@ -183,6 +191,7 @@ impl OutputManifest {
         transparent: 0,
         sapling: 0,
         orchard: 0,
+        ironwood: 0,
     };
 
     pub(crate) fn sapling(&self) -> usize {
@@ -193,8 +202,12 @@ impl OutputManifest {
         self.orchard
     }
 
+    pub(crate) fn ironwood(&self) -> usize {
+        self.ironwood
+    }
+
     pub(crate) fn total_shielded(&self) -> usize {
-        self.sapling + self.orchard
+        self.sapling + self.orchard + self.ironwood
     }
 }
 
@@ -289,6 +302,11 @@ where
             0
         },
         orchard: if change_pool == ShieldedPool::Orchard {
+            target_change_count
+        } else {
+            0
+        },
+        ironwood: if change_pool == ShieldedPool::Ironwood {
             target_change_count
         } else {
             0
@@ -493,7 +511,7 @@ where
                         ironwood_action_count(if route_change_to_ironwood {
                             target_change_counts.orchard()
                         } else {
-                            0
+                            target_change_counts.ironwood()
                         })?,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
@@ -537,7 +555,10 @@ where
                             },
                         )?,
                         ironwood_action_count(
-                            if change_pool == ShieldedPool::Orchard && route_change_to_ironwood {
+                            if change_pool == ShieldedPool::Ironwood
+                                || (change_pool == ShieldedPool::Orchard
+                                    && route_change_to_ironwood)
+                            {
                                 split_count
                             } else {
                                 0
@@ -830,6 +851,8 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
             transparent: t_allowed + t_extra,
             sapling: s_allowed + s_extra,
             orchard: o_allowed + o_extra,
+            // Dust-input analysis does not yet consider Ironwood notes.
+            ironwood: 0,
         })
     };
 
@@ -843,6 +866,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
             transparent: min(l.transparent, r.transparent),
             sapling: min(l.sapling, r.sapling),
             orchard: min(l.orchard, r.orchard),
+            ironwood: min(l.ironwood, r.ironwood),
         })
         .expect("possible_change is nonempty");
 
