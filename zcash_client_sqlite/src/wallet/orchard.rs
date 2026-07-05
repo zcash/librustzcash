@@ -734,11 +734,7 @@ pub(crate) mod tests {
         testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>(None)
     }
 
-    /// Regression test: pinning `target_expiry_height` on a proposal whose Orchard
-    /// bundle pads to two actions must not invalidate the `spend_auth_sig` that the
-    /// IO Finalizer computes over the dummy second action's sighash. The Prover ->
-    /// Signer -> Extractor pipeline must still succeed, and the extracted
-    /// transaction must carry the pinned expiry height.
+    // Regression: pinned expiry must still extract when Orchard adds a dummy action.
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_orchard_pinned_expiry() {

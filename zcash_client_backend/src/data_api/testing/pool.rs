@@ -6184,9 +6184,8 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         pin_expiry_above_target.map(|delta| BlockHeight::from(min_target_height) + delta);
 
     if target_expiry_height.is_some() {
-        // A nonzero expiry below the proposal's minimum target height must be rejected
-        // before any transaction building occurs, so this earlier call has no effect on
-        // note selection for the successful call below.
+        // This is rejected before transaction building, so the successful call below
+        // can reuse the same proposal.
         assert_matches!(
             st.create_pczt_from_proposal::<Infallible, _, Infallible>(
                 account.id(),

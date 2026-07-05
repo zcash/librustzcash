@@ -2289,22 +2289,14 @@ where
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
 ///
-/// `target_expiry_height`, when set, replaces the builder-derived expiry on the
-/// resulting `PcztParts` before the Creator role produces the [`pczt::Pczt`].
-/// This is the only stage at which `expiry_height` can be changed without
-/// invalidating the dummy spends that the IO Finalizer signs immediately
-/// afterwards: the IO Finalizer computes the shielded sighash over the PCZT
-/// global it sees, signs every dummy action with its `dummy_sk` against that
-/// sighash, and then consumes `dummy_sk` from the PCZT. A wire-format Updater
-/// that mutates `Global::expiry_height` post-finalization produces dummy
-/// `spend_auth_sig`s that no longer verify, and the failure surfaces later as
-/// [`pczt::roles::tx_extractor::Error::SighashMismatch`] at extraction time.
+/// `target_expiry_height`, when set, replaces the builder-derived expiry before
+/// the PCZT is finalized. Applying this override after finalization can invalidate
+/// dummy spend signatures.
 ///
 /// A nonzero `target_expiry_height` below the proposal's
 /// [`min_target_height`](Proposal::min_target_height) is rejected with
-/// [`Error::ExpiryHeightBelowTargetHeight`], since it would produce a transaction that
-/// is already expired at the earliest height at which it could be mined. A
-/// `target_expiry_height` of zero, which disables expiry, is exempt from this check.
+/// [`Error::ExpiryHeightBelowTargetHeight`]. A `target_expiry_height` of zero,
+/// which disables expiry, is exempt from this check.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]

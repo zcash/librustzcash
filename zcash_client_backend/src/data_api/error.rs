@@ -104,10 +104,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
-    /// The caller requested a PCZT expiry height below the proposal's minimum target
-    /// height, which would produce a transaction that is already expired at the
-    /// earliest height at which it could be mined. A zero expiry height, which
-    /// disables expiry entirely, is exempt from this check.
+    /// The caller requested a nonzero PCZT expiry height below the proposal's
+    /// minimum target height. Zero remains valid because it disables expiry.
     #[cfg(feature = "pczt")]
     ExpiryHeightBelowTargetHeight {
         expiry_height: BlockHeight,
