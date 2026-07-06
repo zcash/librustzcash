@@ -2695,6 +2695,33 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         drop(orchard_trace);
     }
 
+    #[cfg(feature = "orchard")]
+    {
+        let ironwood_trace = tracing::info_span!("ironwood_balances").entered();
+        with_pool_balances(
+            tx,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            &mut account_balances,
+            ShieldedPool::Ironwood,
+            |balances,
+             spendable_value,
+             change_pending_confirmation,
+             value_pending_spendability,
+             uneconomic_value| {
+                balances.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
+                    bal.add_spendable_value(spendable_value)?;
+                    bal.add_pending_change_value(change_pending_confirmation)?;
+                    bal.add_pending_spendable_value(value_pending_spendability)?;
+                    bal.add_uneconomic_value(uneconomic_value)?;
+                    Ok(())
+                })
+            },
+        )?;
+        drop(ironwood_trace);
+    }
+
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
     with_pool_balances(
         tx,
