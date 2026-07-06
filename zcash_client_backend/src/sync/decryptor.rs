@@ -339,7 +339,7 @@ where
         P: consensus::Parameters + Send + 'static,
     {
         let mut scanning_keys = Arc::new(reload_keys()?);
-        let mut runners = BatchRunners::<_, (), ()>::for_keys(
+        let mut runners = BatchRunners::<_, (), (), ()>::for_keys(
             self.sapling_batch_size_threshold,
             #[cfg(feature = "orchard")]
             self.orchard_batch_size_threshold,

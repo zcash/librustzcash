@@ -5395,6 +5395,7 @@ mod tests {
             )],
             0,
             0,
+            0,
             false,
         );
         let (mid_height, _, _) =
@@ -5540,6 +5541,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {
@@ -5693,6 +5695,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {
@@ -5866,6 +5869,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {
