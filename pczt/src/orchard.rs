@@ -513,10 +513,11 @@ pub mod v1 {
 
 /// Types for the v2 Orchard PCZT encoding.
 pub(crate) mod v2 {
-    use alloc::vec::Vec;
+    use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
     use getset::Getters;
     use serde::{Deserialize, Serialize};
+    use serde_with::serde_as;
 
     use super::{NoteVersion, v1};
 
@@ -548,13 +549,40 @@ pub(crate) mod v2 {
     /// PCZT fields that are specific to producing the transaction's Orchard bundle.
     #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
     pub struct Bundle {
-        actions: Vec<v1::Action>,
+        actions: Vec<Action>,
         flags: u8,
         value_sum: (u64, bool),
         anchor: [u8; 32],
         note_version: SerializedNoteVersion,
         zkproof: Option<Vec<u8>>,
         bsk: Option<[u8; 32]>,
+    }
+
+    /// Information about an Orchard action within a transaction.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub(crate) struct Action {
+        cv_net: [u8; 32],
+        spend: v1::Spend,
+        output: Output,
+        rcv: Option<[u8; 32]>,
+    }
+
+    /// Information about the output part of an Orchard action.
+    #[serde_as]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub(crate) struct Output {
+        cmx: [u8; 32],
+        ephemeral_key: [u8; 32],
+        enc_ciphertext: Vec<u8>,
+        out_ciphertext: Vec<u8>,
+        #[serde_as(as = "Option<[_; 43]>")]
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rseed: Option<[u8; 32]>,
+        ock: Option<[u8; 32]>,
+        zip32_derivation: Option<crate::common::Zip32Derivation>,
+        user_address: Option<String>,
+        proprietary: BTreeMap<String, Vec<u8>>,
     }
 
     impl TryFrom<super::Bundle> for Bundle {
@@ -565,7 +593,7 @@ pub(crate) mod v2 {
                 actions: bundle
                     .actions
                     .into_iter()
-                    .map(v1::Action::from)
+                    .map(Action::from)
                     .collect::<Vec<_>>(),
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
@@ -591,6 +619,64 @@ pub(crate) mod v2 {
                 note_version: bundle.note_version.into(),
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
+            }
+        }
+    }
+
+    impl From<super::Action> for Action {
+        fn from(action: super::Action) -> Self {
+            Self {
+                cv_net: action.cv_net,
+                spend: v1::Spend::from(action.spend),
+                output: Output::from(action.output),
+                rcv: action.rcv,
+            }
+        }
+    }
+
+    impl From<Action> for super::Action {
+        fn from(action: Action) -> Self {
+            Self {
+                cv_net: action.cv_net,
+                spend: super::Spend::from(action.spend),
+                output: super::Output::from(action.output),
+                rcv: action.rcv,
+            }
+        }
+    }
+
+    impl From<super::Output> for Output {
+        fn from(output: super::Output) -> Self {
+            Self {
+                cmx: output.cmx,
+                ephemeral_key: output.ephemeral_key,
+                enc_ciphertext: output.enc_ciphertext,
+                out_ciphertext: output.out_ciphertext,
+                recipient: output.recipient,
+                value: output.value,
+                rseed: output.rseed,
+                ock: output.ock,
+                zip32_derivation: output.zip32_derivation,
+                user_address: output.user_address,
+                proprietary: output.proprietary,
+            }
+        }
+    }
+
+    impl From<Output> for super::Output {
+        fn from(output: Output) -> Self {
+            Self {
+                cmx: output.cmx,
+                ephemeral_key: output.ephemeral_key,
+                enc_ciphertext: output.enc_ciphertext,
+                out_ciphertext: output.out_ciphertext,
+                recipient: output.recipient,
+                value: output.value,
+                rseed: output.rseed,
+                ock: output.ock,
+                zip32_derivation: output.zip32_derivation,
+                user_address: output.user_address,
+                proprietary: output.proprietary,
             }
         }
     }
