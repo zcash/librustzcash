@@ -1711,6 +1711,16 @@ impl<A> TestBuilder<A, ()> {
 }
 
 impl<A, B> TestBuilder<A, B> {
+    /// Overrides the network parameters used by the test (the default is
+    /// [`TestBuilder::DEFAULT_NETWORK`]). This must be called before the account birthday is
+    /// established (i.e. before `with_account_from_sapling_activation` /
+    /// `with_account_having_current_birthday`), because the birthday is derived from the network's
+    /// activation heights.
+    pub fn with_network(mut self, network: LocalNetwork) -> Self {
+        self.network = network;
+        self
+    }
+
     #[cfg(feature = "transparent-inputs")]
     pub fn with_gap_limits(self, gap_limits: GapLimits) -> TestBuilder<A, B> {
         TestBuilder {

@@ -43,8 +43,6 @@ use std::{
 
 use shardtree::error::{QueryError, ShardTreeError};
 
-#[cfg(feature = "transparent-inputs")]
-use super::CoinbaseFilter;
 use super::InputSource;
 use crate::{
     data_api::{
@@ -86,6 +84,7 @@ use zip321::Payment;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    super::CoinbaseFilter,
     crate::{
         fees::ChangeValue,
         proposal::StepOutput,
@@ -96,6 +95,9 @@ use {
     std::collections::HashMap,
     transparent::bundle::TxOut,
 };
+
+#[cfg(feature = "orchard")]
+use zcash_protocol::consensus::NetworkUpgrade;
 
 #[cfg(feature = "transparent-key-import")]
 use zcash_script::script::{self as zs_script, Evaluable};
@@ -128,38 +130,11 @@ const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
 const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
 #[cfg(feature = "orchard")]
-fn legacy_orchard_bundle_requested(
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
-) -> bool {
-    #[cfg(feature = "unstable")]
-    {
-        matches!(proposed_version, Some(TxVersion::V5))
-    }
-    #[cfg(not(feature = "unstable"))]
-    {
-        false
-    }
-}
-
-#[cfg(feature = "orchard")]
-fn ironwood_active_at<ParamsT: consensus::Parameters>(
+fn ironwood_active_at<ParamsT: consensus::Parameters, H: Into<BlockHeight>>(
     params: &ParamsT,
-    target_height: BlockHeight,
+    target_height: H,
 ) -> bool {
-    params.is_nu_active(consensus::NetworkUpgrade::Nu6_3, target_height)
-}
-
-#[cfg(feature = "orchard")]
-fn orchard_outputs_to_ironwood<ParamsT: consensus::Parameters>(
-    params: &ParamsT,
-    target_height: TargetHeight,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
-) -> bool {
-    ironwood_active_at(params, BlockHeight::from(target_height))
-        && !legacy_orchard_bundle_requested(
-            #[cfg(feature = "unstable")]
-            proposed_version,
-        )
+    params.is_nu_active(NetworkUpgrade::Nu6_3, target_height.into())
 }
 
 /// Maps an Ironwood bundle output index to its index in the wallet's combined
@@ -175,26 +150,6 @@ fn stored_ironwood_output_index(tx: &Transaction, raw_ironwood_output_index: usi
         .map_or(raw_ironwood_output_index, |bundle| {
             bundle.actions().len() + raw_ironwood_output_index
         })
-}
-
-/// How a proposal step's Orchard-recipient spends and outputs are routed between
-/// the Orchard and Ironwood bundles.
-///
-/// This is derived once from the proposal and the activation state so the
-/// spend-anchor, input, and output-routing decisions cannot drift apart.
-#[cfg(feature = "orchard")]
-enum OrchardBuildMode {
-    /// A legacy V5 transaction was explicitly requested: use the Orchard bundle
-    /// only. Spending Ironwood notes in this mode is unsupported.
-    LegacyV5,
-    /// Spend Ironwood (`NoteVersion::V3`) notes; Orchard-pool outputs are routed
-    /// to the Ironwood bundle.
-    IronwoodSpends,
-    /// No Ironwood spends, but Orchard-pool outputs are routed to a fresh Ironwood
-    /// bundle.
-    IronwoodOutputs,
-    /// Plain Orchard: spends and outputs both use the Orchard bundle.
-    Orchard,
 }
 
 #[cfg(feature = "pczt")]
@@ -1283,46 +1238,6 @@ where
 {
     #[cfg(feature = "transparent-inputs")]
     let step_index = prior_step_results.len();
-    // The shielded inputs of this step, if any of them are Ironwood (`V3`) notes.
-    #[cfg(feature = "orchard")]
-    let ironwood_spend_inputs = proposal_step.shielded_inputs().filter(|inputs| {
-        inputs.notes().iter().any(|selected| {
-            matches!(
-                selected.note(),
-                Note::Orchard(note) if note.version() == orchard::note::NoteVersion::V3
-            )
-        })
-    });
-    #[cfg(feature = "orchard")]
-    let orchard_build_mode = if legacy_orchard_bundle_requested(
-        #[cfg(feature = "unstable")]
-        proposed_version,
-    ) {
-        // A legacy V5 transaction cannot carry an Ironwood bundle, so spending
-        // Ironwood notes is unsupported in that mode.
-        if ironwood_spend_inputs.is_some() {
-            return Err(Error::ProposalNotSupported);
-        }
-        OrchardBuildMode::LegacyV5
-    } else if ironwood_spend_inputs.is_some() {
-        OrchardBuildMode::IronwoodSpends
-    } else if orchard_outputs_to_ironwood(
-        params,
-        min_target_height,
-        #[cfg(feature = "unstable")]
-        proposed_version,
-    ) {
-        OrchardBuildMode::IronwoodOutputs
-    } else {
-        OrchardBuildMode::Orchard
-    };
-    // Orchard-pool payment and change outputs are routed to the Ironwood bundle
-    // in exactly the Ironwood spend and Ironwood output modes.
-    #[cfg(feature = "orchard")]
-    let orchard_outputs_are_ironwood = matches!(
-        orchard_build_mode,
-        OrchardBuildMode::IronwoodSpends | OrchardBuildMode::IronwoodOutputs
-    );
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
     // prior step (when "transparent-inputs" is enabled).
@@ -1384,7 +1299,7 @@ where
                                 .map_err(Error::from)
                                 .transpose(),
                             #[cfg(feature = "orchard")]
-                            Note::Orchard(_) => None,
+                            Note::Orchard { .. } => None,
                         })
                         .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
 
@@ -1414,26 +1329,22 @@ where
                         .iter()
                         .filter_map(|selected| match selected.note() {
                             #[cfg(feature = "orchard")]
-                            Note::Orchard(note)
-                                if note.version() != orchard::note::NoteVersion::V3 =>
-                            {
-                                orchard_tree
-                                    .witness_at_checkpoint_id_caching(
-                                        selected.note_commitment_tree_position(),
-                                        &inputs.anchor_height(),
-                                    )
-                                    .and_then(|witness| {
-                                        witness.ok_or(ShardTreeError::Query(
-                                            QueryError::CheckpointPruned,
-                                        ))
-                                    })
-                                    .map(|merkle_path| Some((note, merkle_path.into())))
-                                    .map_err(Error::from)
-                                    .transpose()
-                            }
-                            #[cfg(feature = "orchard")]
-                            Note::Orchard(_) => None,
-                            Note::Sapling(_) => None,
+                            Note::Orchard {
+                                note,
+                                pool: orchard::ValuePool::Orchard,
+                            } => orchard_tree
+                                .witness_at_checkpoint_id_caching(
+                                    selected.note_commitment_tree_position(),
+                                    &inputs.anchor_height(),
+                                )
+                                .and_then(|witness| {
+                                    witness
+                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+                                })
+                                .map(|merkle_path| Some((note, merkle_path.into())))
+                                .map_err(Error::from)
+                                .transpose(),
+                            _ => None,
                         })
                         .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
 
@@ -1447,66 +1358,63 @@ where
     #[cfg(not(feature = "orchard"))]
     let orchard_anchor = None;
 
+    // The Ironwood builder must be available whenever the transaction will interact with the
+    // Ironwood bundle: either the proposal itself involves the Ironwood pool, or Ironwood is active
+    // at the target height and the builder will route Orchard-pool outputs into a fresh Ironwood
+    // bundle. The anchor must be a real Ironwood tree root so a transaction with only routed
+    // outputs is indistinguishable from one that spends real Ironwood notes.
     #[cfg(feature = "orchard")]
-    let (ironwood_anchor, ironwood_inputs) = match orchard_build_mode {
-        OrchardBuildMode::IronwoodSpends => {
-            // `IronwoodSpends` is constructed only when `ironwood_spend_inputs` is
-            // `Some`, so the inputs are always present here.
-            let Some(inputs) = ironwood_spend_inputs else {
-                return Err(Error::ProposalNotSupported);
-            };
+    let (ironwood_anchor, ironwood_inputs) = if proposal_step
+        .involves(PoolType::Shielded(ShieldedPool::Ironwood))
+        || ironwood_active_at(params, min_target_height)
+    {
+        let Some(inputs) = proposal_step.shielded_inputs() else {
+            // A shielding proposal carries no shielded anchor height, so there is no valid Ironwood
+            // anchor to bind to. This path is not yet supported.
+            return Err(Error::ProposalNotSupported);
+        };
+        wallet_db
+            .with_ironwood_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|ironwood_tree| {
+                let anchor = ironwood_tree
+                    .root_at_checkpoint_id(&inputs.anchor_height())?
+                    .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
+                    .into();
 
-            wallet_db
-                .with_ironwood_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|ironwood_tree| {
-                    let anchor = ironwood_tree
-                        .root_at_checkpoint_id(&inputs.anchor_height())?
-                        .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
-                        .into();
+                let mut ironwood_inputs = Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new();
 
-                    let mut ironwood_inputs =
-                        Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new();
+                for ironwood_input in
+                    inputs
+                        .notes()
+                        .iter()
+                        .filter_map(|selected| match selected.note() {
+                            Note::Orchard {
+                                note,
+                                pool: orchard::ValuePool::Ironwood,
+                            } => ironwood_tree
+                                .witness_at_checkpoint_id_caching(
+                                    selected.note_commitment_tree_position(),
+                                    &inputs.anchor_height(),
+                                )
+                                .and_then(|witness| {
+                                    witness
+                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+                                })
+                                .map(|merkle_path| Some((note, merkle_path.into())))
+                                .map_err(Error::from)
+                                .transpose(),
+                            _ => None,
+                        })
+                {
+                    ironwood_inputs.push(ironwood_input?);
+                }
 
-                    for ironwood_input in
-                        inputs
-                            .notes()
-                            .iter()
-                            .filter_map(|selected| match selected.note() {
-                                Note::Orchard(note)
-                                    if note.version() == orchard::note::NoteVersion::V3 =>
-                                {
-                                    ironwood_tree
-                                        .witness_at_checkpoint_id_caching(
-                                            selected.note_commitment_tree_position(),
-                                            &inputs.anchor_height(),
-                                        )
-                                        .and_then(|witness| {
-                                            witness.ok_or(ShardTreeError::Query(
-                                                QueryError::CheckpointPruned,
-                                            ))
-                                        })
-                                        .map(|merkle_path| Some((note, merkle_path.into())))
-                                        .map_err(Error::from)
-                                        .transpose()
-                                }
-                                _ => None,
-                            })
-                    {
-                        ironwood_inputs.push(ironwood_input?);
-                    }
-
-                    Ok((Some(anchor), ironwood_inputs))
-                })?
-                .ok_or(Error::ProposalNotSupported)?
-        }
-        OrchardBuildMode::IronwoodOutputs => (
-            Some(orchard::Anchor::empty_tree()),
-            Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new(),
-        ),
-        OrchardBuildMode::LegacyV5 | OrchardBuildMode::Orchard => (
-            None,
-            Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new(),
-        ),
+                Ok((Some(anchor), ironwood_inputs))
+            })?
+            .ok_or(Error::ProposalNotSupported)?
+    } else {
+        (None, vec![])
     };
+
     #[cfg(not(feature = "orchard"))]
     let ironwood_anchor = None;
 
@@ -1567,6 +1475,8 @@ where
         )?;
     }
 
+    // Post-NU6.3 the Orchard bundle enforces the cross-address restriction, so Orchard-pool
+    // change must be returned to a spent Orchard note's own address to remain in the Orchard pool
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
         builder.add_orchard_spend(
@@ -1841,7 +1751,7 @@ where
                 #[cfg(feature = "orchard")]
                 PoolType::Shielded(ShieldedPool::Orchard) => {
                     let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
-                    if orchard_outputs_are_ironwood {
+                    if ironwood_active_at(params, min_target_height) {
                         add_ironwood_output(&mut builder, &mut ironwood_output_meta, to)?;
                     } else {
                         add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
@@ -1913,22 +1823,25 @@ where
                 {
                     let orchard_fvk = ufvk
                         .orchard()
-                        .cloned()
                         .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?;
+
                     let change_address =
                         orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
 
-                    if orchard_outputs_are_ironwood {
-                        // The Ironwood builder enables cross-address transfers, so
-                        // change is an ordinary owned output; `add_ironwood_output`
-                        // covers it (the dedicated change entry point was dropped).
-                        builder.add_ironwood_output(
+                    if ironwood_active_at(params, min_target_height) {
+                        // Post-NU6.3 with an Orchard spend: the change stays in the Orchard pool,
+                        // returned to a spent note's own address so it satisfies the Orchard V3
+                        // cross-address restriction. Only the payment crosses into Ironwood. The
+                        // Orchard V3 bundle forbids ordinary outputs, so the change is added via
+                        // `add_orchard_change_output`, which pairs it with a fabricated same-address
+                        builder.add_orchard_change_output(
+                            orchard_fvk.clone(),
                             internal_ovk.map(|k| k.into()),
                             change_address,
                             change_value.value(),
                             memo.clone(),
                         )?;
-                        ironwood_output_meta.push((
+                        orchard_output_meta.push((
                             BuildRecipient::InternalAccount {
                                 receiving_account: account_id,
                                 external_address: None,
@@ -1959,7 +1872,33 @@ where
                 return Err(Error::UnsupportedChangeType(output_pool));
             }
             PoolType::Shielded(ShieldedPool::Ironwood) => {
-                todo!("Ironwood pool support is not yet implemented")
+                #[cfg(not(feature = "orchard"))]
+                return Err(Error::UnsupportedChangeType(output_pool));
+
+                #[cfg(feature = "orchard")]
+                {
+                    let orchard_fvk = ufvk
+                        .orchard()
+                        .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?;
+
+                    let change_address =
+                        orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
+
+                    builder.add_ironwood_output(
+                        internal_ovk.map(|k| k.into()),
+                        change_address,
+                        change_value.value(),
+                        memo.clone(),
+                    )?;
+                    ironwood_output_meta.push((
+                        BuildRecipient::InternalAccount {
+                            receiving_account: account_id,
+                            external_address: None,
+                        },
+                        change_value.value(),
+                        Some(memo),
+                    ))
+                }
             }
         }
     }
@@ -2119,6 +2058,11 @@ where
     let orchard_fvk: orchard::keys::FullViewingKey = spending_keys.usk.orchard().into();
     #[cfg(feature = "orchard")]
     let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
+    // Same-address Orchard change (post-NU6.3, when spending Orchard notes) is returned to a spent
+    // note's own address, which may be external-scoped; try the external IVK as well so such change
+    // outputs remain decryptable for recording.
+    #[cfg(feature = "orchard")]
+    let orchard_external_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
     #[cfg(feature = "orchard")]
     let orchard_outputs = build_state.orchard_output_meta.into_iter().enumerate().map(
         |(i, (recipient, value, memo))| {
@@ -2134,7 +2078,13 @@ where
                     .and_then(|bundle| {
                         bundle
                             .decrypt_output_with_key(output_index, &orchard_internal_ivk)
-                            .map(|(note, _, _)| Note::Orchard(note))
+                            .or_else(|| {
+                                bundle.decrypt_output_with_key(output_index, &orchard_external_ivk)
+                            })
+                            .map(|(note, _, _)| Note::Orchard {
+                                note,
+                                pool: orchard::ValuePool::Orchard,
+                            })
                     })
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
             });
@@ -2169,7 +2119,7 @@ where
                     .and_then(|bundle| {
                         bundle
                             .decrypt_output_with_key(raw_output_index, &orchard_internal_ivk)
-                            .map(|(note, _, _)| Note::Orchard(note))
+                            .map(|(note, _, _)| Note::Orchard { note, pool: orchard::ValuePool::Ironwood })
                     })
                     .expect(
                         "Wallet-internal Ironwood outputs must be decryptable with the wallet's IVK",
@@ -2890,7 +2840,10 @@ where
                             external_address,
                             |note| note.value().inner(),
                             |memo| memo,
-                            Note::Orchard,
+                            |note| Note::Orchard {
+                                note,
+                                pool: orchard::ValuePool::Orchard,
+                            },
                         )
                     })
                 })

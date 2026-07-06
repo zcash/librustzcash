@@ -880,6 +880,7 @@ fn find_received<
     SK: ScanningKeyOps<D, AccountId, Nf>,
     Output: ShieldedOutput<D, CIPHERTEXT_SIZE>,
     NoteCommitment,
+    Note,
     const CIPHERTEXT_SIZE: usize,
 >(
     block_height: BlockHeight,
@@ -895,8 +896,9 @@ fn find_received<
         &[(D, Output)],
     ) -> Vec<Option<((D::Note, D::Recipient, M), usize)>>,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
+    enrich_note: impl Fn(D::Note) -> Note,
 ) -> (
-    Vec<WalletOutput<D::Note, Nf, AccountId>>,
+    Vec<WalletOutput<Note, Nf, AccountId>>,
     Vec<(NoteCommitment, Retention<BlockHeight>)>,
 ) {
     // Check for incoming notes while incrementing tree and witnesses
@@ -976,7 +978,7 @@ fn find_received<
             shielded_outputs.push(WalletOutput::from_parts(
                 output_idx,
                 output.ephemeral_key(),
-                note,
+                enrich_note(note),
                 is_change,
                 note_commitment_tree_position,
                 nf,

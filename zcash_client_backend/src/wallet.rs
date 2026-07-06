@@ -563,35 +563,24 @@ pub type WalletSaplingOutput<AccountId> =
 /// [`Action`]: orchard::Action
 #[cfg(feature = "orchard")]
 pub type WalletOrchardOutput<AccountId> =
-    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
+    WalletOutput<(orchard::note::Note, orchard::ValuePool), orchard::note::Nullifier, AccountId>;
 
-/// A type alias for Ironwood [`WalletOutput`]s.
+/// The output part of an Ironwood [`Action`] that was decrypted in the process of scanning.
 ///
-/// Ironwood notes are Orchard-shaped and therefore share the Orchard note and nullifier types, but
-/// Ironwood is a distinct pool from Orchard.
+/// [`Action`]: orchard::Action
 #[cfg(feature = "orchard")]
 pub type WalletIronwoodOutput<AccountId> =
-    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
+    WalletOutput<(orchard::note::Note, orchard::ValuePool), orchard::note::Nullifier, AccountId>;
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Note {
     Sapling(sapling::Note),
     #[cfg(feature = "orchard")]
-    Orchard(orchard::Note),
-}
-
-impl From<sapling::Note> for Note {
-    fn from(note: sapling::Note) -> Self {
-        Note::Sapling(note)
-    }
-}
-
-#[cfg(feature = "orchard")]
-impl From<orchard::Note> for Note {
-    fn from(note: orchard::Note) -> Self {
-        Note::Orchard(note)
-    }
+    Orchard {
+        note: orchard::Note,
+        pool: orchard::ValuePool,
+    },
 }
 
 impl Note {
@@ -600,7 +589,7 @@ impl Note {
         match self {
             Note::Sapling(n) => Receiver::Sapling(n.recipient()),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => Receiver::Orchard(n.recipient()),
+            Note::Orchard { note, .. } => Receiver::Orchard(note.recipient()),
         }
     }
 
@@ -610,18 +599,21 @@ impl Note {
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => Zatoshis::from_u64(n.value().inner()).expect(
+            Note::Orchard { note, .. } => Zatoshis::from_u64(note.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
     }
 
-    /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedPool {
+    /// Returns the shielded value pool to which this note belongs.
+    pub fn pool(&self) -> ShieldedPool {
         match self {
             Note::Sapling(_) => ShieldedPool::Sapling,
             #[cfg(feature = "orchard")]
-            Note::Orchard(_) => ShieldedPool::Orchard,
+            Note::Orchard { pool, .. } => match pool {
+                orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
+                orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+            },
         }
     }
 }
