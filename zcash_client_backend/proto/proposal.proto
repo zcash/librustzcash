@@ -54,6 +54,10 @@ enum ValuePool {
     Sapling = 2;
     // The Orchard value pool
     Orchard = 3;
+    // The Ironwood value pool (ZIP 2005). Ironwood notes are Orchard-shaped but
+    // belong to a distinct pool; older decoders that do not recognize this value
+    // will reject the proposal rather than misattribute it to Orchard.
+    Ironwood = 4;
 }
 
 // A mapping from ZIP 321 payment index to the output pool that has been chosen

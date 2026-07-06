@@ -174,26 +174,13 @@ impl std::error::Error for ProposalError {}
 /// The Sapling inputs to a proposed transaction.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ShieldedInputs<NoteRef> {
-    anchor_height: BlockHeight,
     notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
 }
 
 impl<NoteRef> ShieldedInputs<NoteRef> {
     /// Constructs a [`ShieldedInputs`] from its constituent parts.
-    pub fn from_parts(
-        anchor_height: BlockHeight,
-        notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
-    ) -> Self {
-        Self {
-            anchor_height,
-            notes,
-        }
-    }
-
-    /// Returns the anchor height for Sapling inputs that should be used when constructing the
-    /// proposed transaction.
-    pub fn anchor_height(&self) -> BlockHeight {
-        self.anchor_height
+    pub fn from_parts(notes: NonEmpty<ReceivedNote<NoteRef, Note>>) -> Self {
+        Self { notes }
     }
 
     /// Returns the list of Sapling notes to be used as inputs to the proposed transaction.
@@ -307,6 +294,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `payment_pools`: A map from payment index to pool type.
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
+    /// * `anchor_height`: See [`Step::from_parts`].
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `fee_rule`: The fee rule observed by the proposed transaction.
     /// * `min_target_height`: The minimum block height at which the transaction may be created.
@@ -318,6 +306,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         payment_pools: BTreeMap<usize, PoolType>,
         transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+        anchor_height: BlockHeight,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
@@ -332,6 +321,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                 payment_pools,
                 transparent_inputs,
                 shielded_inputs,
+                anchor_height,
                 vec![],
                 balance,
                 is_shielding,
@@ -425,6 +415,12 @@ pub struct Step<NoteRef> {
     payment_pools: BTreeMap<usize, PoolType>,
     transparent_inputs: Vec<WalletTransparentOutput<()>>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+    /// The anchor height that binds every shielded-tree lookup performed while building this
+    /// step's transaction — both shielded-input witnesses and shielded-output anchors. A single
+    /// anchor per step is required so that transactions with only routed shielded outputs (for
+    /// example, an Orchard-recipient payment post-NU6.3 that the builder routes into a fresh
+    /// Ironwood bundle) are indistinguishable from transactions that spend real shielded notes.
+    anchor_height: BlockHeight,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
     is_shielding: bool,
@@ -446,6 +442,9 @@ impl<NoteRef> Step<NoteRef> {
     ///   addresses).
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
+    /// * `anchor_height`: The anchor height that binds every shielded-tree lookup performed
+    ///   while building this step's transaction — both shielded-input witnesses and
+    ///   shielded-output anchors.
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
@@ -456,6 +455,7 @@ impl<NoteRef> Step<NoteRef> {
         payment_pools: BTreeMap<usize, PoolType>,
         transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+        anchor_height: BlockHeight,
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
         is_shielding: bool,
@@ -466,7 +466,15 @@ impl<NoteRef> Step<NoteRef> {
         }
         for (idx, pool) in &payment_pools {
             if let Some(payment) = transaction_request.payments().get(idx) {
-                if !payment.recipient_address().can_receive_as(*pool) {
+                // Ironwood notes are Orchard-shaped and delivered to the recipient's Orchard
+                // receiver, so an Ironwood-pool payment is valid whenever the recipient can
+                // receive Orchard.
+                let deliverable = payment.recipient_address().can_receive_as(*pool)
+                    || (*pool == PoolType::IRONWOOD
+                        && payment
+                            .recipient_address()
+                            .can_receive_as(PoolType::ORCHARD));
+                if !deliverable {
                     return Err(ProposalError::PaymentPoolsMismatch);
                 }
                 if payment.amount().is_none() {
@@ -541,6 +549,7 @@ impl<NoteRef> Step<NoteRef> {
                 payment_pools,
                 transparent_inputs,
                 shielded_inputs,
+                anchor_height,
                 prior_step_inputs,
                 balance,
                 is_shielding,
@@ -569,6 +578,11 @@ impl<NoteRef> Step<NoteRef> {
     /// Returns the shielded inputs that have been selected to fund the transaction.
     pub fn shielded_inputs(&self) -> Option<&ShieldedInputs<NoteRef>> {
         self.shielded_inputs.as_ref()
+    }
+    /// Returns the anchor height that binds every shielded-tree lookup performed while building
+    /// this step's transaction.
+    pub fn anchor_height(&self) -> BlockHeight {
+        self.anchor_height
     }
     /// Returns the inputs that should be obtained from the outputs of the transaction
     /// created to satisfy a previous step of the proposal.
@@ -704,10 +718,7 @@ impl<NoteRef> Debug for Step<NoteRef> {
                 &self.shielded_inputs().map(|i| i.notes.len()),
             )
             .field("prior_step_inputs", &self.prior_step_inputs)
-            .field(
-                "anchor_height",
-                &self.shielded_inputs().map(|i| i.anchor_height),
-            )
+            .field("anchor_height", &self.anchor_height)
             .field("balance", &self.balance)
             .field("is_shielding", &self.is_shielding)
             .finish_non_exhaustive()
@@ -768,13 +779,13 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let shielded_inputs = NonEmpty::from_vec(received)
-            .map(|notes| ShieldedInputs::from_parts(BlockHeight::from_u32(100), notes));
+        let shielded_inputs = NonEmpty::from_vec(received).map(ShieldedInputs::from_parts);
         Step {
             transaction_request: TransactionRequest::empty(),
             payment_pools: BTreeMap::new(),
             transparent_inputs: vec![],
             shielded_inputs,
+            anchor_height: BlockHeight::from_u32(100),
             prior_step_inputs: vec![],
             balance: TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
             is_shielding: false,

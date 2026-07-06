@@ -1341,12 +1341,23 @@ impl PoolMeta {
 pub struct AccountMeta {
     sapling: Option<PoolMeta>,
     orchard: Option<PoolMeta>,
+    ironwood: Option<PoolMeta>,
 }
 
 impl AccountMeta {
     /// Constructs a new [`AccountMeta`] value from its constituent parts.
-    pub fn new(sapling: Option<PoolMeta>, orchard: Option<PoolMeta>) -> Self {
-        Self { sapling, orchard }
+    ///
+    /// Ironwood metadata is tracked separately from Orchard, as Ironwood is a distinct pool.
+    pub fn new(
+        sapling: Option<PoolMeta>,
+        orchard: Option<PoolMeta>,
+        ironwood: Option<PoolMeta>,
+    ) -> Self {
+        Self {
+            sapling,
+            orchard,
+            ironwood,
+        }
     }
 
     /// Returns metadata about Sapling notes belonging to the account for which this was generated.
@@ -1365,6 +1376,15 @@ impl AccountMeta {
         self.orchard.as_ref()
     }
 
+    /// Returns metadata about Ironwood notes belonging to the account for which this was generated.
+    ///
+    /// Ironwood notes are Orchard-shaped but belong to a pool distinct from Orchard. Returns
+    /// [`None`] if no metadata is available or it was not possible to evaluate the query described
+    /// by a [`NoteFilter`] given the available wallet data.
+    pub fn ironwood(&self) -> Option<&PoolMeta> {
+        self.ironwood.as_ref()
+    }
+
     fn sapling_note_count(&self) -> Option<usize> {
         self.sapling.as_ref().map(|m| m.note_count)
     }
@@ -1373,12 +1393,16 @@ impl AccountMeta {
         self.orchard.as_ref().map(|m| m.note_count)
     }
 
-    /// Returns the number of unspent notes in the wallet for the given shielded protocol.
+    fn ironwood_note_count(&self) -> Option<usize> {
+        self.ironwood.as_ref().map(|m| m.note_count)
+    }
+
+    /// Returns the number of unspent notes in the wallet for the given shielded pool.
     pub fn note_count(&self, protocol: ShieldedPool) -> Option<usize> {
         match protocol {
             ShieldedPool::Sapling => self.sapling_note_count(),
             ShieldedPool::Orchard => self.orchard_note_count(),
-            ShieldedPool::Ironwood => todo!("Ironwood note counts are not yet tracked"),
+            ShieldedPool::Ironwood => self.ironwood_note_count(),
         }
     }
 
@@ -1389,9 +1413,14 @@ impl AccountMeta {
     /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
     /// only for a single pool, the metadata for that pool will be returned.
     pub fn total_note_count(&self) -> Option<usize> {
-        let s = self.sapling_note_count();
-        let o = self.orchard_note_count();
-        s.zip(o).map(|(s, o)| s + o).or(s).or(o)
+        [
+            self.sapling_note_count(),
+            self.orchard_note_count(),
+            self.ironwood_note_count(),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| a + b)
     }
 
     fn sapling_value(&self) -> Option<Zatoshis> {
@@ -1402,18 +1431,24 @@ impl AccountMeta {
         self.orchard.as_ref().map(|m| m.value)
     }
 
+    fn ironwood_value(&self) -> Option<Zatoshis> {
+        self.ironwood.as_ref().map(|m| m.value)
+    }
+
     /// Returns the total value of shielded notes represented by [`Self::total_note_count`]
     ///
     /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
     /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
     /// only for a single pool, the metadata for that pool will be returned.
     pub fn total_value(&self) -> Option<Zatoshis> {
-        let s = self.sapling_value();
-        let o = self.orchard_value();
-        s.zip(o)
-            .map(|(s, o)| (s + o).expect("Does not overflow Zcash maximum value."))
-            .or(s)
-            .or(o)
+        [
+            self.sapling_value(),
+            self.orchard_value(),
+            self.ironwood_value(),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| (a + b).expect("Does not overflow Zcash maximum value."))
     }
 }
 
@@ -2667,15 +2702,21 @@ pub struct DecryptedTransaction<'a, Tx: DecryptableTransaction<AccountId>, Accou
     sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
+    #[cfg(feature = "orchard")]
+    ironwood_outputs: Vec<Tx::DecryptedOrchardOutput>,
 }
 
 impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
+    ///
+    /// Ironwood outputs are Orchard-shaped but belong to a distinct pool, and are passed and
+    /// tracked separately from Orchard outputs.
     pub fn new(
         mined_height: Option<BlockHeight>,
         tx: &'a Tx,
         sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
+        #[cfg(feature = "orchard")] ironwood_outputs: Vec<Tx::DecryptedOrchardOutput>,
     ) -> Self {
         Self {
             mined_height,
@@ -2683,6 +2724,8 @@ impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<
             sapling_outputs,
             #[cfg(feature = "orchard")]
             orchard_outputs,
+            #[cfg(feature = "orchard")]
+            ironwood_outputs,
         }
     }
 
@@ -2704,11 +2747,19 @@ impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<
         &self.orchard_outputs
     }
 
+    /// Returns the Ironwood outputs that were decrypted from the transaction.
+    ///
+    /// Ironwood outputs are Orchard-shaped but belong to a pool distinct from Orchard.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_outputs(&self) -> &[Tx::DecryptedOrchardOutput] {
+        &self.ironwood_outputs
+    }
+
     /// Returns whether the transaction has decrypted outputs
     pub fn has_decrypted_outputs(&self) -> bool {
         let has_sapling = !self.sapling_outputs.is_empty();
         #[cfg(feature = "orchard")]
-        let has_orchard = !self.orchard_outputs.is_empty();
+        let has_orchard = !self.orchard_outputs.is_empty() || !self.ironwood_outputs.is_empty();
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
@@ -3784,6 +3835,31 @@ mod tests {
     use transparent::address::TransparentAddress;
     use zcash_keys::address::{Address, UnifiedAddress};
     use zip32::DiversifierIndex;
+
+    #[test]
+    fn account_meta_totals_include_ironwood() {
+        let meta = AccountMeta::new(
+            Some(PoolMeta::new(2, Zatoshis::const_from_u64(200))),
+            Some(PoolMeta::new(3, Zatoshis::const_from_u64(300))),
+            Some(PoolMeta::new(5, Zatoshis::const_from_u64(500))),
+        );
+        assert_eq!(meta.note_count(ShieldedPool::Ironwood), Some(5));
+        assert_eq!(meta.total_note_count(), Some(10));
+        assert_eq!(meta.total_value(), Some(Zatoshis::const_from_u64(1000)));
+
+        // With metadata for only the Ironwood pool, the totals reflect that pool alone.
+        let ironwood_only = AccountMeta::new(
+            None,
+            None,
+            Some(PoolMeta::new(4, Zatoshis::const_from_u64(400))),
+        );
+        assert_eq!(ironwood_only.note_count(ShieldedPool::Ironwood), Some(4));
+        assert_eq!(ironwood_only.total_note_count(), Some(4));
+        assert_eq!(
+            ironwood_only.total_value(),
+            Some(Zatoshis::const_from_u64(400))
+        );
+    }
 
     fn derived_source() -> AddressSource {
         AddressSource::Derived {

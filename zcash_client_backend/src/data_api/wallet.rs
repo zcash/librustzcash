@@ -870,8 +870,8 @@ where
     InputsT: ShieldingSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let chain_tip_height = wallet_db
-        .chain_height()
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted)
         .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
@@ -883,7 +883,8 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            (chain_tip_height + 1).into(),
+            target_height,
+            anchor_height,
             confirmations_policy,
             output_filter,
         )
@@ -953,8 +954,8 @@ where
     InputsT: ShieldingSelector<InputSource = DbT>,
     FeeRuleT: FeeRule + Clone,
 {
-    let chain_tip_height = wallet_db
-        .chain_height()
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted)
         .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
@@ -968,7 +969,8 @@ where
             to_address,
             memo,
             limit,
-            (chain_tip_height + 1).into(),
+            target_height,
+            anchor_height,
         )
         .map_err(Error::from)
 }
@@ -1268,26 +1270,32 @@ where
         return Err(Error::ProposalNotSupported);
     }
 
+    // Each shielded-tree anchor is derived from the step's single anchor height so that a
+    // transaction with only routed shielded outputs (for example, an Orchard-recipient payment
+    // routed by the builder into a fresh Ironwood bundle post-NU6.3) is indistinguishable from
+    // one that spends real notes in that pool.
+    let anchor_height = proposal_step.anchor_height();
+
     let (sapling_anchor, sapling_inputs) = if proposal_step
         .involves(PoolType::Shielded(ShieldedPool::Sapling))
     {
-        proposal_step.shielded_inputs().map_or_else(
-            || Ok((Some(sapling::Anchor::empty_tree()), vec![])),
-            |inputs| {
-                wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|sapling_tree| {
-                    let anchor = sapling_tree
-                        .root_at_checkpoint_id(&inputs.anchor_height())?
-                        .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
-                        .into();
+        wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|sapling_tree| {
+            let anchor = sapling_tree
+                .root_at_checkpoint_id(&anchor_height)?
+                .ok_or(ProposalError::AnchorNotFound(anchor_height))?
+                .into();
 
-                    let sapling_inputs = inputs
+            let sapling_inputs = proposal_step
+                .shielded_inputs()
+                .map(|inputs| {
+                    inputs
                         .notes()
                         .iter()
                         .filter_map(|selected| match selected.note() {
                             Note::Sapling(note) => sapling_tree
                                 .witness_at_checkpoint_id_caching(
                                     selected.note_commitment_tree_position(),
-                                    &inputs.anchor_height(),
+                                    &anchor_height,
                                 )
                                 .and_then(|witness| {
                                     witness
@@ -1301,12 +1309,13 @@ where
                             #[cfg(feature = "orchard")]
                             Note::Orchard { .. } => None,
                         })
-                        .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
-
-                    Ok((Some(anchor), sapling_inputs))
+                        .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()
                 })
-            },
-        )?
+                .transpose()?
+                .unwrap_or_default();
+
+            Ok((Some(anchor), sapling_inputs))
+        })?
     } else {
         (None, vec![])
     };
@@ -1315,27 +1324,26 @@ where
     let (orchard_anchor, orchard_inputs) = if proposal_step
         .involves(PoolType::Shielded(ShieldedPool::Orchard))
     {
-        proposal_step.shielded_inputs().map_or_else(
-            || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
-            |inputs| {
-                wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|orchard_tree| {
-                    let anchor = orchard_tree
-                        .root_at_checkpoint_id(&inputs.anchor_height())?
-                        .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
-                        .into();
+        wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|orchard_tree| {
+            let anchor = orchard_tree
+                .root_at_checkpoint_id(&anchor_height)?
+                .ok_or(ProposalError::AnchorNotFound(anchor_height))?
+                .into();
 
-                    let orchard_inputs = inputs
+            let orchard_inputs = proposal_step
+                .shielded_inputs()
+                .map(|inputs| {
+                    inputs
                         .notes()
                         .iter()
                         .filter_map(|selected| match selected.note() {
-                            #[cfg(feature = "orchard")]
                             Note::Orchard {
                                 note,
                                 pool: orchard::ValuePool::Orchard,
                             } => orchard_tree
                                 .witness_at_checkpoint_id_caching(
                                     selected.note_commitment_tree_position(),
-                                    &inputs.anchor_height(),
+                                    &anchor_height,
                                 )
                                 .and_then(|witness| {
                                     witness
@@ -1346,12 +1354,13 @@ where
                                 .transpose(),
                             _ => None,
                         })
-                        .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()?;
-
-                    Ok((Some(anchor), orchard_inputs))
+                        .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()
                 })
-            },
-        )?
+                .transpose()?
+                .unwrap_or_default();
+
+            Ok((Some(anchor), orchard_inputs))
+        })?
     } else {
         (None, vec![])
     };
@@ -1359,54 +1368,50 @@ where
     let orchard_anchor = None;
 
     // The Ironwood builder must be available whenever the transaction will interact with the
-    // Ironwood bundle: either the proposal itself involves the Ironwood pool, or Ironwood is active
-    // at the target height and the builder will route Orchard-pool outputs into a fresh Ironwood
-    // bundle. The anchor must be a real Ironwood tree root so a transaction with only routed
-    // outputs is indistinguishable from one that spends real Ironwood notes.
+    // Ironwood bundle: either the proposal itself involves the Ironwood pool, or Ironwood is
+    // active at the target height and the builder will route Orchard-pool outputs into a fresh
+    // Ironwood bundle.
     #[cfg(feature = "orchard")]
     let (ironwood_anchor, ironwood_inputs) = if proposal_step
         .involves(PoolType::Shielded(ShieldedPool::Ironwood))
         || ironwood_active_at(params, min_target_height)
     {
-        let Some(inputs) = proposal_step.shielded_inputs() else {
-            // A shielding proposal carries no shielded anchor height, so there is no valid Ironwood
-            // anchor to bind to. This path is not yet supported.
-            return Err(Error::ProposalNotSupported);
-        };
         wallet_db
             .with_ironwood_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|ironwood_tree| {
                 let anchor = ironwood_tree
-                    .root_at_checkpoint_id(&inputs.anchor_height())?
-                    .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
+                    .root_at_checkpoint_id(&anchor_height)?
+                    .ok_or(ProposalError::AnchorNotFound(anchor_height))?
                     .into();
 
-                let mut ironwood_inputs = Vec::<(&orchard::Note, orchard::tree::MerklePath)>::new();
-
-                for ironwood_input in
-                    inputs
-                        .notes()
-                        .iter()
-                        .filter_map(|selected| match selected.note() {
-                            Note::Orchard {
-                                note,
-                                pool: orchard::ValuePool::Ironwood,
-                            } => ironwood_tree
-                                .witness_at_checkpoint_id_caching(
-                                    selected.note_commitment_tree_position(),
-                                    &inputs.anchor_height(),
-                                )
-                                .and_then(|witness| {
-                                    witness
-                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
-                                })
-                                .map(|merkle_path| Some((note, merkle_path.into())))
-                                .map_err(Error::from)
-                                .transpose(),
-                            _ => None,
-                        })
-                {
-                    ironwood_inputs.push(ironwood_input?);
-                }
+                let ironwood_inputs = proposal_step
+                    .shielded_inputs()
+                    .map(|inputs| {
+                        inputs
+                            .notes()
+                            .iter()
+                            .filter_map(|selected| match selected.note() {
+                                Note::Orchard {
+                                    note,
+                                    pool: orchard::ValuePool::Ironwood,
+                                } => ironwood_tree
+                                    .witness_at_checkpoint_id_caching(
+                                        selected.note_commitment_tree_position(),
+                                        &anchor_height,
+                                    )
+                                    .and_then(|witness| {
+                                        witness.ok_or(ShardTreeError::Query(
+                                            QueryError::CheckpointPruned,
+                                        ))
+                                    })
+                                    .map(|merkle_path| Some((note, merkle_path.into())))
+                                    .map_err(Error::from)
+                                    .transpose(),
+                                _ => None,
+                            })
+                            .collect::<Result<Vec<_>, Error<_, _, _, _, _, _>>>()
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
 
                 Ok((Some(anchor), ironwood_inputs))
             })?
@@ -1750,12 +1755,11 @@ where
                 }
                 #[cfg(feature = "orchard")]
                 PoolType::Shielded(ShieldedPool::Orchard) => {
+                    // Legacy Orchard payment (pre-NU6.3). Once Ironwood is active, input
+                    // selection assigns Orchard-receiver payments the Ironwood output pool
+                    // instead, so this arm always builds a plain Orchard output.
                     let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
-                    if ironwood_active_at(params, min_target_height) {
-                        add_ironwood_output(&mut builder, &mut ironwood_output_meta, to)?;
-                    } else {
-                        add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
-                    }
+                    add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
                 }
                 PoolType::Shielded(ShieldedPool::Sapling) => {
                     let to = *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction");
@@ -1765,8 +1769,16 @@ where
                     let to = *ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction");
                     add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
                 }
+                #[cfg(feature = "orchard")]
                 PoolType::Shielded(ShieldedPool::Ironwood) => {
-                    todo!("Ironwood pool support is not yet implemented")
+                    // Ironwood payment (post-NU6.3): delivered to the recipient's Orchard
+                    // receiver, but through the Ironwood bundle, a pool distinct from Orchard.
+                    let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
+                    add_ironwood_output(&mut builder, &mut ironwood_output_meta, to)?;
+                }
+                #[cfg(not(feature = "orchard"))]
+                PoolType::Shielded(ShieldedPool::Ironwood) => {
+                    return Err(Error::ProposalNotSupported);
                 }
             },
             Address::Sapling(to) => {

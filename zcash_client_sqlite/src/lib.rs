@@ -744,7 +744,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(not(feature = "orchard"))]
         let orchard_pool_meta = None;
 
-        Ok(AccountMeta::new(sapling_pool_meta, orchard_pool_meta))
+        #[cfg(feature = "orchard")]
+        let ironwood_pool_meta = unspent_notes_meta(
+            self.conn.borrow(),
+            ShieldedPool::Ironwood,
+            target_height,
+            account_id,
+            selector,
+            exclude,
+        )?;
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_pool_meta = None;
+
+        Ok(AccountMeta::new(
+            sapling_pool_meta,
+            orchard_pool_meta,
+            ironwood_pool_meta,
+        ))
     }
 }
 

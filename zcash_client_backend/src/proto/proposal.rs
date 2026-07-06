@@ -158,6 +158,10 @@ pub enum ValuePool {
     Sapling = 2,
     /// The Orchard value pool
     Orchard = 3,
+    /// The Ironwood value pool (ZIP 2005). Ironwood notes are Orchard-shaped but
+    /// belong to a distinct pool; older decoders that do not recognize this value
+    /// will reject the proposal rather than misattribute it to Orchard.
+    Ironwood = 4,
 }
 impl ValuePool {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -170,6 +174,7 @@ impl ValuePool {
             Self::Transparent => "Transparent",
             Self::Sapling => "Sapling",
             Self::Orchard => "Orchard",
+            Self::Ironwood => "Ironwood",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -179,6 +184,7 @@ impl ValuePool {
             "Transparent" => Some(Self::Transparent),
             "Sapling" => Some(Self::Sapling),
             "Orchard" => Some(Self::Orchard),
+            "Ironwood" => Some(Self::Ironwood),
             _ => None,
         }
     }

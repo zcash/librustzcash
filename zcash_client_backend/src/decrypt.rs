@@ -17,7 +17,9 @@ use zip32::Scope;
 use crate::data_api::DecryptedTransaction;
 
 #[cfg(feature = "orchard")]
-use orchard::note_encryption::OrchardDomain;
+use orchard::note_encryption::{
+    DomainVersion, IronwoodVersion, NoteEncryptionDomain, OrchardVersion,
+};
 
 /// An enumeration of the possible relationships a TXO can have to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -199,15 +201,25 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         })
         .collect();
 
+    // Trial-decrypt an Orchard-family (Orchard or Ironwood) bundle. The two bundle kinds are
+    // protocol-equivalent for trial decryption: both are Orchard-shaped and use the account's
+    // Orchard viewing keys. They differ only in the note plaintext version their domain accepts
+    // (selected by `V`: version 2 for [`OrchardVersion`], version 3 for [`IronwoodVersion`]) and
+    // in the value pool their notes belong to. Decrypting a bundle under the other kind's domain
+    // would silently detect nothing.
     #[cfg(feature = "orchard")]
-    fn decrypt_orchard_bundle<AccountId: Copy>(
+    fn decrypt_orchard_protocol_bundle<V: DomainVersion, AccountId: Copy>(
         ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
         bundle: &orchard::bundle::Bundle<
             orchard::bundle::Authorized,
             zcash_protocol::value::ZatBalance,
         >,
-        value_pool: orchard::ValuePool,
+        pool: orchard::ValuePool,
     ) -> impl Iterator<Item = DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>> {
+        let shielded_pool = match pool {
+            orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+            orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
+        };
         ufvks
             .iter()
             .flat_map(|(account, ufvk)| ufvk.orchard().into_iter().map(|fvk| (*account, fvk)))
@@ -223,7 +235,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                     .iter()
                     .enumerate()
                     .flat_map(move |(index, action)| {
-                        let domain = OrchardDomain::for_action(action);
+                        let domain = NoteEncryptionDomain::<V>::for_action(action);
                         try_note_decryption(&domain, &ivk_external, action)
                             .map(|ret| (ret, TransferType::Incoming))
                             .or_else(|| {
@@ -244,8 +256,8 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                             .map(move |((note, _, memo), transfer_type)| {
                                 DecryptedOutput::new(
                                     index,
-                                    (note, value_pool),
-                                    ShieldedPool::Orchard,
+                                    (note, pool),
+                                    shielded_pool,
                                     account,
                                     MemoBytes::from_bytes(&memo).expect("correct length"),
                                     transfer_type,
@@ -256,14 +268,30 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     }
 
     #[cfg(feature = "orchard")]
-    let orchard_outputs =
-        tx.orchard_bundle()
-            .iter()
-            .flat_map(|bundle| decrypt_orchard_bundle(ufvks, bundle, orchard::ValuePool::Orchard))
-            .chain(tx.ironwood_bundle().iter().flat_map(|bundle| {
-                decrypt_orchard_bundle(ufvks, bundle, orchard::ValuePool::Ironwood)
-            }))
-            .collect();
+    let orchard_outputs = tx
+        .orchard_bundle()
+        .iter()
+        .flat_map(|bundle| {
+            decrypt_orchard_protocol_bundle::<OrchardVersion, _>(
+                ufvks,
+                bundle,
+                orchard::ValuePool::Orchard,
+            )
+        })
+        .collect();
+
+    #[cfg(feature = "orchard")]
+    let ironwood_outputs = tx
+        .ironwood_bundle()
+        .iter()
+        .flat_map(|bundle| {
+            decrypt_orchard_protocol_bundle::<IronwoodVersion, _>(
+                ufvks,
+                bundle,
+                orchard::ValuePool::Ironwood,
+            )
+        })
+        .collect();
 
     DecryptedTransaction::new(
         mined_height,
@@ -271,5 +299,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         sapling_outputs,
         #[cfg(feature = "orchard")]
         orchard_outputs,
+        #[cfg(feature = "orchard")]
+        ironwood_outputs,
     )
 }
