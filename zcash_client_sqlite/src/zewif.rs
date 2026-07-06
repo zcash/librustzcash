@@ -1320,3 +1320,401 @@ fn account_purpose<S>(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use bip0039::{English, Mnemonic};
+    use incrementalmerkletree::Hashable as _;
+    use tempfile::NamedTempFile;
+    use zcash_client_backend::data_api::{Account as _, AccountPurpose, AccountSource, WalletRead};
+    use zcash_keys::encoding::AddressCodec;
+    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_protocol::consensus;
+    use zip32::fingerprint::SeedFingerprint;
+
+    use super::*;
+    use crate::testing::db::{test_clock, test_rng};
+    use crate::wallet::init::WalletMigrator;
+
+    const TEST_NETWORK: consensus::Network = consensus::Network::TestNetwork;
+
+    /// A [`SecretSink`] that records the identifying halves of the entries
+    /// delivered to it.
+    #[derive(Default)]
+    struct RecordingSink {
+        seeds: Vec<String>,
+        transparent: Vec<Vec<u8>>,
+        sapling: Vec<String>,
+        sprout: Vec<String>,
+        unified: Vec<String>,
+    }
+
+    impl SecretSink for RecordingSink {
+        type Error = core::convert::Infallible;
+
+        fn store_seed(&mut self, entry: &::zewif::SeedEntry) -> Result<(), Self::Error> {
+            self.seeds.push(entry.fingerprint().encoding().to_owned());
+            Ok(())
+        }
+
+        fn store_transparent_key(
+            &mut self,
+            entry: &::zewif::TransparentKeyEntry,
+        ) -> Result<(), Self::Error> {
+            self.transparent.push(entry.pubkey().as_slice().to_vec());
+            Ok(())
+        }
+
+        fn store_sapling_key(
+            &mut self,
+            entry: &::zewif::SaplingKeyEntry,
+        ) -> Result<(), Self::Error> {
+            self.sapling.push(entry.fvk().encoding().to_owned());
+            Ok(())
+        }
+
+        fn store_sprout_key(&mut self, entry: &::zewif::SproutKeyEntry) -> Result<(), Self::Error> {
+            self.sprout.push(entry.address().to_owned());
+            Ok(())
+        }
+
+        fn store_unified_key(
+            &mut self,
+            entry: &::zewif::UnifiedKeyEntry,
+        ) -> Result<(), Self::Error> {
+            self.unified.push(entry.fvk().encoding().to_owned());
+            Ok(())
+        }
+    }
+
+    /// Creates an initialized empty wallet database on the test network.
+    fn test_wallet_db() -> (
+        NamedTempFile,
+        WalletDb<
+            rusqlite::Connection,
+            consensus::Network,
+            crate::util::testing::FixedClock,
+            rand_chacha::ChaChaRng,
+        >,
+    ) {
+        let db_file = NamedTempFile::new().unwrap();
+        let mut wdb =
+            WalletDb::for_path(db_file.path(), TEST_NETWORK, test_clock(), test_rng()).unwrap();
+        WalletMigrator::new().init_or_migrate(&mut wdb).unwrap();
+        (db_file, wdb)
+    }
+
+    /// Encodes a seed fingerprint in the canonical Bech32m form ZeWIF uses.
+    fn encode_seed_fp(fp: &SeedFingerprint) -> String {
+        bech32::encode::<bech32::Bech32m>(bech32::Hrp::parse(SEED_FP_HRP).unwrap(), &fp.to_bytes())
+            .unwrap()
+    }
+
+    /// A mnemonic-backed seed and the document/derived artifacts tests need.
+    struct TestSeed {
+        mnemonic_phrase: String,
+        fingerprint_encoding: String,
+        ufvk: UnifiedFullViewingKey,
+    }
+
+    fn test_seed(account_index: u32) -> TestSeed {
+        let mnemonic = <Mnemonic<English>>::from_entropy([0xAB; 32]).unwrap();
+        let seed = mnemonic.to_seed("");
+        let fp = SeedFingerprint::from_seed(&seed).unwrap();
+        let usk = UnifiedSpendingKey::from_seed(
+            &TEST_NETWORK,
+            &seed,
+            zip32::AccountId::try_from(account_index).unwrap(),
+        )
+        .unwrap();
+        TestSeed {
+            mnemonic_phrase: mnemonic.phrase().to_owned(),
+            fingerprint_encoding: encode_seed_fp(&fp),
+            ufvk: usk.to_unified_full_viewing_key(),
+        }
+    }
+
+    fn seed_entry(ts: &TestSeed) -> ::zewif::SeedEntry {
+        ::zewif::SeedEntry::new(
+            ::zewif::SeedFingerprint::new(ts.fingerprint_encoding.clone()),
+            ::zewif::SeedMaterial::Bip39Mnemonic(::zewif::Bip39Mnemonic::new(
+                ts.mnemonic_phrase.clone(),
+                None,
+            )),
+        )
+    }
+
+    fn document(network: ::zewif::Network) -> (::zewif::Zewif, ::zewif::ZewifWallet) {
+        let doc = ::zewif::Zewif::new(
+            ::zewif::BlockHeight::from(3_000_000),
+            ::zewif::BlockHash::from_bytes([0xEE; 32]),
+        );
+        let wallet = ::zewif::ZewifWallet::new(network);
+        (doc, wallet)
+    }
+
+    #[test]
+    fn network_mismatch_is_rejected() {
+        let (_file, mut wdb) = test_wallet_db();
+        let (mut doc, wallet) = document(::zewif::Network::Mainnet);
+        doc.add_wallet(wallet);
+
+        let result = import_wallet(&mut wdb, &doc, &mut DiscardSecrets);
+        assert!(matches!(
+            result,
+            Err(ZewifImportError::NetworkMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn view_only_ufvk_account_with_chain_state_birthday() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("viewing");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        let mut chain_state = ::zewif::ChainState::new(::zewif::BlockHeight::from(2_599_999));
+        chain_state.set_block_hash(::zewif::BlockHash::from_bytes([0xBB; 32]));
+        chain_state.set_sapling_tree(::zewif::Frontier::NonEmpty(
+            ::zewif::FrontierData::from_parts(
+                0,
+                ::zewif::MerkleNode::new(::sapling::Node::empty_root(0.into()).to_bytes()),
+                vec![],
+            ),
+        ));
+        chain_state.set_orchard_tree(::zewif::Frontier::Empty);
+        chain_state.set_ironwood_tree(::zewif::Frontier::Empty);
+        account.set_birthday_chain_state(chain_state);
+        account.set_recover_until_height(::zewif::BlockHeight::from(2_900_000));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.imported_accounts[0].name, "viewing");
+        assert_eq!(
+            report.imported_accounts[0].birthday_basis,
+            BirthdayBasis::ChainState
+        );
+
+        let account_uuid = report.imported_accounts[0].account_uuid;
+        let imported = wdb.get_account(account_uuid).unwrap().unwrap();
+        assert!(matches!(
+            imported.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::ViewOnly,
+                ..
+            }
+        ));
+        // The birthday is the height following the recorded prior chain state.
+        assert_eq!(
+            wdb.get_wallet_birthday().unwrap(),
+            Some(consensus::BlockHeight::from(2_600_000))
+        );
+    }
+
+    #[test]
+    fn derived_account_is_imported_via_hd_derivation() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("derived");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account.set_key_source(::zewif::KeySource::Derived(::zewif::DerivedKeySource::new(
+            ::zewif::SeedFingerprint::new(ts.fingerprint_encoding.clone()),
+            0,
+            None,
+        )));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(sink.seeds, vec![ts.fingerprint_encoding.clone()]);
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(
+            report.imported_accounts[0].birthday_basis,
+            BirthdayBasis::BirthdayHeight
+        );
+
+        let account_uuid = report.imported_accounts[0].account_uuid;
+        let imported = wdb.get_account(account_uuid).unwrap().unwrap();
+        match imported.source() {
+            AccountSource::Derived { derivation, .. } => {
+                assert_eq!(
+                    derivation.seed_fingerprint().to_bytes(),
+                    SeedFingerprint::from_seed(
+                        &<Mnemonic<English>>::from_phrase(&ts.mnemonic_phrase)
+                            .unwrap()
+                            .to_seed("")
+                    )
+                    .unwrap()
+                    .to_bytes()
+                );
+                assert_eq!(derivation.account_index(), zip32::AccountId::ZERO);
+            }
+            other => panic!("expected a derived account, got {other:?}"),
+        }
+        // The account's UFVK is re-derived from the seed and matches the
+        // document's record of it.
+        assert_eq!(
+            imported.ufvk().map(|k| k.encode(&TEST_NETWORK)),
+            Some(ts.ufvk.encode(&TEST_NETWORK)),
+        );
+    }
+
+    #[test]
+    fn sprout_accounts_are_skipped() {
+        let (_file, mut wdb) = test_wallet_db();
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::SproutViewingKey(
+            ::zewif::sprout::SproutViewingKey::new("ZiVtTestViewingKey"),
+        ));
+        account.set_name("sprout");
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+        assert!(report.imported_accounts.is_empty());
+        assert_eq!(report.skipped_accounts.len(), 1);
+        assert_eq!(
+            report.skipped_accounts[0].reason,
+            AccountSkipReason::SproutViewingKey
+        );
+    }
+
+    #[test]
+    fn secrets_are_delivered_to_the_sink() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&[0x42; 32]).unwrap();
+        let pubkey = secret_key.public_key(&secp);
+        let mut wif_payload = vec![0xEF];
+        wif_payload.extend_from_slice(&secret_key.secret_bytes());
+        wif_payload.push(0x01);
+        let wif = bs58::encode(wif_payload).with_check().into_string();
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+            ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                .unwrap(),
+            ::zewif::transparent::TransparentSpendingKey::new(wif),
+        ));
+        store.add_sapling_key(::zewif::SaplingKeyEntry::new(
+            ::zewif::sapling::SaplingExtendedFullViewingKey::new("zxviewtestsapling1aaaa"),
+            ::zewif::sapling::SaplingExtendedSpendingKey::new("secret-extended-key-test1aaaa"),
+        ));
+        store.add_sprout_key(::zewif::SproutKeyEntry::new(
+            "ztTestSproutAddress",
+            ::zewif::sprout::SproutSpendingKey::new("SKTestSproutKey"),
+        ));
+
+        let (mut doc, wallet) = document(::zewif::Network::Testnet);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(sink.seeds.len(), 1);
+        assert_eq!(sink.transparent.len(), 1);
+        assert_eq!(sink.sapling.len(), 1);
+        assert_eq!(sink.sprout.len(), 1);
+        // The transparent key's address is under no account, so it is
+        // delivered to the sink but not registered.
+        assert_eq!(report.transparent_keys_registered, 0);
+        assert_eq!(report.skipped_transparent_keys.len(), 1);
+        assert_eq!(
+            report.skipped_transparent_keys[0].reason,
+            TransparentKeySkipReason::NoOwningAccount
+        );
+    }
+
+    #[test]
+    fn owned_transparent_key_is_registered_and_exposed() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&[0x42; 32]).unwrap();
+        let pubkey = secret_key.public_key(&secp);
+        let address = TransparentAddress::from_pubkey(&pubkey).encode(&TEST_NETWORK);
+        let mut wif_payload = vec![0xEF];
+        wif_payload.extend_from_slice(&secret_key.secret_bytes());
+        wif_payload.push(0x01);
+        let wif = bs58::encode(wif_payload).with_check().into_string();
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+            ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                .unwrap(),
+            ::zewif::transparent::TransparentSpendingKey::new(wif),
+        ));
+
+        // The legacy-style account that owns the imported address.
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::TransparentAddressSet);
+        account.set_name("legacy");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account.set_key_source(::zewif::KeySource::Derived(::zewif::DerivedKeySource::new(
+            ::zewif::SeedFingerprint::new(ts.fingerprint_encoding.clone()),
+            0x7FFF_FFFF,
+            None,
+        )));
+        let mut taddr = ::zewif::transparent::Address::new(address.clone());
+        taddr.set_pubkey(
+            ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                .unwrap(),
+        );
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(taddr),
+        ));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.transparent_keys_registered, 1);
+        assert!(report.skipped_transparent_keys.is_empty());
+        assert_eq!(report.addresses_marked_exposed, 1);
+        assert_eq!(report.addresses_not_recognized, 0);
+    }
+
+    #[test]
+    fn transactions_without_raw_data_are_counted() {
+        let (_file, mut wdb) = test_wallet_db();
+        let (mut doc, wallet) = document(::zewif::Network::Testnet);
+        doc.add_wallet(wallet);
+        let txid = ::zewif::TxId::from_bytes([0x11; 32]);
+        doc.add_transaction(txid, ::zewif::Transaction::new(txid));
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+        assert_eq!(report.transactions_without_raw_data, 1);
+        assert_eq!(report.transactions_stored, 0);
+        assert_eq!(report.transactions_without_wallet_relevance, 0);
+    }
+}
