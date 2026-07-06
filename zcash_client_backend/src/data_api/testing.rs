@@ -1220,7 +1220,7 @@ where
         );
 
         if let Ok(proposal) = &result {
-            check_proposal_serialization_roundtrip(self.wallet(), proposal);
+            check_proposal_serialization_roundtrip(&network, self.wallet(), proposal);
         }
 
         result
@@ -1567,12 +1567,13 @@ pub fn single_output_change_strategy<DbT: InputSource>(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-fn check_proposal_serialization_roundtrip<DbT: InputSource>(
+fn check_proposal_serialization_roundtrip<ParamsT: consensus::Parameters, DbT: InputSource>(
+    params: &ParamsT,
     wallet_data: &DbT,
     proposal: &Proposal<StandardFeeRule, DbT::NoteRef>,
 ) {
     let proposal_proto = crate::proto::proposal::Proposal::from_standard_proposal(proposal);
-    let deserialized_proposal = proposal_proto.try_into_standard_proposal(wallet_data);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(params, wallet_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }
 

@@ -78,6 +78,19 @@ pub enum ProposalError {
     /// transaction is intended.
     #[cfg(feature = "unstable")]
     IncompatibleTxVersion(BranchId),
+    /// After Ironwood activation, a proposal step would create value in the Orchard pool.
+    /// The turnstile only permits value to leave the pool: a step may return change to it
+    /// only when strictly less value returns than the step's Orchard inputs remove.
+    /// (Payments may never be directed to the Orchard pool after Ironwood activation;
+    /// payment classification maintains that invariant, and step construction enforces it
+    /// by assertion.)
+    #[cfg(feature = "orchard")]
+    OrchardPoolValueCreation {
+        /// The total value of the Orchard notes spent by the step.
+        input_total: Zatoshis,
+        /// The total value of the Orchard-pool change outputs created by the step.
+        output_total: Zatoshis,
+    },
 }
 
 impl Display for ProposalError {
@@ -159,6 +172,16 @@ impl Display for ProposalError {
             ProposalError::ShieldingRequiresShieldedRecipient => write!(
                 f,
                 "A shielding proposal's destination must have a shielded receiver."
+            ),
+            #[cfg(feature = "orchard")]
+            ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            } => write!(
+                f,
+                "After Ironwood activation, a step that spends {} zatoshis from the Orchard pool may not return {} zatoshis to it.",
+                u64::from(*input_total),
+                u64::from(*output_total),
             ),
             #[cfg(feature = "unstable")]
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
@@ -300,6 +323,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `min_target_height`: The minimum block height at which the transaction may be created.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
+    /// * `ironwood_active`: See [`Step::from_parts`].
     #[allow(clippy::too_many_arguments)]
     pub fn single_step(
         transaction_request: TransactionRequest,
@@ -311,6 +335,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
         is_shielding: bool,
+        #[cfg(feature = "orchard")] ironwood_active: bool,
     ) -> Result<Self, ProposalError> {
         Ok(Self {
             fee_rule,
@@ -325,6 +350,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                 vec![],
                 balance,
                 is_shielding,
+                #[cfg(feature = "orchard")]
+                ironwood_active,
             )?),
         })
     }
@@ -448,6 +475,11 @@ impl<NoteRef> Step<NoteRef> {
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
+    /// * `ironwood_active`: Whether the Ironwood pool is active at the target height for
+    ///   which this step is proposed. When active, the step is checked against the
+    ///   Orchard turnstile: no payment may be directed to the Orchard pool, and change
+    ///   may be returned to it only when strictly less value returns than the step's
+    ///   Orchard inputs remove.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         prior_steps: &[Step<NoteRef>],
@@ -459,6 +491,7 @@ impl<NoteRef> Step<NoteRef> {
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
         is_shielding: bool,
+        #[cfg(feature = "orchard")] ironwood_active: bool,
     ) -> Result<Self, ProposalError> {
         // Verify that the set of payment pools matches exactly a set of valid payment recipients
         if transaction_request.payments().len() != payment_pools.len() {
@@ -541,6 +574,48 @@ impl<NoteRef> Step<NoteRef> {
                 || request_total > Zatoshis::ZERO)
         {
             return Err(ProposalError::ShieldingInvalid);
+        }
+
+        // After Ironwood activation, the Orchard turnstile only permits value to leave
+        // the pool: payments may not be directed to the Orchard pool, and change may be
+        // returned to it only when strictly less value returns than the step's Orchard
+        // inputs remove.
+        #[cfg(feature = "orchard")]
+        if ironwood_active {
+            // With Ironwood active, payment classification routes every Orchard-receiver
+            // payment to the Ironwood pool before a step is constructed, so a payment
+            // directed to the Orchard pool here is a programming error, not a condition a
+            // well-formed proposal can exhibit. The only Orchard-pool outputs a step may
+            // create are change, which is validated below.
+            assert!(
+                !payment_pools
+                    .iter()
+                    .any(|(_, pool)| *pool == PoolType::ORCHARD),
+                "with Ironwood active, no payment may be directed to the Orchard pool",
+            );
+
+            let orchard_input_total = shielded_inputs
+                .iter()
+                .flat_map(|s_in| s_in.notes().iter())
+                .filter(|n| n.note().pool() == ShieldedPool::Orchard)
+                .map(|n| n.note().value())
+                .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
+                .ok_or(ProposalError::Overflow)?;
+
+            let orchard_change_total = balance
+                .proposed_change()
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::ORCHARD)
+                .map(|c| c.value())
+                .try_fold(Zatoshis::ZERO, |acc, a| acc + a)
+                .ok_or(ProposalError::Overflow)?;
+
+            if orchard_change_total.is_positive() && orchard_change_total >= orchard_input_total {
+                return Err(ProposalError::OrchardPoolValueCreation {
+                    input_total: orchard_input_total,
+                    output_total: orchard_change_total,
+                });
+            }
         }
 
         if input_total == output_total {
@@ -742,8 +817,12 @@ mod tests {
     use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
     use zip321::TransactionRequest;
 
-    use super::{Proposal, ShieldedInputs, Step};
-    use crate::{data_api::wallet::TargetHeight, fees::TransactionBalance, wallet::Note};
+    use super::{Proposal, ProposalError, ShieldedInputs, Step};
+    use crate::{
+        data_api::wallet::TargetHeight,
+        fees::{ChangeValue, TransactionBalance},
+        wallet::Note,
+    };
 
     // Builds an Orchard note of the given version and value. The recipient, rho, and rseed are
     // fixed; only the version and value vary, which is all `Note::pool`/`Note::protocol` depend on.
@@ -761,8 +840,8 @@ mod tests {
         ))
     }
 
-    // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
-    fn step_with_notes(notes: Vec<Note>) -> Step<u32> {
+    // Wraps a list of notes as the shielded inputs of a step.
+    fn shielded_inputs_for(notes: Vec<Note>) -> Option<ShieldedInputs<u32>> {
         let received = notes
             .into_iter()
             .enumerate()
@@ -779,7 +858,12 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let shielded_inputs = NonEmpty::from_vec(received).map(ShieldedInputs::from_parts);
+        NonEmpty::from_vec(received).map(ShieldedInputs::from_parts)
+    }
+
+    // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
+    fn step_with_notes(notes: Vec<Note>) -> Step<u32> {
+        let shielded_inputs = shielded_inputs_for(notes);
         Step {
             transaction_request: TransactionRequest::empty(),
             payment_pools: BTreeMap::new(),
@@ -790,6 +874,163 @@ mod tests {
             balance: TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
             is_shielding: false,
         }
+    }
+
+    // Constructs a validated step spending the given notes, with no payments.
+    fn validated_step(
+        notes: Vec<Note>,
+        balance: TransactionBalance,
+        ironwood_active: bool,
+    ) -> Result<Step<u32>, ProposalError> {
+        Step::from_parts(
+            &[],
+            TransactionRequest::empty(),
+            BTreeMap::new(),
+            vec![],
+            shielded_inputs_for(notes),
+            BlockHeight::from_u32(100),
+            vec![],
+            balance,
+            false,
+            ironwood_active,
+        )
+    }
+
+    fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
+        ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
+    }
+
+    #[test]
+    fn orchard_turnstile_permits_only_strict_pool_balance_decrease() {
+        // Post-activation, change may return to Orchard when strictly less value returns
+        // than the step's Orchard inputs remove: 6_000 change < 10_000 input.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(1, 0),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 6_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Ok(_)
+        );
+
+        // Post-activation, Orchard change equal to the Orchard input total would leave the
+        // pool balance unchanged, which the turnstile forbids.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(1, 1),
+                TransactionBalance::new(
+                    vec![
+                        shielded_change(ShieldedPool::Orchard, 10_000),
+                        shielded_change(ShieldedPool::Ironwood, 16_000),
+                    ],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Err(ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::const_from_u64(10_000)
+                && output_total == Zatoshis::const_from_u64(10_000)
+        );
+
+        // Post-activation, a step that spends no Orchard notes may not create Orchard
+        // change at all.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(0, 1),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 16_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                true,
+            ),
+            Err(ProposalError::OrchardPoolValueCreation {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::ZERO
+                && output_total == Zatoshis::const_from_u64(16_000)
+        );
+
+        // Before activation, value may freely enter the Orchard pool: the same step is
+        // valid.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(0, 1),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 16_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Ok(_)
+        );
+    }
+
+    // Constructs a step that spends a 10_000-zatoshi Orchard note to pay 6_000 zatoshis to
+    // an Orchard receiver, with the payment assigned to the given pool.
+    fn orchard_payment_step(
+        pool: PoolType,
+        ironwood_active: bool,
+    ) -> Result<Step<u32>, ProposalError> {
+        use zcash_keys::address::{Address, UnifiedAddress};
+        use zcash_protocol::consensus::Network;
+
+        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
+        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        let ua = UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap();
+        let to = Address::Unified(ua).to_zcash_address(&Network::TestNetwork);
+
+        let request = TransactionRequest::new(vec![
+            zip321::Payment::new(
+                to,
+                Some(Zatoshis::const_from_u64(6_000)),
+                None,
+                None,
+                None,
+                vec![],
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+
+        Step::from_parts(
+            &[],
+            request,
+            BTreeMap::from([(0usize, pool)]),
+            vec![],
+            shielded_inputs_for(orchard_and_ironwood_notes(1, 0)),
+            BlockHeight::from_u32(100),
+            vec![],
+            TransactionBalance::new(vec![], Zatoshis::const_from_u64(4_000)).unwrap(),
+            false,
+            ironwood_active,
+        )
+    }
+
+    #[test]
+    fn orchard_turnstile_permits_routed_and_pre_activation_payments() {
+        // A payment routed through the Ironwood bundle (the post-activation representation
+        // of an Orchard-receiver payment) is valid.
+        assert_matches!(orchard_payment_step(PoolType::IRONWOOD, true), Ok(_));
+
+        // Before activation, an Orchard-pool payment is valid.
+        assert_matches!(orchard_payment_step(PoolType::ORCHARD, false), Ok(_));
+    }
+
+    // Post-activation, payment classification never assigns a payment to the Orchard pool,
+    // so a step constructed with one is a programming error and step construction asserts.
+    #[test]
+    #[should_panic(expected = "no payment may be directed to the Orchard pool")]
+    fn orchard_pool_payment_with_ironwood_active_is_a_programming_error() {
+        let _ = orchard_payment_step(PoolType::ORCHARD, true);
     }
 
     // Builds `n` version-2 (Orchard) notes followed by `m` version-3 (Ironwood) notes.

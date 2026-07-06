@@ -800,3 +800,15 @@ pub(crate) fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTeste
         _,
     >(TestDbFactory::default(), BlockCache::new());
 }
+
+#[cfg(all(
+    feature = "orchard",
+    feature = "pczt-tests",
+    feature = "transparent-inputs"
+))]
+pub(crate) fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
+    zcash_client_backend::data_api::testing::pool::shielding_coinbase_to_orchard_receiver_delivers_via_ironwood(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
