@@ -546,13 +546,15 @@ pub(crate) mod v2 {
         }
     }
 
+    const ZERO_BYTES_32: [u8; 32] = [0; 32];
+
     /// PCZT fields that are specific to producing the transaction's Orchard bundle.
     #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
     pub struct Bundle {
         actions: Vec<Action>,
         flags: u8,
         value_sum: (u64, bool),
-        anchor: [u8; 32],
+        anchor: Option<[u8; 32]>,
         note_version: SerializedNoteVersion,
         zkproof: Option<Vec<u8>>,
         bsk: Option<[u8; 32]>,
@@ -561,7 +563,7 @@ pub(crate) mod v2 {
     /// Information about an Orchard action within a transaction.
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Action {
-        cv_net: [u8; 32],
+        cv_net: Option<[u8; 32]>,
         spend: v1::Spend,
         output: Output,
         rcv: Option<[u8; 32]>,
@@ -597,7 +599,7 @@ pub(crate) mod v2 {
                     .collect::<Vec<_>>(),
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
-                anchor: bundle.anchor,
+                anchor: (bundle.anchor != ZERO_BYTES_32).then_some(bundle.anchor),
                 note_version: bundle.note_version.into(),
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
@@ -615,7 +617,7 @@ pub(crate) mod v2 {
                     .collect(),
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
-                anchor: bundle.anchor,
+                anchor: bundle.anchor.unwrap_or(ZERO_BYTES_32),
                 note_version: bundle.note_version.into(),
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
@@ -626,7 +628,7 @@ pub(crate) mod v2 {
     impl From<super::Action> for Action {
         fn from(action: super::Action) -> Self {
             Self {
-                cv_net: action.cv_net,
+                cv_net: (action.cv_net != ZERO_BYTES_32).then_some(action.cv_net),
                 spend: v1::Spend::from(action.spend),
                 output: Output::from(action.output),
                 rcv: action.rcv,
@@ -637,7 +639,7 @@ pub(crate) mod v2 {
     impl From<Action> for super::Action {
         fn from(action: Action) -> Self {
             Self {
-                cv_net: action.cv_net,
+                cv_net: action.cv_net.unwrap_or(ZERO_BYTES_32),
                 spend: super::Spend::from(action.spend),
                 output: super::Output::from(action.output),
                 rcv: action.rcv,
@@ -695,6 +697,87 @@ pub(crate) mod v2 {
         (bundle != *empty)
             .then(|| Bundle::try_from(bundle))
             .transpose()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use alloc::{collections::BTreeMap, vec::Vec};
+
+        use super::super::{
+            Action as LogicalAction, Bundle as LogicalBundle, NoteVersion,
+            ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output, Spend,
+        };
+
+        fn logical_action(cv_net: [u8; 32]) -> LogicalAction {
+            LogicalAction {
+                cv_net,
+                spend: Spend {
+                    nullifier: [1; 32],
+                    rk: [2; 32],
+                    spend_auth_sig: None,
+                    recipient: None,
+                    value: None,
+                    rho: None,
+                    rseed: None,
+                    fvk: None,
+                    witness: None,
+                    alpha: None,
+                    zip32_derivation: None,
+                    dummy_sk: None,
+                    proprietary: BTreeMap::new(),
+                },
+                output: Output {
+                    cmx: [3; 32],
+                    ephemeral_key: [4; 32],
+                    enc_ciphertext: Vec::new(),
+                    out_ciphertext: Vec::new(),
+                    recipient: None,
+                    value: None,
+                    rseed: None,
+                    ock: None,
+                    zip32_derivation: None,
+                    user_address: None,
+                    proprietary: BTreeMap::new(),
+                },
+                rcv: None,
+            }
+        }
+
+        fn logical_bundle(anchor: [u8; 32], cv_net: [u8; 32]) -> LogicalBundle {
+            LogicalBundle {
+                actions: vec![logical_action(cv_net)],
+                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                value_sum: (0, false),
+                anchor,
+                note_version: NoteVersion::V2,
+                zkproof: None,
+                bsk: None,
+            }
+        }
+
+        #[test]
+        fn zero_anchor_and_cv_net_encode_as_none() {
+            let bundle = logical_bundle([0; 32], [0; 32]);
+
+            let encoded = super::Bundle::try_from(bundle.clone()).unwrap();
+            assert!(encoded.anchor.is_none());
+            assert!(encoded.actions[0].cv_net.is_none());
+
+            let decoded = LogicalBundle::from(encoded);
+            assert_eq!(decoded, bundle);
+        }
+
+        #[test]
+        fn nonzero_anchor_and_cv_net_encode_as_some() {
+            let bundle = logical_bundle([5; 32], [6; 32]);
+
+            let encoded = super::Bundle::try_from(bundle.clone()).unwrap();
+            assert_eq!(encoded.anchor, Some([5; 32]));
+            assert_eq!(encoded.actions[0].cv_net, Some([6; 32]));
+
+            let decoded = LogicalBundle::from(encoded);
+            assert_eq!(decoded, bundle);
+        }
     }
 }
 

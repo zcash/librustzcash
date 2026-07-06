@@ -57,6 +57,9 @@ workspace.
   version separately from the version 1 serialization format.
 - PCZT version 2 serialization now omits empty Transparent, Sapling, and
   Orchard bundles.
+- PCZT version 2 Orchard bundle encodings now represent the bundle anchor and
+  per-action `cv_net` as optional fields. Absent values are restored as all zero
+  bytes in the logical `pczt::orchard` model.
 - Direct `serde` serialization implementations have been removed from the
   logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
