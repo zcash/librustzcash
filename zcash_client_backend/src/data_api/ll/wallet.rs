@@ -809,6 +809,7 @@ where
         #[cfg(feature = "orchard")]
         {
             tx_has_wallet_outputs |= !d_tx.orchard_outputs().is_empty();
+            tx_has_wallet_outputs |= !d_tx.ironwood_outputs().is_empty();
         }
 
         // Two cases handled here:
@@ -850,6 +851,25 @@ where
         |_, _| Ok(None),
         |wallet_db, output, tx_ref, spent_in| {
             wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), spent_in)
+        },
+        |_account_id| {
+            #[cfg(feature = "transparent-inputs")]
+            gap_update_set.insert((_account_id, TransparentKeyScope::EXTERNAL));
+        },
+    )?;
+
+    // Ironwood outputs are Orchard-shaped but belong to a distinct pool; store them in the
+    // Ironwood tables rather than misfiling them alongside Orchard notes.
+    #[cfg(feature = "orchard")]
+    put_shielded_outputs(
+        wallet_db,
+        Some(params),
+        tx_ref,
+        funding_account,
+        d_tx.ironwood_outputs(),
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_ironwood_note(output, tx_ref, d_tx.mined_height(), spent_in)
         },
         |_account_id| {
             #[cfg(feature = "transparent-inputs")]

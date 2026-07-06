@@ -233,6 +233,10 @@ pub enum ChangeError<E, NoteRefT> {
         /// have economic value in the context of this input selection.
         #[cfg(feature = "orchard")]
         orchard: Vec<NoteRefT>,
+        /// The identifiers for Ironwood inputs that could not be determined to
+        /// have economic value in the context of this input selection.
+        #[cfg(feature = "orchard")]
+        ironwood: Vec<NoteRefT>,
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
@@ -257,9 +261,11 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                 sapling,
                 #[cfg(feature = "orchard")]
                 orchard,
+                #[cfg(feature = "orchard")]
+                ironwood,
             } => {
                 #[cfg(feature = "orchard")]
-                let orchard_len = orchard.len();
+                let orchard_len = orchard.len() + ironwood.len();
                 #[cfg(not(feature = "orchard"))]
                 let orchard_len = 0;
 
@@ -562,12 +568,6 @@ pub trait ChangeStrategy {
     ///   transaction carries a separate Ironwood bundle, distinct from `orchard`,
     ///   with its own action count; pass an empty view when nothing targets the
     ///   Ironwood pool.
-    /// - `orchard_change_to_ironwood`: whether Orchard-pool change should be counted
-    ///   in the Ironwood bundle, mirroring how the builder routes Orchard-pool
-    ///   outputs into a separate Ironwood bundle when Ironwood is active. This is a
-    ///   single boolean rather than a richer type because it simply carries the
-    ///   builder's already-computed routing decision, so the proposal and the built
-    ///   transaction stay in lock-step.
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
@@ -588,7 +588,6 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard::BundleView<NoteRefT>,
-        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
