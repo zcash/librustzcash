@@ -850,6 +850,7 @@ pub(crate) mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
 
@@ -1305,6 +1306,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);
@@ -1517,6 +1519,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);

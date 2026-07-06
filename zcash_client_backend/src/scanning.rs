@@ -212,19 +212,48 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
 
 /// The note-encryption domain used to trial-decrypt Ironwood outputs.
 ///
-/// Ironwood ([ZIP 2005], NU6.3) is a distinct shielded pool with its own note commitment tree,
-/// but its notes are Orchard-shaped: they are decrypted under the Orchard note-encryption domain
-/// and use the Orchard commitment and nullifier types. These aliases name that reuse so that
-/// Ironwood can share the underlying Orchard primitives without being modelled as part of an
-/// "Orchard family"; the two pools are kept strictly separate throughout the scanner.
+/// Ironwood ([ZIP 2005], NU6.3) is a distinct shielded pool. Its notes are Orchard-shaped and use
+/// the Orchard commitment and nullifier types, and are decrypted with the same Orchard viewing
+/// keys, but they carry version 3 note plaintexts and so require the Ironwood note-encryption
+/// domain, which is distinct from [`OrchardDomain`] (that domain accepts only version 2
+/// plaintexts). This is why Ironwood is a separate pool rather than a variant of Orchard.
 ///
 /// [ZIP 2005]: https://zips.z.cash/zip-2005
 #[cfg(feature = "orchard")]
-pub(crate) type IronwoodDomain = OrchardDomain;
+pub(crate) type IronwoodDomain = orchard::note_encryption::IronwoodDomain;
 
-/// The nullifier type for Ironwood notes. See [`IronwoodDomain`].
+/// The nullifier type for Ironwood notes. This is the Orchard nullifier type, which does not
+/// depend on the note plaintext version. See [`IronwoodDomain`].
 #[cfg(feature = "orchard")]
 pub(crate) type IronwoodNullifier = orchard::note::Nullifier;
+
+/// An Orchard viewing key trial-decrypts Ironwood outputs under the Ironwood note-encryption
+/// domain. The key material is the same as for Orchard; only the domain (and thus the accepted
+/// note plaintext version) differs.
+#[cfg(feature = "orchard")]
+impl<AccountId> ScanningKeyOps<IronwoodDomain, AccountId, orchard::note::Nullifier>
+    for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
+{
+    fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
+        orchard::keys::PreparedIncomingViewingKey::new(&self.ivk)
+    }
+
+    fn nf(
+        &self,
+        note: &orchard::note::Note,
+        _position: Position,
+    ) -> Option<orchard::note::Nullifier> {
+        self.nk.as_ref().map(|key| note.nullifier(key))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
+    }
+}
 
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
@@ -744,7 +773,7 @@ where
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    compact::scan_block_with_runners::<_, _, _, (), ()>(
+    compact::scan_block_with_runners::<_, _, _, (), (), ()>(
         params,
         block,
         scanning_keys,

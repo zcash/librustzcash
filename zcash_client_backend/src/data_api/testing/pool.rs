@@ -3876,6 +3876,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     let not_our_value = Zatoshis::const_from_u64(10000);
     let sapling_end_size = st.latest_cached_block().unwrap().sapling_end_size();
     let orchard_end_size = st.latest_cached_block().unwrap().orchard_end_size();
+    let ironwood_end_size = st.latest_cached_block().unwrap().ironwood_end_size();
     st.generate_block_at(
         account.birthday().height() + 10,
         BlockHash([0; 32]),
@@ -3886,6 +3887,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
         )],
         sapling_end_size,
         orchard_end_size,
+        ironwood_end_size,
         false,
     );
 
@@ -4474,6 +4476,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
         )],
         2,
         2,
+        0,
         true,
     );
     st.generate_next_block(
