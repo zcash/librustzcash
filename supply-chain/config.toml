@@ -34,11 +34,19 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
+[policy.incrementalmerkletree]
+audit-as-crates-io = false
+
+[policy.incrementalmerkletree-testing]
+audit-as-crates-io = false
+
 [policy.orchard]
-audit-as-crates-io = true
 
 [policy.pczt]
 audit-as-crates-io = true
+
+[policy.shardtree]
+audit-as-crates-io = false
 
 [policy.zcash]
 audit-as-crates-io = true
@@ -836,10 +844,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.oorandom]]
 version = "11.1.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.orchard]]
-version = "0.15.0-pre.1@git:ab7c5fae83d3c197ba045b6485fa0206d68dc6f4"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-float]]

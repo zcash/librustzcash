@@ -64,20 +64,6 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.incrementalmerkletree]]
-version = "0.8.2"
-when = "2025-02-01"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
-[[publisher.incrementalmerkletree-testing]]
-version = "0.3.0"
-when = "2025-01-31"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.memuse]]
 version = "0.2.2"
 when = "2024-12-13"
@@ -86,11 +72,11 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.orchard]]
-version = "0.15.0-pre.1"
-when = "2026-06-30"
-user-id = 1244
-user-login = "ebfull"
-user-name = "Sean Bowe"
+version = "0.15.0-pre.2"
+when = "2026-07-03"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
 version = "0.7.0"
@@ -119,13 +105,6 @@ when = "2025-10-26"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
-
-[[publisher.shardtree]]
-version = "0.6.2"
-when = "2026-02-21"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
 
 [[publisher.sinsemilla]]
 version = "0.1.0"
