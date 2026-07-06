@@ -3792,6 +3792,8 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
                     sapling_initial_tree,
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -4707,6 +4709,8 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
                     sapling_initial_tree,
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -4851,6 +4855,8 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
         shard2_sapling_frontier,
         #[cfg(feature = "orchard")]
         shard2_orchard_frontier,
+        #[cfg(feature = "orchard")]
+        Frontier::empty(),
     );
 
     // Verify the scan queue extends beyond the target.
@@ -5290,6 +5296,8 @@ where
                     sapling_initial_tree,
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -5552,6 +5560,8 @@ where
                     sapling_initial_tree,
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -6129,6 +6139,8 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
                 chain_state: ChainState::new(
                     birthday_height - 1,
                     BlockHash([5; 32]),
+                    Frontier::empty(),
+                    #[cfg(feature = "orchard")]
                     Frontier::empty(),
                     #[cfg(feature = "orchard")]
                     Frontier::empty(),

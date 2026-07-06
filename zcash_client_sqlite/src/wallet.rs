@@ -3084,16 +3084,21 @@ pub(crate) fn get_target_and_anchor_heights(
     }
 }
 
+/// A row of block metadata as selected by [`block_metadata`] and [`block_max_scanned`]: the block
+/// height and hash, the Sapling commitment tree size and legacy Sapling tree, and the Orchard and
+/// Ironwood commitment tree sizes.
+type BlockMetadataRow = (
+    BlockHeight,
+    Vec<u8>,
+    Option<u32>,
+    Vec<u8>,
+    Option<u32>,
+    Option<u32>,
+);
+
 fn parse_block_metadata<P: consensus::Parameters>(
     _params: &P,
-    row: (
-        BlockHeight,
-        Vec<u8>,
-        Option<u32>,
-        Vec<u8>,
-        Option<u32>,
-        Option<u32>,
-    ),
+    row: BlockMetadataRow,
 ) -> Result<BlockMetadata, SqliteClientError> {
     let (
         block_height,
@@ -5479,6 +5484,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5486,6 +5498,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5626,6 +5640,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5633,6 +5654,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5790,6 +5813,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5797,6 +5827,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]

@@ -811,6 +811,12 @@ pub(crate) mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -818,6 +824,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -968,6 +976,12 @@ pub(crate) mod tests {
                         NonZeroU8::new(16).unwrap(),
                     );
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height,
@@ -975,6 +989,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: if insert_prior_roots {
                         prior_sapling_roots
@@ -1226,6 +1242,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1233,6 +1255,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1419,6 +1443,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1426,6 +1456,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1749,12 +1781,17 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // The Sapling and Ironwood trees are unused in this test.
+                let sapling_initial_tree = Frontier::empty();
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
                         birthday_prior_block_hash,
-                        Frontier::empty(), // the Sapling tree is unused in this test
+                        sapling_initial_tree,
                         orchard_initial_tree,
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: vec![],
                     prior_orchard_roots,
