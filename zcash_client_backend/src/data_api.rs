@@ -325,6 +325,7 @@ impl core::ops::Add<Balance> for Balance {
 pub struct AccountBalance {
     sapling_balance: Balance,
     orchard_balance: Balance,
+    ironwood_balance: Balance,
     unshielded_balance: Balance,
 }
 
@@ -333,12 +334,14 @@ impl AccountBalance {
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
+        ironwood_balance: Balance::ZERO,
         unshielded_balance: Balance::ZERO,
     };
 
     fn check_total(&self) -> Result<Zatoshis, BalanceError> {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
+            + self.ironwood_balance.total()
             + self.unshielded_balance.total())
         .ok_or(BalanceError::Overflow)
     }
@@ -373,6 +376,23 @@ impl AccountBalance {
         f: impl FnOnce(&mut Balance) -> Result<A, E>,
     ) -> Result<A, E> {
         let result = f(&mut self.orchard_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the [`Balance`] of Ironwood funds in the account.
+    pub fn ironwood_balance(&self) -> &Balance {
+        &self.ironwood_balance
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of Ironwood funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_ironwood_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.ironwood_balance)?;
         self.check_total()?;
         Ok(result)
     }
@@ -414,14 +434,17 @@ impl AccountBalance {
     pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
+            + self.ironwood_balance.total()
             + self.unshielded_balance.total())
         .expect("Account balance cannot overflow MAX_MONEY")
     }
 
-    /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
-    /// spent.
+    /// Returns the total value of shielded (Sapling, Orchard, and Ironwood) funds that may
+    /// immediately be spent.
     pub fn spendable_value(&self) -> Zatoshis {
-        (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
+        (self.sapling_balance.spendable_value
+            + self.orchard_balance.spendable_value
+            + self.ironwood_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -429,7 +452,8 @@ impl AccountBalance {
     /// sufficient confirmations for spendability.
     pub fn change_pending_confirmation(&self) -> Zatoshis {
         (self.sapling_balance.change_pending_confirmation
-            + self.orchard_balance.change_pending_confirmation)
+            + self.orchard_balance.change_pending_confirmation
+            + self.ironwood_balance.change_pending_confirmation)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -437,7 +461,8 @@ impl AccountBalance {
     /// is required before it will be possible to derive witnesses for the associated notes.
     pub fn value_pending_spendability(&self) -> Zatoshis {
         (self.sapling_balance.value_pending_spendability
-            + self.orchard_balance.value_pending_spendability)
+            + self.orchard_balance.value_pending_spendability
+            + self.ironwood_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -446,6 +471,7 @@ impl AccountBalance {
     pub fn uneconomic_value(&self) -> Zatoshis {
         (self.sapling_balance.uneconomic_value
             + self.orchard_balance.uneconomic_value
+            + self.ironwood_balance.uneconomic_value
             + self.unshielded_balance.uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }

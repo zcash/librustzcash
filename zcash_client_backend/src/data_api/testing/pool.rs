@@ -3785,6 +3785,10 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
                 .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
                 .collect::<Vec<_>>();
 
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
             InitialChainState {
                 chain_state: ChainState::new(
                     birthday_height - 1,
@@ -3793,7 +3797,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    ironwood_initial_tree,
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -4705,6 +4709,10 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
                 .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 100, root))
                 .collect::<Vec<_>>();
 
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
             InitialChainState {
                 chain_state: ChainState::new(
                     birthday_height - 1,
@@ -4713,7 +4721,7 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    ironwood_initial_tree,
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -4851,6 +4859,9 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
         shard_2_tree_size,
         NonZeroU8::new(16).unwrap(),
     );
+    // Ironwood is not active at these test heights, so its tree is empty.
+    #[cfg(feature = "orchard")]
+    let shard2_ironwood_frontier = Frontier::empty();
 
     let target_chain_state = ChainState::new(
         target_height,
@@ -4859,7 +4870,7 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
         #[cfg(feature = "orchard")]
         shard2_orchard_frontier,
         #[cfg(feature = "orchard")]
-        Frontier::empty(),
+        shard2_ironwood_frontier,
     );
 
     // Verify the scan queue extends beyond the target.
@@ -5292,6 +5303,10 @@ where
                 .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
                 .collect::<Vec<_>>();
 
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
             InitialChainState {
                 chain_state: ChainState::new(
                     birthday_height - 1,
@@ -5300,7 +5315,7 @@ where
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    ironwood_initial_tree,
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -5556,6 +5571,10 @@ where
                 .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
                 .collect::<Vec<_>>();
 
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
             InitialChainState {
                 chain_state: ChainState::new(
                     birthday_height - 1,
@@ -5564,7 +5583,7 @@ where
                     #[cfg(feature = "orchard")]
                     orchard_initial_tree,
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    ironwood_initial_tree,
                 ),
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
@@ -6138,6 +6157,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
                 network.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD,
             );
 
+            // Ironwood is not active at these test heights, so its tree is empty.
+            #[cfg(feature = "orchard")]
+            let ironwood_initial_tree = Frontier::empty();
+
             InitialChainState {
                 chain_state: ChainState::new(
                     birthday_height - 1,
@@ -6146,7 +6169,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
                     #[cfg(feature = "orchard")]
                     Frontier::empty(),
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    ironwood_initial_tree,
                 ),
                 prior_sapling_roots: vec![],
                 #[cfg(feature = "orchard")]
