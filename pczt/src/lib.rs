@@ -56,8 +56,6 @@ use {
 pub mod roles;
 
 pub mod common;
-#[cfg(feature = "orchard")]
-pub mod compact_migration;
 pub mod orchard;
 pub mod sapling;
 pub mod transparent;

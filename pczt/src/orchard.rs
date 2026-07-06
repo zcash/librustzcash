@@ -272,6 +272,13 @@ pub struct Spend {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
+impl Spend {
+    /// Returns whether this spend can identify its spending key from a ZIP 32 derivation.
+    pub fn has_zip32_derivation(&self) -> bool {
+        self.zip32_derivation.is_some()
+    }
+}
+
 /// Information about the output part of an Orchard action.
 #[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Output {
@@ -360,153 +367,6 @@ pub struct Output {
     /// Proprietary fields related to the note being created.
     #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
-}
-
-impl Bundle {
-    pub(crate) fn raw_note_version(&self) -> NoteVersion {
-        self.note_version
-    }
-
-    pub(crate) fn from_raw_parts(
-        actions: Vec<Action>,
-        flags: u8,
-        value_sum: (u64, bool),
-        anchor: Option<[u8; 32]>,
-        note_version: NoteVersion,
-        zkproof: Option<Vec<u8>>,
-        bsk: Option<[u8; 32]>,
-    ) -> Self {
-        Self {
-            actions,
-            flags,
-            value_sum,
-            anchor,
-            note_version,
-            zkproof,
-            bsk,
-        }
-    }
-}
-
-impl Action {
-    pub(crate) fn from_raw_parts(
-        cv_net: Option<[u8; 32]>,
-        spend: Spend,
-        output: Output,
-        rcv: Option<[u8; 32]>,
-    ) -> Self {
-        Self {
-            cv_net,
-            spend,
-            output,
-            rcv,
-        }
-    }
-
-    pub(crate) fn raw_rcv(&self) -> Option<[u8; 32]> {
-        self.rcv
-    }
-}
-
-impl Spend {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_raw_parts(
-        nullifier: Option<[u8; 32]>,
-        rk: Option<[u8; 32]>,
-        spend_auth_sig: Option<[u8; 64]>,
-        recipient: Option<[u8; 43]>,
-        value: Option<u64>,
-        rho: Option<[u8; 32]>,
-        rseed: Option<[u8; 32]>,
-        fvk: Option<[u8; 96]>,
-        witness: Option<(u32, [[u8; 32]; 32])>,
-        alpha: Option<[u8; 32]>,
-        zip32_derivation: Option<Zip32Derivation>,
-        dummy_sk: Option<[u8; 32]>,
-        proprietary: BTreeMap<String, Vec<u8>>,
-    ) -> Self {
-        Self {
-            nullifier,
-            rk,
-            spend_auth_sig,
-            recipient,
-            value,
-            rho,
-            rseed,
-            fvk,
-            witness,
-            alpha,
-            zip32_derivation,
-            dummy_sk,
-            proprietary,
-        }
-    }
-
-    pub(crate) fn raw_recipient(&self) -> Option<[u8; 43]> {
-        self.recipient
-    }
-
-    pub(crate) fn raw_rho(&self) -> Option<[u8; 32]> {
-        self.rho
-    }
-
-    pub(crate) fn raw_rseed(&self) -> Option<[u8; 32]> {
-        self.rseed
-    }
-
-    pub(crate) fn raw_alpha(&self) -> Option<[u8; 32]> {
-        self.alpha
-    }
-
-    pub(crate) fn raw_zip32_derivation(&self) -> Option<Zip32Derivation> {
-        self.zip32_derivation.clone()
-    }
-
-    /// Returns whether this spend can identify its spending key from a ZIP 32 derivation.
-    pub fn has_zip32_derivation(&self) -> bool {
-        self.zip32_derivation.is_some()
-    }
-}
-
-impl Output {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_raw_parts(
-        cmx: Option<[u8; 32]>,
-        ephemeral_key: Option<[u8; 32]>,
-        enc_ciphertext: Option<Vec<u8>>,
-        memo_kind: Option<MemoKind>,
-        out_ciphertext: Vec<u8>,
-        recipient: Option<[u8; 43]>,
-        value: Option<u64>,
-        rseed: Option<[u8; 32]>,
-        ock: Option<[u8; 32]>,
-        zip32_derivation: Option<Zip32Derivation>,
-        user_address: Option<String>,
-        proprietary: BTreeMap<String, Vec<u8>>,
-    ) -> Self {
-        Self {
-            cmx,
-            ephemeral_key,
-            enc_ciphertext,
-            memo_kind,
-            out_ciphertext,
-            recipient,
-            value,
-            rseed,
-            ock,
-            zip32_derivation,
-            user_address,
-            proprietary,
-        }
-    }
-
-    pub(crate) fn raw_recipient(&self) -> Option<[u8; 43]> {
-        self.recipient
-    }
-
-    pub(crate) fn raw_rseed(&self) -> Option<[u8; 32]> {
-        self.rseed
-    }
 }
 
 /// Types for the v1 Orchard PCZT encoding.
