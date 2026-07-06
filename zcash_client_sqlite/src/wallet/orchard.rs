@@ -910,6 +910,12 @@ pub(crate) mod tests {
         testing::pool::propose_and_build_shielding_coinbase_succeeds::<OrchardPoolTester>();
     }
 
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
+    fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
+        testing::pool::shielding_coinbase_to_orchard_receiver_delivers_via_ironwood();
+    }
+
     /// `put_received_note` records a note in the received-notes table chosen by the caller,
     /// preserving the note's plaintext version in the `note_version` column. An Orchard-pool note
     /// and an Ironwood-pool note sharing an action index may both be recorded in their respective
@@ -1212,7 +1218,7 @@ pub(crate) mod tests {
         let proposal_proto =
             zcash_client_backend::proto::proposal::Proposal::from_standard_proposal(&proposal);
         let roundtripped = proposal_proto
-            .try_into_standard_proposal(st.wallet())
+            .try_into_standard_proposal(st.network(), st.wallet())
             .expect("Ironwood proposal round-trips through protobuf");
         assert_eq!(roundtripped, proposal);
 
