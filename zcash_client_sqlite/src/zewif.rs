@@ -21,7 +21,14 @@
 //!    corresponding spending material was delivered to the sink and as view-only
 //!    accounts otherwise. Account birthdays are constructed from the tree-state
 //!    frontiers carried by the document where present.
-//! 4. Stores the document's transactions: each transaction carrying raw data is
+//! 4. Registers standalone transparent keys: each transparent spending key in the
+//!    secret store whose pay-to-public-key-hash address appears under an imported
+//!    account is registered with that account (its secret half having already been
+//!    delivered to the sink), and P2SH redeem scripts recorded on imported
+//!    accounts' addresses are registered where the wallet can represent them.
+//! 5. Marks the transparent addresses recorded in the document as exposed, so
+//!    that address-based recovery includes them.
+//! 6. Stores the document's transactions: each transaction carrying raw data is
 //!    parsed and trial-decrypted against the imported accounts' viewing keys, and
 //!    stored if it involves the wallet. Transactions that cannot be shown to
 //!    involve the wallet are not stored (the post-import rescan recovers them if
@@ -65,6 +72,9 @@ use zcash_protocol::consensus::{
     self, BlockHeight, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
 };
 use zip32::fingerprint::SeedFingerprint;
+
+use ::transparent::address::TransparentAddress;
+use zcash_keys::encoding::AddressCodec;
 
 use crate::{AccountUuid, WalletDb, error::SqliteClientError, util::Clock};
 
@@ -248,6 +258,24 @@ pub enum ZewifImportError<S> {
         /// The underlying structural error.
         source: incrementalmerkletree::frontier::FrontierError,
     },
+    /// A transparent public key in the document's secret store is not a valid
+    /// secp256k1 point.
+    InvalidTransparentPubKey {
+        /// The underlying secp256k1 error.
+        source: secp256k1::Error,
+    },
+    /// A transparent spending key in the document's secret store is not a valid
+    /// WIF encoding for the document's network.
+    InvalidTransparentKeyEncoding {
+        /// The pay-to-public-key-hash address of the entry's public key.
+        address: String,
+    },
+    /// A transparent spending key in the document's secret store does not
+    /// correspond to the public key under which it was recorded.
+    TransparentKeyMismatch {
+        /// The pay-to-public-key-hash address of the entry's public key.
+        address: String,
+    },
     /// The raw bytes of a transaction in the document could not be parsed as a
     /// Zcash transaction.
     TransactionParse {
@@ -341,6 +369,18 @@ impl<S: fmt::Display> fmt::Display for ZewifImportError<S> {
                 f,
                 "The {pool} tree frontier in the birthday of account \"{account_name}\" is invalid: {source:?}"
             ),
+            ZewifImportError::InvalidTransparentPubKey { source } => write!(
+                f,
+                "A transparent public key in the secret store is not a valid secp256k1 point: {source}"
+            ),
+            ZewifImportError::InvalidTransparentKeyEncoding { address } => write!(
+                f,
+                "The transparent spending key recorded for {address} is not a valid WIF encoding for the document's network."
+            ),
+            ZewifImportError::TransparentKeyMismatch { address } => write!(
+                f,
+                "The transparent spending key recorded for {address} does not correspond to its recorded public key."
+            ),
             ZewifImportError::TransactionParse { txid, source } => write!(
                 f,
                 "Unable to parse the raw data of transaction {txid}: {source}"
@@ -359,6 +399,7 @@ impl<S: std::error::Error + 'static> std::error::Error for ZewifImportError<S> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ZewifImportError::InvalidMnemonic { source, .. } => Some(source),
+            ZewifImportError::InvalidTransparentPubKey { source } => Some(source),
             ZewifImportError::TransactionParse { source, .. } => Some(source),
             ZewifImportError::Wallet(e) => Some(e),
             ZewifImportError::Sink(e) => Some(e),
@@ -419,6 +460,29 @@ pub struct SkippedAccount {
     pub reason: AccountSkipReason,
 }
 
+/// The reason a transparent spending key in the document's secret store was
+/// not registered with the wallet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransparentKeySkipReason {
+    /// The recorded public key is uncompressed; the wallet derives addresses
+    /// only from compressed public keys.
+    UncompressedPubKey,
+    /// The key's pay-to-public-key-hash address does not appear under any
+    /// imported account, so there is no account to register it with.
+    NoOwningAccount,
+}
+
+/// A transparent spending key that was delivered to the [`SecretSink`] but
+/// could not be registered with the wallet.
+#[derive(Debug, Clone)]
+pub struct SkippedTransparentKey {
+    /// The pay-to-public-key-hash address of the key, where derivable; `None`
+    /// for uncompressed public keys.
+    pub address: Option<String>,
+    /// Why the key was not registered.
+    pub reason: TransparentKeySkipReason,
+}
+
 /// A summary of the effects of a ZeWIF document import.
 #[derive(Debug, Clone, Default)]
 pub struct ZewifImportReport {
@@ -426,6 +490,23 @@ pub struct ZewifImportReport {
     pub imported_accounts: Vec<ImportedAccount>,
     /// The accounts that could not be imported.
     pub skipped_accounts: Vec<SkippedAccount>,
+    /// The number of standalone transparent spending keys registered with
+    /// imported accounts.
+    pub transparent_keys_registered: usize,
+    /// Transparent spending keys that were delivered to the [`SecretSink`] but
+    /// could not be registered with the wallet.
+    pub skipped_transparent_keys: Vec<SkippedTransparentKey>,
+    /// The number of P2SH redeem scripts registered with imported accounts.
+    pub redeem_scripts_registered: usize,
+    /// The number of P2SH redeem scripts recorded in the document that the
+    /// wallet cannot represent (for example, non-multisig scripts).
+    pub redeem_scripts_not_representable: usize,
+    /// The number of transparent addresses marked as exposed.
+    pub addresses_marked_exposed: usize,
+    /// The number of transparent addresses recorded in the document that the
+    /// wallet does not recognize as receivers of any imported account, and so
+    /// could not be marked as exposed.
+    pub addresses_not_recognized: usize,
     /// The number of transactions from the document that were stored because
     /// they involve the imported accounts.
     pub transactions_stored: usize,
@@ -781,18 +862,193 @@ where
     }
 
     let mut report = ZewifImportReport::default();
+    let mut taddrs = TransparentAddressRecords::default();
 
     for wallet in document.wallets() {
         report.address_book_entries_not_imported += wallet.address_book().len();
 
         for account in wallet.accounts() {
-            import_account(wdb, &params, account, &available, &mut report)?;
+            import_account(wdb, &params, account, &available, &mut taddrs, &mut report)?;
         }
     }
+
+    register_transparent_keys(
+        wdb,
+        &params,
+        deliver_secrets::<S>(document)?,
+        &taddrs,
+        &mut report,
+    )?;
+    mark_addresses_exposed(wdb, &params, &taddrs, &mut report)?;
 
     import_transactions(wdb, &params, document, &mut report)?;
 
     Ok(report)
+}
+
+/// The transparent addresses recorded under imported accounts, indexed for
+/// standalone key registration and exposure marking.
+#[derive(Default)]
+struct TransparentAddressRecords {
+    /// Maps each transparent address string to the account that recorded it
+    /// and the height at which it is known to have been exposed.
+    owners: HashMap<String, (AccountUuid, BlockHeight)>,
+    /// The P2SH redeem scripts recorded on imported accounts' addresses.
+    redeem_scripts: Vec<(AccountUuid, Vec<u8>)>,
+}
+
+/// Decodes a WIF-encoded transparent spending key, returning the secret key
+/// and whether the corresponding public key uses the compressed encoding.
+fn decode_wif(expected_prefix: u8, wif: &str) -> Option<(secp256k1::SecretKey, bool)> {
+    let payload = bs58::decode(wif).with_check(None).into_vec().ok()?;
+    match payload.as_slice() {
+        [prefix, key_data @ ..] if *prefix == expected_prefix && key_data.len() == 32 => {
+            Some((secp256k1::SecretKey::from_slice(key_data).ok()?, false))
+        }
+        [prefix, key_data @ .., 0x01] if *prefix == expected_prefix && key_data.len() == 32 => {
+            Some((secp256k1::SecretKey::from_slice(key_data).ok()?, true))
+        }
+        _ => None,
+    }
+}
+
+/// Registers the secret store's standalone transparent spending keys with the
+/// accounts that record their addresses, and the recorded P2SH redeem scripts
+/// with the accounts that carry them.
+fn register_transparent_keys<C, P, CL, R, S>(
+    wdb: &mut WalletDb<C, P, CL, R>,
+    params: &P,
+    store: Option<&::zewif::SecretStore>,
+    taddrs: &TransparentAddressRecords,
+    report: &mut ZewifImportReport,
+) -> Result<(), ZewifImportError<S>>
+where
+    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters,
+    CL: Clock,
+    R: RngCore,
+    S: std::error::Error,
+{
+    let wif_prefix = match params.network_type() {
+        NetworkType::Main => 0x80,
+        NetworkType::Test | NetworkType::Regtest => 0xEF,
+    };
+    let secp = secp256k1::Secp256k1::new();
+
+    for entry in store.map_or(&[][..], |s| s.transparent_keys()) {
+        if !entry.pubkey().is_compressed() {
+            report.skipped_transparent_keys.push(SkippedTransparentKey {
+                address: None,
+                reason: TransparentKeySkipReason::UncompressedPubKey,
+            });
+            continue;
+        }
+        let pubkey = secp256k1::PublicKey::from_slice(entry.pubkey().as_slice())
+            .map_err(|source| ZewifImportError::InvalidTransparentPubKey { source })?;
+        let address = TransparentAddress::from_pubkey(&pubkey).encode(params);
+
+        // Verify that the spending key corresponds to the recorded public key.
+        let (secret_key, _compressed) = decode_wif(wif_prefix, entry.spending_key().encoding())
+            .ok_or_else(|| ZewifImportError::InvalidTransparentKeyEncoding {
+                address: address.clone(),
+            })?;
+        if secret_key.public_key(&secp) != pubkey {
+            return Err(ZewifImportError::TransparentKeyMismatch { address });
+        }
+
+        match taddrs.owners.get(&address) {
+            Some((account_uuid, _)) => {
+                wdb.import_standalone_transparent_pubkey(*account_uuid, pubkey)
+                    .map_err(ZewifImportError::Wallet)?;
+                report.transparent_keys_registered += 1;
+            }
+            None => {
+                report.skipped_transparent_keys.push(SkippedTransparentKey {
+                    address: Some(address),
+                    reason: TransparentKeySkipReason::NoOwningAccount,
+                });
+            }
+        }
+    }
+
+    for (account_uuid, script_bytes) in &taddrs.redeem_scripts {
+        use zcash_script::script::{Code, Redeem};
+        let parsed = Redeem::parse(&Code(script_bytes.clone()));
+        match parsed {
+            Ok(redeem) => {
+                match wdb.import_standalone_transparent_script(*account_uuid, redeem) {
+                    Ok(()) => report.redeem_scripts_registered += 1,
+                    // The wallet can only represent a subset of redeem scripts
+                    // (e.g. multisig within the P2SH size limit); scripts it
+                    // rejects remain recoverable from the document.
+                    Err(SqliteClientError::BadAccountData(_)) => {
+                        report.redeem_scripts_not_representable += 1;
+                    }
+                    Err(e) => return Err(ZewifImportError::Wallet(e)),
+                }
+            }
+            Err(_) => {
+                report.redeem_scripts_not_representable += 1;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Marks the transparent addresses recorded in the document as exposed, so
+/// that address-based recovery includes them.
+///
+/// Only addresses the wallet recognizes as receivers of an imported account
+/// can be marked; unrecognized addresses are counted in the report.
+fn mark_addresses_exposed<C, P, CL, R, S>(
+    wdb: &mut WalletDb<C, P, CL, R>,
+    params: &P,
+    taddrs: &TransparentAddressRecords,
+    report: &mut ZewifImportReport,
+) -> Result<(), ZewifImportError<S>>
+where
+    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters,
+    CL: Clock,
+    R: RngCore,
+    S: std::error::Error,
+{
+    use zcash_client_backend::data_api::WalletRead;
+
+    // The upstream API rejects the entire batch if any address is not a known
+    // receiver, so restrict the batch to the receivers the wallet recognizes.
+    let mut known = std::collections::HashSet::new();
+    let accounts: std::collections::HashSet<AccountUuid> =
+        taddrs.owners.values().map(|(uuid, _)| *uuid).collect();
+    for account_uuid in accounts {
+        known.extend(
+            wdb.get_transparent_receivers(account_uuid, true, true)
+                .map_err(ZewifImportError::Wallet)?
+                .into_keys(),
+        );
+    }
+
+    let mut exposures: Vec<(TransparentAddress, BlockHeight)> = vec![];
+    for (address_str, (_, exposure_height)) in &taddrs.owners {
+        match TransparentAddress::decode(params, address_str) {
+            Ok(taddr) if known.contains(&taddr) => {
+                exposures.push((taddr, *exposure_height));
+            }
+            _ => {
+                report.addresses_not_recognized += 1;
+            }
+        }
+    }
+    exposures.sort();
+
+    if !exposures.is_empty() {
+        wdb.mark_transparent_addresses_exposed(&exposures)
+            .map_err(ZewifImportError::Wallet)?;
+    }
+    report.addresses_marked_exposed = exposures.len();
+
+    Ok(())
 }
 
 /// Stores the document's transactions in the wallet database.
@@ -900,6 +1156,7 @@ fn import_account<C, P, CL, R, S>(
     params: &P,
     account: &::zewif::Account,
     available: &AvailableSecrets,
+    taddrs: &mut TransparentAddressRecords,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
@@ -1013,6 +1270,24 @@ where
             }
         }
     };
+
+    // Record the account's transparent addresses for standalone key
+    // registration and exposure marking.
+    for address in account.addresses() {
+        if let ::zewif::ProtocolAddress::Transparent(taddr) = address.address() {
+            let exposure_height = address
+                .exposed_at_height()
+                .map_or(birthday.height(), |h| BlockHeight::from(u32::from(h)));
+            taddrs
+                .owners
+                .insert(taddr.address().to_owned(), (account_uuid, exposure_height));
+            if let Some(script) = taddr.redeem_script() {
+                taddrs
+                    .redeem_scripts
+                    .push((account_uuid, script.as_ref().to_vec()));
+            }
+        }
+    }
 
     report.imported_accounts.push(ImportedAccount {
         name: account.name().to_owned(),
