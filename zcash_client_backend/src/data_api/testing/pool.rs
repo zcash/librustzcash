@@ -7191,3 +7191,93 @@ pub fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>
         proposal,
     );
 }
+
+/// Verifies that once Ironwood is active, `propose_shielding_coinbase` resolves a destination
+/// with an Orchard receiver to the Ironwood pool — the payment is delivered to the Orchard
+/// receiver via the Ironwood bundle — and that the proposed transaction builds.
+#[cfg(all(feature = "orchard", feature = "pczt", feature = "transparent-inputs"))]
+pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    use super::orchard::OrchardPoolTester;
+    use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
+
+    // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+    let account = st.get_account();
+    let (t_addr, _) = account.usk().default_transparent_address();
+    let coinbase_value = Zatoshis::const_from_u64(100000);
+    let coinbase_build_result = build_transparent_coinbase_tx(
+        st.network(),
+        TargetHeight::from(st.sapling_activation_height()),
+        coinbase_value,
+        t_addr,
+        None,
+    );
+    let coinbase_tx = coinbase_build_result.transaction();
+    let (h, _) = st.generate_next_block_from_tx(0, coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), coinbase_tx, Some(h)).unwrap();
+    // Coinbase outputs require 100 confirmations.
+    st.add_empty_blocks(COINBASE_MATURITY_BLOCKS as usize);
+
+    // The destination has an Orchard receiver controlled by a separate spending key.
+    let to_extsk = OrchardPoolTester::sk(&[0xcd; 32]);
+    let to_address =
+        OrchardPoolTester::sk_default_address(&to_extsk).to_zcash_address(st.network());
+
+    let proposal = st
+        .propose_shielding_coinbase(
+            &GreedyInputSelector::new(),
+            &StandardFeeRule::Zip317,
+            Zatoshis::ZERO,
+            &[t_addr],
+            to_address,
+            None,
+            None,
+        )
+        .expect("propose_shielding_coinbase to an Orchard receiver should succeed post-NU6.3");
+
+    // The Orchard-receiver payment is represented as an Ironwood-pool output, matching the
+    // bundle the builder will deliver it through; an Orchard-pool payment would violate the
+    // Orchard turnstile.
+    assert_eq!(
+        proposal.steps().head.payment_pools().get(&0),
+        Some(&PoolType::IRONWOOD),
+    );
+
+    let build_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(
+        &build_result,
+        Ok(txids) if txids.len() == 1,
+        "create_proposed_transactions must succeed for proposal {:?}",
+        proposal,
+    );
+}

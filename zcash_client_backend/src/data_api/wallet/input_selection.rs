@@ -1153,6 +1153,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         transparent_inputs,
                         transaction_request,
                         payment_pools,
+                        #[cfg(feature = "orchard")]
+                        ironwood_active_at(params, target_height),
                         #[cfg(feature = "transparent-inputs")]
                         ephemeral_output_value.zip(tr1_balance_opt).map(
                             |(ephemeral_output_value, tr1_balance)| EphemeralStepConfig {
@@ -1591,6 +1593,8 @@ where
         vec![],
         transaction_request,
         payment_pools,
+        #[cfg(feature = "orchard")]
+        ironwood_active_at(params, target_height),
         #[cfg(feature = "transparent-inputs")]
         ephemeral_output_value
             .zip(tr1_fee)
@@ -1623,6 +1627,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     transparent_inputs: Vec<WalletTransparentOutput<()>>,
     transaction_request: TransactionRequest,
     payment_pools: BTreeMap<usize, PoolType>,
+    #[cfg(feature = "orchard")] ironwood_active: bool,
     #[cfg(feature = "transparent-inputs")] ephemeral_step_opt: Option<EphemeralStepConfig>,
 ) -> Result<Proposal<FeeRuleT, NoteRef>, ProposalError> {
     #[cfg(feature = "transparent-inputs")]
@@ -1674,6 +1679,8 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             vec![],
             tr0_balance,
             false,
+            #[cfg(feature = "orchard")]
+            ironwood_active,
         )?);
 
         let tr1 =
@@ -1688,6 +1695,8 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             vec![ephemeral_stepoutput],
             tr1_balance,
             false,
+            #[cfg(feature = "orchard")]
+            ironwood_active,
         )?);
 
         return Proposal::multi_step(
@@ -1707,6 +1716,8 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         fee_rule.clone(),
         target_height,
         false,
+        #[cfg(feature = "orchard")]
+        ironwood_active,
     )
 }
 
@@ -1768,6 +1779,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 (*change_strategy.fee_rule()).clone(),
                 target_height,
                 true,
+                #[cfg(feature = "orchard")]
+                ironwood_active_at(params, target_height),
             )
             .map_err(InputSelectorError::Proposal)
         } else {
@@ -1821,8 +1834,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 .min(shielding_max_inputs(self.shielding_block_space_percent)),
         )?;
 
-        let destination_pool =
-            resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(&to_address, params)?;
+        let destination_pool = resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(
+            &to_address,
+            params,
+            target_height,
+        )?;
 
         let (sapling_output_count, orchard_action_count, ironwood_action_count) =
             match destination_pool {
@@ -1832,6 +1848,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                         .expect("sapling DEFAULT bundle type permits any (spends, outputs) count");
                     (count, 0usize, 0usize)
                 }
+                // A pre-NU6.3 payment to an Orchard receiver; after Ironwood activation,
+                // `resolve_shielded_destination` assigns such payments to the Ironwood pool.
                 #[cfg(feature = "orchard")]
                 PoolType::ORCHARD => {
                     let count = orchard_fees::transactional_action_count(
@@ -1840,11 +1858,19 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                         1,
                     )
                     .expect("every Orchard bundle version permits spending and output creation");
-                    if ironwood_active_at(params, target_height) {
-                        (0usize, 0usize, count)
-                    } else {
-                        (0usize, count, 0usize)
-                    }
+                    (0usize, count, 0usize)
+                }
+                // A post-NU6.3 payment to an Orchard receiver, delivered via the Ironwood
+                // bundle and charged to its action count.
+                #[cfg(feature = "orchard")]
+                PoolType::IRONWOOD => {
+                    let count = orchard_fees::transactional_action_count(
+                        ironwood_bundle_version_for_height(params, target_height),
+                        0,
+                        1,
+                    )
+                    .expect("the Ironwood bundle version permits spending and output creation");
+                    (0usize, 0usize, count)
                 }
                 // Unreachable: `resolve_shielded_destination` rejects transparent
                 // destinations earlier with `ShieldingRequiresShieldedRecipient`.
@@ -1924,6 +1950,8 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             fee_rule.clone(),
             target_height,
             false,
+            #[cfg(feature = "orchard")]
+            ironwood_active_at(params, target_height),
         )
         .map_err(InputSelectorError::Proposal)
     }
@@ -2024,6 +2052,7 @@ where
 fn resolve_shielded_destination<DbT, ChangeErrT, ParamsT>(
     addr: &ZcashAddress,
     params: &ParamsT,
+    target_height: TargetHeight,
 ) -> Result<
     PoolType,
     InputSelectorError<
@@ -2037,14 +2066,26 @@ where
     DbT: InputSource,
     ParamsT: consensus::Parameters,
 {
+    #[cfg(not(feature = "orchard"))]
+    let _ = target_height;
+
     let resolved: Address = addr
         .clone()
         .convert_if_network(params.network_type())
         .map_err(InputSelectorError::Address)?;
     match resolved {
         Address::Sapling(_) => Ok(PoolType::SAPLING),
+        // A payment to an Orchard-protocol receiver is an Ironwood-pool output once
+        // Ironwood is active (delivered to the recipient's Orchard receiver via the
+        // Ironwood bundle), and an Orchard-pool output otherwise.
         #[cfg(feature = "orchard")]
-        Address::Unified(ua) if ua.has_orchard() => Ok(PoolType::ORCHARD),
+        Address::Unified(ua) if ua.has_orchard() => {
+            Ok(if ironwood_active_at(params, target_height) {
+                PoolType::IRONWOOD
+            } else {
+                PoolType::ORCHARD
+            })
+        }
         Address::Unified(ua) if ua.has_sapling() => Ok(PoolType::SAPLING),
         Address::Unified(ua) => Err(InputSelectorError::Selection(
             GreedyInputSelectorError::UnsupportedAddress(Box::new(ua)),

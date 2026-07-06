@@ -735,11 +735,13 @@ impl proposal::Proposal {
 
     /// Attempts to parse a [`Proposal`] based upon a supported [`StandardFeeRule`] from its
     /// protobuf representation.
-    pub fn try_into_standard_proposal<DbT, DbError>(
+    pub fn try_into_standard_proposal<ParamsT, DbT, DbError>(
         &self,
+        params: &ParamsT,
         wallet_db: &DbT,
     ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
+        ParamsT: consensus::Parameters,
         DbT: InputSource<Error = DbError>,
     {
         use self::proposal::proposed_input::Value::*;
@@ -753,6 +755,15 @@ impl proposal::Proposal {
                 };
 
                 let target_height = TargetHeight::from(self.min_target_height);
+                // Steps are checked against the Orchard turnstile when Ironwood is
+                // active at the height for which the proposal was constructed.
+                #[cfg(feature = "orchard")]
+                let ironwood_active = params.is_nu_active(
+                    consensus::NetworkUpgrade::Nu6_3,
+                    BlockHeight::from(target_height),
+                );
+                #[cfg(not(feature = "orchard"))]
+                let _ = params;
 
                 let mut steps = Vec::with_capacity(self.steps.len());
                 for step in &self.steps {
@@ -931,6 +942,8 @@ impl proposal::Proposal {
                         prior_step_inputs,
                         balance,
                         step.is_shielding,
+                        #[cfg(feature = "orchard")]
+                        ironwood_active,
                     )
                     .map_err(ProposalDecodingError::ProposalInvalid)?;
 
