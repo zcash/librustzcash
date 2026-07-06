@@ -182,6 +182,9 @@ bip0039 = { version = "0.12" }
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
 
+# ZeWIF wallet interchange
+zewif = "0.1.0"
+
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"
 
@@ -235,3 +238,5 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
 incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
+
+zewif = { git = "https://github.com/zcash/zewif.git", branch = "main" }

@@ -83,6 +83,9 @@ audit-as-crates-io = true
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
+[policy.zewif]
+audit-as-crates-io = false
+
 [policy.zip321]
 audit-as-crates-io = true
 
@@ -772,6 +775,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.merlin]]
 version = "3.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.minicbor]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.minicbor-derive]]
+version = "0.17.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.minimal-lexical]]
