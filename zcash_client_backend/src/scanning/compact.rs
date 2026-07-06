@@ -28,6 +28,9 @@ use orchard::{
     tree::MerkleHashOrchard,
 };
 
+#[cfg(feature = "orchard")]
+use super::IronwoodDomain;
+
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
 
@@ -57,6 +60,19 @@ type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     Tasks,
 >;
 
+// Ironwood outputs are Orchard-shaped, so an Ironwood batch is identical in type to an Orchard
+// batch (`IronwoodDomain` aliases `OrchardDomain`). This means the Orchard task type `TO` already
+// satisfies the bound for the Ironwood runner, and no separate `IronwoodTasks` is required; the
+// alias exists only to name the Ironwood runner as belonging to its own pool.
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatchRunner<IvkTag, Tasks> = BatchRunner<
+    IvkTag,
+    IronwoodDomain,
+    orchard::note_encryption::CompactAction,
+    CompactDecryptor,
+    Tasks,
+>;
+
 pub(crate) trait SaplingTasks<IvkTag>: Tasks<TaggedSaplingBatch<IvkTag>> {}
 impl<IvkTag, T: Tasks<TaggedSaplingBatch<IvkTag>>> SaplingTasks<IvkTag> for T {}
 
@@ -74,6 +90,8 @@ pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTask
     sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
     #[cfg(feature = "orchard")]
     orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
+    #[cfg(feature = "orchard")]
+    ironwood: TaggedIronwoodBatchRunner<IvkTag, TO>,
     #[cfg(not(feature = "orchard"))]
     orchard: PhantomData<TO>,
 }
@@ -104,6 +122,14 @@ where
                     .iter()
                     .map(|(id, key)| (id.clone(), key.prepare())),
             ),
+            #[cfg(feature = "orchard")]
+            ironwood: BatchRunner::new(
+                batch_size_threshold,
+                scanning_keys
+                    .ironwood()
+                    .iter()
+                    .map(|(id, key)| (id.clone(), key.prepare())),
+            ),
             #[cfg(not(feature = "orchard"))]
             orchard: PhantomData,
         }
@@ -113,6 +139,8 @@ where
         self.sapling.flush();
         #[cfg(feature = "orchard")]
         self.orchard.flush();
+        #[cfg(feature = "orchard")]
+        self.ironwood.flush();
     }
 
     #[tracing::instrument(skip_all, fields(height = block.height))]
