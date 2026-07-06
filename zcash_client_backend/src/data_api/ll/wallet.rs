@@ -211,11 +211,15 @@ impl<
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
+/// - `anchor_retention_height`: If `Some(h)`, checkpoints established at or above height `h` whose
+///   height falls on the [`ANCHOR_RETENTION_INTERVAL`] are retained as durable anchors, exempting
+///   them from automatic pruning of excess checkpoints. `None` disables anchor retention.
 pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+    anchor_retention_height: Option<BlockHeight>,
 ) -> Result<(), PutBlocksError<SE, TE>>
 where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
@@ -486,6 +490,7 @@ where
                     from_state.final_sapling_tree(),
                     from_state.block_height(),
                     sapling_tree,
+                    anchor_retention_height,
                     &mut sapling_subtrees,
                     #[cfg(feature = "orchard")]
                     &mut missing_checkpoints,
@@ -509,6 +514,7 @@ where
                     from_state.final_orchard_tree(),
                     from_state.block_height(),
                     orchard_tree,
+                    anchor_retention_height,
                     &mut orchard_subtrees,
                     &mut missing_checkpoints,
                 )
@@ -1256,13 +1262,48 @@ fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u
         .collect::<Vec<_>>()
 }
 
+/// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
+/// retention is active. At 75-second blocks this is roughly every 6 hours (4 per day).
+const ANCHOR_RETENTION_INTERVAL: u32 = 288;
+
+/// Returns whether the checkpoint at `height` should be retained as a durable anchor.
+///
+/// Anchor retention is active for `height` when `anchor_retention_height` is `Some` and `height`
+/// is at or above it (i.e. at or after the network upgrade that enables anchor retention), and
+/// `height` falls on the [`ANCHOR_RETENTION_INTERVAL`].
+fn should_retain_anchor(anchor_retention_height: Option<BlockHeight>, height: BlockHeight) -> bool {
+    anchor_retention_height.is_some_and(|floor| height >= floor)
+        && u32::from(height) % ANCHOR_RETENTION_INTERVAL == 0
+}
+
+/// Retains `height` as a durable anchor checkpoint when [`should_retain_anchor`] holds.
+fn retain_anchor_checkpoint<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    anchor_retention_height: Option<BlockHeight>,
+    height: BlockHeight,
+) -> Result<(), ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Clone + PartialEq + Hashable,
+{
+    if should_retain_anchor(anchor_retention_height, height) {
+        tree.ensure_retained(height)?;
+    }
+    Ok(())
+}
+
 /// Updates the given note commitment tree with all newly read note commitments starting
 /// at the block `frontier_height + 1`.
+///
+/// If `anchor_retention_height` is `Some`, every checkpoint established at or above that height
+/// whose height falls on the [`ANCHOR_RETENTION_INTERVAL`] is retained as a durable anchor (see
+/// [`retain_anchor_checkpoint`]).
 fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     protocol: &'static str,
     frontier: &Frontier<S::H, DEPTH>,
     frontier_height: BlockHeight,
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    anchor_retention_height: Option<BlockHeight>,
     subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
     #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
 ) -> Result<(), ShardTreeError<S::Error>>
@@ -1283,9 +1324,15 @@ where
             marking: Marking::Reference,
         },
     )?;
+    retain_anchor_checkpoint(tree, anchor_retention_height, frontier_height)?;
 
     for (subtree, checkpoints) in subtrees {
+        // Capture the checkpoint heights before the checkpoint map is consumed by `insert_tree`.
+        let checkpoint_heights = checkpoints.keys().copied().collect::<Vec<_>>();
         tree.insert_tree(subtree, checkpoints)?;
+        for height in checkpoint_heights {
+            retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
+        }
     }
 
     // Ensure we have a tree checkpoint for each checkpointed block height.
@@ -1309,9 +1356,51 @@ where
                 tree.store_mut()
                     .add_checkpoint(height, checkpoint.clone())
                     .map_err(ShardTreeError::Storage)?;
+                retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
             }
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ANCHOR_RETENTION_INTERVAL, should_retain_anchor};
+    use zcash_protocol::consensus::BlockHeight;
+
+    #[test]
+    fn anchor_retention_gating() {
+        let interval = ANCHOR_RETENTION_INTERVAL;
+        let floor = BlockHeight::from(4 * interval);
+
+        // With no retention floor, nothing is retained, even on the interval.
+        assert!(!should_retain_anchor(None, BlockHeight::from(8 * interval)));
+
+        // On the interval and at or above the floor: retained.
+        assert!(should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(4 * interval)
+        ));
+        assert!(should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(8 * interval)
+        ));
+
+        // On the interval but below the floor: not retained.
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(3 * interval)
+        ));
+
+        // At or above the floor but not on the interval: not retained.
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(4 * interval + 1)
+        ));
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(5 * interval - 1)
+        ));
+    }
 }

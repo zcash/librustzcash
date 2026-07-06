@@ -43,6 +43,7 @@ mod standalone_p2sh;
 mod support_legacy_sqlite;
 mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
+mod tree_retained_checkpoints;
 mod tx_observation_height;
 mod tx_retrieval_queue;
 mod tx_retrieval_queue_expiry;
@@ -254,6 +255,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_note_version::Migration),
         Box::new(ironwood_received_notes::Migration),
         Box::new(ironwood_pool_code_views::Migration),
+        Box::new(tree_retained_checkpoints::Migration),
     ]
 }
 
@@ -401,6 +403,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_receiver_address_index::MIGRATION_ID,
     add_transparent_value_index::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
+    tree_retained_checkpoints::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(

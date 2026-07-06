@@ -185,6 +185,14 @@ zip32 = { version = "0.2", default-features = false }
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"
 
+[patch.crates-io]
+# TEMPORARY: explicit checkpoint retention (ensure_retained / retained_checkpoints).
+# Points at zcash/incrementalmerkletree main (includes #184); replace with a published
+# shardtree release once one is cut.
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
+incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
+
 [workspace.metadata.release]
 consolidate-commits = false
 pre-release-commit-message = "{{crate_name}} {{version}}"

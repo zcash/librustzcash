@@ -87,6 +87,17 @@ workspace.
   block heights that were being added to the wallet when the error occurred.
   This makes it possible to identify which pool and which scanned blocks
   triggered a note commitment tree conflict during `put_blocks`.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::remove_retained_checkpoints_below`,
+  which releases retained "anchor" checkpoints with height below a given
+  threshold so that they may be pruned normally.
+- During scanning, checkpoints on a fixed interval (every 288 blocks, roughly
+  four per day) at or above the NU6.3 (Ironwood) activation height are now
+  retained as durable "anchors", exempting them from automatic pruning of
+  excess checkpoints so that their roots and the witnesses anchored to them
+  remain computable after they age beyond the checkpoint window. Anchor
+  retention is inactive until NU6.3 has an assigned activation height.
+  `zcash_client_backend::data_api::ll::wallet::put_blocks` takes a new
+  `anchor_retention_height: Option<BlockHeight>` argument that controls this.
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`
   - `recipient_key_scope`
